@@ -51,6 +51,21 @@ export class LegacyReductionService {
     windowDays: number; candidates: RetirementCandidate[]; note: string; generatedAt: string;
   } | { restricted: true } {
     if (!ContextProjectionService.hasFullBusinessVisibility(orgId, user)) return { restricted: true };
+    return this.compute(orgId, opts);
+  }
+
+  /**
+   * Só os candidatos `ready_to_retire` — variante de SISTEMA (sem role-gate), pro
+   * Scheduler surfacer proativamente (F16). Continua ADVISÓRIO: só reporta, não remove.
+   */
+  static readyForOrg(orgId: string, opts: { sinceDays?: number } = {}): RetirementCandidate[] {
+    return this.compute(orgId, opts).candidates.filter((c) => c.status === "ready_to_retire");
+  }
+
+  /** Cálculo puro (compartilhado por `candidates` e `readyForOrg`). */
+  private static compute(orgId: string, opts: { sinceDays?: number } = {}): {
+    windowDays: number; candidates: RetirementCandidate[]; note: string; generatedAt: string;
+  } {
     const days = Math.max(1, Math.min(365, Number(opts.sinceDays) || 30));
 
     // Agrega views + usuários distintos por superfície na janela.

@@ -9092,6 +9092,51 @@ const initDb = () => {
         ON campaign_objective_contracts (organization_id, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar campaign_objective_contracts (ADR-168 F2)', e); }
+
+  // PRD 11 / ADR-168 F6 — Creative Experiment Engine. Generaliza o motor de experimento de
+  // prospecção (`ProspectResearchService`, §37 — REUSA `twoProportionZ`, NÃO cria 2º motor)
+  // sobre VARIANTES DE CONTEÚDO: mede a taxa de ENGAJAMENTO de cada variante e declara o
+  // campeão com rigor estatístico. `variant_key` na `social_post_metrics` liga a métrica do
+  // post à variante testada (aditivo; null = fora de experimento). O vencedor por RESULTADO
+  // DE NEGÓCIO é a F9 (engajamento aqui é PROXY — RN-CG-01). Aditivas, opt-in.
+  try { db.exec(`ALTER TABLE social_post_metrics ADD COLUMN variant_key TEXT`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS creative_experiments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        hypothesis TEXT NOT NULL,
+        objective_id TEXT,                   -- objetivo de campanha (opcional)
+        correlation_id TEXT,                 -- fio ADR-158 (opcional)
+        metric TEXT NOT NULL DEFAULT 'engagement',
+        min_sample INTEGER NOT NULL DEFAULT 100,  -- impressões mínimas por variante (anti-ruído)
+        confidence_z REAL NOT NULL DEFAULT 1.96,
+        status TEXT NOT NULL DEFAULT 'running',    -- running | completed
+        decision TEXT,                       -- winner | inconclusive | insufficient_data
+        winner_variant_key TEXT,
+        decision_reason TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS creative_experiment_variants (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        experiment_id TEXT NOT NULL,
+        variant_key TEXT NOT NULL,
+        label TEXT,
+        is_champion INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, experiment_id, variant_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_creative_experiments_org
+        ON creative_experiments (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_creative_exp_variants_exp
+        ON creative_experiment_variants (organization_id, experiment_id);
+      CREATE INDEX IF NOT EXISTS idx_social_post_metrics_variant
+        ON social_post_metrics (organization_id, variant_key);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar creative_experiments (ADR-168 F6)', e); }
 };
 
 initDb();

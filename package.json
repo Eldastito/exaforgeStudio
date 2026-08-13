@@ -118,6 +118,7 @@
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",
     "test:script-intelligence": "tsx scripts/test-script-intelligence.ts",
     "test:channel-adaptation": "tsx scripts/test-channel-adaptation.ts",
+    "test:creative-experiment": "tsx scripts/test-creative-experiment.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

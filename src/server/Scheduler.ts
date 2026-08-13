@@ -791,6 +791,13 @@ export class Scheduler {
         }
       }).catch((e) => console.error('[Scheduler] import do PatternLearningFromAssurance falhou', e));
     } catch (e) { console.error('[Scheduler] pass de aprendizado assured falhou', e); }
+    // Social Analytics Ingestion (ADR-167 F4): puxa posts+analytics próprios das conexões
+    // sociais HABILITADAS (provider real) e grava snapshot por-org. Opt-in, best-effort;
+    // reusa este tick (§42 — sem 2º Scheduler). Import dinâmico p/ evitar ciclo.
+    try {
+      import("./SocialAnalyticsService.js").then((m) => m.SocialAnalyticsService.pass())
+        .catch((e) => console.error('[Scheduler] ingestão de social analytics falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de social analytics falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

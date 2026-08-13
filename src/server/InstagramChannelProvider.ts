@@ -55,8 +55,8 @@ export class InstagramChannelProvider implements SocialChannelProvider {
   get capabilities(): SocialChannelCapability[] {
     if (!InstagramService.isConnected(this.orgId)) return [];
     const caps: SocialChannelCapability[] = ["getProfile", "getPosts", "publish"];
-    // getAudienceAnalytics só entra depois que um probe confirmou o escopo de insights.
-    if (this.probed && this.analyticsAvailable) caps.push("getAudienceAnalytics");
+    // Analytics (conta E post) só entram depois que um probe confirmou o escopo de insights.
+    if (this.probed && this.analyticsAvailable) caps.push("getAudienceAnalytics", "getPostAnalytics");
     return caps;
   }
 
@@ -142,9 +142,31 @@ export class InstagramChannelProvider implements SocialChannelProvider {
     }
   }
 
-  /** Analytics por-post fica pra F4 (Social Analytics Ingestion) — degrada honesto. */
+  /**
+   * Analytics de UM post via media insights (F4). Degrada honesto quando a Meta não
+   * liberou o escopo (`capability_unavailable`) — nunca inventa (RN-SI-12). Métrica
+   * ausente vira null (não 0).
+   */
   async getPostAnalytics(postExternalId: string): Promise<SocialReadResult<SocialPostAnalytics>> {
-    return { available: false, data: null, reason: "capability_unavailable" };
+    if (!InstagramService.isConnected(this.orgId)) return { available: false, data: null, reason: "not_connected" };
+    try {
+      const ins = await InstagramService.fetchMediaInsights(this.orgId, postExternalId);
+      if (!ins) return { available: false, data: null, reason: "capability_unavailable" };
+      const data: SocialPostAnalytics = {
+        postExternalId,
+        impressions: ins.impressions ?? null,
+        reach: ins.reach ?? null,
+        likes: ins.likes ?? null,
+        comments: ins.comments ?? null,
+        shares: ins.shares ?? null,
+        saves: ins.saved ?? null,
+        clicks: null,   // IG não expõe clicks de post orgânico — null honesto
+        retrievedAt: null,
+      };
+      return { available: true, data };
+    } catch (e: any) {
+      return { available: false, data: null, reason: String(e?.message || e) };
+    }
   }
 
   async getAudienceAnalytics(): Promise<SocialReadResult<SocialAudienceAnalytics>> {

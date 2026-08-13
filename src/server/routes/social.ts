@@ -9,6 +9,7 @@ import { CreativeVariantService } from "../CreativeVariantService.js";
 import { EditorialCalendarService } from "../EditorialCalendarService.js";
 import { GovernedPublishService } from "../GovernedPublishService.js";
 import { SocialAttributionService } from "../SocialAttributionService.js";
+import { CreativeLearningService } from "../CreativeLearningService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -278,6 +279,25 @@ router.get("/attribution", requireRole("owner", "admin"), (req: AuthRequest, res
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const correlationId = typeof req.query?.correlationId === "string" ? req.query.correlationId : undefined;
   res.json({ attribution: SocialAttributionService.attribution(orgId, { correlationId }) });
+});
+
+// POST /api/social/creative-learning/sweep — aprende das publicações asseguradas
+// (assured→PatternMemory: qual ângulo/formato funciona pro nicho). Owner/admin.
+router.post("/creative-learning/sweep", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = CreativeLearningService.sweep(orgId);
+    if (out.learned > 0) logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_CREATIVE_LEARN", { learned: out.learned });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/social/creative-learning — eficácia aprendida por ângulo criativo (assured).
+router.get("/creative-learning", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ effectiveness: CreativeLearningService.effectiveness(orgId) });
 });
 
 export default router;

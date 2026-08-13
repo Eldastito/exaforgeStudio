@@ -810,6 +810,12 @@ export class Scheduler {
       import("./SocialAttributionService.js").then((m) => m.SocialAttributionService.pass())
         .catch((e) => console.error('[Scheduler] atribuição social falhou', e));
     } catch (e) { console.error('[Scheduler] pass de atribuição social falhou', e); }
+    // Creative Learning (ADR-167 F13): publicação ASSEGURADA realimenta o motor único
+    // (PatternMemory) — qual ângulo/formato funciona pro nicho. Só assured aprende (RN-EL-1).
+    try {
+      import("./CreativeLearningService.js").then((m) => m.CreativeLearningService.pass())
+        .catch((e) => console.error('[Scheduler] aprendizado criativo falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de aprendizado criativo falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

@@ -6,8 +6,33 @@ import { BrandDnaService, BrandDnaPatch } from "../BrandDnaService.js";
 import { CampaignObjectiveContractService } from "../CampaignObjectiveContractService.js";
 import { HookIntelligenceService } from "../HookIntelligenceService.js";
 import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
+import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
 
 const router = Router();
+
+// ── Channel Adaptation (PRD 11 / ADR-168 F5) — reescreve o conteúdo por canal ──
+
+// GET /api/studio/channels — normas dos canais suportados
+router.get("/channels", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ channels: ChannelAdaptationService.channels() });
+});
+
+// POST /api/studio/channel-adaptation { caption, hook?, format?, hashtags?, channels:[...] }
+router.post("/channel-adaptation", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const caption = String(req.body?.caption || "").trim();
+  if (!caption) return res.status(400).json({ error: "Informe a legenda base." });
+  const channels = Array.isArray(req.body?.channels) ? req.body.channels.map((c: any) => String(c)) : [];
+  if (!channels.length) return res.status(400).json({ error: "Informe pelo menos um canal." });
+  const base = {
+    caption,
+    hook: req.body?.hook ? String(req.body.hook) : null,
+    format: req.body?.format ? String(req.body.format) : null,
+    hashtags: Array.isArray(req.body?.hashtags) ? req.body.hashtags.map((h: any) => String(h)) : [],
+  };
+  res.json(ChannelAdaptationService.adaptMany(base, channels));
+});
 
 // ── Script Intelligence (PRD 11 / ADR-168 F4) — roteiro/storyboard de vídeo grounded ──
 

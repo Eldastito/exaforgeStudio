@@ -6,6 +6,7 @@ import { VerticalSocialIntelligenceService } from "../VerticalSocialIntelligence
 import { OpportunityMatchingService } from "../OpportunityMatchingService.js";
 import { StudioBriefService } from "../StudioBriefService.js";
 import { CreativeVariantService } from "../CreativeVariantService.js";
+import { EditorialCalendarService } from "../EditorialCalendarService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -173,6 +174,58 @@ router.get("/studio/variants/:signalId", requireRole("owner", "admin"), (req: Au
   const set = CreativeVariantService.variants(orgId, String(req.params.signalId || ""));
   if (!set) return res.status(404).json({ error: "oportunidade não encontrada" });
   res.json(set);
+});
+
+// GET /api/social/studio/calendar — calendário editorial (todos os estágios).
+router.get("/studio/calendar", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ entries: EditorialCalendarService.calendar(orgId) });
+});
+
+// POST /api/social/studio/calendar — cria um RASCUNHO no calendário (não publica).
+router.post("/studio/calendar", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    const out = EditorialCalendarService.draft(orgId, {
+      creationId: b.creationId, channel: b.channel, objective: b.objective, caption: b.caption,
+      scheduledAt: b.scheduledAt, variantKey: b.variantKey, correlationId: b.correlationId,
+    });
+    logAuthEvent(orgId, (req as any).user?.userId || null, out.id, "SOCIAL_CALENDAR_DRAFT", { channel: b.channel || null });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/social/studio/calendar/:id/approve { scheduledAt } — draft→scheduled.
+router.post("/studio/calendar/:id/approve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const scheduledAt = (req.body || {}).scheduledAt;
+  if (!scheduledAt) return res.status(400).json({ error: "scheduledAt é obrigatório" });
+  try {
+    EditorialCalendarService.approve(orgId, String(req.params.id), { scheduledAt });
+    logAuthEvent(orgId, (req as any).user?.userId || null, req.params.id, "SOCIAL_CALENDAR_APPROVE", { scheduledAt });
+    res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// DELETE /api/social/studio/calendar/:id — cancela (rascunho ou agendada).
+router.delete("/studio/calendar/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = EditorialCalendarService.cancel(orgId, String(req.params.id));
+  if (!ok) return res.status(404).json({ error: "entrada não encontrada ou não cancelável" });
+  res.json({ ok: true });
+});
+
+// GET /api/social/studio/best-time?channel= — melhor horário derivado do desempenho próprio.
+router.get("/studio/best-time", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const channel = typeof req.query?.channel === "string" ? req.query.channel : "instagram";
+  res.json(EditorialCalendarService.bestTime(orgId, channel));
 });
 
 export default router;

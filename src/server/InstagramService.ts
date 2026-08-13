@@ -58,6 +58,28 @@ export class InstagramService {
     } catch { return null; }
   }
 
+  /**
+   * Insights de UMA mídia (post) — alcance/impressões/curtidas/etc. Requer o escopo
+   * instagram_manage_insights + conta business/creator (App Review). Best-effort:
+   * retorna null se o escopo não estiver liberado (não inventa métrica). (ADR-167 F4)
+   */
+  static async fetchMediaInsights(orgId: string, mediaId: string): Promise<Record<string, number> | null> {
+    const ch = this.getChannel(orgId);
+    if (!ch) return null;
+    try {
+      const url = `${GRAPH}/${encodeURIComponent(mediaId)}/insights?metric=impressions,reach,likes,comments,shares,saved&access_token=${encodeURIComponent(ch.token)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null; // sem escopo/app review: ignora (honesto)
+      const data: any = await res.json();
+      const out: Record<string, number> = {};
+      for (const m of (data?.data || [])) {
+        const val = m?.values?.[0]?.value ?? m?.total_value?.value;
+        if (typeof val === "number") out[m.name] = val;
+      }
+      return Object.keys(out).length ? out : null;
+    } catch { return null; }
+  }
+
   private static async urlToB64(url: string): Promise<{ base64: string; mime: string } | null> {
     try {
       const res = await fetch(url);

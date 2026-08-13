@@ -8990,6 +8990,41 @@ const initDb = () => {
         ON social_connections (organization_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar social_connections (ADR-167 F2)', e); }
+
+  // PRD 10 / ADR-167 F4 — Social Analytics Ingestion. Snapshot por-org de POSTS
+  // PRÓPRIOS + analytics lidos do provider (getPosts/getPostAnalytics). Uma linha por
+  // post por canal por org; UNIQUE(org,channel,post_external_id) torna a ingestão
+  // IDEMPOTENTE (upsert). Métricas NULL quando o provedor não fornece (null≠0, RN-SI-12)
+  // — nunca inventa 0. Aditivo, opt-in (alimentado só por conexão habilitada). Fonte do
+  // closed-loop de conteúdo (Outcome Assurance/Creative Learning nas fatias finais).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS social_post_metrics (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        post_external_id TEXT NOT NULL,
+        kind TEXT,
+        caption TEXT,
+        permalink TEXT,
+        published_at DATETIME,
+        impressions INTEGER,
+        reach INTEGER,
+        likes INTEGER,
+        comments INTEGER,
+        shares INTEGER,
+        saves INTEGER,
+        clicks INTEGER,
+        analytics_available INTEGER DEFAULT 0,
+        fetched_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, channel, post_external_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_social_post_metrics_org
+        ON social_post_metrics (organization_id, channel);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar social_post_metrics (ADR-167 F4)', e); }
 };
 
 initDb();

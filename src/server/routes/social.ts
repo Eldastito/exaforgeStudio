@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { SocialConnectionService } from "../SocialConnectionService.js";
+import { SocialAnalyticsService } from "../SocialAnalyticsService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -76,6 +77,35 @@ router.delete("/connections/:channel", requireRole("owner", "admin"), (req: Auth
     logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_CONNECTION_DISCONNECTED", { channel });
     res.json({ ok: true, ...SocialConnectionService.status(orgId, channel) });
   } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/social/analytics/:channel/sync — puxa posts+analytics próprios do provider
+// e persiste (idempotente). Owner/admin. Best-effort/honesto (degrada sem capacidade).
+router.post("/analytics/:channel/sync", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const channel = String(req.params.channel || "");
+  if (!SocialConnectionService.isKnownChannel(channel)) return res.status(400).json({ error: "canal inválido" });
+  const b = req.body || {};
+  const limit = Number.isFinite(b.limit) ? Math.max(1, Math.min(50, Number(b.limit))) : undefined;
+  try {
+    const result = await SocialAnalyticsService.sync(orgId, channel, { limit });
+    logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_ANALYTICS_SYNC", { channel, synced: result.synced, withAnalytics: result.withAnalytics, degraded: !!result.degraded });
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/social/analytics/:channel — posts persistidos + resumo agregado (por-org).
+router.get("/analytics/:channel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const channel = String(req.params.channel || "");
+  if (!SocialConnectionService.isKnownChannel(channel)) return res.status(400).json({ error: "canal inválido" });
+  const limit = typeof req.query?.limit === "string" ? parseInt(req.query.limit, 10) : undefined;
+  res.json({
+    summary: SocialAnalyticsService.summary(orgId, channel),
+    posts: SocialAnalyticsService.list(orgId, channel, { limit }),
+  });
 });
 
 export default router;

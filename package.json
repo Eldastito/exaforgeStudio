@@ -98,6 +98,7 @@
     "test:social-channel-contract": "tsx scripts/test-social-channel-contract.ts",
     "test:social-connection-hub": "tsx scripts/test-social-connection-hub.ts",
     "test:social-provider-instagram": "tsx scripts/test-social-provider-instagram.ts",
+    "test:social-analytics-sync": "tsx scripts/test-social-analytics-sync.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

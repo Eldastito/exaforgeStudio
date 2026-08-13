@@ -31,6 +31,7 @@ import {
   deriveCapabilityFlags,
   SocialChannelCapabilityFlags,
 } from "./SocialChannelProvider.js";
+import { InstagramChannelProvider } from "./InstagramChannelProvider.js";
 
 interface ConnectionRow {
   id: string;
@@ -184,6 +185,12 @@ export class SocialConnectionService {
     const r = this.row(orgId, channel);
     const providerName = r?.provider || "stub";
     const cfg = this.getConfig(orgId, channel) || {};
+    // Provider REAL do Instagram (F3): rota só quando a conexão pede `instagram`
+    // explicitamente. A credencial vem do `channels` (OAuth existente), não daqui —
+    // sem 2ª tela de credenciais (§42). Default `stub` mantém 0-regressão (opt-in).
+    if (channel === "instagram" && providerName === "instagram") {
+      return new InstagramChannelProvider(orgId);
+    }
     if (providerName === "stub" || !this.isKnownChannel(channel) || channel === "stub") {
       const c = cfg.capabilities || {};
       return new StubSocialChannelProvider({

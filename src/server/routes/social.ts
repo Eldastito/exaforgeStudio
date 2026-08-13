@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { SocialConnectionService } from "../SocialConnectionService.js";
 import { SocialAnalyticsService } from "../SocialAnalyticsService.js";
 import { VerticalSocialIntelligenceService } from "../VerticalSocialIntelligenceService.js";
+import { OpportunityMatchingService } from "../OpportunityMatchingService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -122,6 +123,25 @@ router.get("/vertical-intelligence", requireRole("owner", "admin"), (req: AuthRe
   const timeframe = typeof req.query?.timeframe === "string" ? req.query.timeframe : undefined;
   try {
     res.json(VerticalSocialIntelligenceService.assemble(orgId, { vertical, channel, topics, region, timeframe }));
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/social/opportunities/match { vertical?, channel?, publish? } — cruza a
+// inteligência do nicho com o momento da org; `publish` grava as oportunidades frescas
+// em `business_signals` (espinha canônica). `publish` default true. Owner/admin.
+router.post("/opportunities/match", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const publish = b.publish === undefined ? true : !!b.publish;
+  try {
+    const out = OpportunityMatchingService.match(orgId, {
+      vertical: typeof b.vertical === "string" ? b.vertical : undefined,
+      channel: typeof b.channel === "string" ? b.channel : undefined,
+      publish,
+    });
+    if (publish && out.matched > 0) logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_OPPORTUNITY_MATCH", { vertical: out.vertical, channel: out.channel, matched: out.matched });
+    res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 

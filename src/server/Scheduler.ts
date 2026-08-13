@@ -798,6 +798,12 @@ export class Scheduler {
       import("./SocialAnalyticsService.js").then((m) => m.SocialAnalyticsService.pass())
         .catch((e) => console.error('[Scheduler] ingestão de social analytics falhou', e));
     } catch (e) { console.error('[Scheduler] pass de social analytics falhou', e); }
+    // Opportunity Matching (ADR-167 F7): cruza inteligência do nicho com o momento da
+    // org e publica oportunidades na espinha (`business_signals`, D6 — sem tabela paralela).
+    try {
+      import("./OpportunityMatchingService.js").then((m) => m.OpportunityMatchingService.pass())
+        .catch((e) => console.error('[Scheduler] opportunity matching falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de opportunity matching falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

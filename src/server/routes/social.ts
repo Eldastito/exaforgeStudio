@@ -4,6 +4,7 @@ import { SocialConnectionService } from "../SocialConnectionService.js";
 import { SocialAnalyticsService } from "../SocialAnalyticsService.js";
 import { VerticalSocialIntelligenceService } from "../VerticalSocialIntelligenceService.js";
 import { OpportunityMatchingService } from "../OpportunityMatchingService.js";
+import { StudioBriefService } from "../StudioBriefService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -143,6 +144,24 @@ router.post("/opportunities/match", requireRole("owner", "admin"), (req: AuthReq
     if (publish && out.matched > 0) logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_OPPORTUNITY_MATCH", { vertical: out.vertical, channel: out.channel, matched: out.matched });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/social/studio/opportunities — oportunidades de conteúdo abertas (candidatas
+// a virar briefing orientado no Estúdio). Read-only. Owner/admin.
+router.get("/studio/opportunities", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ opportunities: StudioBriefService.listOpportunities(orgId) });
+});
+
+// GET /api/social/studio/brief/:signalId — briefing orientado derivado de UMA
+// oportunidade (nicho/tópico/ângulo/formato/procedência + texto pronto p/ o Estúdio).
+router.get("/studio/brief/:signalId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const brief = StudioBriefService.fromOpportunity(orgId, String(req.params.signalId || ""));
+  if (!brief) return res.status(404).json({ error: "oportunidade não encontrada" });
+  res.json(brief);
 });
 
 export default router;

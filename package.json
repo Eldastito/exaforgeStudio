@@ -95,6 +95,7 @@
     "test:contextual-fusion": "tsx scripts/test-contextual-fusion.ts",
     "test:learning-metrics": "tsx scripts/test-learning-metrics.ts",
     "test:enterprise-learning-hardening": "tsx scripts/test-enterprise-learning-hardening.ts",
+    "test:social-channel-contract": "tsx scripts/test-social-channel-contract.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

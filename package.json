@@ -504,6 +504,7 @@
     "test:decision-intelligence-di5-curate": "tsx scripts/test-decision-intelligence-di5-curate.ts",
     "test:decision-intelligence-di5-schedule": "tsx scripts/test-decision-intelligence-di5-schedule.ts",
     "test:decision-intelligence-di5-ui": "tsx scripts/test-decision-intelligence-di5-ui.ts",
+    "test:decision-intelligence-di5-trend-tenant": "tsx scripts/test-decision-intelligence-di5-trend-tenant.ts",
     "test:command-executor": "tsx scripts/test-command-executor.ts",
     "test:purchase-orders": "tsx scripts/test-purchase-orders.ts",
     "test:goods-receipt": "tsx scripts/test-goods-receipt.ts",

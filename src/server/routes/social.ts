@@ -11,6 +11,7 @@ import { GovernedPublishService } from "../GovernedPublishService.js";
 import { SocialAttributionService } from "../SocialAttributionService.js";
 import { CreativeLearningService } from "../CreativeLearningService.js";
 import { SocialProactivityService } from "../SocialProactivityService.js";
+import { SocialEntitlementService } from "../SocialEntitlementService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -240,6 +241,13 @@ router.post("/publish", requireRole("owner", "admin"), (req: AuthRequest, res): 
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
   if (!b.channel) return res.status(400).json({ error: "channel é obrigatório" });
+  // GATE de plano SERVER-SIDE (RN-SI-14): recusa a publicação ANTES de propor se o plano
+  // não cobre — um cliente que pule a UI é barrado igual. 402 + caminho de upgrade.
+  try { SocialEntitlementService.assertAllowed(orgId, req.user, "execute"); }
+  catch (e: any) {
+    if (e?.code === "entitlement_denied") return res.status(402).json({ error: e.message, entitlement: e.decision });
+    return res.status(400).json({ error: String(e?.message || e) });
+  }
   try {
     const action = GovernedPublishService.propose(orgId, {
       channel: b.channel, caption: b.caption, mediaRef: b.mediaRef, kind: b.kind,
@@ -307,6 +315,14 @@ router.get("/proactive", requireRole("owner", "admin"), (req: AuthRequest, res):
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SocialProactivityService.digest(orgId));
+});
+
+// GET /api/social/entitlement — status do gate de plano das capacidades sociais
+// (allowed + caminho de upgrade/add-on pra a CTA de billing). Read-only.
+router.get("/entitlement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SocialEntitlementService.status(orgId, req.user));
 });
 
 export default router;

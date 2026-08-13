@@ -108,6 +108,7 @@
     "test:governed-publishing": "tsx scripts/test-governed-publishing.ts",
     "test:social-attribution": "tsx scripts/test-social-attribution.ts",
     "test:creative-learning": "tsx scripts/test-creative-learning.ts",
+    "test:social-proactivity": "tsx scripts/test-social-proactivity.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

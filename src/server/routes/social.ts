@@ -10,6 +10,7 @@ import { EditorialCalendarService } from "../EditorialCalendarService.js";
 import { GovernedPublishService } from "../GovernedPublishService.js";
 import { SocialAttributionService } from "../SocialAttributionService.js";
 import { CreativeLearningService } from "../CreativeLearningService.js";
+import { SocialProactivityService } from "../SocialProactivityService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -298,6 +299,14 @@ router.get("/creative-learning", requireRole("owner", "admin"), (req: AuthReques
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ effectiveness: CreativeLearningService.effectiveness(orgId) });
+});
+
+// GET /api/social/proactive — digest humano da fatia social pro "Hoje" do Fala Tu/Radar
+// (oportunidades + aprovações pendentes + resultados medidos + o que funciona). Read-only.
+router.get("/proactive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SocialProactivityService.digest(orgId));
 });
 
 export default router;

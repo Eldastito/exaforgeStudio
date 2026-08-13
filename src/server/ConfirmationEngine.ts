@@ -48,6 +48,10 @@ export const CONFIRMATION_METHODS = [
   // FECHAMENTO (réplica do consumidor / caso resolvido) é armada aqui e
   // confirmada na F10 (réplica + closure). Aditivo, não altera métodos existentes.
   "reputation_reply",
+  // ADR-167 F11 — publicação social realizada; a confirmação de RESULTADO
+  // (engajamento/outcome medido) é armada aqui e resolvida na F12 (analytics→
+  // outcome). PUBLISHED ≠ RESULTADO. Aditivo, não altera métodos existentes.
+  "social_publish",
 ] as const;
 export type ConfirmationMethod = (typeof CONFIRMATION_METHODS)[number];
 

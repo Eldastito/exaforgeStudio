@@ -110,6 +110,7 @@
     "test:creative-learning": "tsx scripts/test-creative-learning.ts",
     "test:social-proactivity": "tsx scripts/test-social-proactivity.ts",
     "test:social-entitlement": "tsx scripts/test-social-entitlement.ts",
+    "test:social-hardening": "tsx scripts/test-social-hardening.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

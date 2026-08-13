@@ -5,6 +5,7 @@ import { SocialAnalyticsService } from "../SocialAnalyticsService.js";
 import { VerticalSocialIntelligenceService } from "../VerticalSocialIntelligenceService.js";
 import { OpportunityMatchingService } from "../OpportunityMatchingService.js";
 import { StudioBriefService } from "../StudioBriefService.js";
+import { CreativeVariantService } from "../CreativeVariantService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -162,6 +163,16 @@ router.get("/studio/brief/:signalId", requireRole("owner", "admin"), (req: AuthR
   const brief = StudioBriefService.fromOpportunity(orgId, String(req.params.signalId || ""));
   if (!brief) return res.status(404).json({ error: "oportunidade não encontrada" });
   res.json(brief);
+});
+
+// GET /api/social/studio/variants/:signalId — variantes criativas A/B/C derivadas do
+// briefing orientado (cada uma pronta p/ StudioService.generate). Read-only.
+router.get("/studio/variants/:signalId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const set = CreativeVariantService.variants(orgId, String(req.params.signalId || ""));
+  if (!set) return res.status(404).json({ error: "oportunidade não encontrada" });
+  res.json(set);
 });
 
 export default router;

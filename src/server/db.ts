@@ -8960,6 +8960,36 @@ const initDb = () => {
         ON business_pattern_outcomes (organization_id, event_key) WHERE event_key IS NOT NULL;
     `);
   } catch(e){ console.error('[DB] Falha ao criar business_pattern_outcomes (ADR-166 F1)', e); }
+
+  // PRD 10 / ADR-167 F2 — Social Connection Hub. ESTADO por-org de uma conexão de
+  // CANAL SOCIAL (Instagram/Facebook/TikTok/…): credenciais CIFRADAS (`config_enc`,
+  // AES-GCM via EncryptionService — nunca cru numa rota, RN-SI-05), estado de conexão
+  // observável (§5 — token vencido nunca "connected"), capacidades DESCOBERTAS e
+  // cacheadas (RN-SI-06), escopos concedidos e saúde. Espelha `reputation_connectors`
+  // (ADR-162); aditivo, opt-in (`enabled` DEFAULT 0). UNIQUE(org,channel) — 1 conexão
+  // por canal por org (convenção #1). NÃO é tabela de alerta paralela nem 2º Estúdio (§42).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS social_connections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'stub',
+        config_enc TEXT,
+        capabilities_json TEXT,
+        scopes_json TEXT,
+        connection_state TEXT DEFAULT 'not_connected',
+        state_detail TEXT,
+        health_checked_at DATETIME,
+        enabled INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, channel)
+      );
+      CREATE INDEX IF NOT EXISTS idx_social_connections_org
+        ON social_connections (organization_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar social_connections (ADR-167 F2)', e); }
 };
 
 initDb();

@@ -9025,6 +9025,14 @@ const initDb = () => {
         ON social_post_metrics (organization_id, channel);
     `);
   } catch(e){ console.error('[DB] Falha ao criar social_post_metrics (ADR-167 F4)', e); }
+
+  // PRD 10 / ADR-167 F10 — Calendário editorial. ESTENDE `scheduled_posts` (§42 — sem 2º
+  // calendário): estágio `draft` (rascunho no calendário, NÃO publica — o passe só pega
+  // `status='scheduled'`, então drafts ficam de fora até aprovados; 0-regressão) + o fio
+  // da oportunidade→variante (F7/F9) pra atribuição futura (F12). Aditivos, nunca reordenar.
+  try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN channel TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN correlation_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN variant_key TEXT`); } catch(e){}
 };
 
 initDb();

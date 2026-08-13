@@ -104,6 +104,7 @@
     "test:opportunity-matching": "tsx scripts/test-opportunity-matching.ts",
     "test:studio-brief": "tsx scripts/test-studio-brief.ts",
     "test:creative-variants": "tsx scripts/test-creative-variants.ts",
+    "test:editorial-calendar": "tsx scripts/test-editorial-calendar.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

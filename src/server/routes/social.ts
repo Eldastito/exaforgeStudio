@@ -8,6 +8,7 @@ import { StudioBriefService } from "../StudioBriefService.js";
 import { CreativeVariantService } from "../CreativeVariantService.js";
 import { EditorialCalendarService } from "../EditorialCalendarService.js";
 import { GovernedPublishService } from "../GovernedPublishService.js";
+import { SocialAttributionService } from "../SocialAttributionService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -257,6 +258,26 @@ router.post("/publish/:actionId/execute", requireRole("owner", "admin"), async (
     const out = await GovernedPublishService.execute(orgId, String(req.params.actionId));
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/social/attribution/resolve — resolve confirmações social_publish pendentes
+// com o analytics do post (PUBLISHED→RESULTADO). Owner/admin.
+router.post("/attribution/resolve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = SocialAttributionService.resolvePending(orgId);
+    if (out.resolved > 0) logAuthEvent(orgId, (req as any).user?.userId || null, null, "SOCIAL_ATTRIBUTION_RESOLVE", { resolved: out.resolved });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/social/attribution?correlationId= — atribuição variante→engajamento medido.
+router.get("/attribution", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const correlationId = typeof req.query?.correlationId === "string" ? req.query.correlationId : undefined;
+  res.json({ attribution: SocialAttributionService.attribution(orgId, { correlationId }) });
 });
 
 export default router;

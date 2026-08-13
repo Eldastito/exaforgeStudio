@@ -228,7 +228,7 @@ function safeParse(s: string): any { try { return JSON.parse(s); } catch { retur
 /** Resumo curto e legível de um sinal pra a leitura de atenção (F1 Onda A). */
 function shortSummary(signalType: string, evidenceJson: string | null): string {
   const ev = evidenceJson ? safeParse(evidenceJson) : {};
-  const cand = ev?.summary || ev?.title || ev?.label || ev?.contactName || ev?.nota;
+  const cand = ev?.summary || ev?.title || ev?.label || ev?.contactName || ev?.nota || ev?.note;
   const base = typeof cand === "string" && cand.trim() ? cand.trim() : String(signalType || "").replace(/_/g, " ");
   return base.slice(0, 200);
 }

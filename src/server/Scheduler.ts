@@ -804,6 +804,12 @@ export class Scheduler {
       import("./OpportunityMatchingService.js").then((m) => m.OpportunityMatchingService.pass())
         .catch((e) => console.error('[Scheduler] opportunity matching falhou', e));
     } catch (e) { console.error('[Scheduler] pass de opportunity matching falhou', e); }
+    // Social Attribution (ADR-167 F12): resolve confirmações social_publish com o
+    // analytics do post → PUBLISHED vira RESULTADO medido (fecha o closed-loop; §42/D6).
+    try {
+      import("./SocialAttributionService.js").then((m) => m.SocialAttributionService.pass())
+        .catch((e) => console.error('[Scheduler] atribuição social falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de atribuição social falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

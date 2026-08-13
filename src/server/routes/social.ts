@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { SocialConnectionService } from "../SocialConnectionService.js";
 import { SocialAnalyticsService } from "../SocialAnalyticsService.js";
+import { VerticalSocialIntelligenceService } from "../VerticalSocialIntelligenceService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -106,6 +107,22 @@ router.get("/analytics/:channel", requireRole("owner", "admin"), (req: AuthReque
     summary: SocialAnalyticsService.summary(orgId, channel),
     posts: SocialAnalyticsService.list(orgId, channel, { limit }),
   });
+});
+
+// GET /api/social/vertical-intelligence?vertical=&channel=&topics=a,b — consolida a
+// inteligência social do nicho (externo compartilhado + próprio da F4). Read-only.
+router.get("/vertical-intelligence", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const vertical = typeof req.query?.vertical === "string" ? req.query.vertical : "";
+  if (!vertical) return res.status(400).json({ error: "vertical é obrigatório" });
+  const channel = typeof req.query?.channel === "string" ? req.query.channel : undefined;
+  const topics = typeof req.query?.topics === "string" ? req.query.topics.split(",").map((t) => t.trim()).filter(Boolean) : undefined;
+  const region = typeof req.query?.region === "string" ? req.query.region : undefined;
+  const timeframe = typeof req.query?.timeframe === "string" ? req.query.timeframe : undefined;
+  try {
+    res.json(VerticalSocialIntelligenceService.assemble(orgId, { vertical, channel, topics, region, timeframe }));
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 
 export default router;

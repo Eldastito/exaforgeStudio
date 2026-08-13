@@ -100,6 +100,7 @@
     "test:social-provider-instagram": "tsx scripts/test-social-provider-instagram.ts",
     "test:social-analytics-sync": "tsx scripts/test-social-analytics-sync.ts",
     "test:competitive-intelligence": "tsx scripts/test-competitive-intelligence.ts",
+    "test:vertical-social-intelligence": "tsx scripts/test-vertical-social-intelligence.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

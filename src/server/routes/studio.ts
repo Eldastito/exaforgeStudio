@@ -3,8 +3,64 @@ import { AuthRequest } from "../middleware/auth.js";
 import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
 import { BrandDnaService, BrandDnaPatch } from "../BrandDnaService.js";
+import { CampaignObjectiveContractService } from "../CampaignObjectiveContractService.js";
 
 const router = Router();
+
+// ── Campaign Objective Contract (PRD 11 / ADR-168 F2) — objetivo ligado a meta de negócio ──
+
+// GET /api/studio/campaign-objectives — catálogo enriquecido (com métrica de negócio sugerida)
+router.get("/campaign-objectives", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ objectives: CampaignObjectiveContractService.objectives() });
+});
+
+// POST /api/studio/campaign-contracts { objectiveId, goalMetric?, title? }
+router.post("/campaign-contracts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const objectiveId = String(req.body?.objectiveId || "").trim();
+  if (!objectiveId) return res.status(400).json({ error: "Informe o objetivo da campanha." });
+  const input: { objectiveId: string; goalMetric?: string | null; title?: string | null } = { objectiveId };
+  if (req.body?.goalMetric !== undefined) input.goalMetric = req.body.goalMetric === null ? null : String(req.body.goalMetric);
+  if (req.body?.title !== undefined) input.title = req.body.title === null ? null : String(req.body.title);
+  try { res.json(CampaignObjectiveContractService.create(orgId, req.user?.userId || null, input)); }
+  catch (e: any) { res.status(400).json({ error: e.message || "Falha ao criar o contrato." }); }
+});
+
+// GET /api/studio/campaign-contracts?status=active
+router.get("/campaign-contracts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const status = req.query?.status ? String(req.query.status) : undefined;
+  res.json({ contracts: CampaignObjectiveContractService.list(orgId, status ? { status: status as any } : undefined) });
+});
+
+// GET /api/studio/campaign-contracts/:id
+router.get("/campaign-contracts/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const c = CampaignObjectiveContractService.get(orgId, req.params.id);
+  if (!c) return res.status(404).json({ error: "Contrato não encontrado." });
+  res.json(c);
+});
+
+// GET /api/studio/campaign-contracts/:id/progress — distância-à-meta do contrato
+router.get("/campaign-contracts/:id/progress", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const p = CampaignObjectiveContractService.progress(orgId, req.params.id);
+  if (!p) return res.status(404).json({ error: "Contrato não encontrado." });
+  res.json(p);
+});
+
+// POST /api/studio/campaign-contracts/:id/cancel
+router.post("/campaign-contracts/:id/cancel", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = CampaignObjectiveContractService.cancel(orgId, req.params.id);
+  res.json({ canceled: ok });
+});
 
 // ── Brand DNA 2.0 (PRD 11 / ADR-168 F1) — identidade estruturada + unificada + versionada ──
 

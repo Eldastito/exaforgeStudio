@@ -253,6 +253,21 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
    *    'manual' caso contrário. Base do `assuredEffectiveness` da F2 (DONE ≠ EXEMPLO
    *    DE SUCESSO — §9/CA2). O ledger + agregados são atômicos (uma transação).
    */
+  /**
+   * Garante que um padrão exista no MOTOR ÚNICO (upsert idempotente) e devolve seu id —
+   * sem a maquinaria de `learn()` (decay/publicação de sinais). Usado quando o outcome já
+   * chegou pronto (ex.: aprendizado criativo assured, ADR-167 F13) e só precisa do padrão
+   * pra ancorar `recordOutcome`. Não amplia o motor — só expõe o upsert que já existia.
+   */
+  static ensurePattern(orgId: string, domain: string, c: PatternCandidate, description?: string): string {
+    const asOf = new Date().toISOString().slice(0, 10);
+    this.upsert(orgId, domain, c, description || c.fallbackDescription, "rule", asOf);
+    const row = db.prepare(
+      `SELECT id FROM business_patterns WHERE organization_id = ? AND domain = ? AND COALESCE(scope_id,'') = ? AND pattern_type = ? AND pattern_key = ?`,
+    ).get(orgId, domain, c.scopeId || "", c.patternType, c.patternKey) as any;
+    return row.id;
+  }
+
   static recordOutcome(
     orgId: string,
     patternId: string,

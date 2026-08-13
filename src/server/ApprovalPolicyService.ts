@@ -46,6 +46,9 @@ const DEFAULTS: Record<string, { policy: ApprovalPolicy; role?: string }> = {
   choose_supplier: { policy: "two_step" },
   create_purchase_order: { policy: "two_step" },
   change_price: { policy: "role", role: "owner" },
+  // ADR-167 F11 — publicação social exige aprovação humana por padrão (governança
+  // on por default; o Autonomy Contract pode liberar/bloquear por banda).
+  social_publish: { policy: "single" },
 };
 
 const DEFAULT_FALLBACK: { policy: ApprovalPolicy; role?: string } = { policy: "single" };

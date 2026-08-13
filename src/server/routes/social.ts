@@ -7,6 +7,7 @@ import { OpportunityMatchingService } from "../OpportunityMatchingService.js";
 import { StudioBriefService } from "../StudioBriefService.js";
 import { CreativeVariantService } from "../CreativeVariantService.js";
 import { EditorialCalendarService } from "../EditorialCalendarService.js";
+import { GovernedPublishService } from "../GovernedPublishService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -226,6 +227,36 @@ router.get("/studio/best-time", requireRole("owner", "admin"), (req: AuthRequest
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const channel = typeof req.query?.channel === "string" ? req.query.channel : "instagram";
   res.json(EditorialCalendarService.bestTime(orgId, channel));
+});
+
+// POST /api/social/publish { channel, caption?, mediaRef?, kind?, variantKey?, signalId?,
+// correlationId? } — PROPÕE a publicação como comando GOVERNADO (não publica direto).
+// A ação nasce aguardando aprovação (default) ou aprovada (Autonomy Contract). Owner/admin.
+router.post("/publish", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (!b.channel) return res.status(400).json({ error: "channel é obrigatório" });
+  try {
+    const action = GovernedPublishService.propose(orgId, {
+      channel: b.channel, caption: b.caption, mediaRef: b.mediaRef, kind: b.kind,
+      variantKey: b.variantKey, signalId: b.signalId, correlationId: b.correlationId, title: b.title,
+      createdBy: (req as any).user?.userId || "studio",
+    });
+    logAuthEvent(orgId, (req as any).user?.userId || null, action.id, "SOCIAL_PUBLISH_PROPOSE", { channel: b.channel, status: action.status });
+    res.json({ action });
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/social/publish/:actionId/execute — roda o efeito de uma ação de publicação
+// APROVADA pelo choke-point governado (idempotente). Owner/admin.
+router.post("/publish/:actionId/execute", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await GovernedPublishService.execute(orgId, String(req.params.actionId));
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 
 export default router;

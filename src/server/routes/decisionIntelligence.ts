@@ -51,12 +51,17 @@ router.get("/priorities", (req: AuthRequest, res): any => {
 
 // POST /api/decision-intelligence/analyze — roda as estratégias (premortem/
 // red_team/advocate) sobre a decisão. Body: { title, decisionType, impactAmount,
-// impactUnit, severity?, expectedValue?, premises?, decisionId?, mode?, persist? }.
+// impactUnit, severity?, expectedValue?, premises?, decisionId?, mode?, persist?,
+// externalTopic?, vertical?, region?, timeframe? }.
+// DI-5.6: os campos externos (externalTopic/vertical/region/timeframe) eram
+// aceitos pela engine mas a rota os descartava — sem eles a evidência/tendência
+// de mercado nunca chegava ao lojista. Repassados (o broker segue read-only).
 router.post("/analyze", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
   if (!b.title || typeof b.title !== "string") return res.status(400).json({ error: "title é obrigatório." });
+  const str = (v: any) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
   const out = DecisionEngine.analyze(orgId, {
     title: b.title,
     decisionType: b.decisionType,
@@ -66,6 +71,10 @@ router.post("/analyze", (req: AuthRequest, res): any => {
     expectedValue: b.expectedValue ?? null,
     premises: Array.isArray(b.premises) ? b.premises : undefined,
     decisionId: b.decisionId ?? null,
+    externalTopic: str(b.externalTopic),
+    vertical: str(b.vertical),
+    region: str(b.region),
+    timeframe: str(b.timeframe),
   }, { mode: typeof b.mode === "string" ? b.mode : undefined, persist: b.persist === true });
   res.json(out);
 });

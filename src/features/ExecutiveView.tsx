@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '@/src/lib/api';
 import { Button } from '@/src/components/ui/button';
 import { toast } from '@/src/lib/toast';
-import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap, Handshake, Repeat2, UserX, MessageCircle } from 'lucide-react';
+import { BrainCircuit, Send, Sparkles, RefreshCw, ListChecks, MessageSquare, TrendingUp, ShieldCheck, CheckCircle2, XCircle, Target, Activity, AlertTriangle, Clock, Zap, Handshake, Repeat2, UserX, MessageCircle, Globe } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useStore } from '@/src/store/useStore';
 
@@ -1211,6 +1211,11 @@ function DecidirTab() {
               <p className="mt-2 text-[11px] text-zinc-600">Recomendação advisória — a autorização final segue as permissões (RBAC).</p>
             </div>
 
+            {/* Tendência de mercado (DI-5.6) — inteligência de nicho anonimizada +
+                o delta da última pesquisa (novo/cresceu/retraiu/saiu). Só aparece
+                quando o nicho tem pesquisa fresca e a org optou (external_intelligence_enabled). */}
+            {out.external?.available && <MercadoTrendCard external={out.external} />}
+
             {/* Cenários */}
             {out.scenarios?.ok && (
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -1273,3 +1278,65 @@ function DecidirTab() {
     </div>
   );
 }
+
+// ===== Card: Tendência de mercado (DI-5.6 / ADR-157) =====
+// Surfaça pro lojista a inteligência de nicho COMPARTILHADA (anonimizada, sem
+// dado de outra loja) + o delta da última pesquisa. O broker é read-only: este
+// card nunca dispara pesquisa, só lê o que a automação já publicou. `trend` vem
+// null na 1ª versão do nicho (não há "anterior" pra comparar).
+function MercadoTrendCard({ external }: { external: any }) {
+  const ctx = external?.contextualization?.context || {};
+  const summary: string = typeof ctx.summary === 'string' ? ctx.summary : '';
+  const conf = Number(ctx.confidence);
+  const trend = external?.trend || null;
+  const changes: Array<{ kind: string; label: string; items: string[] }> = trend && !trend.isFirst ? [
+    { kind: 'new', label: '✨ novo', items: Array.isArray(trend.new) ? trend.new : [] },
+    { kind: 'grew', label: '↑ cresceu', items: Array.isArray(trend.grew) ? trend.grew : [] },
+    { kind: 'shrank', label: '↓ retraiu', items: Array.isArray(trend.shrank) ? trend.shrank : [] },
+    { kind: 'gone', label: 'saiu', items: Array.isArray(trend.gone) ? trend.gone : [] },
+  ].filter((c) => c.items.length > 0) : [];
+  const confDelta = trend ? Number(trend.confidenceDelta) : 0;
+  const nothingChanged = trend && !trend.isFirst && changes.length === 0 && Math.abs(confDelta) < 0.01;
+
+  return (
+    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4">
+      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-sky-200">
+        <Globe className="h-4 w-4" /> Tendência de mercado — {external.vertical}
+        {Number.isFinite(conf) && conf > 0 && <span className="ml-auto text-[11px] font-normal text-zinc-400">confiança {Math.round(conf * 100)}%</span>}
+      </div>
+      {summary && <p className="text-[13px] text-zinc-200">{summary}</p>}
+
+      {trend?.isFirst && <p className="mt-2 text-[12px] text-zinc-500">Primeira leitura deste nicho — sem versão anterior pra comparar. As próximas mostram o que mudou.</p>}
+      {nothingChanged && <p className="mt-2 text-[12px] text-zinc-500">Sem mudança material desde a última pesquisa deste nicho.</p>}
+
+      {changes.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          <p className="text-[11px] uppercase tracking-wide text-zinc-500">O que mudou desde a última vez</p>
+          {changes.map((c) => (
+            <div key={c.kind} className="flex flex-wrap items-center gap-1.5">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${TREND_CLS[c.kind]}`}>{c.label}</span>
+              {c.items.map((it, i) => (
+                <span key={i} className={`rounded-full border px-2 py-0.5 text-[11px] ${c.kind === 'gone' ? 'border-zinc-700 text-zinc-500 line-through' : 'border-zinc-700 text-zinc-300'}`}>{it}</span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {trend && !trend.isFirst && Math.abs(confDelta) >= 0.01 && (
+        <p className={`mt-2 text-[12px] ${confDelta > 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+          Confiança {confDelta > 0 ? 'subiu' : 'caiu'} {Math.abs(Math.round(confDelta * 100))} p.p. vs a última pesquisa.
+        </p>
+      )}
+
+      <p className="mt-2 text-[11px] text-zinc-600">Inteligência de nicho compartilhada e anonimizada — nunca inclui dados de outra loja. Só leitura (não dispara pesquisa).</p>
+    </div>
+  );
+}
+
+const TREND_CLS: Record<string, string> = {
+  new: 'bg-sky-500/15 text-sky-300',
+  grew: 'bg-emerald-500/15 text-emerald-300',
+  shrank: 'bg-amber-500/15 text-amber-300',
+  gone: 'bg-zinc-700/40 text-zinc-400',
+};

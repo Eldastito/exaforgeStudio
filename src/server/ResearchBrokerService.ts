@@ -14,6 +14,15 @@ import { VerticalIntelligenceService, researchFingerprint } from "./VerticalInte
  * rica com evidência PRIVADA da org entra na DI-4.3; aqui o `context_json`
  * carrega só a referência + um enquadramento mínimo, e NUNCA volta ao
  * compartilhado (RN-156-1).
+ *
+ * DI-5.6 (ADR-157) — a leitura do tenant também devolve a TENDÊNCIA de mercado
+ * (`trend`): o delta da última versão publicada do nicho vs a anterior
+ * (novo/saiu/cresceu/retraiu + variação de confiança). É o mesmo delta que o
+ * admin master já vê, agora surfaça no Diretor IA do lojista. Seguro por
+ * construção: o delta deriva de `vertical_intelligence_history`, que é
+ * COMPARTILHADO e por RN-157-1 nunca guarda PII/id de tenant — logo é só
+ * inteligência de nicho anonimizada, nunca dado por-org. Read-only (nunca dispara
+ * pesquisa). Ausente (`null`) na 1ª versão do nicho (não há "anterior").
  */
 
 export class ResearchBrokerService {
@@ -43,7 +52,7 @@ export class ResearchBrokerService {
       WHERE c.organization_id = ? AND c.fingerprint = ?
     `).get(orgId, fingerprint) as any;
     if (ctx && new Date(ctx.vi_valid_until).getTime() > Date.now()) {
-      return { available: true, source: "organization_contextualization", cacheLevel: "L2", fingerprint, vertical, contextualization: hydrateCtx(ctx) };
+      return { available: true, source: "organization_contextualization", cacheLevel: "L2", fingerprint, vertical, contextualization: hydrateCtx(ctx), trend: VerticalIntelligenceService.latestDelta(fingerprint) };
     }
 
     // L3 — entrada compartilhada fresca do nicho. NUNCA chama o provider.
@@ -51,7 +60,7 @@ export class ResearchBrokerService {
     if (!vi) return { available: false, reason: "no_fresh_vertical_intelligence", fingerprint, vertical };
 
     const contextualization = this.contextualize(orgId, vi, fingerprint);
-    return { available: true, source: "vertical_intelligence", cacheLevel: "L3", fingerprint, vertical, contextualization };
+    return { available: true, source: "vertical_intelligence", cacheLevel: "L3", fingerprint, vertical, contextualization, trend: VerticalIntelligenceService.latestDelta(fingerprint) };
   }
 
   /** Cria/atualiza a contextualização por-org (upsert por org+fingerprint). */

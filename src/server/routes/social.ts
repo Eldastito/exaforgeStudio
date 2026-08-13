@@ -12,6 +12,7 @@ import { SocialAttributionService } from "../SocialAttributionService.js";
 import { CreativeLearningService } from "../CreativeLearningService.js";
 import { SocialProactivityService } from "../SocialProactivityService.js";
 import { SocialEntitlementService } from "../SocialEntitlementService.js";
+import { CreativeExperimentService } from "../CreativeExperimentService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -323,6 +324,50 @@ router.get("/entitlement", requireRole("owner", "admin"), (req: AuthRequest, res
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SocialEntitlementService.status(orgId, req.user));
+});
+
+// ── Creative Experiment Engine (PRD 11 / ADR-168 F6) — variantes → z-test → campeão ──
+
+// POST /api/social/experiments { hypothesis, variants:[{variantKey,label?}], objectiveId?, correlationId?, minSample?, confidenceZ? }
+router.post("/experiments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = CreativeExperimentService.create(orgId, req.user?.userId || null, {
+      hypothesis: String(req.body?.hypothesis || ""),
+      variants: Array.isArray(req.body?.variants) ? req.body.variants : [],
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      correlationId: req.body?.correlationId ? String(req.body.correlationId) : null,
+      minSample: req.body?.minSample !== undefined ? Number(req.body.minSample) : undefined,
+      confidenceZ: req.body?.confidenceZ !== undefined ? Number(req.body.confidenceZ) : undefined,
+    });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao criar o experimento." }); }
+});
+
+// GET /api/social/experiments?status=running
+router.get("/experiments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const status = req.query?.status ? String(req.query.status) : undefined;
+  res.json({ experiments: CreativeExperimentService.list(orgId, status ? { status } : undefined) });
+});
+
+// GET /api/social/experiments/:id
+router.get("/experiments/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const e = CreativeExperimentService.get(orgId, req.params.id);
+  if (!e) return res.status(404).json({ error: "Experimento não encontrado." });
+  res.json(e);
+});
+
+// POST /api/social/experiments/:id/decide — mede + decide (não executa; RN-CG-08)
+router.post("/experiments/:id/decide", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(CreativeExperimentService.decide(orgId, req.params.id, req.user?.userId || null)); }
+  catch (e: any) { res.status(404).json({ error: e.message || "Falha ao decidir." }); }
 });
 
 export default router;

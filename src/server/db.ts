@@ -9065,6 +9065,33 @@ const initDb = () => {
         ON brand_dna_versions (organization_id, version DESC);
     `);
   } catch(e){ console.error('[DB] Falha ao criar brand_dna_versions (ADR-168 F1)', e); }
+
+  // PRD 11 / ADR-168 F2 — Campaign Objective Contract. Liga um OBJETIVO de campanha
+  // (do `CAMPAIGN_OBJECTIVES` do Estúdio) a uma MÉTRICA DE META de negócio
+  // (`BusinessGoalService`, ex.: revenue/appointments), com um `correlation_id` que o
+  // conteúdo produzido sob o contrato carrega (fio ADR-158 → atribuição F9/F12). É AQUI
+  // que ENGAGEMENT≠BUSINESS VALUE começa: objetivos de vaidade (engajamento/alcance) ligam
+  // a `goal_metric = NULL` (honesto — não fingem métrica de negócio). Sem tabela de meta
+  // paralela (§37 — a meta segue em `business_goals`). Aditiva, opt-in de uso.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS campaign_objective_contracts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        objective_id TEXT NOT NULL,          -- id em CAMPAIGN_OBJECTIVES (vendas|agendamento|...)
+        goal_metric TEXT,                    -- métrica em BusinessGoalService (revenue|appointments) ou NULL (vaidade)
+        correlation_id TEXT NOT NULL,        -- fio que o conteúdo do contrato carrega (ADR-158)
+        title TEXT,
+        status TEXT NOT NULL DEFAULT 'active', -- active | canceled | achieved
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, correlation_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_campaign_obj_contracts_org
+        ON campaign_objective_contracts (organization_id, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar campaign_objective_contracts (ADR-168 F2)', e); }
 };
 
 initDb();

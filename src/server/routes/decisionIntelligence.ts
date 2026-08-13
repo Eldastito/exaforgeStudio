@@ -22,6 +22,7 @@ import { ContextualFusionService } from "../ContextualFusionService.js";
 import { LearningMetricsService } from "../LearningMetricsService.js";
 import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
+import { CompetitiveIntelligenceService } from "../CompetitiveIntelligenceService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -246,6 +247,24 @@ router.post("/vertical-intelligence/run", requireMasterAdmin, async (req: AuthRe
       { providerName: typeof b.provider === "string" ? b.provider : undefined },
     );
     res.json({ verticalIntelligence: out });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || e) });
+  }
+});
+
+// POST /api/decision-intelligence/competitive-intelligence/gather — SÓ admin master
+// (ADR-167 F5, D5). Coleta inteligência COMPETITIVA de fonte pública/legal pelo MESMO
+// pipeline (provider `competitive`), grava no compartilhado. Body: { vertical, topic?,
+// region?, timeframe?, ttlDays? }. Sem fonte configurada → degrada model_knowledge honesto.
+router.post("/competitive-intelligence/gather", requireMasterAdmin, async (req: AuthRequest, res): Promise<any> => {
+  const b = req.body || {};
+  if (!b.vertical) return res.status(400).json({ error: "vertical é obrigatório." });
+  try {
+    const out = await CompetitiveIntelligenceService.gather(
+      { userId: req.user?.userId, organizationId: req.organizationId },
+      { vertical: b.vertical, topic: b.topic, region: b.region, timeframe: b.timeframe, ttlDays: b.ttlDays },
+    );
+    res.json({ configured: CompetitiveIntelligenceService.isConfigured(), verticalIntelligence: out });
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || e) });
   }

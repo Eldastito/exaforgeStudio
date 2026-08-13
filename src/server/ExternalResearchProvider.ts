@@ -19,6 +19,8 @@
  * mede/bloqueia é o `VerticalIntelligenceService.runResearch` (já pronto).
  */
 
+import { CompetitiveIntelligenceProvider } from "./CompetitiveIntelligenceProvider.js";
+
 export interface ResearchQuery {
   vertical: string;
   topic: string;
@@ -269,6 +271,10 @@ const REGISTRY: Record<string, ExternalResearchProvider> = {
   stub: new StubResearchProvider(),
   llm: new LlmResearchProvider(),
   live: new LiveSearchResearchProvider(),
+  // `competitive` (ADR-167 F5) — inteligência competitiva de fonte pública/legal atrás
+  // do MESMO contrato (D5/§42). O provider importa só TIPOS daqui (erasados em runtime),
+  // então não há ciclo real.
+  competitive: new CompetitiveIntelligenceProvider(),
 };
 
 /** Resolve o provider por nome → env `EXTERNAL_RESEARCH_PROVIDER` → 'stub'. */

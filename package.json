@@ -115,6 +115,7 @@
     "test:social-intelligence-hardening": "tsx scripts/test-social-intelligence-hardening.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
+    "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

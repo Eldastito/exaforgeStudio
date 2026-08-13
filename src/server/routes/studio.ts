@@ -4,8 +4,27 @@ import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
 import { BrandDnaService, BrandDnaPatch } from "../BrandDnaService.js";
 import { CampaignObjectiveContractService } from "../CampaignObjectiveContractService.js";
+import { HookIntelligenceService } from "../HookIntelligenceService.js";
 
 const router = Router();
+
+// ── Hook Intelligence (PRD 11 / ADR-168 F3) — ganchos de abertura grounded ──
+
+// POST /api/studio/hooks { topic, objectiveId?, count? }
+router.post("/hooks", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const topic = String(req.body?.topic || "").trim();
+  if (!topic) return res.status(400).json({ error: "Descreva o tópico do conteúdo." });
+  try {
+    const out = await HookIntelligenceService.generate(orgId, {
+      topic,
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      count: req.body?.count !== undefined ? Number(req.body.count) : undefined,
+    });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao gerar ganchos." }); }
+});
 
 // ── Campaign Objective Contract (PRD 11 / ADR-168 F2) — objetivo ligado a meta de negócio ──
 

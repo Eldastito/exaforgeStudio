@@ -212,14 +212,31 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     try { db.prepare("UPDATE studio_creations SET ig_media_id = ?, ig_posted_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(igMediaId, id, orgId); } catch { /* noop */ }
   }
 
-  /** Sugere uma legenda de Instagram com o tom da marca + objetivo de campanha + CTA + hashtags. */
+  /** Sugere uma legenda de Instagram com o Brand DNA + objetivo de campanha + CTA + hashtags. */
   static async suggestCaption(orgId: string, prompt: string, objectiveId?: string): Promise<string> {
-    const brand = this.getBrand(orgId);
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
-    const tone = brand?.tone ? `Tom da marca: ${brand.tone}.` : "";
+    // Brand DNA 2.0 (ADR-168 F1): a legenda passa a ler a identidade UNIFICADA (voz da
+    // marca + persona + posicionamento + proibições), não só o tom visual. 0-regressão:
+    // campos vazios não entram no prompt (RN-CG-09 — grounded, nunca inventa).
+    let brandLines = "";
+    try {
+      const { BrandDnaService } = await import("./BrandDnaService.js");
+      const dna = await BrandDnaService.get(orgId);
+      const parts: string[] = [];
+      if (dna.voice) parts.push(`Voz da marca: ${dna.voice}.`);
+      else if (dna.tone) parts.push(`Tom da marca: ${dna.tone}.`);
+      if (dna.persona) parts.push(`Persona: ${dna.persona}.`);
+      if (dna.audience) parts.push(`Público-alvo: ${dna.audience}.`);
+      if (dna.positioning) parts.push(`Posicionamento: ${dna.positioning}.`);
+      if (dna.forbidden.length) parts.push(`NÃO use estes termos/temas: ${dna.forbidden.join(", ")}.`);
+      brandLines = parts.join(" ");
+    } catch {
+      const brand = this.getBrand(orgId);
+      brandLines = brand?.tone ? `Tom da marca: ${brand.tone}.` : "";
+    }
     const obj = objectiveOf(objectiveId);
     const objLine = obj ? `Objetivo da campanha: ${obj.label}. ${obj.guidance}` : "";
-    const p = `Escreva uma legenda curta e envolvente para um post de Instagram da empresa "${biz?.business_name || "a empresa"}" sobre: ${prompt}. ${tone} ${objLine} Inclua 1 chamada para ação e de 3 a 5 hashtags relevantes. Responda SOMENTE com a legenda.`;
+    const p = `Escreva uma legenda curta e envolvente para um post de Instagram da empresa "${biz?.business_name || "a empresa"}" sobre: ${prompt}. ${brandLines} ${objLine} Inclua 1 chamada para ação e de 3 a 5 hashtags relevantes. Responda SOMENTE com a legenda.`;
     try { return (await chat(p, { temperature: 0.7 })).trim(); } catch { return ""; }
   }
 

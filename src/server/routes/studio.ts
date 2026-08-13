@@ -2,8 +2,66 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
+import { BrandDnaService, BrandDnaPatch } from "../BrandDnaService.js";
 
 const router = Router();
+
+// ── Brand DNA 2.0 (PRD 11 / ADR-168 F1) — identidade estruturada + unificada + versionada ──
+
+// GET /api/studio/brand-dna — leitura unificada (visual + voz + estruturado + completeness)
+router.get("/brand-dna", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await BrandDnaService.get(orgId)); }
+  catch (e: any) { res.status(500).json({ error: e.message || "Falha ao ler o Brand DNA." }); }
+});
+
+// PUT /api/studio/brand-dna — grava patch parcial (nunca inventa), sobe versão + snapshot
+router.put("/brand-dna", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  // Só repassa chaves reconhecidas (a rota valida FORMA; o service valida invariante).
+  const patch: BrandDnaPatch = {};
+  for (const k of ["tone", "style", "summary", "voice", "persona", "audience", "positioning"] as const) {
+    if (b[k] !== undefined) (patch as any)[k] = b[k] === null ? null : String(b[k]);
+  }
+  if (b.voiceEnabled !== undefined) patch.voiceEnabled = !!b.voiceEnabled;
+  for (const k of ["palette", "forbidden", "doExamples", "dontExamples"] as const) {
+    if (b[k] !== undefined) (patch as any)[k] = Array.isArray(b[k]) ? b[k].map((x: any) => String(x)) : [];
+  }
+  if (Object.keys(patch).length === 0) return res.status(400).json({ error: "Nada para atualizar." });
+  try { res.json(await BrandDnaService.save(orgId, req.user?.userId || null, patch)); }
+  catch (e: any) { res.status(400).json({ error: e.message || "Falha ao salvar o Brand DNA." }); }
+});
+
+// GET /api/studio/brand-dna/versions — histórico de versões (metadados)
+router.get("/brand-dna/versions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ versions: BrandDnaService.versions(orgId) });
+});
+
+// GET /api/studio/brand-dna/versions/:version — snapshot congelado de uma versão
+router.get("/brand-dna/versions/:version", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const v = Number(req.params.version);
+  if (!Number.isInteger(v) || v < 1) return res.status(400).json({ error: "Versão inválida." });
+  const snap = BrandDnaService.snapshot(orgId, v);
+  if (!snap) return res.status(404).json({ error: "Versão não encontrada." });
+  res.json(snap);
+});
+
+// POST /api/studio/brand-dna/restore/:version — restaura (como nova versão)
+router.post("/brand-dna/restore/:version", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const v = Number(req.params.version);
+  if (!Number.isInteger(v) || v < 1) return res.status(400).json({ error: "Versão inválida." });
+  try { res.json(await BrandDnaService.restore(orgId, req.user?.userId || null, v)); }
+  catch (e: any) { res.status(404).json({ error: e.message || "Falha ao restaurar." }); }
+});
 
 // GET /api/studio/brand — identidade visual atual da empresa
 router.get("/brand", (req: AuthRequest, res): any => {

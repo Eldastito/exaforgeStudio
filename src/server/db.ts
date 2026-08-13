@@ -9033,6 +9033,38 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN channel TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN correlation_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE scheduled_posts ADD COLUMN variant_key TEXT`); } catch(e){}
+
+  // PRD 11 / ADR-168 F1 — Brand DNA 2.0. ESTENDE `brand_profiles` (§37 — sem 2º store de
+  // marca) com identidade ESTRUTURADA (persona/público/posicionamento/proibições/do-don't),
+  // além do palette/tone/style/summary já existentes. A VOZ continua sendo o
+  // `organization_settings.brand_voice_context` da ADR-155 (fonte única, unificada pelo
+  // `BrandDnaService`) — não duplicamos voz aqui. `dna_version` versiona; o histórico vai
+  // pra `brand_dna_versions`. Aditivos, nunca reordenar (convenção nº 2).
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN persona TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN audience TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN positioning TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN forbidden_json TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN do_examples_json TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN dont_examples_json TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN dna_version INTEGER NOT NULL DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN dna_updated_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE brand_profiles ADD COLUMN dna_updated_by TEXT`); } catch(e){}
+  // Histórico versionado do Brand DNA — snapshot canônico por versão (rollback/auditoria).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS brand_dna_versions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_brand_dna_versions_org
+        ON brand_dna_versions (organization_id, version DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar brand_dna_versions (ADR-168 F1)', e); }
 };
 
 initDb();

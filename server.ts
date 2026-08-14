@@ -135,6 +135,7 @@ import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole
 import { logAuthEvent } from "./src/server/auditLog.js";
 import { validateImageBase64 } from "./src/server/mediaValidation.js";
 import { buildSecurityHeaders } from "./src/server/securityHeaders.js";
+import { buildCorsHeaders } from "./src/server/corsConfig.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -253,15 +254,9 @@ async function startServer() {
   // NUNCA refletimos o Host da requisição (que é falsificável). O SPA é servido
   // pela mesma origem, então não precisa de CORS; só consumidores externos.
   app.use((req, res, next) => {
-    const isProd = process.env.NODE_ENV === 'production';
-    const allowed = isProd
-      ? (process.env.CORS_ORIGIN || process.env.APP_URL || '')
-      : '*';
-    if (allowed) {
-      res.setHeader('Access-Control-Allow-Origin', allowed);
-      res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-      res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,x-organization-id');
+    const corsHeaders = buildCorsHeaders();
+    if (Object.keys(corsHeaders).length > 0) {
+      for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
       if (req.method === 'OPTIONS') {
          return res.status(200).end();
       }

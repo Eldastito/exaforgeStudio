@@ -6,10 +6,12 @@ produção — afirma "há risco no código" onde há evidência `arquivo:linha`
 **Data:** ver histórico git. **Método:** verificação por evidência (cada achado abaixo foi
 confirmado lendo o código; `arquivo:linha` no final de cada item).
 
-> **Progresso (SEC-F0..F18):** fechados A1,A2,A3 (P0), A4,A5,A6,A7,A9 (P1) e A15 (P2) + FE2.
-> Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook em
-> `docs/runbook/security-operacao.md`. Pendentes (exigem contexto de deploy/frontend): A8 (mídia
-> pública — read), F7 (`security_version`), F8 (rate-limit distribuído), F14 (container non-root).
+> **Progresso (SEC-F0..F18):** fechados A1,A2,A3 (P0), A4,A5,A6,A7,A9 (P1), A12,A14,A15 (P2) +
+> FE2,FE4. Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook
+> em `docs/runbook/security-operacao.md`. Pendentes (exigem contexto de deploy/frontend/infra): A8
+> (mídia pública — read, precisa de URL assinada no frontend), A10/A11/F8 (rate-limit distribuído,
+> precisa de store compartilhado/Redis + trust-proxy), A13 (TTL de JWT), A16/F14 (container non-root),
+> FE1 (JWT em localStorage → httpOnly cookie, mudança de sessão no frontend).
 >
 > Princípio fundante do programa: **FAIL CLOSED.** Ausência ou falha de um controle de segurança
 > (criptografia, autenticação, autorização, resolução de tenant, verificação de webhook, operação
@@ -46,7 +48,7 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 | A9 | 🟠 P1 | ~~`saveMediaBase64` grava bytes confiando na extensão/MIME do cliente~~ — **✅ CORRIGIDO (SEC-F10):** `mediaValidation.validateImageBase64` valida o CONTEÚDO por magic bytes, deriva a extensão do tipo REAL e REJEITA não-imagem (script/HTML/PDF/lixo não aterrissam no `/media`). `test:security-media-upload` (12). | `src/server/mediaValidation.ts`; `server.ts` |
 | A10 | 🟠 P1 | Rate limit de login puramente **in-memory** (`new Map()`), 5 tentativas/15min por e-mail — reinício limpa; não compartilha entre instâncias; troca de e-mail/IP contorna. | `src/server/routes/auth.ts:15-18` |
 | A11 | 🟠 P1 | Rate limit global in-memory (~3000 req/15min por IP), desligado por padrão fora de produção. | `server.ts:258-279` |
-| A12 | 🟠 P1 | CORS manual: `Access-Control-Allow-Headers` lista `x-organization-id` e **omite `Authorization`** (o header de auth real). Origem restrita em prod (OK). | `server.ts:238-253` |
+| A12 | 🟠 P1 | ~~CORS manual: `Access-Control-Allow-Headers` lista `x-organization-id` e **omite `Authorization`**~~ — **✅ CORRIGIDO (SEC-F12):** `buildCorsHeaders()` central agora INCLUI `Authorization`; política de origem inalterada (prod → origem explícita, dev → `*`, sem reflexão de Host). `test:security-cors` (12). | `src/server/corsConfig.ts`; `server.ts` |
 | A13 | 🟡 P2 | JWT com `expiresIn: '24h'`; re-check por request só de `global_status` blocked/deleted (e org blocked), só nas rotas com `requireOrganizationAccess`. | `src/server/routes/auth.ts:238-242`; `src/server/middleware/auth.ts:50-55` |
 | A14 | 🟡 P2 | ~~Sem `security_version` — tokens antigos seguem válidos após troca de senha/MFA~~ — **✅ CORRIGIDO (SEC-F7):** coluna `users.security_version`; JWT carrega `sv`; `requireOrganizationAccess` compara e barra 401 quando diverge; `bumpSecurityVersion()` no reset de senha / desativar MFA / bloqueio. Token legado sem `sv` não é barrado (sem lockout). `test:security-session` (6). | `src/server/middleware/auth.ts`; `routes/auth.ts`, `routes/mfa.ts`, `routes/users.ts` |
 | A15 | 🟡 P2 | ~~Sem CSP/Referrer-Policy/Permissions-Policy~~ — **✅ CORRIGIDO (SEC-F11):** `buildSecurityHeaders()` central adiciona `Referrer-Policy`, `Permissions-Policy` (camera/mic `self`; nega geolocation/payment/…) e CSP em **report-only** por padrão (enforcing sob `CSP_ENFORCE=1`, sem quebrar o SPA); HSTS/nosniff/X-Frame-Options mantidos (X-XSS legado removido). `test:security-headers` (10). | `src/server/securityHeaders.ts`; `server.ts` |
@@ -67,8 +69,8 @@ sink de XSS, e o tenant **não** é confiado do cliente (nunca há `x-organizati
 | FE1 | 🟠 MED | JWT cru + objeto de usuário completo em `localStorage` (`zappflow_token`/`zappflow_user`) — qualquer XSS exfiltra a sessão inteira. Padrão comum de SPA, mas não é httpOnly cookie. | `src/contexts/AuthContext.tsx:74-75` |
 | FE2 | 🟠 MED | Gating de Master Admin / módulos é **cosmético no cliente** (`isMasterAdmin` só esconde UI). **✅ Backend endurecido (SEC-F3):** o gate server-side `requireMasterAdmin`/`isPlatformMaster` agora exige `platform_role='master_admin'` na LINHA do DB — esconder o botão deixou de ser a única defesa. | `src/store/useStore.ts:322` (UI); backend `middleware/auth.ts` |
 | FE3 | 🟠 MED | Custo/margem/lucro ABSOLUTOS renderizados na UI (valores vêm do servidor; cliente só exibe). Confirmar que as rotas de origem (`/api/catalog`, `/api/retail/*`, movimentos de estoque) são role-gated (RN-CG-06/§73) — o front não aplica check de papel. | `CatalogView.tsx:541`, `RetailOpsView.tsx:507-603`, `StockModal.tsx:126` |
-| FE4 | 🟠 MED | `console.log` da mensagem WebSocket inteira (telefone = PII + corpo da mensagem) no console do navegador, em produção. | `src/App.tsx:187` (e `:172/207/231/245`) |
-| FE5 | 🟡 LOW | Chave Web do Firebase commitada (`firebase-applet-config.json`) — pública por design (identificador, não segredo) e aparentemente **dead file** (sem import). Remover para evitar confusão. | `firebase-applet-config.json:5` |
+| FE4 | 🟠 MED | ~~`console.log` da mensagem WebSocket inteira (telefone = PII + corpo da mensagem) no console do navegador, em produção~~ — **✅ CORRIGIDO (SEC-F12):** `devLog` (só emite em DEV; no-op em produção) substitui os `console.log` que carregavam dados de contato/mensagem — nada sensível aterrissa mais no console do cliente em produção. | `src/lib/log.ts`; `src/App.tsx` |
+| FE5 | 🟡 LOW | Chave Web do Firebase commitada (`firebase-applet-config.json`) — pública por design (identificador, **não** segredo). **Correção da auditoria:** NÃO é dead file — é importada por `IntegrationsView.tsx:4`; removê-la quebraria o build. Sem ação (é identificador público, não credencial). | `firebase-applet-config.json:5`; `src/features/IntegrationsView.tsx:4` |
 
 Ações derivadas: FE2/FE3 são **verificações de backend** (o gate real é server-side — casa com A6 e
 o RBAC das rotas de dinheiro); FE1 entra na fatia de sessão (F7); FE4 no redactor de logs (F16/SEC-38);

@@ -133,6 +133,7 @@ import { ComigoPixService } from "./src/server/ComigoPixService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission, resolveTokenOrg } from "./src/server/middleware/auth.js";
 import { logAuthEvent } from "./src/server/auditLog.js";
+import { validateImageBase64 } from "./src/server/mediaValidation.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -155,10 +156,15 @@ const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), 'media');
 try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) {}
 
 // Salva um base64 como arquivo e retorna a URL pública (/media/<arquivo>).
-function saveMediaBase64(base64: string, ext = 'jpg'): string | null {
+// SEC-F10 (A9): valida o CONTEÚDO por magic bytes (não confia na extensão do cliente) e deriva
+// a extensão do tipo REAL. Conteúdo não-imagem é REJEITADO — nada arbitrário vai pro /media público.
+// O 2º arg (ext do cliente) é ignorado de propósito, mantido só por compat de assinatura.
+function saveMediaBase64(base64: string, _clientExt = 'jpg'): string | null {
+  const v = validateImageBase64(base64);
+  if (!v) { console.warn("[Media] Conteúdo rejeitado — não é uma imagem reconhecida (SEC-F10)."); return null; }
   try {
-    const name = `${uuidv4()}.${ext}`;
-    fs.writeFileSync(path.join(MEDIA_DIR, name), Buffer.from(base64, 'base64'));
+    const name = `${uuidv4()}.${v.ext}`;
+    fs.writeFileSync(path.join(MEDIA_DIR, name), v.buffer);
     return `/media/${name}`;
   } catch (e) {
     console.error("[Media] Falha ao salvar arquivo:", e);

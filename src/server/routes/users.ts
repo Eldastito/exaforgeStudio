@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { requirePermission } from "../middleware/auth.js";
+import { requirePermission, bumpSecurityVersion } from "../middleware/auth.js";
 import { PermissionService } from "../PermissionService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -84,6 +84,7 @@ router.put("/:id/status", requirePermission("usuarios", "write"), (req: Request,
 
   try {
      db.prepare('UPDATE users SET global_status = ? WHERE id = ? AND organization_id = ?').run(status, id, orgId);
+     bumpSecurityVersion(id); // SEC-F7: bloquear/reativar revoga tokens antigos do usuário
      logAuthEvent(orgId, actor.userId, id, 'USER_STATUS_CHANGED', { status });
      res.json({ success: true });
   } catch(e) {

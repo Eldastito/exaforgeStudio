@@ -64,9 +64,15 @@ export const requireOrganizationAccess = (req: AuthRequest, res: Response, next:
     // removido continuava com acesso até o token de 24h expirar. Rechecamos o
     // global_status do usuário do JWT a cada requisição protegida (lookup por PK).
     if (req.user?.userId) {
-      const u: any = db.prepare('SELECT global_status FROM users WHERE id = ?').get(req.user.userId);
+      const u: any = db.prepare('SELECT global_status, security_version FROM users WHERE id = ?').get(req.user.userId);
       if (u && (u.global_status === 'blocked' || u.global_status === 'deleted')) {
         return res.status(403).json({ error: "Acesso revogado. Faça login novamente." });
+      }
+      // SEC-F7 (SEC-08) — credential version: um token com `sv` DIVERGENTE da linha do DB foi
+      // revogado (troca de senha/MFA/papel/bloqueio incrementam a versão). Tokens antigos SEM
+      // `sv` (emitidos antes desta fatia) NÃO são barrados — não há lockout de sessões legadas.
+      if (u && req.user.sv != null && u.security_version != null && Number(req.user.sv) !== Number(u.security_version)) {
+        return res.status(401).json({ error: "Sessão revogada. Faça login novamente." });
       }
     }
 
@@ -102,6 +108,15 @@ export function isPlatformMaster(req: AuthRequest): boolean {
     }
     return false;
   } catch { return false; }
+}
+
+/**
+ * SEC-F7 (SEC-08) — incrementa a `security_version` do usuário, REVOGANDO todos os tokens
+ * emitidos antes (troca/reset de senha, desativar MFA, mudar papel, bloquear). Best-effort:
+ * falha de storage não derruba o fluxo chamador.
+ */
+export function bumpSecurityVersion(userId: string): void {
+  try { db.prepare("UPDATE users SET security_version = COALESCE(security_version, 1) + 1 WHERE id = ?").run(userId); } catch { /* best-effort */ }
 }
 
 export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {

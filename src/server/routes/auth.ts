@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET } from "../config/secret.js";
+import { bumpSecurityVersion } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
@@ -236,7 +237,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email });
 
     const token = jwt.sign(
-      { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name, platform_role: user.platform_role || null },
+      { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name, platform_role: user.platform_role || null, sv: user.security_version ?? 1 },
       JWT_SECRET,
       { expiresIn: "24h" }
     );
@@ -314,6 +315,7 @@ router.post("/reset-password", async (req: Request, res: Response): Promise<any>
 
     const hashed = await bcrypt.hash(newPassword, 10);
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashed, user.id);
+    bumpSecurityVersion(user.id); // SEC-F7: revoga tokens antigos após reset de senha
     db.prepare('UPDATE password_reset_events SET status = ? WHERE id = ?').run('completed', pendingEvent.id);
 
     logAuthEvent(user.organization_id, user.id, user.id, 'PASSWORD_RESET_COMPLETED', { email });

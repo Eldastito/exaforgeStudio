@@ -5680,6 +5680,10 @@ const initDb = () => {
   // deixa de confiar só no claim de e-mail do JWT e passa a revalidar esta coluna no DB por
   // userId. Backfill: ensureMasterAdmin marca o usuário do MASTER_ADMIN_EMAIL como 'master_admin'.
   try { db.exec(`ALTER TABLE users ADD COLUMN platform_role TEXT`); } catch(e){}
+  // SEC-F7 (SEC-08) — versão de credencial. O JWT carrega `sv`; um token com `sv` divergente
+  // da coluna foi revogado. Incrementada em troca/reset de senha, desativar MFA, mudar papel,
+  // bloquear (bumpSecurityVersion). Default 1; tokens antigos sem `sv` não são barrados.
+  try { db.exec(`ALTER TABLE users ADD COLUMN security_version INTEGER DEFAULT 1`); } catch(e){}
 
   // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
   // Balcão PDV por toque + motor de precificação (ficha técnica viva) + fiado

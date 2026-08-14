@@ -134,6 +134,7 @@ import { AsaasService } from "./src/server/AsaasService.js";
 import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission, resolveTokenOrg } from "./src/server/middleware/auth.js";
 import { logAuthEvent } from "./src/server/auditLog.js";
 import { validateImageBase64 } from "./src/server/mediaValidation.js";
+import { buildSecurityHeaders } from "./src/server/securityHeaders.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -240,14 +241,10 @@ async function startServer() {
     }
   }
 
-  // --- SECURITY HEADERS (Helmet-like) ---
+  // --- SECURITY HEADERS (Helmet-like) — centralizados em securityHeaders (SEC-F11) ---
+  const SECURITY_HEADERS = buildSecurityHeaders();
   app.use((req, res, next) => {
-    res.setHeader('X-DNS-Prefetch-Control', 'off');
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-    res.setHeader('X-Download-Options', 'noopen');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     next();
   });
 

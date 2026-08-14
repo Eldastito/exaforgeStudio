@@ -6,6 +6,11 @@ produção — afirma "há risco no código" onde há evidência `arquivo:linha`
 **Data:** ver histórico git. **Método:** verificação por evidência (cada achado abaixo foi
 confirmado lendo o código; `arquivo:linha` no final de cada item).
 
+> **Progresso (SEC-F0..F18):** fechados A1,A2,A3 (P0), A4,A5,A6,A7,A9 (P1) e A15 (P2) + FE2.
+> Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook em
+> `docs/runbook/security-operacao.md`. Pendentes (exigem contexto de deploy/frontend): A8 (mídia
+> pública — read), F7 (`security_version`), F8 (rate-limit distribuído), F14 (container non-root).
+>
 > Princípio fundante do programa: **FAIL CLOSED.** Ausência ou falha de um controle de segurança
 > (criptografia, autenticação, autorização, resolução de tenant, verificação de webhook, operação
 > privilegiada) **nunca** deve AMPLIAR acesso. Hoje vários mecanismos "degradam com conveniência";

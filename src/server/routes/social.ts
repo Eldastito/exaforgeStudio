@@ -17,6 +17,7 @@ import { ContentLeadAttributionService } from "../ContentLeadAttributionService.
 import { ContentRevenueAttributionService } from "../ContentRevenueAttributionService.js";
 import { ProductOpportunityService } from "../ProductOpportunityService.js";
 import { GrowthAutopilotService } from "../GrowthAutopilotService.js";
+import { GrowthOptimizationService } from "../GrowthOptimizationService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -337,6 +338,33 @@ router.post("/growth-autopilot/mode", requireRole("owner", "admin"), (req: AuthR
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(GrowthAutopilotService.setMode(orgId, String(req.body?.mode || ""))); }
   catch (e: any) { res.status(400).json({ error: e.message || "Modo inválido." }); }
+});
+
+// GET /api/social/growth-optimizations — propostas do autopilot ANOTADAS com o estado de
+// governança (já viraram ação? qual status?). Read-only (F16).
+router.get("/growth-optimizations", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(GrowthOptimizationService.list(orgId));
+});
+
+// POST /api/social/growth-optimizations/propose { kind, ref } — aceita uma proposta do
+// autopilot e a PROPÕE como comando GOVERNADO (nasce awaiting_approval — nunca executa
+// direto, RN-CG-08/10). Grounded no plano vivo (RN-CG-09); idempotente por (kind, ref).
+router.post("/growth-optimizations/propose", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(GrowthOptimizationService.propose(orgId, { kind: String(req.body?.kind || ""), ref: String(req.body?.ref || "") }, (req as any).user?.userId || "growth_autopilot")); }
+  catch (e: any) { res.status(400).json({ error: e.message || "Não foi possível propor a otimização." }); }
+});
+
+// POST /api/social/growth-optimizations/:actionId/execute — roda o efeito de uma otimização
+// APROVADA (pelo choke-point governado; o executor barra ação não-aprovada) (F16).
+router.post("/growth-optimizations/:actionId/execute", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await GrowthOptimizationService.execute(orgId, String(req.params.actionId))); }
+  catch (e: any) { res.status(400).json({ error: e.message || "Não foi possível executar a otimização." }); }
 });
 
 // GET /api/social/growth-brief — o que postar + impacto esperado + campeão (F13; role-gated,

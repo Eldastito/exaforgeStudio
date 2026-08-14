@@ -128,6 +128,7 @@
     "test:growth-brief": "tsx scripts/test-growth-brief.ts",
     "test:social-provider-facebook": "tsx scripts/test-social-provider-facebook.ts",
     "test:growth-autopilot": "tsx scripts/test-growth-autopilot.ts",
+    "test:growth-optimization": "tsx scripts/test-growth-optimization.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

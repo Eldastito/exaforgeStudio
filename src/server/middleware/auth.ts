@@ -4,6 +4,7 @@ import db from "../db.js";
 import { JWT_SECRET, MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { PermissionService, Action } from "../PermissionService.js";
 import { logAuthEvent } from "../auditLog.js";
+import { resolveRequestToken, cookieAuthCsrfOk } from "../sessionCookie.js";
 
 export interface AuthRequest extends Request {
   user?: any;
@@ -11,12 +12,20 @@ export interface AuthRequest extends Request {
 }
 
 export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  // SEC-F24 (FE1) — token do header `Authorization` (primário, CSRF-safe) OU do cookie httpOnly
+  // `zf_session`. Header tem precedência (0-regressão pro front atual). Ver src/server/sessionCookie.ts.
+  const { token, source } = resolveRequestToken(req);
+  if (!token) {
     return res.status(401).json({ error: "Unauthorized: No token provided" });
   }
 
-  const token = authHeader.split(" ")[1];
+  // Se a sessão veio do COOKIE, o navegador o envia sozinho em requisições cross-site → CSRF.
+  // Defesa: métodos que mudam estado só passam se a requisição for de MESMA ORIGEM. Autenticação
+  // por header nunca cai aqui (um site atacante não seta `Authorization`).
+  if (source === "cookie" && !cookieAuthCsrfOk(req)) {
+    return res.status(403).json({ error: "Forbidden: origin check failed (CSRF)" });
+  }
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     req.user = decoded;
@@ -32,11 +41,10 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
  * SEC-F4 (SEC-02) — resolve o tenant SOMENTE do JWT VERIFICADO. O header `x-organization-id`
  * enviado pelo cliente NUNCA é autoridade. Retorna `null` quando não há token válido (o chamador
  * deve então NÃO tomar decisão de tenant a partir do header — deixa o requireAuth barrar depois).
+ * SEC-F24 (FE1): aceita também o token do cookie httpOnly (header tem precedência).
  */
 export function resolveTokenOrg(req: AuthRequest): string | null {
-  const auth = req.headers.authorization;
-  if (!auth) return null;
-  const token = auth.split(" ")[1];
+  const { token } = resolveRequestToken(req);
   if (!token) return null;
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;

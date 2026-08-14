@@ -139,6 +139,7 @@ import { buildCorsHeaders } from "./src/server/corsConfig.js";
 import { jsonForScript } from "./src/server/htmlSafe.js";
 import { resolveGenericPaymentWebhook, paymentAmountMatches } from "./src/server/paymentWebhookGuard.js";
 import { chatMediaEnforced, verifyChatMediaRequest, signChatMediaUrl } from "./src/server/mediaSigning.js";
+import { cookieToken } from "./src/server/sessionCookie.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -1611,7 +1612,8 @@ async function startServer() {
     try {
       const token = socket.handshake.auth?.token
         || (socket.handshake.query?.token as string)
-        || (socket.handshake.headers?.authorization as string || '').split(' ')[1];
+        || (socket.handshake.headers?.authorization as string || '').split(' ')[1]
+        || cookieToken({ headers: socket.handshake.headers }); // SEC-F24 (FE1): sessão via cookie httpOnly
       if (!token) {
         console.warn(`[Socket] Conexão sem token recusada (${socket.id}).`);
         return next(new Error("unauthorized"));

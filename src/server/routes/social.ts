@@ -321,6 +321,14 @@ router.get("/proactive", requireRole("owner", "admin"), (req: AuthRequest, res):
   res.json(SocialProactivityService.digest(orgId));
 });
 
+// GET /api/social/growth-brief — o que postar + impacto esperado + campeão (F13; role-gated,
+// carrega números de meta = dinheiro RN-CG-06). Read-only.
+router.get("/growth-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(SocialProactivityService.growthBrief(orgId));
+});
+
 // GET /api/social/entitlement — status do gate de plano das capacidades sociais
 // (allowed + caminho de upgrade/add-on pra a CTA de billing). Read-only.
 router.get("/entitlement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

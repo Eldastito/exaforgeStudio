@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { JWT_SECRET } from "../config/secret.js";
+import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
 import { bumpSecurityVersion } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
@@ -239,7 +239,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     const token = jwt.sign(
       { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name, platform_role: user.platform_role || null, sv: user.security_version ?? 1 },
       JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: SESSION_JWT_TTL as jwt.SignOptions["expiresIn"] } // A13: configurável via env JWT_TTL (default 24h)
     );
 
     const org = db.prepare('SELECT onboarding_status FROM organization_settings WHERE organization_id = ?').get(user.organization_id) as any;

@@ -58,6 +58,26 @@ export function resolveJwtSecret(): string {
 
 export const JWT_SECRET = resolveJwtSecret();
 
+// Tempo de vida do token de SESSÃO (achado A13). Antes fixo em "24h";
+// agora configurável via env `JWT_TTL` para o operador poder ENCURTAR a janela de
+// exposição de um token vazado (ex.: "8h", "30m", "3600" segundos). Default "24h"
+// (0-regressão). Formato aceito: inteiro de segundos, ou `<n><s|m|h|d|w>`. Valor
+// malformado é IGNORADO (cai no default + aviso) — nunca quebra o `jwt.sign`.
+// Retorna number (SEGUNDOS) para entrada só-dígitos, ou string (`ms`-parseável, ex.
+// "8h") para o formato com unidade. Importante: `jwt.sign({expiresIn})` interpreta uma
+// STRING só-dígitos como MILISSEGUNDOS (via `ms`), mas um NUMBER como segundos — então
+// "3600" precisa virar Number(3600) para significar 1h, não 3,6s.
+export function resolveSessionJwtTtl(env: Record<string, string | undefined> = process.env): string | number {
+  const raw = String(env.JWT_TTL || "").trim();
+  if (!raw) return "24h";
+  if (/^\d+$/.test(raw)) return Number(raw); // segundos
+  if (/^\d+[smhdw]$/.test(raw)) return raw;   // ex. "8h", "30m", "7d"
+  console.warn(`[SECURITY] JWT_TTL="${raw}" inválido (use segundos ou <n><s|m|h|d|w>, ex. "8h"). Usando o default 24h.`);
+  return "24h";
+}
+
+export const SESSION_JWT_TTL = resolveSessionJwtTtl();
+
 // E-mail do administrador master (super-admin entre organizações). Configurável,
 // com fallback para o dono original para não quebrar instalações existentes.
 export const MASTER_ADMIN_EMAIL = process.env.MASTER_ADMIN_EMAIL || "eldastito@gmail.com";

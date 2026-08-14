@@ -7,7 +7,7 @@ produção — afirma "há risco no código" onde há evidência `arquivo:linha`
 confirmado lendo o código; `arquivo:linha` no final de cada item).
 
 > **Progresso (SEC-F0..F18):** fechados A1,A2,A3 (P0), A4,A5,A6,A7,A9 (P1), A12,A14,A15 (P2) +
-> FE2,FE4. Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook
+> FE2,FE3,FE4. Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook
 > em `docs/runbook/security-operacao.md`. Pendentes (exigem contexto de deploy/frontend/infra): A8
 > (mídia pública — read, precisa de URL assinada no frontend), A10/A11/F8 (rate-limit distribuído,
 > precisa de store compartilhado/Redis + trust-proxy), A13 (TTL de JWT), A16/F14 (container non-root),
@@ -68,7 +68,7 @@ sink de XSS, e o tenant **não** é confiado do cliente (nunca há `x-organizati
 | --- | --- | --- | --- |
 | FE1 | 🟠 MED | JWT cru + objeto de usuário completo em `localStorage` (`zappflow_token`/`zappflow_user`) — qualquer XSS exfiltra a sessão inteira. Padrão comum de SPA, mas não é httpOnly cookie. | `src/contexts/AuthContext.tsx:74-75` |
 | FE2 | 🟠 MED | Gating de Master Admin / módulos é **cosmético no cliente** (`isMasterAdmin` só esconde UI). **✅ Backend endurecido (SEC-F3):** o gate server-side `requireMasterAdmin`/`isPlatformMaster` agora exige `platform_role='master_admin'` na LINHA do DB — esconder o botão deixou de ser a única defesa. | `src/store/useStore.ts:322` (UI); backend `middleware/auth.ts` |
-| FE3 | 🟠 MED | Custo/margem/lucro ABSOLUTOS renderizados na UI (valores vêm do servidor; cliente só exibe). Confirmar que as rotas de origem (`/api/catalog`, `/api/retail/*`, movimentos de estoque) são role-gated (RN-CG-06/§73) — o front não aplica check de papel. | `CatalogView.tsx:541`, `RetailOpsView.tsx:507-603`, `StockModal.tsx:126` |
+| FE3 | 🟠 MED | ~~Custo/margem/lucro ABSOLUTOS renderizados na UI sem o front aplicar papel — confirmar que as rotas de origem são role-gated server-side~~ — **✅ CORRIGIDO (SEC-F13):** a verificação de backend achou GETs financeiros SEM gate (o gate do cliente não é segurança). Fechados server-side: relatórios puros → `requireRole("owner","admin")` (`products.ts` `/sales-analytics[/csv]`; `retailops.ts` `/stores/:id/costs`, `/stores/:id/variable-costs`, `/stores/:id/result`, `/stores-result`, `/pricing/products`); o catálogo (`GET /api/products`) segue aberto ao vendedor mas com `avg_cost`/`suggested_price` REDIGIDOS pra não-owner/admin (`canSeeProductCost`). `test:security-money-routes` (32). Borderline pendente (R$ de valor/impacto, não custo/margem): `retailops` `/impact*` e `/dashboard/*`. | `src/server/routes/products.ts`, `src/server/routes/retailops.ts` |
 | FE4 | 🟠 MED | ~~`console.log` da mensagem WebSocket inteira (telefone = PII + corpo da mensagem) no console do navegador, em produção~~ — **✅ CORRIGIDO (SEC-F12):** `devLog` (só emite em DEV; no-op em produção) substitui os `console.log` que carregavam dados de contato/mensagem — nada sensível aterrissa mais no console do cliente em produção. | `src/lib/log.ts`; `src/App.tsx` |
 | FE5 | 🟡 LOW | Chave Web do Firebase commitada (`firebase-applet-config.json`) — pública por design (identificador, **não** segredo). **Correção da auditoria:** NÃO é dead file — é importada por `IntegrationsView.tsx:4`; removê-la quebraria o build. Sem ação (é identificador público, não credencial). | `firebase-applet-config.json:5`; `src/features/IntegrationsView.tsx:4` |
 

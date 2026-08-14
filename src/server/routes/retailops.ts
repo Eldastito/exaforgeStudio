@@ -501,7 +501,9 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
 
 // --- Custos fixos + RESULTADO/LUCRO por loja ---
 // Custos fixos cadastrados da loja (aluguel, luz, condomínio...) por categoria.
-router.get("/stores/:id/costs", (req: AuthRequest, res): any => {
+// SEC-F13 (FE3/RN-CG-06/§73): dinheiro absoluto é owner/admin — o GET é role-gated
+// igual ao PUT abaixo (ler o custo é tão sensível quanto gravá-lo).
+router.get("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
@@ -521,7 +523,8 @@ router.put("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest
 
 // Custos VARIÁVEIS da loja (taxa cartão, imposto, embalagem etc.) — ADR-083 E5.
 // Body salvo é {costs: {card_fee: {percent, fixedPerSale}, ...}}.
-router.get("/stores/:id/variable-costs", (req: AuthRequest, res): any => {
+// SEC-F13: role-gated (dinheiro absoluto — §73), como o PUT abaixo.
+router.get("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
@@ -539,7 +542,8 @@ router.put("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: Au
 });
 
 // Resultado gerencial + ponto de equilíbrio de UMA loja no mês (?period=YYYY-MM).
-router.get("/stores/:id/result", (req: AuthRequest, res): any => {
+// SEC-F13: lucro/margem absolutos são owner/admin (§73).
+router.get("/stores/:id/result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
@@ -550,7 +554,8 @@ router.get("/stores/:id/result", (req: AuthRequest, res): any => {
 
 // Resultado de TODAS as lojas + totais da rede (?period=YYYY-MM). Hífen no path
 // para não colidir com /stores/:id (senão :id capturaria "result").
-router.get("/stores-result", (req: AuthRequest, res): any => {
+// SEC-F13: lucro/margem da rede são owner/admin (§73).
+router.get("/stores-result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
@@ -1777,7 +1782,8 @@ router.get("/dashboard/monthly/export", (req: AuthRequest, res): any => {
 // GET lista: produto + custo médio (notas) + preço + sugestão do motor + venda
 // do mês, com semáforo de risco. POST aplica em lote (só owner/admin), com
 // histórico versionado (ADR-033) e sem abortar o batch por linha ruim.
-router.get("/pricing/products", (req: AuthRequest, res): any => {
+// SEC-F13: custo médio + margem absoluta são owner/admin (§73), como o POST /pricing/apply.
+router.get("/pricing/products", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {

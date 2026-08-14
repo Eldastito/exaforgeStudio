@@ -14,6 +14,8 @@
 import db from "./db.js";
 import { OutcomeAssuranceService } from "./OutcomeAssuranceService.js";
 import { PatternMemoryService, type PatternCandidate } from "./PatternMemoryService.js";
+import { ContentRevenueAttributionService } from "./ContentRevenueAttributionService.js";
+import { ContentLeadAttributionService } from "./ContentLeadAttributionService.js";
 
 const DOMAIN = "social_creative";
 
@@ -35,6 +37,7 @@ export class CreativeLearningService {
   static learnFromAction(orgId: string, actionId: string, actorId?: string): {
     ok: boolean; learned: boolean; idempotent?: boolean; reason?: string;
     assuranceState?: string; patternId?: string; patternKey?: string; outcome?: string; engagement?: number;
+    businessBasis?: "revenue" | "leads" | "engagement"; businessValue?: number;
   } {
     if (!orgId || !actionId) return { ok: false, learned: false, reason: "args_invalidos" };
     if (!PatternMemoryService.isEnabled(orgId)) return { ok: true, learned: false, reason: "pattern_memory_off" };
@@ -59,12 +62,28 @@ export class CreativeLearningService {
     const patternType = `creative:${signature}`;
     const patternKey = signature;
 
-    // 3. Desfecho DETERMINÍSTICO do ENGAJAMENTO medido (confirmação social_publish, F12).
+    // 3. Desfecho DETERMINÍSTICO. Engajamento medido (confirmação social_publish, F12)…
     const conf = db.prepare("SELECT evidence_json FROM action_confirmations WHERE organization_id = ? AND action_id = ? AND confirmation_method = 'social_publish' AND status = 'confirmed'").get(orgId, actionId) as any;
     let engagement = 0;
     try { const ev = JSON.parse(conf?.evidence_json || "{}"); engagement = Number(ev?.engagement) || 0; } catch { /* noop */ }
-    // Engajamento é ≥0: houve engajamento → worked; zero medido → no_effect (nunca inventa).
-    const outcome = engagement > 0 ? "worked" : "no_effect";
+
+    // …mas o RESULTADO DE NEGÓCIO (F7/F8) SOBREPÕE o engajamento quando existe (Creative
+    // Learning 2.0 / F10, RN-CG-01: ENGAGEMENT ≠ BUSINESS VALUE). O aprendizado forte passa a
+    // ser "que assinatura VENDE/gera lead", não "que assinatura engaja". Sem desfecho de
+    // negócio ainda → cai pro engajamento (proxy), 0-regressão do F13.
+    const corr = action.correlation_id || null;
+    let businessBasis: "revenue" | "leads" | "engagement" = "engagement";
+    let businessValue = 0;
+    let outcome: string;
+    if (corr) {
+      const revenueFact = ContentRevenueAttributionService.revenueFor(orgId, corr).revenueFact;
+      const leads = ContentLeadAttributionService.leadCount(orgId, corr);
+      if (revenueFact > 0) { outcome = "worked"; businessBasis = "revenue"; businessValue = revenueFact; }
+      else if (leads > 0) { outcome = "worked"; businessBasis = "leads"; businessValue = leads; }
+      else { outcome = engagement > 0 ? "worked" : "no_effect"; } // engajamento é PROXY
+    } else {
+      outcome = engagement > 0 ? "worked" : "no_effect";
+    }
 
     // 4. Ancora o padrão criativo no motor único e grava o outcome assured (idempotente).
     const candidate: PatternCandidate = {
@@ -75,15 +94,18 @@ export class CreativeLearningService {
       scopeName: vertical,
     };
     const patternId = PatternMemoryService.ensurePattern(orgId, DOMAIN, candidate);
+    // realizedImpact segue = ENGAJAMENTO (unidade documentada; nunca mistura R$ com contagem
+    // — RN-CG-03). A PONDERAÇÃO por negócio vive na CLASSIFICAÇÃO (worked/no_effect acima) →
+    // a eficácia aprendida passa a medir "que assinatura VENDE", não "que assinatura engaja".
     const res = PatternMemoryService.recordOutcome(orgId, patternId, {
       outcome, realizedImpact: engagement, source: "assured",
       eventKey: `creative:${actionId}`,
       correlationId: action.correlation_id ?? null, actionId,
-      note: "aprendizado criativo forte a partir de publicação assured (PRD 10 F13)",
+      note: `aprendizado criativo forte (assured) — desfecho por ${businessBasis}${businessBasis !== "engagement" ? ` (${businessValue})` : ""} (PRD 11 F10)`,
     }, actorId || "system:creative-learning");
 
     if (!res.ok) return { ok: false, learned: false, reason: res.error, assuranceState: "assured", patternId, patternKey };
-    return { ok: true, learned: !res.idempotent, idempotent: !!res.idempotent, reason: res.idempotent ? "ja_aprendido" : "aprendido", assuranceState: "assured", patternId, patternKey, outcome, engagement };
+    return { ok: true, learned: !res.idempotent, idempotent: !!res.idempotent, reason: res.idempotent ? "ja_aprendido" : "aprendido", assuranceState: "assured", patternId, patternKey, outcome, engagement, businessBasis, businessValue };
   }
 
   /** Aprende de todas as publicações `done` com confirmação confirmada. Idempotente. */

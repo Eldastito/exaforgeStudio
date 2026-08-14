@@ -134,6 +134,7 @@
     "test:security-media-signing": "tsx scripts/test-security-media-signing.ts",
     "test:security-session-cookie": "tsx scripts/test-security-session-cookie.ts",
     "test:security-money-gating": "tsx scripts/test-security-money-gating.ts",
+    "test:security-stone-webhook": "tsx scripts/test-security-stone-webhook.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

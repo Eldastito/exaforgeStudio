@@ -8,6 +8,7 @@ import { CustomerProfileService } from "./CustomerProfileService.js";
 import { ReferralService } from "./ReferralService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { EncryptionService } from "./EncryptionService.js";
+import { stoneFetchTargetFromEvent, resolveStoneAuthoritative, stoneAmountMatches } from "./stonePaymentGuard.js";
 
 /**
  * Camada de recebimento de pagamentos — genérica e multi-tenant.
@@ -396,20 +397,50 @@ export class PaymentService {
    * Webhook do Pagar.me (evento order.paid/charge.paid). Marca o pedido pago.
    * A org já foi resolvida pelo secret na URL. Casa pela `code`/metadata que
    * gravamos ao criar o link (id do pedido ou "res:"/"sub:").
+   *
+   * SEC-F27: NÃO confia mais no `status` do CORPO do webhook (um POST forjado com o segredo na
+   * URL marcaria pago sem pagamento). Igual ao Mercado Pago, pega só o ID do evento e RE-CONSULTA
+   * a API do Pagar.me; decide pelo objeto AUTORITATIVO (status/code/amount). Decisão pura em
+   * stonePaymentGuard.ts; aqui ficam a re-consulta (fetch) e os efeitos. FAIL CLOSED: qualquer
+   * falha (sem id, API fora, status≠paid, sem ref, valor divergente) → não confirma.
    */
   static async syncStonePayment(orgId: string, event: any): Promise<string | null> {
     try {
-      const type = String(event?.type || "").toLowerCase();
-      const data = event?.data || {};
-      const status = String(data?.status || data?.charges?.[0]?.status || "").toLowerCase();
-      const paid = ["order.paid", "charge.paid"].includes(type) || status === "paid";
-      if (!paid) return null;
-      const ref = data?.code || data?.metadata?.reference || data?.metadata?.orderId;
-      if (!ref) return null;
+      const target = stoneFetchTargetFromEvent(event);
+      if (!target) return null; // corpo sem id de recurso → nada a re-consultar
+      const o = this.getSettings(orgId);
+      const token = o.pay_gateway_token as string | undefined; // secret key Pagar.me (sk_...)
+      if (!token) return null;
+
+      // RE-CONSULTA a fonte da verdade (mesma Basic auth do _stoneLink).
+      const auth = Buffer.from(`${token}:`).toString("base64");
+      const path = target.kind === "order"
+        ? `orders/${encodeURIComponent(target.id)}`
+        : `charges/${encodeURIComponent(target.id)}`;
+      const res = await fetch(`${this.STONE_API}/${path}`, { headers: { Authorization: `Basic ${auth}` } });
+      const obj: any = await res.json().catch(() => ({}));
+      if (!res.ok) { console.error(`[Stone] Falha ao consultar ${target.kind}:`, res.status, obj?.message || obj); return null; }
+
+      const { paid, ref, amountCents } = resolveStoneAuthoritative(obj);
+      if (!paid || !ref) return null; // só o objeto AUTORITATIVO confirma; corpo do webhook é ignorado
+
+      // Defesa em profundidade: confere o valor autoritativo contra a cobrança guardada (se houver).
+      let expected: number | undefined;
+      try {
+        const row: any = db.prepare(
+          `SELECT amount FROM payment_charges WHERE order_id = ? AND organization_id = ? ORDER BY created_at DESC LIMIT 1`
+        ).get(String(ref), orgId);
+        expected = row?.amount;
+      } catch (e) { /* noop */ }
+      if (!stoneAmountMatches(amountCents, expected)) {
+        console.error(`[Stone] Valor divergente p/ ${ref}: autoritativo ${amountCents}c vs esperado ${expected}`);
+        return null;
+      }
+
       try { db.prepare(`UPDATE payment_charges SET status = 'paid' WHERE order_id = ? AND organization_id = ?`).run(String(ref), orgId); } catch (e) { /* noop */ }
       if (String(ref).startsWith("res:")) { try { ReservationService.markPaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
       else if (String(ref).startsWith("sub:")) { try { SubscriptionService.markInvoicePaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
-      else this.markPaid(orgId, String(ref), { method: "stone", externalId: String(data?.id || "") });
+      else this.markPaid(orgId, String(ref), { method: "stone", externalId: String(obj?.id || "") });
       return "paid";
     } catch (e) {
       console.error("[Stone] Erro ao sincronizar pagamento:", e);

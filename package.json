@@ -120,6 +120,7 @@
     "test:security-webhook": "tsx scripts/test-security-webhook.ts",
     "test:security-media-upload": "tsx scripts/test-security-media-upload.ts",
     "test:security-headers": "tsx scripts/test-security-headers.ts",
+    "test:security-program-hardening": "tsx scripts/test-security-program-hardening.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

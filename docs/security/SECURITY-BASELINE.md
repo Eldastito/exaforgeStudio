@@ -30,7 +30,7 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 
 | # | Sev | Achado | Evidência (`arquivo:linha`) |
 | --- | --- | --- | --- |
-| A1 | 🔴 P0 | `EncryptionService.encrypt()` retorna **plaintext** em caso de erro (`catch → return plain`) — segredo pode ser persistido sem cifra. `decrypt()` já falha seguro (`return null`). | `src/server/EncryptionService.ts:54-57` |
+| A1 | 🔴 P0 | ~~`EncryptionService.encrypt()` retorna **plaintext** em caso de erro~~ — **✅ CORRIGIDO (SEC-F1):** agora LANÇA `EncryptionUnavailableError` (fail-closed, SEC-01); backfill resiliente pula a linha sem abortar. `test:security-encryption` (13). | `src/server/EncryptionService.ts:60-72` |
 | A2 | 🔴 P0 | Bootstrap do Master Admin **loga a senha aleatória em texto puro** (`console.warn(...\`${email} / ${password}\`)`), sem guard de produção. | `server.ts:346-365` (linha 364) |
 | A3 | 🔴 P0 | Webhook do WhatsApp é aceito **sem autenticação** quando `isWebhookEnforced()` é falso (default-open: sem `WEBHOOK_SECRET` **e** sem `webhook_enforce=1` **e** sem org com clínica). Correção da auditoria: a lógica é **OR**, não AND — enforce dispara com QUALQUER uma das três. | `src/server/webhookSecurity.ts:42-54`; `server.ts:293-299` |
 | A4 | 🟠 P1 | `ENCRYPTION_KEY` deriva de `JWT_SECRET` quando ausente, com fallback final `sha256("zappflow-dev-key-fallback")`; produção só emite `console.warn` (não bloqueia boot). | `src/server/EncryptionService.ts:17-27` |

@@ -152,6 +152,9 @@ Enquanto o strict não é ligado, o boot só AVISA (não brica o deploy atual).
 - `.github/workflows/security-review.yml` — roda `anthropics/claude-code-security-review` em cada PR
   (comenta findings). **Requer o secret `CLAUDE_API_KEY` no repositório** para operar; sem ele o job
   apenas não roda (não bloqueia merge). Complementa — não substitui — as suítes `test:security-*`.
+- **Supply-chain (SEC-F15):** `npm audit fix` (semver-compatível, validado) reduziu 26→6 vulns
+  (crítica 1→0). Restam 6 na cadeia `whatsapp-web.js`/puppeteer (major/breaking, baixa exposição —
+  usamos Evolution API + `PUPPETEER_SKIP_DOWNLOAD`). Detalhe em `docs/security/SUPPLY-CHAIN.md`.
 - Recomendado ao fim do programa: DAST autenticado (ex.: StackHawk) + **pentest multi-tenant em
   staging** (Tenant A→B, cliente→Master, webhook→runtime, arquivo privado→público). Essa etapa não é
   substituível por revisão de código.

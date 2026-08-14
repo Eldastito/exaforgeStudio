@@ -7,11 +7,12 @@ produção — afirma "há risco no código" onde há evidência `arquivo:linha`
 confirmado lendo o código; `arquivo:linha` no final de cada item).
 
 > **Progresso (SEC-F0..F18):** fechados A1,A2,A3 (P0), A4,A5,A6,A7,A9 (P1), A12,A14,A15 (P2) +
-> FE2,FE3,FE4. Regressão em `test:security-*` (consolidada em `test:security-program-hardening`); runbook
-> em `docs/runbook/security-operacao.md`. Pendentes (exigem contexto de deploy/frontend/infra): A8
-> (mídia pública — read, precisa de URL assinada no frontend), A10/A11/F8 (rate-limit distribuído,
-> precisa de store compartilhado/Redis + trust-proxy), A13 (TTL de JWT), A16/F14 (container non-root),
-> FE1 (JWT em localStorage → httpOnly cookie, mudança de sessão no frontend).
+> A13,A14,A15 (P2) + FE2,FE3,FE4. Regressão em `test:security-*` (consolidada em
+> `test:security-program-hardening`); runbook em `docs/runbook/security-operacao.md`. Pendentes (exigem
+> contexto de deploy/frontend/infra, fora do que dá pra fechar de forma aditiva/reversível sem decisão
+> do operador): A8 (mídia pública — read, precisa de URL assinada no frontend), A10/A11/F8 (rate-limit
+> distribuído, precisa de store compartilhado/Redis + trust-proxy), A16/F14 (container non-root, muda a
+> imagem de deploy), FE1 (JWT em localStorage → httpOnly cookie, redesenho de sessão no frontend).
 >
 > Princípio fundante do programa: **FAIL CLOSED.** Ausência ou falha de um controle de segurança
 > (criptografia, autenticação, autorização, resolução de tenant, verificação de webhook, operação
@@ -49,7 +50,7 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 | A10 | 🟠 P1 | Rate limit de login puramente **in-memory** (`new Map()`), 5 tentativas/15min por e-mail — reinício limpa; não compartilha entre instâncias; troca de e-mail/IP contorna. | `src/server/routes/auth.ts:15-18` |
 | A11 | 🟠 P1 | Rate limit global in-memory (~3000 req/15min por IP), desligado por padrão fora de produção. | `server.ts:258-279` |
 | A12 | 🟠 P1 | ~~CORS manual: `Access-Control-Allow-Headers` lista `x-organization-id` e **omite `Authorization`**~~ — **✅ CORRIGIDO (SEC-F12):** `buildCorsHeaders()` central agora INCLUI `Authorization`; política de origem inalterada (prod → origem explícita, dev → `*`, sem reflexão de Host). `test:security-cors` (12). | `src/server/corsConfig.ts`; `server.ts` |
-| A13 | 🟡 P2 | JWT com `expiresIn: '24h'`; re-check por request só de `global_status` blocked/deleted (e org blocked), só nas rotas com `requireOrganizationAccess`. | `src/server/routes/auth.ts:238-242`; `src/server/middleware/auth.ts:50-55` |
+| A13 | 🟡 P2 | ~~JWT com `expiresIn: '24h'` fixo~~ — **✅ MITIGADO (A13):** TTL da sessão agora configurável via env `JWT_TTL` (`SESSION_JWT_TTL`), default `24h` (0-regressão); o operador pode ENCURTAR a janela de um token vazado (ex.: `8h`, `30m`, `3600`s). Parsing seguro (só-dígitos → segundos como NUMBER; unidade → string; inválido → default+aviso, nunca quebra `jwt.sign`). Complementa o `security_version` (A14/SEC-F7) que já revoga na hora em troca de senha/MFA/bloqueio. `test:security-session-ttl` (9). | `src/server/config/secret.ts`; `src/server/routes/auth.ts` |
 | A14 | 🟡 P2 | ~~Sem `security_version` — tokens antigos seguem válidos após troca de senha/MFA~~ — **✅ CORRIGIDO (SEC-F7):** coluna `users.security_version`; JWT carrega `sv`; `requireOrganizationAccess` compara e barra 401 quando diverge; `bumpSecurityVersion()` no reset de senha / desativar MFA / bloqueio. Token legado sem `sv` não é barrado (sem lockout). `test:security-session` (6). | `src/server/middleware/auth.ts`; `routes/auth.ts`, `routes/mfa.ts`, `routes/users.ts` |
 | A15 | 🟡 P2 | ~~Sem CSP/Referrer-Policy/Permissions-Policy~~ — **✅ CORRIGIDO (SEC-F11):** `buildSecurityHeaders()` central adiciona `Referrer-Policy`, `Permissions-Policy` (camera/mic `self`; nega geolocation/payment/…) e CSP em **report-only** por padrão (enforcing sob `CSP_ENFORCE=1`, sem quebrar o SPA); HSTS/nosniff/X-Frame-Options mantidos (X-XSS legado removido). `test:security-headers` (10). | `src/server/securityHeaders.ts`; `server.ts` |
 | A16 | 🟡 P2 | Dockerfile roda como **root** (sem `USER`), single-stage, mantém toolchain de build (python3/make/g++) e devDependencies na imagem de runtime. | `Dockerfile` |

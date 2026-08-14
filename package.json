@@ -125,6 +125,7 @@
     "test:security-cors": "tsx scripts/test-security-cors.ts",
     "test:security-money-routes": "tsx scripts/test-security-money-routes.ts",
     "test:security-session-ttl": "tsx scripts/test-security-session-ttl.ts",
+    "test:security-login-ratelimit": "tsx scripts/test-security-login-ratelimit.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

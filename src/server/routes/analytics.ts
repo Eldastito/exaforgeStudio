@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireRole } from "../middleware/auth.js";
 import { AnalyticsService } from "../AnalyticsService.js";
 import { ReportsService } from "../ReportsService.js";
 import { ReportPdfService } from "../ReportPdfService.js";
@@ -61,8 +62,9 @@ router.get("/metrics", (req, res) => {
   }
 });
 
-// Relatório de lucro/margem do período
-router.get("/profit", (req, res) => {
+// Relatório de lucro/margem do período.
+// SEC-F25 (FE3/RN-CG-06/§73): receita/custo/lucro/margem (por produto) = dinheiro → owner/admin.
+router.get("/profit", requireRole("owner", "admin"), (req, res) => {
   const orgId = getOrgId(req);
   const period = (req.query.period as any) || "month";
   try {

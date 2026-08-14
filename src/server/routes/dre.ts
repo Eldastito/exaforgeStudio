@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ManagerialDreService } from "../ManagerialDreService.js";
 
 // DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa. Rota core
@@ -7,7 +7,8 @@ import { ManagerialDreService } from "../ManagerialDreService.js";
 const router = Router();
 
 // GET /api/dre?period=YYYY-MM — DRE gerencial do mês (padrão: mês corrente).
-router.get("/", (req: AuthRequest, res): any => {
+// SEC-F25 (FE3/RN-CG-06/§73): DRE = receita × lucro × caixa (dinheiro de gestão) → owner/admin.
+router.get("/", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = /^\d{4}-\d{2}$/.test(String(req.query?.period || "")) ? String(req.query.period) : undefined;

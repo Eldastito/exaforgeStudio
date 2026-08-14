@@ -3,6 +3,7 @@ import multer from "multer";
 import db from "../db.js";
 import { randomUUID } from "crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
+import { redactMoney } from "../moneyVisibility.js";
 import { ComigoPricingService } from "../ComigoPricingService.js";
 import { BalcaoService } from "../BalcaoService.js";
 import { ComigoCollectionService } from "../ComigoCollectionService.js";
@@ -41,10 +42,14 @@ router.get("/overview", (req: AuthRequest, res): any => {
     const debt = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind = 'debt'").get(orgId) as any)?.s || 0;
     const paid = (db.prepare("SELECT COALESCE(SUM(amount),0) s FROM comigo_fiado_ledger WHERE organization_id = ? AND kind = 'payment'").get(orgId) as any)?.s || 0;
     const blacklisted = (db.prepare("SELECT COUNT(*) c FROM comigo_customer_credit WHERE organization_id = ? AND blacklisted = 1").get(orgId) as any)?.c || 0;
+    // SEC-F25 (FE3/RN-CG-06/§73): a rota é MISTA — os contadores operacionais (fichas/pedidos/
+    // blacklist) o staff precisa ver, mas o SALDO EM FIADO (a receber, R$) é dinheiro de gestão.
+    // Mantemos a resposta e REDIGIMOS só o valor de dinheiro pra quem não é owner/admin (espelha
+    // a redação de custo no catálogo, SEC-F13), em vez de bloquear a rota inteira.
     res.json({
       recipes,
       openOrders,
-      fiadoReceivable: Math.max(0, debt - paid),
+      fiadoReceivable: redactMoney(Math.max(0, debt - paid), req.user),
       blacklisted,
     });
   } catch (e: any) {
@@ -314,7 +319,9 @@ router.get("/fiado", (req: AuthRequest, res): any => {
 // GET /api/comigo/summary?date=YYYY-MM-DD — caixa × a receber (ADR-112 D3).
 // Caixa = só o RECEBIDO (à vista + fiado quitado). Fiado em aberto é a receber,
 // não infla o caixa. Deriva ticket médio das vendas do dia.
-router.get("/summary", (req: AuthRequest, res): any => {
+// SEC-F25 (FE3/RN-CG-06/§73): day summary = caixa/receita/ticket (dinheiro) → owner/admin,
+// consistente com a política já declarada nas rotas de relatório deste módulo (linha ~685).
+router.get("/summary", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || new Date().toISOString().slice(0, 10));

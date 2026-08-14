@@ -1,7 +1,7 @@
 import { Router } from "express";
 import db from "../db.js";
 import { randomUUID } from "crypto";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { LossMarginService } from "../LossMarginService.js";
 
 // Margem de Perda Aceitável (ADR-114) — indicador global. Rota core (não é
@@ -16,7 +16,8 @@ const audit = (orgId?: string, actorId?: string, eventType = "", meta: any = {})
 };
 
 // GET /api/loss — visão completa (config + mês atual + histórico + média).
-router.get("/", (req: AuthRequest, res): any => {
+// SEC-F25 (FE3/RN-CG-06/§73): perdas/margem em R$ são dinheiro de gestão → owner/admin.
+router.get("/", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(LossMarginService.overview(orgId));

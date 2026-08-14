@@ -9199,6 +9199,23 @@ const initDb = () => {
   // leads), não só pelo engajamento (RN-CG-01). Aditivo.
   try { db.exec(`ALTER TABLE creative_experiment_variants ADD COLUMN correlation_id TEXT`); } catch(e){}
 
+  // SEC-F6 (SEC-05 / achado A7) — proteção de REPLAY para webhooks inbound. Um evento legítimo
+  // capturado e reenviado N vezes deve executar UMA vez só. `UNIQUE(provider, event_id)` é a trava:
+  // a 1ª inserção vence; as repetições batem no índice e são ignoradas. Aditiva; nunca rejeita a
+  // 1ª entrega (só dedup). GLOBAL (não é por-org — o webhook chega antes de resolver o tenant).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS webhook_inbound_events (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(provider, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_webhook_inbound_recv ON webhook_inbound_events (received_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar webhook_inbound_events (SEC-F6)', e); }
+
   // PRD 11 / ADR-168 F15 — Growth Autopilot. Postura SHADOW-first (RN-CG-10): 'off' (default,
   // opt-in convenção nº 10) | 'shadow' (propõe, mas NUNCA executa — RN-CG-08). NÃO existe
   // 'auto' aqui: crescimento autônomo nunca vai direto pra execução. Aditivo.

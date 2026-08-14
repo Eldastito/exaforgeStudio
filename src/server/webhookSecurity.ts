@@ -41,6 +41,9 @@ export function effectiveWebhookSecret(): string {
  */
 export function isWebhookEnforced(): boolean {
   if (process.env.WEBHOOK_SECRET) return true;
+  // SEC-F5 (SEC-05): switch opt-in pra EXIGIR verificação sem depender de org clínica.
+  // O operador liga WEBHOOK_STRICT=1 depois de configurar o segredo nos dois lados.
+  if (/^(1|true|yes|on)$/i.test(String(process.env.WEBHOOK_STRICT || ""))) return true;
   if (getConfig("webhook_enforce") === "1") return true;
   // Fase 30: presença de qualquer org com módulo clínica ativo
   try {
@@ -75,4 +78,21 @@ export function recordWebhookHit(ok: boolean, reason: string) {
 }
 export function getLastWebhookHit(): { at: number; ok: boolean; reason: string } | null {
   try { const v = getConfig("webhook_last"); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+
+/**
+ * SEC-F6 (SEC-05 / A7) — anti-replay para webhooks inbound. Registra `(provider, event_id)`;
+ * retorna `true` na PRIMEIRA vez (processar) e `false` numa repetição (ignorar). Sem `event_id`
+ * (payload não identificável) → `true` (não bloqueia a 1ª entrega; não há como deduplicar).
+ * Best-effort: qualquer erro de storage devolve `true` (nunca DERRUBA a entrega legítima).
+ */
+export function claimWebhookEvent(provider: string, eventId: string | null | undefined): boolean {
+  const id = String(eventId || "").trim();
+  if (!id) return true; // sem identificador → não há como deduplicar; processa
+  try {
+    const info = db.prepare(
+      "INSERT OR IGNORE INTO webhook_inbound_events (id, provider, event_id) VALUES (?, ?, ?)"
+    ).run(`${provider}:${id}`, provider, id);
+    return info.changes > 0; // 1ª vez → 1 mudança (novo); replay → 0 (já existia)
+  } catch { return true; }
 }

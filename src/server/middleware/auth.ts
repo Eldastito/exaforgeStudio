@@ -60,8 +60,36 @@ export const requireOrganizationAccess = (req: AuthRequest, res: Response, next:
   }
 };
 
+/**
+ * SEC-F3 (SEC-03) — autoridade master é a LINHA do usuário no DB (por userId), não o claim de
+ * e-mail do JWT. Fecha A6: um e-mail no token não é papel administrativo. Sem lockout e sem
+ * regressão de performance:
+ *  - usuário comum (claim ≠ MASTER_ADMIN_EMAIL e sem platform_role no claim) → false SEM ir ao DB;
+ *  - candidato a master → revalida no DB: `platform_role='master_admin'` concede; transição:
+ *    se o e-mail REAL do DB (não o claim) == MASTER_ADMIN_EMAIL, concede e faz backfill da coluna.
+ *  - usuário bloqueado/removido nunca é master.
+ */
+export function isPlatformMaster(req: AuthRequest): boolean {
+  const u = req.user;
+  if (!u?.userId) return false;
+  // Fast path: só o e-mail master configurado (ou um platform_role já no claim) dispara o lookup.
+  if (u.email !== MASTER_ADMIN_EMAIL && u.platform_role !== "master_admin") return false;
+  try {
+    const row: any = db.prepare("SELECT platform_role, email, global_status FROM users WHERE id = ?").get(u.userId);
+    if (!row) return false;
+    if (row.global_status === "blocked" || row.global_status === "deleted") return false;
+    if (row.platform_role === "master_admin") return true;
+    // Transição: master por e-mail validado NO DB (não no claim). Concede e persiste o papel.
+    if (row.email && row.email === MASTER_ADMIN_EMAIL) {
+      try { db.prepare("UPDATE users SET platform_role = 'master_admin' WHERE id = ? AND (platform_role IS NULL OR platform_role = '')").run(u.userId); } catch { /* noop */ }
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
 export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (!req.user || req.user.email !== MASTER_ADMIN_EMAIL) {
+  if (!isPlatformMaster(req)) {
      return res.status(403).json({ error: "Forbidden: Master Admin Access Required" });
   }
   next();
@@ -98,8 +126,8 @@ const methodAction = (method: string): Action => {
 
 export const requirePermission = (module: string, action?: Action) => (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-  // Master admin é cross-tenant e nunca é barrado pelo RBAC da org.
-  if (req.user.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
+  // Master admin é cross-tenant e nunca é barrado pelo RBAC da org (autoridade no DB — SEC-F3).
+  if (isPlatformMaster(req)) return next();
   const act = action || methodAction(req.method);
   if (!PermissionService.can(req.organizationId || req.user.organizationId, req.user, module, act)) {
     return res.status(403).json({ error: `Forbidden: sem permissão de ${act} em ${module}` });
@@ -116,7 +144,7 @@ export const requirePermission = (module: string, action?: Action) => (req: Auth
 // não estão no mapa, então não há dupla checagem.
 export const enforceModulePermission = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.user) return next(); // requireAuth já cuidou; aqui é só o gate de módulo
-  if (req.user.email && req.user.email === MASTER_ADMIN_EMAIL) return next();
+  if (isPlatformMaster(req)) return next(); // autoridade no DB (SEC-F3), não no claim de e-mail
   const seg = (req.path || "").split("/").filter(Boolean)[0];
   const orgId = req.organizationId || req.user.organizationId;
   const dec = PermissionService.checkRouteAccess(orgId, req.user, seg, req.method);

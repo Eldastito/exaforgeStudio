@@ -76,6 +76,9 @@ async function main() {
   check("Legado GET /payments → passa (sem perfil)", run(legado, "GET", "/payments").allowed);
 
   // ===== Master admin nunca é barrado =====
+  // SEC-F3: a autoridade master é a LINHA do DB por userId (não o claim de e-mail) — o usuário
+  // master precisa existir de fato com o e-mail master configurado.
+  db.prepare(`INSERT INTO users (id, organization_id, email, role) VALUES ('u_master', ?, 'master@zappflow.test', 'owner')`).run(orgId);
   const master = { userId: "u_master", organizationId: orgId, role: "agent", email: "master@zappflow.test", role_profile_id: profileId("vendedor") };
   check("Master admin DELETE /orders → passa", run(master, "DELETE", "/orders/1").allowed);
 

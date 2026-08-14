@@ -363,24 +363,27 @@ async function startServer() {
     const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as any;
 
     if (!existingAdmin) {
-       // Sem env: gera uma senha aleatória forte e a exibe UMA vez no log,
-       // para não criar a conta com uma senha previsível.
-       const password = envPassword || crypto.randomBytes(12).toString('base64url');
-       const passwordHash = await bcrypt.hash(password, saltRounds);
-       db.prepare(`
-         INSERT INTO users (id, organization_id, name, email, password_hash, role)
-         VALUES (?, 'default_org', 'Eldas Tito', ?, ?, 'owner')
-       `).run(uuidv4(), email, passwordHash);
-       if (envPassword) {
-         console.log('Master admin criado: ' + email);
-       } else {
-         console.warn(`[SECURITY] Master admin criado com senha aleatória (defina MASTER_ADMIN_PASSWORD): ${email} / ${password}`);
+       // SEC-F3 (A2/SEC-11): a senha NUNCA entra no log. Sem MASTER_ADMIN_PASSWORD, NÃO criamos
+       // a conta automaticamente (evita conta com senha impossível de recuperar sem vazar o log).
+       if (!envPassword) {
+         console.warn('[SECURITY] Master admin não existe e MASTER_ADMIN_PASSWORD não está definido — NÃO criando automaticamente. Defina MASTER_ADMIN_PASSWORD e reinicie para provisionar o master (a senha nunca é impressa).');
+         return;
        }
-    } else if (envPassword) {
-       // Rotaciona a senha do admin para a definida na env (corrige a senha vazada).
        const passwordHash = await bcrypt.hash(envPassword, saltRounds);
-       db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, existingAdmin.id);
-       console.log('[SECURITY] Senha do master admin atualizada a partir de MASTER_ADMIN_PASSWORD.');
+       db.prepare(`
+         INSERT INTO users (id, organization_id, name, email, password_hash, role, platform_role)
+         VALUES (?, 'default_org', 'Eldas Tito', ?, ?, 'owner', 'master_admin')
+       `).run(uuidv4(), email, passwordHash);
+       console.log('[SECURITY] Master admin provisionado a partir de MASTER_ADMIN_PASSWORD: ' + email);
+    } else {
+       // Backfill do papel de plataforma (SEC-F3) — a autoridade master passa a ser esta coluna.
+       try { db.prepare("UPDATE users SET platform_role = 'master_admin' WHERE id = ? AND (platform_role IS NULL OR platform_role = '')").run(existingAdmin.id); } catch { /* noop */ }
+       if (envPassword) {
+         // Rotaciona a senha do admin para a definida na env (corrige a senha vazada).
+         const passwordHash = await bcrypt.hash(envPassword, saltRounds);
+         db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, existingAdmin.id);
+         console.log('[SECURITY] Senha do master admin atualizada a partir de MASTER_ADMIN_PASSWORD.');
+       }
     }
   };
   await ensureMasterAdmin();

@@ -5676,6 +5676,10 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas de RBAC', e); }
   try { db.exec(`ALTER TABLE users ADD COLUMN role_profile_id TEXT`); } catch(e){}
+  // SEC-F3 (SEC-03) — papel de PLATAFORMA persistido (cross-tenant). A autorização master
+  // deixa de confiar só no claim de e-mail do JWT e passa a revalidar esta coluna no DB por
+  // userId. Backfill: ensureMasterAdmin marca o usuário do MASTER_ADMIN_EMAIL como 'master_admin'.
+  try { db.exec(`ALTER TABLE users ADD COLUMN platform_role TEXT`); } catch(e){}
 
   // ZappFlow Comigo — módulo `copiloto` do plano Autônomo (ADR-111/112/113).
   // Balcão PDV por toque + motor de precificação (ficha técnica viva) + fiado

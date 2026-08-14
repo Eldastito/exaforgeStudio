@@ -152,6 +152,8 @@ async function main() {
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as any).port;
 
+  // SEC-F3: master é autoridade do DB por userId — cria o usuário master de fato.
+  db.prepare(`INSERT INTO users (id, organization_id, email, role) VALUES ('master1', 'default_org', 'master@test.local', 'owner')`).run();
   const masterToken = jwt.sign({ userId: "master1", email: "master@test.local", role: "owner" }, process.env.JWT_SECRET!);
   const userToken = jwt.sign({ userId: "u1", email: "user@x.com", role: "owner" }, process.env.JWT_SECRET!);
 

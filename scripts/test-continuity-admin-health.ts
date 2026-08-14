@@ -44,6 +44,9 @@ async function main() {
   ).run(randomUUID(), org, randomUUID(), status);
   mkDeliv(A, "queued"); mkDeliv(A, "sent"); mkDeliv(B, "delivered"); mkDeliv(B, "failed");
 
+  // SEC-F3: a autoridade master é a linha do DB por userId — cria o usuário master de fato.
+  db.prepare(`INSERT INTO users (id, organization_id, email, role) VALUES ('u_master', ?, 'boss@zappflow.test', 'owner')`).run(A);
+
   const app = express(); app.use(express.json());
   const p = express.Router(); p.use(requireAuth);
   p.use("/admin", requireMasterAdmin, adminRoutes);
@@ -52,7 +55,8 @@ async function main() {
   const port = (server.address() as any).port;
 
   const call = (tokenEmail: string): Promise<{ status: number; json: any }> => {
-    const tok = jwt.sign({ userId: "u", organizationId: A, role: "owner", email: tokenEmail }, process.env.JWT_SECRET!);
+    const uid = tokenEmail === "boss@zappflow.test" ? "u_master" : "u";
+    const tok = jwt.sign({ userId: uid, organizationId: A, role: "owner", email: tokenEmail }, process.env.JWT_SECRET!);
     return new Promise((resolve) => {
       http.get({ host: "127.0.0.1", port, path: "/api/admin/continuity/health", headers: { Authorization: `Bearer ${tok}` } }, (res) => {
         let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => { let j: any = null; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode || 0, json: j }); });

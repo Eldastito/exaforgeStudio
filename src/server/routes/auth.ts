@@ -236,7 +236,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email });
 
     const token = jwt.sign(
-      { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name },
+      { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name, platform_role: user.platform_role || null },
       JWT_SECRET,
       { expiresIn: "24h" }
     );

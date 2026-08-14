@@ -1,5 +1,9 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
+// SEC-F26: `vite` é devDependency (só o dev-server usa, ver bloco NODE_ENV!==production).
+// O import ESTÁTICO virava `require("vite")` no bundle .cjs (esbuild --packages=external),
+// executado no boot MESMO em produção — o que obrigava a imagem a carregar vite/devDeps.
+// Import DINÂMICO dentro do ramo de dev: em produção o `require("vite")` nunca roda → a
+// imagem multi-stage pode podar as devDeps sem quebrar o boot.
 import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
@@ -1417,6 +1421,8 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    // Import dinâmico (SEC-F26): só o dev-server carrega `vite`; em produção nunca chega aqui.
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

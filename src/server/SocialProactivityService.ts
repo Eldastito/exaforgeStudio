@@ -18,12 +18,25 @@ import { StudioBriefService } from "./StudioBriefService.js";
 import { DecisionActionService } from "./DecisionActionService.js";
 import { SocialAttributionService } from "./SocialAttributionService.js";
 import { CreativeLearningService } from "./CreativeLearningService.js";
+import { ProductOpportunityService } from "./ProductOpportunityService.js";
+import { BusinessGoalService } from "./BusinessGoalService.js";
+import { CreativeExperimentService } from "./CreativeExperimentService.js";
 
 export interface SocialProactiveDigest {
   opportunities: Array<{ signalId: string; vertical: string | null; topic: string | null; channel: string | null; summary: string | null }>;
   pendingApprovals: Array<{ actionId: string; title: string; channel: string | null }>;
   recentResults: Array<{ actionId: string; variantKey: string | null; channel: string | null; engagement: number }>;
   learning: Array<{ patternType: string; effectiveness: number | null; acted: number }>;
+  headline: string | null;
+}
+
+// Métricas de crescimento por conteúdo (F12) que entram no brief.
+const GROWTH_METRICS = new Set(["content_revenue", "content_leads"]);
+
+export interface GrowthBrief {
+  whatToPost: Array<{ kind: "content" | "product"; ref: string; label: string; reason: string; marginBand?: string }>;
+  goals: Array<{ metric: string; label: string; unit: string; target: number; current: number; remaining: number; attainmentPct: number; paceStatus: string }>;
+  champions: Array<{ experimentId: string; hypothesis: string; winnerVariantKey: string | null }>;
   headline: string | null;
 }
 
@@ -64,6 +77,46 @@ export class SocialProactivityService {
     const headline = parts.length ? parts.join(" · ") : null;
 
     return { opportunities, pendingApprovals, recentResults, learning, headline };
+  }
+
+  /**
+   * Growth Brief (PRD 11 / ADR-168 F13) — o "o que postar + impacto esperado + campeão" pra
+   * o dono. COMPÕE (read-only) as fatias do PRD 11: o que postar (oportunidades de conteúdo F7
+   * + de produto F11), o progresso das metas de CONTEÚDO (F12) e o campeão atual dos
+   * experimentos (F6/F9). HONESTO: só o que existe; produto sem R$ (marginBand qualitativo,
+   * RN-CG-06 — os números de meta são dinheiro, então a ROTA é role-gated). Não inventa.
+   */
+  static growthBrief(orgId: string): GrowthBrief {
+    const whatToPost: GrowthBrief["whatToPost"] = [];
+
+    // Conteúdo: oportunidades de nicho abertas (F7).
+    for (const o of StudioBriefService.listOpportunities(orgId)) {
+      if (!o.topic) continue;
+      whatToPost.push({ kind: "content", ref: o.signalId, label: o.topic, reason: `Assunto em alta${o.vertical ? ` no nicho ${o.vertical}` : ""}.` });
+    }
+    // Produto: em estoque, alta margem, vendendo pouco (F11) — só QUALITATIVO (sem R$).
+    for (const p of ProductOpportunityService.match(orgId, { publish: false }).opportunities) {
+      whatToPost.push({ kind: "product", ref: p.productId, label: p.name, reason: `Produto de margem ${p.marginBand === "high" ? "alta" : "boa"} em estoque e vendendo pouco.`, marginBand: p.marginBand });
+    }
+
+    // Impacto esperado: progresso das metas de CONTEÚDO (F12) — distância-à-meta.
+    const goals = BusinessGoalService.progress(orgId, { includeInactive: true }).goals
+      .filter((g: any) => GROWTH_METRICS.has(g.metric))
+      .map((g: any) => ({ metric: g.metric, label: g.label, unit: g.unit, target: g.target, current: g.current, remaining: g.remaining, attainmentPct: g.attainmentPct, paceStatus: g.paceStatus }));
+
+    // Campeão atual: experimentos decididos com vencedor (F6/F9).
+    const champions = CreativeExperimentService.list(orgId, { status: "completed" })
+      .filter((e: any) => e.decision === "winner" && e.winner_variant_key)
+      .slice(0, 5)
+      .map((e: any) => ({ experimentId: e.id, hypothesis: e.hypothesis, winnerVariantKey: e.winner_variant_key ?? null }));
+
+    const parts: string[] = [];
+    if (whatToPost.length) parts.push(`${whatToPost.length} ideia${whatToPost.length > 1 ? "s" : ""} pra postar`);
+    if (goals.length) parts.push(`${goals.length} meta${goals.length > 1 ? "s" : ""} de crescimento`);
+    if (champions.length) parts.push(`${champions.length} campeã${champions.length > 1 ? "s" : "o"}`);
+    const headline = parts.length ? parts.join(" · ") : null;
+
+    return { whatToPost, goals, champions, headline };
   }
 }
 

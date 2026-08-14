@@ -50,15 +50,24 @@ async function main() {
   const realFetch = globalThis.fetch;
   (globalThis as any).fetch = async (url: any, init: any) => {
     calls++;
-    capturedUrl = String(url);
-    capturedAuth = init?.headers?.Authorization || init?.headers?.authorization || "";
-    try { capturedBody = JSON.parse(init?.body || "{}"); } catch { capturedBody = null; }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ id: "pl_STONE_ABC", url: "https://pagar.me/link/STONE_ABC" }),
-      text: async () => "",
-    } as any;
+    const u = String(url);
+    // CREATE do Link de Pagamento (POST /paymentlinks) — captura o contrato pra Seção 2.
+    if (u.endsWith("/paymentlinks")) {
+      capturedUrl = u;
+      capturedAuth = init?.headers?.Authorization || init?.headers?.authorization || "";
+      try { capturedBody = JSON.parse(init?.body || "{}"); } catch { capturedBody = null; }
+      return { ok: true, status: 200, json: async () => ({ id: "pl_STONE_ABC", url: "https://pagar.me/link/STONE_ABC" }), text: async () => "" } as any;
+    }
+    // SEC-F27: RE-CONSULTA autoritativa do webhook (GET /orders/{id}). O `syncStonePayment` não
+    // confia mais no corpo do webhook — consulta aqui. Só `or_XYZ` é o pedido REALMENTE pago (com
+    // o nosso `code` e o valor certo); qualquer outro id volta pago mas SEM o code → não confirma.
+    if (/\/orders\/or_XYZ$/.test(u)) {
+      return { ok: true, status: 200, json: async () => ({ id: "or_XYZ", code: orderId, status: "paid", amount: 14990 }), text: async () => "" } as any;
+    }
+    if (/\/orders\//.test(u)) {
+      return { ok: true, status: 200, json: async () => ({ status: "paid" }), text: async () => "" } as any;
+    }
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "" } as any;
   };
 
   let msg: string | null = null;

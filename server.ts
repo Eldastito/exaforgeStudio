@@ -19,7 +19,7 @@ import recoveryRoutes from "./src/server/routes/recovery.js";
 import bigIdeaRoutes from "./src/server/routes/bigIdea.js";
 import recognitionRoutes from "./src/server/routes/recognition.js";
 import philosophyAuditRoutes from "./src/server/routes/philosophyAudit.js";
-import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit } from "./src/server/webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent } from "./src/server/webhookSecurity.js";
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
@@ -922,6 +922,13 @@ async function startServer() {
         const data = Array.isArray(payload.data) ? payload.data[0] : (payload.data || {});
         const info = data.Info || data.info || data.key || {};
         const msgObj = data.Message || data.message || {};
+
+        // SEC-F6 (SEC-05 / A7) — anti-replay: a MESMA mensagem reenviada executa uma vez só.
+        const eventId = info.id || info.ID || info.Id || (data.key && data.key.id) || null;
+        if (!claimWebhookEvent("evolution", eventId)) {
+          recordWebhookHit(true, "duplicado_ignorado");
+          return res.status(200).json({ status: "duplicate_ignored" });
+        }
 
         // Log de diagnóstico do formato real (ajuda a depurar payloads novos).
         console.log("[Evolution Webhook] data(trunc):", JSON.stringify(data).slice(0, 900));

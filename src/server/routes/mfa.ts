@@ -2,7 +2,7 @@ import { Router } from "express";
 import db from "../db.js";
 import bcrypt from "bcrypt";
 import QRCode from "qrcode";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, bumpSecurityVersion } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 
@@ -58,6 +58,7 @@ router.post("/disable", async (req: AuthRequest, res): Promise<any> => {
   const ok = u.password_hash && await bcrypt.compare(String(password || ""), u.password_hash);
   if (!ok) return res.status(400).json({ error: "Senha incorreta." });
   db.prepare("UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_pending_secret = NULL, mfa_backup_codes = NULL WHERE id = ?").run(userId);
+  bumpSecurityVersion(userId); // SEC-F7: desativar MFA revoga tokens antigos
   res.json({ success: true });
 });
 

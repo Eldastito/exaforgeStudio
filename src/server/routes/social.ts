@@ -16,6 +16,7 @@ import { CreativeExperimentService } from "../CreativeExperimentService.js";
 import { ContentLeadAttributionService } from "../ContentLeadAttributionService.js";
 import { ContentRevenueAttributionService } from "../ContentRevenueAttributionService.js";
 import { ProductOpportunityService } from "../ProductOpportunityService.js";
+import { GrowthAutopilotService } from "../GrowthAutopilotService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -319,6 +320,23 @@ router.get("/proactive", requireRole("owner", "admin"), (req: AuthRequest, res):
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SocialProactivityService.digest(orgId));
+});
+
+// ── Growth Autopilot shadow (PRD 11 / ADR-168 F15) — propõe, NUNCA executa (RN-CG-08/10) ──
+
+// GET /api/social/growth-autopilot — o que o autopilot FARIA (read-only, shadow)
+router.get("/growth-autopilot", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(GrowthAutopilotService.plan(orgId));
+});
+
+// POST /api/social/growth-autopilot/mode { mode: 'off'|'shadow' } — só shadow-first (RN-CG-10)
+router.post("/growth-autopilot/mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(GrowthAutopilotService.setMode(orgId, String(req.body?.mode || ""))); }
+  catch (e: any) { res.status(400).json({ error: e.message || "Modo inválido." }); }
 });
 
 // GET /api/social/growth-brief — o que postar + impacto esperado + campeão (F13; role-gated,

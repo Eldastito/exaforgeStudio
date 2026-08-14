@@ -9194,6 +9194,11 @@ const initDb = () => {
   // negócio (F7/F8). Assim o vencedor pode ser escolhido pelo RESULTADO DE NEGÓCIO (receita/
   // leads), não só pelo engajamento (RN-CG-01). Aditivo.
   try { db.exec(`ALTER TABLE creative_experiment_variants ADD COLUMN correlation_id TEXT`); } catch(e){}
+
+  // PRD 11 / ADR-168 F15 — Growth Autopilot. Postura SHADOW-first (RN-CG-10): 'off' (default,
+  // opt-in convenção nº 10) | 'shadow' (propõe, mas NUNCA executa — RN-CG-08). NÃO existe
+  // 'auto' aqui: crescimento autônomo nunca vai direto pra execução. Aditivo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN growth_autopilot_mode TEXT DEFAULT 'off'`); } catch(e){}
 };
 
 initDb();

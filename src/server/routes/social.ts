@@ -13,6 +13,7 @@ import { CreativeLearningService } from "../CreativeLearningService.js";
 import { SocialProactivityService } from "../SocialProactivityService.js";
 import { SocialEntitlementService } from "../SocialEntitlementService.js";
 import { CreativeExperimentService } from "../CreativeExperimentService.js";
+import { ContentLeadAttributionService } from "../ContentLeadAttributionService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -368,6 +369,32 @@ router.post("/experiments/:id/decide", requireRole("owner", "admin"), (req: Auth
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(CreativeExperimentService.decide(orgId, req.params.id, req.user?.userId || null)); }
   catch (e: any) { res.status(404).json({ error: e.message || "Falha ao decidir." }); }
+});
+
+// ── Content→Lead Attribution (PRD 11 / ADR-168 F7) — 1º elo do fio de negócio ──
+
+// POST /api/social/attribution/lead { correlationId, contactId, actionId?, source? }
+router.post("/attribution/lead", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = ContentLeadAttributionService.attribute(orgId, {
+      correlationId: String(req.body?.correlationId || ""),
+      contactId: String(req.body?.contactId || ""),
+      actionId: req.body?.actionId ? String(req.body.actionId) : null,
+      source: req.body?.source ? String(req.body.source) : null,
+    });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao atribuir o lead." }); }
+});
+
+// GET /api/social/attribution/leads?correlationId=...
+router.get("/attribution/leads", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const correlationId = String(req.query?.correlationId || "").trim();
+  if (!correlationId) return res.status(400).json({ error: "Informe o correlationId." });
+  res.json({ correlationId, leadCount: ContentLeadAttributionService.leadCount(orgId, correlationId), leads: ContentLeadAttributionService.leadsFor(orgId, correlationId) });
 });
 
 export default router;

@@ -9137,6 +9137,29 @@ const initDb = () => {
         ON social_post_metrics (organization_id, variant_key);
     `);
   } catch(e){ console.error('[DB] Falha ao criar creative_experiments (ADR-168 F6)', e); }
+
+  // PRD 11 / ADR-168 F7 — Content→Lead Attribution. Liga o CONTEÚDO publicado (pelo
+  // `correlation_id` da ação `social_publish`) a um LEAD (`contacts`), fechando o 1º elo do
+  // fio conteúdo→lead→venda→receita→margem. É o system-of-record que o `ContentOutcomeResolver`
+  // (registry do PRD 8, §37 — register-a-resolver) consulta. Espelha `sales_recovery_attributions`.
+  // Um lead é MAIS que engajamento (RN-CG-01) — é o 1º sinal de valor de negócio do conteúdo.
+  // Aditiva; UNIQUE evita dupla contagem do mesmo lead pro mesmo conteúdo (RN-CG-03).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS content_lead_attributions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,        -- fio da campanha/conteúdo (ADR-158)
+        contact_id TEXT NOT NULL,            -- o lead (contacts)
+        action_id TEXT,                      -- ação social_publish de origem (opcional)
+        source TEXT,                         -- como o lead chegou (link/utm/whatsapp_ref/manual)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, correlation_id, contact_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_content_lead_attr_corr
+        ON content_lead_attributions (organization_id, correlation_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar content_lead_attributions (ADR-168 F7)', e); }
 };
 
 initDb();

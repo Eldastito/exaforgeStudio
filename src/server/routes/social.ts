@@ -372,6 +372,13 @@ router.post("/experiments/:id/decide", requireRole("owner", "admin"), (req: Auth
   catch (e: any) { res.status(404).json({ error: e.message || "Falha ao decidir." }); }
 });
 
+// GET /api/social/experiments/:id/outcome — resultado de NEGÓCIO por variante (F9, role-gated)
+router.get("/experiments/:id/outcome", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ outcomes: CreativeExperimentService.outcomeFor(orgId, req.params.id) });
+});
+
 // ── Content→Lead Attribution (PRD 11 / ADR-168 F7) — 1º elo do fio de negócio ──
 
 // POST /api/social/attribution/lead { correlationId, contactId, actionId?, source? }

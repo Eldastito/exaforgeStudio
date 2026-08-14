@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
 import { DistributedLoginLimiter } from "../loginRateLimitRedis.js";
 import { bumpSecurityVersion } from "../middleware/auth.js";
+import { sessionCookieHeader, clearSessionCookieHeader } from "../sessionCookie.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
@@ -238,6 +239,10 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     const org = db.prepare('SELECT onboarding_status FROM organization_settings WHERE organization_id = ?').get(user.organization_id) as any;
 
+    // SEC-F24 (FE1) — emite a MESMA sessão também num cookie httpOnly (imune a XSS). O token no
+    // corpo continua (0-regressão pro front atual, que ainda usa localStorage); a Fase 2 do front
+    // passa a confiar só no cookie e para de guardar o token no localStorage. Ver sessionCookie.ts.
+    res.append("Set-Cookie", sessionCookieHeader(token));
     res.json({ token, user: { id: user.id, email: user.email, name: user.name, organizationId: user.organization_id, role: user.role, onboarding_status: org?.onboarding_status } });
   } catch (error: any) {
     console.error("Login Error:", error);
@@ -346,6 +351,14 @@ router.get("/me", (req, res) => {
   } catch (error) {
     res.status(401).json({ error: "Invalid token" });
   }
+});
+
+// SEC-F24 (FE1) — logout: LIMPA o cookie httpOnly de sessão. Sem corpo/estado (o JWT é
+// stateless); revogação forte de token continua sendo `bumpSecurityVersion` (troca de senha etc.).
+// Idempotente e sempre 200 — chamar sem sessão é um no-op seguro.
+router.post("/logout", (_req: Request, res: Response): any => {
+  res.append("Set-Cookie", clearSessionCookieHeader());
+  res.json({ message: "Logged out" });
 });
 
 export default router;

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { devLog } from '@/src/lib/log';
 import { Sidebar } from '@/src/features/Sidebar';
 import { KanbanBoard } from '@/src/features/KanbanBoard';
 import { ChatPanel } from '@/src/features/ChatPanel';
@@ -169,7 +170,7 @@ export default function App() {
 
     let hadDisconnect = false;
     socket.on("connect", () => {
-      console.log("Conectado ao servidor via WebSocket", socket.id);
+      devLog("Conectado ao servidor via WebSocket", socket.id);
       // O servidor decide a organização a partir do token; não enviamos o id.
       socket.emit("join_org");
       setConnectivity('online');
@@ -184,7 +185,7 @@ export default function App() {
     socket.on("connect_error", () => setConnectivity(c => (c === 'offline' ? 'offline' : 'unstable')));
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string, mediaUrl?: string }) => {
-      console.log("Recebido novo evento via WebSocket:", data);
+      devLog("Recebido novo evento via WebSocket:", data);
       // Adiciona na store independentemente se é bot ou user
       receiveMessage(data.contactId, data.text, data.sender as any, data.contactName, data.contactAvatar, data.contactNumber, data.mediaUrl);
     });
@@ -204,7 +205,7 @@ export default function App() {
     });
 
     socket.on("ticket_stage_change", (data: { contactId: string, newStage: string }) => {
-      console.log("Movendo cartão do lead...", data);
+      devLog("Movendo cartão do lead...", data);
       updateStageByContactId(data.contactId, data.newStage as any);
     });
 
@@ -228,7 +229,7 @@ export default function App() {
     });
 
     socket.on("ticket_ai_paused", (data: { ticketId: string, summary?: string }) => {
-       console.log("Pausando IA do ticket...", data);
+       devLog("Pausando IA do ticket...", data);
        const state = useStore.getState();
        const ticket = state.tickets[data.ticketId];
        if (ticket) {
@@ -242,7 +243,7 @@ export default function App() {
     });
 
     socket.on("ticket_ai_unpaused", (data: { ticketId: string }) => {
-       console.log("Despausando IA do ticket...", data);
+       devLog("Despausando IA do ticket...", data);
        const state = useStore.getState();
        const ticket = state.tickets[data.ticketId];
        if (ticket) {

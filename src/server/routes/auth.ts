@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
-import { LoginRateLimiter } from "../loginRateLimit.js";
+import { DistributedLoginLimiter } from "../loginRateLimitRedis.js";
 import { bumpSecurityVersion } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
@@ -20,9 +20,11 @@ const router = Router();
 // rotação de e-mail (`LOGIN_RATELIMIT_BY_IP=1`) — default off pra não arriscar
 // lockout em NAT compartilhado sem o operador decidir; teto mais alto (20/15min).
 const LOGIN_LOCK_MS = 15 * 60 * 1000; // 15 min
-const emailLoginLimiter = new LoginRateLimiter({ maxAttempts: 5, lockMs: LOGIN_LOCK_MS });
+// SEC-F22 (A11/F8): limitador DISTRIBUÍDO. Com REDIS_URL, o bloqueio é compartilhado entre
+// instâncias e sobrevive a restart; sem REDIS_URL (ou Redis fora), cai pra memória (0-regressão).
+const emailLoginLimiter = new DistributedLoginLimiter({ maxAttempts: 5, lockMs: LOGIN_LOCK_MS, prefix: "loginrl:email" });
 const LOGIN_BY_IP = /^(1|true|yes|on)$/i.test(String(process.env.LOGIN_RATELIMIT_BY_IP || ""));
-const ipLoginLimiter = new LoginRateLimiter({ maxAttempts: 20, lockMs: LOGIN_LOCK_MS });
+const ipLoginLimiter = new DistributedLoginLimiter({ maxAttempts: 20, lockMs: LOGIN_LOCK_MS, prefix: "loginrl:ip" });
 // Mesmo padrão de IP que o resto do app (rate-limit global, radar/fashion public).
 const loginClientIp = (req: Request): string =>
   String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
@@ -162,8 +164,8 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
   const attemptKey = String(email).toLowerCase();
   const ipKey = LOGIN_BY_IP ? loginClientIp(req) : null;
-  const registerFail = () => { emailLoginLimiter.registerFailure(attemptKey); if (ipKey) ipLoginLimiter.registerFailure(ipKey); };
-  const lockMs = Math.max(emailLoginLimiter.remainingMs(attemptKey), ipKey ? ipLoginLimiter.remainingMs(ipKey) : 0);
+  const registerFail = async () => { await emailLoginLimiter.registerFailure(attemptKey); if (ipKey) await ipLoginLimiter.registerFailure(ipKey); };
+  const lockMs = Math.max(await emailLoginLimiter.remainingMs(attemptKey), ipKey ? await ipLoginLimiter.remainingMs(ipKey) : 0);
   if (lockMs > 0) {
     logAuthEvent(null, null, null, 'LOGIN_LOCKED', { email });
     return res.status(429).json({
@@ -175,7 +177,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
     if (!user || !user.password_hash) {
       // Don't reveal if user exists
-      registerFail();
+      await registerFail();
       logAuthEvent(null, null, null, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -187,7 +189,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
-      registerFail();
+      await registerFail();
       logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -215,14 +217,14 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
         } catch (e) { /* noop */ }
       }
       if (!ok) {
-        registerFail();
+        await registerFail();
         logAuthEvent(user.organization_id, user.id, user.id, 'MFA_FAILED', { email });
         return res.status(401).json({ mfaRequired: true, error: "Código 2FA inválido." });
       }
     }
 
     // Login OK: zera o contador de tentativas
-    emailLoginLimiter.clear(attemptKey); if (ipKey) ipLoginLimiter.clear(ipKey);
+    await emailLoginLimiter.clear(attemptKey); if (ipKey) await ipLoginLimiter.clear(ipKey);
 
     // Update last login
     db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);

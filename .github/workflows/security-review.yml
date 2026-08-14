@@ -1,0 +1,37 @@
+# Claude Code Security Review — análise de segurança por PR (SEC-F0).
+#
+# Roda o revisor de segurança oficial da Anthropic em cada pull request e comenta os findings
+# no diff. É um GATE COMPLEMENTAR — não substitui as suítes `test:security-*` (essas rodam na
+# matriz de CI e são a defesa de regressão durável).
+#
+# PRÉ-REQUISITO: adicionar o secret `CLAUDE_API_KEY` no repositório
+#   (Settings → Secrets and variables → Actions → New repository secret).
+# Sem o secret, o job é PULADO (o `if` abaixo o desliga) — nunca bloqueia o merge por falta de chave.
+name: security-review
+
+on:
+  pull_request:
+
+permissions:
+  pull-requests: write   # comentar findings no PR
+  contents: read
+
+jobs:
+  security-review:
+    runs-on: ubuntu-latest
+    # só roda quando o secret existe (evita falha barulhenta antes da configuração)
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Claude Code Security Review
+        if: ${{ env.CLAUDE_API_KEY != '' }}
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          comment-pr: true
+          # não escanear artefatos de build / dependências / saída compilada
+          exclude-directories: dist,node_modules,data

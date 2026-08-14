@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
+import { SecurityConfigurationService } from "../SecurityConfigurationService.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
@@ -39,6 +40,16 @@ const router = Router();
 router.get("/production-readiness", (_req: AuthRequest, res): any => {
   try {
     return res.json(ProductionReadinessService.report());
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// SEC-F2 — validação da configuração de segredos no boot (redigida: presença/tamanho/códigos,
+// NUNCA o valor do segredo). Master-only (herda requireMasterAdmin).
+router.get("/security-config", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(SecurityConfigurationService.report());
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }

@@ -220,6 +220,19 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // --- SECURITY CONFIG VALIDATION (SEC-F2 / SEC-04) ---
+  // Fail-closed OPT-IN: valida os segredos críticos no boot. Em produção AVISA + marca degradado;
+  // só ABORTA o boot quando SECURITY_STRICT_BOOT=1 (ligar após a migração de chaves — ver
+  // docs/security/SECURITY-BASELINE.md). Nunca brica um deploy que hoje deriva a cifra do JWT.
+  {
+    const { SecurityConfigurationService } = await import("./src/server/SecurityConfigurationService.js");
+    const secReport = SecurityConfigurationService.enforceBoot();
+    if (secReport.production && secReport.strict && secReport.hasCritical) {
+      console.error("[SECURITY] Boot abortado: SECURITY_STRICT_BOOT=1 e há falha CRÍTICA de configuração de segredos. Corrija e suba de novo (fail-closed).");
+      process.exit(1);
+    }
+  }
+
   // --- SECURITY HEADERS (Helmet-like) ---
   app.use((req, res, next) => {
     res.setHeader('X-DNS-Prefetch-Control', 'off');

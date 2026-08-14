@@ -33,7 +33,7 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 | A1 | 🔴 P0 | ~~`EncryptionService.encrypt()` retorna **plaintext** em caso de erro~~ — **✅ CORRIGIDO (SEC-F1):** agora LANÇA `EncryptionUnavailableError` (fail-closed, SEC-01); backfill resiliente pula a linha sem abortar. `test:security-encryption` (13). | `src/server/EncryptionService.ts:60-72` |
 | A2 | 🔴 P0 | Bootstrap do Master Admin **loga a senha aleatória em texto puro** (`console.warn(...\`${email} / ${password}\`)`), sem guard de produção. | `server.ts:346-365` (linha 364) |
 | A3 | 🔴 P0 | Webhook do WhatsApp é aceito **sem autenticação** quando `isWebhookEnforced()` é falso (default-open: sem `WEBHOOK_SECRET` **e** sem `webhook_enforce=1` **e** sem org com clínica). Correção da auditoria: a lógica é **OR**, não AND — enforce dispara com QUALQUER uma das três. | `src/server/webhookSecurity.ts:42-54`; `server.ts:293-299` |
-| A4 | 🟠 P1 | `ENCRYPTION_KEY` deriva de `JWT_SECRET` quando ausente, com fallback final `sha256("zappflow-dev-key-fallback")`; produção só emite `console.warn` (não bloqueia boot). | `src/server/EncryptionService.ts:17-27` |
+| A4 | 🟠 P1 | ~~`ENCRYPTION_KEY` deriva de `JWT_SECRET`; fallback final hardcoded; prod só avisa~~ — **✅ MITIGADO (SEC-F2):** `SecurityConfigurationService.validateBoot()` valida os segredos no boot (chave presente/distinta/não-fallback/não-placeholder), AVISA + marca `degraded` em produção, e ABORTA o boot sob `SECURITY_STRICT_BOOT=1` (fail-closed opt-in). Rota master `GET /api/admin/security-config`; o pior caso (chave hardcoded) virou `critical` também no painel `SecurityAuditService`. `test:security-config` (14). Falta só ligar o strict após a migração (abaixo). | `src/server/SecurityConfigurationService.ts` |
 | A5 | 🟠 P1 | Middleware financeiro (pré-auth, em `/api`) resolve tenant de `req.headers['x-organization-id'] \|\| 'default_org'`. Mitigado no fluxo autenticado por `requireAuth` que sobrescreve o header com o org do JWT — mas o header ainda é autoridade nesse ponto pré-auth (efeito: driblar o gate read-only ou cair em `default_org`; sem vazamento cross-tenant de dados). | `server.ts:411-431`; mitigação `src/server/middleware/auth.ts:23-24` |
 | A6 | 🟠 P1 | Master Admin autorizado **só** por `req.user.email === MASTER_ADMIN_EMAIL` (claim do JWT). Não existe `platform_role` persistido nem revalidação server-side do papel master. | `src/server/middleware/auth.ts:63-68,102,119` |
 | A7 | 🟠 P1 | Sem proteção de **replay** para webhook inbound do WhatsApp (nenhum `UNIQUE(provider,event_id)`/nonce/janela de timestamp). Só o webhook da Asaas tem dedup. | `server.ts:874+`, `webhookProcessor.ts` (ausência); contraste `src/server/AsaasService.ts:158` |
@@ -119,6 +119,23 @@ NÃO considerar hardening concluído enquanto QUALQUER um for verdadeiro:
 cripto pode persistir plaintext · senha master pode ir pro log · webhook mutável de produção sem
 verificação · tenant escolhível por header arbitrário · mídia tenant-private recuperável publicamente ·
 vulnerabilidade crítica de dependência não resolvida.
+
+## 6.1 Migração de chaves (habilitar o boot fail-closed — SEC-F2)
+
+Hoje a cifra usa `sha256(ENCRYPTION_KEY || JWT_SECRET)`. Definir uma `ENCRYPTION_KEY` NOVA e
+aleatória tornaria **indecifráveis** os segredos já cifrados (tokens OAuth/gateway/MFA → `null`).
+Sequência SEGURA para chegar ao `SECURITY_STRICT_BOOT=1` sem perder dados:
+
+1. **Preservar a leitura** — defina `ENCRYPTION_KEY` = o valor ATUAL do `JWT_SECRET` (o mesmo
+   material que a cifra já usa). Nada muda na decifragem; agora a chave é explícita e desacoplada.
+2. **Rotacionar para chave dedicada** — gere `openssl rand -hex 32` e rode
+   `scripts/rotate-encryption-key.ts` (recifra a base da chave antiga para a nova). Agora
+   `ENCRYPTION_KEY` ≠ `JWT_SECRET`.
+3. **Confirmar** — `GET /api/admin/security-config` deve retornar `issues: []` (`ok: true`).
+4. **Ligar o fail-closed** — defina `SECURITY_STRICT_BOOT=1`. A partir daí, boot com segredo
+   crítico faltando **aborta** (SEC-04), em vez de degradar silenciosamente.
+
+Enquanto o strict não é ligado, o boot só AVISA (não brica o deploy atual).
 
 ## 7. Gate automatizado (CI)
 

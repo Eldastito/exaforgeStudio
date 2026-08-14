@@ -66,6 +66,19 @@ export class SecurityAuditService {
 
     // ENCRYPTION_KEY — check dedicado (segredos em repouso).
     const enc = process.env.ENCRYPTION_KEY || '';
+    // Pior caso (SEC-F2): sem ENCRYPTION_KEY E sem JWT_SECRET no ambiente, a cifra cai numa
+    // chave HARDCODED conhecida ('zappflow-dev-key-fallback') — segredos em repouso ficam
+    // trivialmente decifráveis. Espelha EncryptionService.resolveKey / SecurityConfigurationService.
+    if (!enc && !jwt) {
+      issues.push({
+        id: 'env-encryption-fallback',
+        category: 'environment',
+        severity: 'critical',
+        title: 'Cifra usando chave HARDCODED conhecida',
+        description: "Nem ENCRYPTION_KEY nem JWT_SECRET estão definidos — a criptografia de segredos em repouso usa a chave fixa 'zappflow-dev-key-fallback'. Qualquer segredo guardado é trivialmente decifrável.",
+        recommendation: 'Defina ENCRYPTION_KEY (e JWT_SECRET) com `openssl rand -hex 32`. Veja a migração em docs/security/SECURITY-BASELINE.md.'
+      });
+    }
     if (isProd && !enc) {
       issues.push({
         id: 'env-encryption-derived',

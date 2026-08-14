@@ -114,6 +114,7 @@
     "test:social-golden-paths": "tsx scripts/test-social-golden-paths.ts",
     "test:social-intelligence-hardening": "tsx scripts/test-social-intelligence-hardening.ts",
     "test:security-encryption": "tsx scripts/test-security-encryption.ts",
+    "test:security-config": "tsx scripts/test-security-config.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

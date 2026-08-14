@@ -23,8 +23,9 @@ function parseQuery(url: string): any {
 }
 
 // 1. Assina so /media/private/ (no-op no resto).
-const priv = "/media/private/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg";
-const signed = signChatMediaUrl(priv, now);
+// `priv` anotado como string (nao literal): senao o TS estreita `signed !== priv` para `never`.
+const priv: string = "/media/private/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg";
+const signed: string = signChatMediaUrl(priv, now);
 check("1.1 URL de conversa ganhou assinatura", signed !== priv && signed.includes("sig=") && signed.includes("exp="));
 check("1.2 imagem de produto NAO e tocada", signChatMediaUrl("/media/produto.jpg", now) === "/media/produto.jpg");
 check("1.3 URL externa NAO e tocada", signChatMediaUrl("https://cdn.x/img.jpg", now) === "https://cdn.x/img.jpg");

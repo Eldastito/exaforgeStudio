@@ -34,6 +34,20 @@ RUN npm run build && npm run build:vision-cloud && npm run build:supervisor
 ENV NODE_ENV=production
 EXPOSE 3000
 
+# SEC-F23 (achado A16): roda como usuário SEM privilégio (não-root) — reduz o impacto
+# de uma eventual exploração (um processo comprometido não é root do container). A imagem
+# base `node:*` já traz o usuário `node` (uid/gid 1000); todo o /app passa a pertencer a ele.
+# O build acima roda como root (precisa do apt/toolchain); só a EXECUÇÃO cai pra `node`.
+#
+# IMPORTANTE (validar no deploy): o app escreve em DATA_DIR (SQLite, mídia, .jwt_secret).
+# Sem DATA_DIR definido, o default é /app (que fica gravável pelo `node`). SE você MONTA um
+# volume e aponta DATA_DIR pra ele, esse volume precisa ser GRAVÁVEL pelo uid 1000 — senão
+# o app não sobe (permissão negada ao escrever o banco). No Coolify/host, garanta a
+# permissão do volume (ex.: chown 1000:1000 no diretório do volume) OU deixe DATA_DIR no
+# default. Reversível: se algo travar, basta remover as duas linhas abaixo (chown + USER).
+RUN chown -R node:node /app
+USER node
+
 # `tini` como PID 1 real do container (ENTRYPOINT, não CMD — isso importa:
 # ENTRYPOINT não é sobrescrito por overrides de comando, garantindo que o
 # init nunca seja acidentalmente pulado). Filho único do tini é o supervisor

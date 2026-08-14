@@ -14,6 +14,22 @@ import db from "./db.js";
  */
 const PREFIX = "enc:v1:";
 
+/**
+ * Lançado quando a cifra falha (SEC-01 / SEC-F1 — FAIL CLOSED). A escrita NUNCA cai pra
+ * plaintext: se o AES-GCM falhar (chave inválida/ambiente quebrado), a operação FALHA e
+ * o chamador não persiste o segredo em texto. Com uma chave válida o `encrypt` não falha
+ * em operação normal — então este erro só surge num estado genuinamente quebrado, onde
+ * guardar plaintext seria sempre a escolha errada.
+ */
+export class EncryptionUnavailableError extends Error {
+  code = "encryption_unavailable";
+  constructor(cause?: unknown) {
+    super("Falha ao cifrar segredo — operação abortada (fail-closed, SEC-01). Segredo NÃO persistido em texto.");
+    this.name = "EncryptionUnavailableError";
+    if (cause) (this as any).cause = cause;
+  }
+}
+
 function resolveKey(): Buffer {
   const raw = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || "";
   if (!process.env.ENCRYPTION_KEY) {
@@ -52,8 +68,10 @@ export class EncryptionService {
       const tag = cipher.getAuthTag();
       return PREFIX + Buffer.concat([iv, tag, ct]).toString("base64");
     } catch (e) {
-      console.error("[Encryption] Falha ao cifrar:", e);
-      return plain; // não perde o dado; fica em texto (melhor que sumir)
+      // SEC-01 / SEC-F1 — FAIL CLOSED: nunca devolve plaintext. A operação falha e o
+      // chamador não persiste o segredo em texto (transação faz rollback).
+      console.error("[Encryption] Falha ao cifrar — abortando (fail-closed):", e);
+      throw new EncryptionUnavailableError(e);
     }
   }
 
@@ -89,7 +107,10 @@ export class EncryptionService {
       } catch (e) { return; }
       const upd = db.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${idCol} = ?`);
       for (const r of rows) {
-        const enc = this.encrypt(r.val);
+        // Fail-closed (SEC-F1): se a cifra falhar, PULA a linha (segue plaintext, retentado
+        // no próximo boot) em vez de abortar o backfill inteiro ou gravar texto.
+        let enc: string | null = null;
+        try { enc = this.encrypt(r.val); } catch { continue; }
         if (enc && this.isEncrypted(enc)) { try { upd.run(enc, r.id); updated++; } catch (e) { /* noop */ } }
       }
     };

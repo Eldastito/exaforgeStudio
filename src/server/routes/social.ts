@@ -14,6 +14,7 @@ import { SocialProactivityService } from "../SocialProactivityService.js";
 import { SocialEntitlementService } from "../SocialEntitlementService.js";
 import { CreativeExperimentService } from "../CreativeExperimentService.js";
 import { ContentLeadAttributionService } from "../ContentLeadAttributionService.js";
+import { ContentRevenueAttributionService } from "../ContentRevenueAttributionService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -395,6 +396,26 @@ router.get("/attribution/leads", requireRole("owner", "admin"), (req: AuthReques
   const correlationId = String(req.query?.correlationId || "").trim();
   if (!correlationId) return res.status(400).json({ error: "Informe o correlationId." });
   res.json({ correlationId, leadCount: ContentLeadAttributionService.leadCount(orgId, correlationId), leads: ContentLeadAttributionService.leadsFor(orgId, correlationId) });
+});
+
+// ── Lead→Sale→Revenue→Margin (PRD 11 / ADR-168 F8) — dinheiro role-gated (RN-CG-06) ──
+
+// POST /api/social/attribution/revenue { correlationId } — resolve venda dos leads do conteúdo
+router.post("/attribution/revenue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const correlationId = String(req.body?.correlationId || "").trim();
+  if (!correlationId) return res.status(400).json({ error: "Informe o correlationId." });
+  res.json(ContentRevenueAttributionService.attributeLeads(orgId, correlationId));
+});
+
+// GET /api/social/attribution/revenue?correlationId=... — resumo receita/margem (fact≠estimate)
+router.get("/attribution/revenue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const correlationId = String(req.query?.correlationId || "").trim();
+  if (!correlationId) return res.status(400).json({ error: "Informe o correlationId." });
+  res.json(ContentRevenueAttributionService.revenueFor(orgId, correlationId));
 });
 
 export default router;

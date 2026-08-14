@@ -9160,6 +9160,34 @@ const initDb = () => {
         ON content_lead_attributions (organization_id, correlation_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar content_lead_attributions (ADR-168 F7)', e); }
+
+  // PRD 11 / ADR-168 F8 — Lead→Sale→Revenue→Margin. Estende o fio da F7 até o DINHEIRO:
+  // pra cada lead atribuído a um conteúdo, resolve o valor da venda por PRECEDÊNCIA (orders
+  // pago→fact > quotes aceito→estimate > contacts.avg_ticket→estimate > nenhum→não atribui),
+  // espelhando `SalesRecoveryAttributionService`. Margem = unit_price − unit_cost (só fact
+  // quando TODO custo é conhecido; senão null — RN-CG-03 não inventa dinheiro). `revenue_basis`
+  // e `margin_basis` separam fact de estimate (nunca somados). UNIQUE(org,corr,contact) evita
+  // dupla contagem. Aditiva; dinheiro role-gated na rota (RN-CG-06).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS content_sale_attributions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        correlation_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        order_id TEXT,                       -- venda de origem (quando source='orders')
+        revenue REAL,                        -- valor atribuído
+        revenue_basis TEXT,                  -- 'fact' | 'estimate'
+        margin REAL,                         -- lucro (null quando custo desconhecido)
+        margin_basis TEXT,                   -- 'fact' | null
+        source TEXT,                         -- 'orders' | 'quotes' | 'contacts_avg_ticket'
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, correlation_id, contact_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_content_sale_attr_corr
+        ON content_sale_attributions (organization_id, correlation_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar content_sale_attributions (ADR-168 F8)', e); }
 };
 
 initDb();

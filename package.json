@@ -124,6 +124,7 @@
     "test:objective-aware-winner": "tsx scripts/test-objective-aware-winner.ts",
     "test:creative-learning-2": "tsx scripts/test-creative-learning-2.ts",
     "test:product-opportunity": "tsx scripts/test-product-opportunity.ts",
+    "test:growth-goal": "tsx scripts/test-growth-goal.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { COOKIE_SESSION } from '@/src/lib/sessionMode';
 
 interface User {
   id: string;
@@ -33,6 +34,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const storedToken = localStorage.getItem('zappflow_token');
     const storedUser = localStorage.getItem('zappflow_user');
+
+    // SEC-F24 Fase 2 (cookie mode): a sessão vive no cookie httpOnly; não há token em JS.
+    // Reidrata consultando /api/auth/me (o cookie vai junto, same-origin). 401/403 → sem
+    // sessão; erro de rede → se houver perfil salvo, reidrata a UI (contingência, igual ao
+    // header mode). O `token` do context fica null — o socket usa o cookie no handshake (Fase 1).
+    if (COOKIE_SESSION) {
+      fetch('/api/auth/me')
+        .then(res => {
+          if (res.status === 401 || res.status === 403) {
+            localStorage.removeItem('zappflow_user');
+            setUser(null);
+            return;
+          }
+          return res.json().then((u: any) => {
+            if (u && u.id) {
+              const nu = { id: u.id, name: u.name, email: u.email, role: u.role, organizationId: u.organization_id, onboarding_status: u.onboarding_status };
+              setUser(nu);
+              localStorage.setItem('zappflow_user', JSON.stringify(nu));
+            } else if (storedUser) { try { setUser(JSON.parse(storedUser)); } catch (e) {} }
+          }).catch(() => { if (storedUser) { try { setUser(JSON.parse(storedUser)); } catch (e) {} } });
+        })
+        .catch(() => { if (storedUser) { try { setUser(JSON.parse(storedUser)); } catch (e) {} } })
+        .finally(() => setLoading(false));
+      return;
+    }
 
     if (storedToken && storedUser) {
       // Valida o token no servidor. Se estiver inválido/expirado (ex.: o
@@ -71,7 +97,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
-    localStorage.setItem('zappflow_token', newToken);
+    // SEC-F24 Fase 2 (cookie mode): NÃO gravamos o token (segredo) no localStorage — a sessão
+    // vive no cookie httpOnly que o backend acabou de setar na resposta do login. Só o perfil
+    // (não-secreto) é persistido pra reidratar a UI no refresh. Header mode: comportamento atual.
+    if (!COOKIE_SESSION) localStorage.setItem('zappflow_token', newToken);
     localStorage.setItem('zappflow_user', JSON.stringify(newUser));
   };
 
@@ -80,6 +109,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem('zappflow_token');
     localStorage.removeItem('zappflow_user');
+    // SEC-F24 Fase 2: encerra a sessão do cookie httpOnly no servidor (best-effort, idempotente).
+    // O backend emite o cookie em todo login desde a Fase 1, então limpar é correto nos dois modos.
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     // ADR-082 (D7): apaga o armazenamento local da camada de continuidade
     // (outbox no IndexedDB). É dado por-usuário e não pode sobreviver ao logout
     // num dispositivo compartilhado. Best-effort: não bloqueia a saída.

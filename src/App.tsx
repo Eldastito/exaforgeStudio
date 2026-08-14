@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { devLog } from '@/src/lib/log';
+import { COOKIE_SESSION } from '@/src/lib/sessionMode';
 import { Sidebar } from '@/src/features/Sidebar';
 import { KanbanBoard } from '@/src/features/KanbanBoard';
 import { ChatPanel } from '@/src/features/ChatPanel';
@@ -58,6 +59,13 @@ import io from 'socket.io-client';
 export default function App() {
   const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, loadPermissions, isModuleEnabled, canAccessModule, setViewMode, enabledModules } = useStore();
   const { user, token, loading, logout } = useAuth();
+  // SEC-F24 Fase 2 — em cookie mode a sessão vive no cookie httpOnly; após um refresh o `token`
+  // fica null (o JWT é httpOnly, JS não lê), mas o usuário SEGUE logado. O sinal canônico de
+  // "logado" passa a ser o usuário; o token, quando existe em memória (login recente), ainda
+  // serve pro header/socket, senão o cookie carrega a auth sozinho (same-origin). Em header mode
+  // (default) `authed`/`sessionKey` colapsam pro token — comportamento idêntico ao de antes.
+  const authed = COOKIE_SESSION ? !!user : !!token;
+  const sessionKey = COOKIE_SESSION ? (user?.id ?? null) : token;
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   // F2.1c — se o navegador tem sessão ativa e o usuário abre `?solo=<key>`
@@ -83,7 +91,7 @@ export default function App() {
   // Outbox durável (ADR-082, Fase 1b): reenvia comandos enfileirados offline e
   // reflete o resultado no balão da mensagem (id do comando = id local da msg).
   useEffect(() => {
-    if (!token) return;
+    if (!authed) return;
     let stop = () => {};
     import('@/src/lib/continuity/sync').then(({ startOutboxFlusher }) => {
       stop = startOutboxFlusher((commandId, status) => {
@@ -98,23 +106,23 @@ export default function App() {
       });
     });
     return () => stop();
-  }, [token]);
+  }, [sessionKey]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!authed) return;
     // Carrega os tickets/contatos reais do banco (substitui os dados de exemplo)
     hydrate();
     // Carrega a config da org (vertical + módulos habilitados) para o gating da UI.
     loadOrgConfig();
     // RBAC granular (ADR-095): carrega o nível de acesso do usuário por módulo.
     loadPermissions();
-  }, [token, hydrate, loadOrgConfig, loadPermissions]);
+  }, [sessionKey, hydrate, loadOrgConfig, loadPermissions]);
 
   // F2.1c — detecta ?solo=<key> em sessão logada. Nunca faz redirect
   // automático (respeitamos a sessão ativa); o usuário decide se quer
   // deslogar pra criar conta Solo, ou continuar na sessão atual.
   useEffect(() => {
-    if (!token) return;
+    if (!authed) return;
     try {
       const params = new URLSearchParams(window.location.search);
       const solo = params.get('solo') || params.get('blueprint');
@@ -123,7 +131,7 @@ export default function App() {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     } catch { /* noop */ }
-  }, [token]);
+  }, [sessionKey]);
 
   // Se a aba atual aponta para um módulo desligado, volta para o Atendimento.
   useEffect(() => {
@@ -144,15 +152,15 @@ export default function App() {
   }, [viewMode, isModuleEnabled, canAccessModule, setViewMode, enabledModules]);
 
   useEffect(() => {
-    if (!token) return;
-    // Carregar notificações
-    fetch('/api/notifications', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
+    if (!authed) return;
+    // Carregar notificações. Em cookie mode sem token em memória (pós-refresh), NÃO mandamos
+    // header — a auth vai pelo cookie httpOnly (same-origin). Com token (login recente ou header
+    // mode), mandamos o Bearer como antes.
+    fetch('/api/notifications', token ? { headers: { 'Authorization': `Bearer ${token}` } } : undefined)
       .then(r => r.json())
       .then(setNotifications)
       .catch(() => {});
-  }, [token]);
+  }, [sessionKey]);
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
@@ -164,9 +172,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!token) return;
-    // Conectar ao Socket.IO do backend (autenticado via JWT no handshake)
-    const socket = io(window.location.origin, { auth: { token } });
+    if (!authed) return;
+    // Conectar ao Socket.IO do backend (autenticado no handshake). Em cookie mode sem token em
+    // memória (pós-refresh), NÃO passamos auth.token — o handshake lê o cookie httpOnly (Fase 1).
+    // Com token (login recente ou header mode), passamos como antes.
+    const socket = io(window.location.origin, token ? { auth: { token } } : undefined);
 
     let hadDisconnect = false;
     socket.on("connect", () => {

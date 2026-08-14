@@ -15,6 +15,7 @@ import { SocialEntitlementService } from "../SocialEntitlementService.js";
 import { CreativeExperimentService } from "../CreativeExperimentService.js";
 import { ContentLeadAttributionService } from "../ContentLeadAttributionService.js";
 import { ContentRevenueAttributionService } from "../ContentRevenueAttributionService.js";
+import { ProductOpportunityService } from "../ProductOpportunityService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -370,6 +371,22 @@ router.post("/experiments/:id/decide", requireRole("owner", "admin"), (req: Auth
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(CreativeExperimentService.decide(orgId, req.params.id, req.user?.userId || null)); }
   catch (e: any) { res.status(404).json({ error: e.message || "Falha ao decidir." }); }
+});
+
+// ── Inventory/Product Opportunity (PRD 11 / ADR-168 F11) — dinheiro role-gated (RN-CG-06) ──
+
+// GET /api/social/product-opportunities — candidatos (margem/custo ABSOLUTOS, role-gated)
+router.get("/product-opportunities", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ candidates: ProductOpportunityService.candidates(orgId) });
+});
+
+// POST /api/social/product-opportunities/match { publish? } — publica na espinha (sem R$ no sinal)
+router.post("/product-opportunities/match", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProductOpportunityService.match(orgId, { publish: req.body?.publish !== false }));
 });
 
 // GET /api/social/experiments/:id/outcome — resultado de NEGÓCIO por variante (F9, role-gated)

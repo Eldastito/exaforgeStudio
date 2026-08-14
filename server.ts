@@ -138,6 +138,7 @@ import { buildSecurityHeaders } from "./src/server/securityHeaders.js";
 import { buildCorsHeaders } from "./src/server/corsConfig.js";
 import { jsonForScript } from "./src/server/htmlSafe.js";
 import { resolveGenericPaymentWebhook, paymentAmountMatches } from "./src/server/paymentWebhookGuard.js";
+import { chatMediaEnforced, verifyChatMediaRequest, signChatMediaUrl } from "./src/server/mediaSigning.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -159,17 +160,19 @@ import fs from "fs";
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), 'media');
 try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) {}
 
-// Salva um base64 como arquivo e retorna a URL pública (/media/<arquivo>).
-// SEC-F10 (A9): valida o CONTEÚDO por magic bytes (não confia na extensão do cliente) e deriva
-// a extensão do tipo REAL. Conteúdo não-imagem é REJEITADO — nada arbitrário vai pro /media público.
-// O 2º arg (ext do cliente) é ignorado de propósito, mantido só por compat de assinatura.
+// Salva a MÍDIA DE CONVERSA (foto que o cliente manda) e retorna `/media/private/<arquivo>`.
+// SEC-F10 (A9): valida o CONTEÚDO por magic bytes; conteúdo não-imagem é REJEITADO.
+// SEC-F21 (A8): vai para o subdir PRIVADO `private/` — entregue por URL assinada (mídia de
+// conversa é sensível, ≠ imagem de produto/estúdio, que seguem públicas). O 2º arg é ignorado.
 function saveMediaBase64(base64: string, _clientExt = 'jpg'): string | null {
   const v = validateImageBase64(base64);
   if (!v) { console.warn("[Media] Conteúdo rejeitado — não é uma imagem reconhecida (SEC-F10)."); return null; }
   try {
     const name = `${uuidv4()}.${v.ext}`;
-    fs.writeFileSync(path.join(MEDIA_DIR, name), v.buffer);
-    return `/media/${name}`;
+    const dir = path.join(MEDIA_DIR, 'private');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), v.buffer);
+    return `/media/private/${name}`;
   } catch (e) {
     console.error("[Media] Falha ao salvar arquivo:", e);
     return null;
@@ -409,6 +412,15 @@ async function startServer() {
   app.use(httpMetricsMiddleware);
 
   // Servir mídias recebidas (imagens) — rota pública, fora do /api protegido.
+  // SEC-F21 (A8): a MÍDIA DE CONVERSA vive em /media/private/ e, quando o operador liga
+  // MEDIA_PRIVATE_CHAT=1, só é servida com URL assinada válida (HMAC+TTL). Produto/estúdio
+  // (o resto de /media) seguem públicos — vitrine e publicação social intactas. Off por
+  // padrão (0-regressão) até validar que o chat renderiza com URL assinada.
+  app.use('/media/private', (req, res, next) => {
+    if (!chatMediaEnforced()) return next();
+    if (verifyChatMediaRequest(req.path, req.query)) return next();
+    return res.status(403).send('Forbidden');
+  });
   app.use('/media', express.static(MEDIA_DIR));
 
   // ADR-154 F10.1 — probes de saúde para monitoramento externo (uptime robots,

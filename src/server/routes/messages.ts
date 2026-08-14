@@ -6,6 +6,7 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { ContinuityService } from "../ContinuityService.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { signChatMediaUrl } from "../mediaSigning.js";
 
 const router = Router();
 
@@ -19,7 +20,9 @@ router.get("/:ticketId", (req: AuthRequest, res): any => {
       FROM messages
       WHERE ticket_id = ? AND organization_id = ?
       ORDER BY created_at ASC
-    `).all(req.params.ticketId, orgId);
+    `).all(req.params.ticketId, orgId) as any[];
+    // SEC-F21: assina a mídia de conversa (/media/private/) na entrega; outras URLs intactas.
+    for (const r of rows) r.media_url = signChatMediaUrl(r.media_url);
     res.json(rows);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

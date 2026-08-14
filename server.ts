@@ -136,6 +136,7 @@ import { logAuthEvent } from "./src/server/auditLog.js";
 import { validateImageBase64 } from "./src/server/mediaValidation.js";
 import { buildSecurityHeaders } from "./src/server/securityHeaders.js";
 import { buildCorsHeaders } from "./src/server/corsConfig.js";
+import { jsonForScript } from "./src/server/htmlSafe.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -1530,7 +1531,10 @@ async function startServer() {
           `<meta name="twitter:title" content="${esc(title)}">` +
           `<meta name="twitter:description" content="${esc(desc)}">` +
           (imgUrl ? `<meta name="twitter:image" content="${esc(imgUrl)}">` : '') +
-          `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`;
+          // XSS armazenado: JSON.stringify NÃO escapa < / > / & — nome/descrição do
+          // produto (form do lojista) poderiam fechar a </script> e executar JS no
+          // navegador do visitante. jsonForScript neutraliza (JSON segue válido).
+          `<script type="application/ld+json">${jsonForScript(jsonLd)}</script>`;
         html = html.replace(/<title>.*?<\/title>/s, meta);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(html);

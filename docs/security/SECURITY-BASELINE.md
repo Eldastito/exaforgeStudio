@@ -61,6 +61,21 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 que a auditoria supôs, mas o default-open é real. A2/A8 têm mitigações parciais (docs clínicos já são
 privados). A1 afeta só a escrita (`encrypt`), não a leitura.
 
+### 2.0.1 Auditoria de INJEÇÃO (código digitado em formulários) — SEC-F16
+
+Pergunta do dono: "um usuário mal-intencionado consegue escrever código nos campos e executar?".
+Varredura completa (XSS cliente/servidor, SQL, comando, path traversal, prompt-injection):
+
+| Classe | Resultado |
+| --- | --- |
+| **XSS armazenado (SSR JSON-LD)** | 🔴 **1 CONFIRMADO → ✅ CORRIGIDO (SEC-F16):** `server.ts` embutia `JSON.stringify(jsonLd)` (nome/descrição do produto, digitados no form do lojista) num `<script type="application/ld+json">`. `JSON.stringify` não escapa `<`/`>`/`&` — um produto `</script><script>…</script>` executava JS na loja pública. `jsonForScript` (`src/server/htmlSafe.ts`) escapa como `\uXXXX` (JSON segue válido). `test:security-xss-jsonld` (10). |
+| XSS cliente (React) | ✅ SEGURO — zero `dangerouslySetInnerHTML`/`innerHTML`/`eval`/`new Function`; React escapa texto por padrão. |
+| SQL injection | ✅ SEGURO — `better-sqlite3` com `?` em tudo; fragmentos `${where}` são cláusulas fixas, valores sempre via bind; colunas de `ORDER BY`/`SET` são literais/whitelist; `LIMIT` sempre `Number()`-coagido. Nenhuma query monta SQL com dado do request. |
+| Comando/código | ✅ SEGURO — sem `eval`/`new Function`/`vm`/`child_process` alcançável por rota HTTP (só em `scripts/` de teste, com args fixos). |
+| Path traversal | ✅ SEGURO — nomes de arquivo são UUID do servidor ou chaves do DB por-org; onde há URL do usuário, `path.basename()` protege. |
+| Prompt-injection (IA) | 🟡 LIMITADO — a saída da IA é whitelist server-side (`sanitizeActions`), então injeção não executa SQL/código (no máximo resposta fora do script). Endurecimento futuro: rotear o chat principal pelo `ContextGuardService.fence` (já usado na Reputação). |
+| Validação de entrada | Manual por rota (destructuring de campos nomeados, coerção, whitelist de enum, cap de tamanho) — sem lib de schema (zod). É o que mantém o SQL seguro; recomendação futura: camada central de validação. |
+
 ### 2.1 Varredura do FRONTEND (dados sensíveis no navegador)
 
 Resultado geral: **bom**. Sem segredo hardcoded, sem exposição via `import.meta.env`/`VITE_*`, sem

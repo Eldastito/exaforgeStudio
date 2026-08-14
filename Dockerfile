@@ -1,22 +1,28 @@
-# Imagem única: builda o front (Vite) + os dois servidores Node (core +
-# vision-cloud, ver docs/adr/ADR-001-vision-edge-runtime.md, adendo) via
-# esbuild, e roda os dois processos dentro do MESMO container.
-FROM node:22-bookworm-slim
+# Multi-stage (SEC-F26 / follow-up A16): a imagem de RUNTIME não carrega mais o
+# toolchain de compilação (python3/make/g++) nem as devDependencies (vite/esbuild/
+# tsc/@types) — só o que o app precisa pra RODAR. O build (que precisa do toolchain
+# e das devDeps) acontece no estágio `builder` e é DESCARTADO; o estágio final copia
+# apenas o /app já buildado e com `node_modules` de produção.
+#
+# Por que isso importa e é seguro:
+#  - Os bundles são feitos com esbuild `--packages=external` (ver package.json): NENHUM
+#    pacote é embutido no .cjs — em runtime, os .cjs fazem `require()` de tudo a partir
+#    de `node_modules`. Logo a imagem final PRECISA do `node_modules` de PRODUÇÃO, com
+#    os módulos NATIVOS (better-sqlite3, bcrypt) já compilados. Compilamos no `builder`
+#    (mesma imagem base → mesmo glibc/arch, os .node são compatíveis) e copiamos prontos.
+#  - Copiamos o /app INTEIRO do builder (após `npm prune`), não uma seleção de arquivos:
+#    como o servidor é bundlado mas lê assets em runtime (templates/fontes de PDF, etc.),
+#    um copy seletivo arriscaria faltar um arquivo. Copiar tudo (menos o toolchain apt e
+#    as devDeps já podadas) é o corte seguro. Otimização futura (encolher mais a imagem
+#    tirando o código-fonte) exige validar os caminhos de asset num build real.
 
+# ── Estágio 1: builder (tem toolchain + devDeps; é descartado) ──────────────
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 
-# Ferramentas para compilar módulos nativos (better-sqlite3, bcrypt) + `tini`.
-#
-# `tini` é o init de facto para containers Docker — é literalmente o binário
-# por trás da flag `docker run --init`. Ele roda como PID 1 real do container
-# (ver ENTRYPOINT abaixo) e resolve dois problemas que Node sozinho NÃO
-# resolve como PID 1: (1) reaping de processos-filho zumbis/órfãos — Node não
-# faz isso; (2) repasse correto de sinais (SIGTERM do `docker stop`/redeploy
-# do Coolify) para os processos filhos. Decisão completa, alternativas
-# avaliadas e testes que validaram isso (inclusive teste real de reaping de
-# zumbi, não só teórico): docs/adr/ADR-008-process-supervisor.md
+# Ferramentas p/ compilar módulos nativos (better-sqlite3, bcrypt). Só no builder.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ ca-certificates tini \
+      python3 make g++ ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Não baixar o Chromium do whatsapp-web.js (usamos a Evolution API)
@@ -31,13 +37,39 @@ RUN npm ci --include=dev
 COPY . .
 RUN npm run build && npm run build:vision-cloud && npm run build:supervisor
 
+# Remove as devDependencies do node_modules — o runtime só precisa das `dependencies`
+# (com os nativos já compilados acima). NÃO recompila nada; só poda.
+RUN npm prune --omit=dev
+
+# ── Estágio 2: runtime (sem toolchain, sem devDeps) ─────────────────────────
+FROM node:22-bookworm-slim
+WORKDIR /app
+
+# `tini` é o init de facto para containers Docker — é literalmente o binário
+# por trás da flag `docker run --init`. Ele roda como PID 1 real do container
+# (ver ENTRYPOINT abaixo) e resolve dois problemas que Node sozinho NÃO
+# resolve como PID 1: (1) reaping de processos-filho zumbis/órfãos — Node não
+# faz isso; (2) repasse correto de sinais (SIGTERM do `docker stop`/redeploy
+# do Coolify) para os processos filhos. Decisão completa, alternativas
+# avaliadas e testes que validaram isso (inclusive teste real de reaping de
+# zumbi, não só teórico): docs/adr/ADR-008-process-supervisor.md
+#
+# `ca-certificates` fica no runtime (chamadas HTTPS de saída em produção); o
+# toolchain de build (python3/make/g++) NÃO — ele só existia pra compilar os
+# nativos, o que já aconteceu no estágio `builder`.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates tini \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 EXPOSE 3000
+
+# Copia o app já buildado + node_modules de produção (nativos compilados) do builder.
+COPY --from=builder /app /app
 
 # SEC-F23 (achado A16): roda como usuário SEM privilégio (não-root) — reduz o impacto
 # de uma eventual exploração (um processo comprometido não é root do container). A imagem
 # base `node:*` já traz o usuário `node` (uid/gid 1000); todo o /app passa a pertencer a ele.
-# O build acima roda como root (precisa do apt/toolchain); só a EXECUÇÃO cai pra `node`.
 #
 # IMPORTANTE (validar no deploy): o app escreve em DATA_DIR (SQLite, mídia, .jwt_secret).
 # Sem DATA_DIR definido, o default é /app (que fica gravável pelo `node`). SE você MONTA um

@@ -73,7 +73,7 @@ Varredura completa (XSS cliente/servidor, SQL, comando, path traversal, prompt-i
 | SQL injection | ✅ SEGURO — `better-sqlite3` com `?` em tudo; fragmentos `${where}` são cláusulas fixas, valores sempre via bind; colunas de `ORDER BY`/`SET` são literais/whitelist; `LIMIT` sempre `Number()`-coagido. Nenhuma query monta SQL com dado do request. |
 | Comando/código | ✅ SEGURO — sem `eval`/`new Function`/`vm`/`child_process` alcançável por rota HTTP (só em `scripts/` de teste, com args fixos). |
 | Path traversal | ✅ SEGURO — nomes de arquivo são UUID do servidor ou chaves do DB por-org; onde há URL do usuário, `path.basename()` protege. |
-| Prompt-injection (IA) | 🟡 LIMITADO — a saída da IA é whitelist server-side (`sanitizeActions`), então injeção não executa SQL/código (no máximo resposta fora do script). Endurecimento futuro: rotear o chat principal pelo `ContextGuardService.fence` (já usado na Reputação). |
+| Prompt-injection (IA) | ✅ **ENDURECIDO (SEC-F17):** o chat principal (`AIOrchestratorService`) e o legado (`geminiRAG`) agora ROTEIAM o conteúdo externo pelo `ContextGuardService` — trechos de RAG e a mensagem do cliente vão CERCADOS no envelope `<untrusted_external_data>` (sentinela desarmado, chars de controle removidos), e o system prompt declara que ali é DADO, nunca instrução. Continua com a whitelist de ações server-side (`sanitizeActions`) por trás. `test:security-ai-fence` (11). |
 | Validação de entrada | Manual por rota (destructuring de campos nomeados, coerção, whitelist de enum, cap de tamanho) — sem lib de schema (zod). É o que mantém o SQL seguro; recomendação futura: camada central de validação. |
 
 ### 2.1 Varredura do FRONTEND (dados sensíveis no navegador)

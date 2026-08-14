@@ -227,8 +227,8 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     // Login OK: zera o contador de tentativas
     await emailLoginLimiter.clear(attemptKey); if (ipKey) await ipLoginLimiter.clear(ipKey);
 
-    // Update last login
-    db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);
+    // Update last login — best-effort (não pode derrubar o login por falha de escrita)
+    try { db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id); } catch {}
     logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email });
 
     const token = jwt.sign(

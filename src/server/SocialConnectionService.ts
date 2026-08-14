@@ -32,6 +32,7 @@ import {
   SocialChannelCapabilityFlags,
 } from "./SocialChannelProvider.js";
 import { InstagramChannelProvider } from "./InstagramChannelProvider.js";
+import { FacebookChannelProvider } from "./FacebookChannelProvider.js";
 
 interface ConnectionRow {
   id: string;
@@ -190,6 +191,10 @@ export class SocialConnectionService {
     // sem 2ª tela de credenciais (§42). Default `stub` mantém 0-regressão (opt-in).
     if (channel === "instagram" && providerName === "instagram") {
       return new InstagramChannelProvider(orgId);
+    }
+    // Provider REAL do Facebook (F14): mesmo padrão do IG (opt-in, credencial no `channels`).
+    if (channel === "facebook" && providerName === "facebook") {
+      return new FacebookChannelProvider(orgId);
     }
     if (providerName === "stub" || !this.isKnownChannel(channel) || channel === "stub") {
       const c = cfg.capabilities || {};

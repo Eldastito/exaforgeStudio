@@ -1,10 +1,15 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { PaymentService } from "../PaymentService.js";
 
 const router = Router();
+
+// SEC-F19: quem enxerga/edita o DESTINO do dinheiro (chave PIX, token do gateway) é
+// só dono/admin. Antes o GET expunha a chave PIX a qualquer papel e o PUT/rotate não
+// tinham trava — um funcionário podia trocar a chave pela conta dele e desviar tudo.
+const canSeePayout = (req: AuthRequest) => req.user?.role === "owner" || req.user?.role === "admin";
 
 const logEvent = (orgId?: string, actorId?: string, targetId?: string, eventType = '', meta: any = {}) => {
   try {
@@ -13,16 +18,24 @@ const logEvent = (orgId?: string, actorId?: string, targetId?: string, eventType
   } catch (e) { /* noop */ }
 };
 
-// GET /api/payments/settings — config de recebimento (sem segredos)
+// GET /api/payments/settings — config de recebimento (sem segredos). A chave PIX de
+// recebimento (identidade de quem recebe) é redigida para quem não é dono/admin —
+// status (habilitado/provider/tem-token) segue visível para o resto da operação.
 router.get("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(PaymentService.getPublicSettings(orgId)); }
-  catch (e: any) { res.status(500).json({ error: e.message }); }
+  try {
+    const s: any = PaymentService.getPublicSettings(orgId);
+    if (!canSeePayout(req)) {
+      s.hasPixKey = !!s.pixKey;
+      s.pixKey = ""; s.pixName = ""; s.pixCity = "";
+    }
+    res.json(s);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/payments/settings — atualiza a config de recebimento
-router.put("/settings", (req: AuthRequest, res): any => {
+// PUT /api/payments/settings — atualiza a config de recebimento (SÓ dono/admin — SEC-F19)
+router.put("/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });
@@ -33,8 +46,8 @@ router.put("/settings", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/payments/webhook-secret — gera/regenera o segredo do webhook do gateway
-router.post("/webhook-secret", (req: AuthRequest, res): any => {
+// POST /api/payments/webhook-secret — gera/regenera o segredo do webhook (SÓ dono/admin — SEC-F19)
+router.post("/webhook-secret", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });

@@ -9188,6 +9188,12 @@ const initDb = () => {
         ON content_sale_attributions (organization_id, correlation_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar content_sale_attributions (ADR-168 F8)', e); }
+
+  // PRD 11 / ADR-168 F9 — Objective-aware Winner. Cada variante do experimento ganha um
+  // `correlation_id` que liga a variante ao seu conteúdo publicado → às atribuições de
+  // negócio (F7/F8). Assim o vencedor pode ser escolhido pelo RESULTADO DE NEGÓCIO (receita/
+  // leads), não só pelo engajamento (RN-CG-01). Aditivo.
+  try { db.exec(`ALTER TABLE creative_experiment_variants ADD COLUMN correlation_id TEXT`); } catch(e){}
 };
 
 initDb();

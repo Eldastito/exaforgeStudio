@@ -116,6 +116,7 @@
     "test:security-encryption": "tsx scripts/test-security-encryption.ts",
     "test:security-config": "tsx scripts/test-security-config.ts",
     "test:security-master": "tsx scripts/test-security-master.ts",
+    "test:security-tenant": "tsx scripts/test-security-tenant.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

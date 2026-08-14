@@ -135,9 +135,38 @@ export const RetailClosingOutcomeResolver: BusinessOutcomeResolver = {
   },
 };
 
+// ── Resolver de CONTEÚDO (PRD 11 / ADR-168 F7) ────────────────────────────
+// System-of-record: `content_lead_attributions`. O problema ("conteúdo publicado não
+// converteu") só está no 1º grau resolvido quando o conteúdo GEROU UM LEAD — publicar (e até
+// engajar) NÃO é resultado de negócio (RN-CG-01: ENGAGEMENT ≠ BUSINESS VALUE; um lead é o 1º
+// sinal de valor). A F8 estende pra venda→receita→margem. Read-only, pergunta ao dado (D3).
+export const ContentOutcomeResolver: BusinessOutcomeResolver = {
+  domain: "content",
+  appliesTo(action: any): boolean {
+    return action?.command_type === "social_publish";
+  },
+  resolve(orgId: string, action: any): ResolverResult {
+    const corr = action?.correlation_id || null;
+    if (!corr) {
+      // Sem o fio da campanha não há como perguntar ao system-of-record (RN-OA-2).
+      return { resolved: "unknown", basis: "system_of_record", domain: "content", reason: "no_correlation_link" };
+    }
+    const row = db.prepare(
+      "SELECT COUNT(*) AS leads FROM content_lead_attributions WHERE organization_id = ? AND correlation_id = ?"
+    ).get(orgId, corr) as any;
+    const leads = Number(row?.leads || 0);
+    if (leads > 0) {
+      return { resolved: "confirmed", basis: "system_of_record", domain: "content", reason: "lead_generated", evidence: { correlationId: corr, leadCount: leads, stage: "lead" } };
+    }
+    // Publicou mas ainda não gerou lead → não resolvido (não é falha — pode converter depois).
+    return { resolved: "not_confirmed", basis: "system_of_record", domain: "content", reason: "no_lead_yet", evidence: { correlationId: corr } };
+  },
+};
+
 // ── Registry ──────────────────────────────────────────────────────────────
 const DEFAULT_RESOLVERS: BusinessOutcomeResolver[] = [
   CollectionOutcomeResolver, SalesRecoveryOutcomeResolver, ReputationOutcomeResolver, RetailClosingOutcomeResolver,
+  ContentOutcomeResolver,
 ];
 
 export class BusinessOutcomeResolverRegistry {

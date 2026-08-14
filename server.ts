@@ -137,6 +137,7 @@ import { validateImageBase64 } from "./src/server/mediaValidation.js";
 import { buildSecurityHeaders } from "./src/server/securityHeaders.js";
 import { buildCorsHeaders } from "./src/server/corsConfig.js";
 import { jsonForScript } from "./src/server/htmlSafe.js";
+import { resolveGenericPaymentWebhook, paymentAmountMatches } from "./src/server/paymentWebhookGuard.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -1187,27 +1188,37 @@ async function startServer() {
         return res.status(200).send("OK");
       }
 
-      // FORMATO GENÉRICO (gateway 'custom' que posta no nosso formato):
-      let orderId: string | undefined = body.orderId || body.order_id;
-      let paid = body.status ? ['paid', 'approved', 'pago', 'completed'].includes(String(body.status).toLowerCase()) : true;
-      let externalId: string | undefined = body.externalId || body.payment_id || body.id;
-
-      if (!orderId && body.data && body.data.external_reference) {
-        orderId = body.data.external_reference;
-        externalId = body.data.id || externalId;
-      }
-
+      // FORMATO GENÉRICO (gateway 'custom' que posta no nosso formato). Decisões puras
+      // (status pago explícito + valor) em paymentWebhookGuard (SEC-F20); replay/dedup e
+      // markPaid ficam aqui (efeitos colaterais).
+      const { orderId, externalId, paid } = resolveGenericPaymentWebhook(body);
       if (!orderId) {
         console.warn("[PayWebhook] Sem orderId/external_reference no payload.");
         return res.status(200).send("IGNORED");
       }
-      if (paid) {
-        const ok = PaymentService.markPaid(orgId, orderId, { method: 'gateway', externalId });
-        if (ok && (global as any).io) {
-          (global as any).io.to(`org:${orgId}`).emit("order_updated", { orderId, status: 'pago', payment_status: 'paid' });
-        }
-        console.log(`[PayWebhook] Pedido ${orderId} marcado como pago (org ${orgId}).`);
+      // SEC-F20: exige status PAGO EXPLÍCITO. Antes, payload SEM status assumia pago —
+      // quem tivesse o segredo marcava qualquer pedido como pago sem pagar.
+      if (!paid) {
+        console.log(`[PayWebhook] Pedido ${orderId}: sem status pago explícito — ignorado (org ${orgId}).`);
+        return res.status(200).send("IGNORED");
       }
+      // SEC-F20: replay/dedup — a MESMA notificação (mesmo id externo) processa 1×.
+      if (externalId && !claimWebhookEvent("payment", String(externalId))) {
+        console.log(`[PayWebhook] Evento ${externalId} duplicado — ignorado (org ${orgId}).`);
+        return res.status(200).send("DUPLICATE_IGNORED");
+      }
+      // SEC-F20: quando o payload traz um valor, ele TEM que bater com o total do pedido —
+      // impede marcar pago com valor menor. Sem valor no payload, segue (não inventa).
+      const payOrder = db.prepare(`SELECT total_amount FROM orders WHERE id = ? AND organization_id = ?`).get(orderId, orgId) as any;
+      if (payOrder && !paymentAmountMatches(body, payOrder.total_amount)) {
+        console.warn(`[PayWebhook] Valor divergente no pedido ${orderId} (esperado ${payOrder.total_amount}) — ignorado (org ${orgId}).`);
+        return res.status(200).send("AMOUNT_MISMATCH");
+      }
+      const ok = PaymentService.markPaid(orgId, orderId, { method: 'gateway', externalId: externalId || undefined });
+      if (ok && (global as any).io) {
+        (global as any).io.to(`org:${orgId}`).emit("order_updated", { orderId, status: 'pago', payment_status: 'paid' });
+      }
+      console.log(`[PayWebhook] Pedido ${orderId} marcado como pago (org ${orgId}).`);
       return res.status(200).send("OK");
     } catch (e) {
       console.error("[PayWebhook] erro", e);

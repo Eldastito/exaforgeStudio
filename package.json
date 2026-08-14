@@ -128,6 +128,7 @@
     "test:security-login-ratelimit": "tsx scripts/test-security-login-ratelimit.ts",
     "test:security-xss-jsonld": "tsx scripts/test-security-xss-jsonld.ts",
     "test:security-ai-fence": "tsx scripts/test-security-ai-fence.ts",
+    "test:security-payment-payout": "tsx scripts/test-security-payment-payout.ts",
     "test:brand-dna": "tsx scripts/test-brand-dna.ts",
     "test:campaign-objective": "tsx scripts/test-campaign-objective.ts",
     "test:hook-intelligence": "tsx scripts/test-hook-intelligence.ts",

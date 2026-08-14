@@ -56,6 +56,30 @@ export class BusinessGoalService {
         } catch { return 0; }
       },
     },
+    // PRD 11 / ADR-168 F12 — Métricas de CRESCIMENTO por conteúdo. O ponto de extensão do
+    // registro (schema-free) vira a ponte goal↔content: uma meta de negócio pode ser a
+    // RECEITA ou os LEADS que o CONTEÚDO gerou (F7/F8), medidos por query no mês corrente.
+    // `content_revenue` soma só `fact` (RN-CG-03 — não mistura estimate; não inventa dinheiro).
+    content_revenue: {
+      label: "Receita de conteúdo (mês)",
+      unit: "BRL",
+      derive: (orgId: string) => {
+        try {
+          const r = db.prepare("SELECT COALESCE(SUM(revenue),0) AS v FROM content_sale_attributions WHERE organization_id = ? AND revenue_basis = 'fact' AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").get(orgId) as any;
+          return Number(r?.v) || 0;
+        } catch { return 0; }
+      },
+    },
+    content_leads: {
+      label: "Leads de conteúdo (mês)",
+      unit: "count",
+      derive: (orgId: string) => {
+        try {
+          const r = db.prepare("SELECT COUNT(*) AS v FROM content_lead_attributions WHERE organization_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").get(orgId) as any;
+          return Number(r?.v) || 0;
+        } catch { return 0; }
+      },
+    },
   };
 
   /** Catálogo das métricas que o dono pode definir como meta (para a UI). */

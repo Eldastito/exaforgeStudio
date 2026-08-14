@@ -131,7 +131,8 @@ import { registerBuiltinEdgeCommandHandlers } from "./src/server/edgeCommandHand
 import { PaymentService } from "./src/server/PaymentService.js";
 import { ComigoPixService } from "./src/server/ComigoPixService.js";
 import { AsaasService } from "./src/server/AsaasService.js";
-import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission } from "./src/server/middleware/auth.js";
+import { requireAuth, requireOrganizationAccess, requireMasterAdmin, requireRole, enforceModulePermission, resolveTokenOrg } from "./src/server/middleware/auth.js";
+import { logAuthEvent } from "./src/server/auditLog.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
@@ -430,7 +431,15 @@ async function startServer() {
     if (req.path.startsWith('/admin') || req.path.startsWith('/analytics/settings') || req.path.startsWith('/notifications')) {
       return next();
     }
-    const orgId = req.headers['x-organization-id'] || 'default_org';
+    // SEC-F4 (SEC-02): o tenant vem do JWT VERIFICADO, NUNCA do header `x-organization-id`
+    // (spoofável). Sem token válido → não aplica o bloqueio por header; o requireAuth barra depois.
+    const orgId = resolveTokenOrg(req);
+    if (!orgId) return next();
+    // Defesa em profundidade (SEC-09): se o cliente mandou um header divergente do token, audita.
+    const headerOrg = req.headers['x-organization-id'];
+    if (headerOrg && headerOrg !== orgId) {
+      try { logAuthEvent(orgId, (req as any).user?.userId || null, null, 'TENANT_HEADER_MISMATCH', { header: String(headerOrg), token: orgId, path: req.path, method: req.method }); } catch { /* audit best-effort */ }
+    }
     try {
       const org: any = db.prepare('SELECT status, billing_status FROM organization_settings WHERE organization_id = ?').get(orgId);
       // Modo somente-leitura (ADR-091 Bloco B): 'blocked' (admin) e 'suspended'

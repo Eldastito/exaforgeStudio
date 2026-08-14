@@ -28,6 +28,22 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
   }
 };
 
+/**
+ * SEC-F4 (SEC-02) — resolve o tenant SOMENTE do JWT VERIFICADO. O header `x-organization-id`
+ * enviado pelo cliente NUNCA é autoridade. Retorna `null` quando não há token válido (o chamador
+ * deve então NÃO tomar decisão de tenant a partir do header — deixa o requireAuth barrar depois).
+ */
+export function resolveTokenOrg(req: AuthRequest): string | null {
+  const auth = req.headers.authorization;
+  if (!auth) return null;
+  const token = auth.split(" ")[1];
+  if (!token) return null;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    return decoded?.organizationId || null;
+  } catch { return null; }
+}
+
 export const requireOrganizationAccess = (req: AuthRequest, res: Response, next: NextFunction) => {
   if (!req.organizationId) {
     return res.status(403).json({ error: "Forbidden: No organization assigned" });

@@ -6,7 +6,7 @@ import sharp from "sharp";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { logAuthEvent } from "../auditLog.js";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
 import { parseNFeXml } from "../nfeParser.js";
@@ -18,6 +18,15 @@ import { verifyNFeSignature } from "../nfeSignature.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 
 const router = Router();
+
+// SEC-F13 (FE3/RN-CG-06/§73): CUSTO é dinheiro role-gated. O catálogo (`GET /`) é lido
+// por qualquer papel (vendedor precisa da lista pra vender), então em vez de bloquear a
+// rota, REDIGIMOS os campos de custo (`avg_cost` e a `suggested_price` derivada dele) pra
+// quem não é owner/admin — a lista e os campos de venda seguem, o custo some. Espelha a
+// semântica de `requireRole("owner","admin")` das rotas de relatório financeiro.
+export function canSeeProductCost(user: any): boolean {
+  return !!user && (user.role === "owner" || user.role === "admin");
+}
 
 // Modos de venda aceitos no catálogo (espelha a validação da vitrine em
 // routes/storefront.ts): `unit` (unidade), `slice` (fatia), `size` (tamanho),
@@ -614,7 +623,8 @@ router.post("/:id/movements", (req: AuthRequest, res): any => {
 // (só pedidos que viraram receita de verdade). Inclui produtos ativos com
 // ZERO venda no período — o "menos vendido" mais importante é o que nunca
 // vendeu e continua ocupando vitrine/estoque.
-router.get("/sales-analytics", (req: AuthRequest, res): any => {
+// SEC-F13 (FE3/RN-CG-06/§73): relatório de custo/lucro/margem é owner/admin.
+router.get("/sales-analytics", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
@@ -682,7 +692,8 @@ router.get("/sales-analytics", (req: AuthRequest, res): any => {
 });
 
 // GET /api/products/sales-analytics/csv — exportação CSV das vendas por produto
-router.get("/sales-analytics/csv", (req: AuthRequest, res): any => {
+// SEC-F13: mesmo relatório financeiro em CSV — owner/admin (§73).
+router.get("/sales-analytics/csv", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
@@ -780,13 +791,17 @@ router.get("/", (req: AuthRequest, res): any => {
       ${limit ? "LIMIT ? OFFSET ?" : ""}
     `).all(...args, ...(limit ? [limit, offset] : [])) as any[];
     const markup = orgMarkup(orgId);
+    // SEC-F13: custo/sugestão (derivada do custo) só pra owner/admin (§73).
+    const canSeeCost = canSeeProductCost(req.user);
     res.json(products.map(p => ({
       ...p,
+      avg_cost: canSeeCost ? p.avg_cost : null,
       sellable: p.stock_control_enabled ? Math.max(0, (p.quantity_available || 0) - (p.quantity_reserved || 0)) : null,
       // Sugestão informativa a partir do custo médio real (Fases 1/2 do Smart
       // Inventory) — nunca substitui o preço já definido, só orienta quem
-      // está editando. Markup configurável por organização (ADR-024).
-      suggested_price: p.avg_cost > 0 ? suggestSalePrice(p.avg_cost, markup) : null,
+      // está editando. Markup configurável por organização (ADR-024). Como deriva
+      // do custo, é redigida junto (SEC-F13).
+      suggested_price: canSeeCost && p.avg_cost > 0 ? suggestSalePrice(p.avg_cost, markup) : null,
     })));
   } catch (e: any) {
     res.status(500).json({ error: e.message });

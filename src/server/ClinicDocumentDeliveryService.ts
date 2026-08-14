@@ -14,7 +14,7 @@
  *   - PDF é sensível — NÃO vai pra `/media` estático. Salva em
  *     `PRIVATE_MEDIA_DIR/clinical_docs/` e serve por URL assinada (HMAC
  *     + `exp` curto) que o próprio provider baixa. Padrão idêntico ao
- *     `FashionAvatarService.signedUrl` (ADR-XXX).
+ *     `FashionAvatarService.signedUrl` (ADR-035).
  *
  * Cada tentativa vira row em `clinical_document_deliveries` — histórico
  * completo (paciente pediu 2ª via = 2 rows), com status/provider_message_id

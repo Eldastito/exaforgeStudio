@@ -36,6 +36,26 @@ conteúdo externo é dado, não instrução · `SEC-08` credencial revogada perd
 | `WEBHOOK_SECRET` / `WEBHOOK_STRICT=1` | exige assinatura no webhook | após configurar o segredo no provider |
 | `CSP_ENFORCE=1` | CSP passa de report-only a enforcing | após validar report-only sem violação |
 | `CLAUDE_API_KEY` (secret do repo) | ativa o gate `security-review` por PR | quando quiser a revisão automática |
+| `MEDIA_PRIVATE_CHAT=1` | força URL assinada na mídia de chat (A8) | após confirmar que a mídia de chat ainda renderiza |
+| `REDIS_URL` | rate-limit de login **distribuído** (compartilhado/durável) | multi-instância; sem ela cai pra memória |
+| `VITE_COOKIE_SESSION=1` (build) | frontend usa a sessão por **cookie httpOnly** (FE1 Fase 2) | após validar login/refresh/logout/socket no navegador |
+
+### Sessão por cookie httpOnly (FE1 — habilitar `VITE_COOKIE_SESSION=1`)
+
+O backend já EMITE e ACEITA a sessão no cookie httpOnly `zf_session` (Fase 1, sempre ligado, imune
+a XSS) mantendo o header `Authorization` como primário. A Fase 2 (frontend) é **flag de BUILD**:
+- **OFF (default):** token no `localStorage` + header — comportamento atual, 0-regressão.
+- **ON:** o SPA não guarda mais o token (só o perfil não-secreto), confia no cookie, reidrata via
+  `GET /api/auth/me` (cookie), faz `POST /api/auth/logout` ao sair; o socket reconecta pelo cookie.
+
+Sequência segura: (1) build com `VITE_COOKIE_SESSION=1` num deploy de validação; (2) testar no
+navegador — login, F5/refresh (continua logado), logout (desloga em todas as abas), e o tempo-real
+(socket) reconectando; confira em DevTools que o cookie `zf_session` é `HttpOnly`+`Secure` e que o
+`localStorage` NÃO tem mais `zappflow_token`; (3) promover o build pra produção. Reversível: rebuild
+sem a env. Migração sem logout: quem já tem token no `localStorage` segue em header mode até o próximo
+login sob o build em cookie mode. **Pré-requisito:** app servido em HTTPS same-origin (o cookie é
+`SameSite=Strict`+`Secure` em produção); se o front for servido de origem diferente da API, o cookie
+não vai — não ligue.
 
 ### Migração de chaves (habilitar `SECURITY_STRICT_BOOT=1` sem perder dados)
 

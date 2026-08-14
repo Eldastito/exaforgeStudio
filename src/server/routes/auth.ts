@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
 import { DistributedLoginLimiter } from "../loginRateLimitRedis.js";
 import { bumpSecurityVersion } from "../middleware/auth.js";
-import { sessionCookieHeader, clearSessionCookieHeader } from "../sessionCookie.js";
+import { sessionCookieHeader, clearSessionCookieHeader, resolveRequestToken } from "../sessionCookie.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
@@ -326,12 +326,13 @@ router.post("/reset-password", async (req: Request, res: Response): Promise<any>
 });
 
 router.get("/me", (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  // SEC-F24 (FE1) — aceita o token do header `Authorization` OU do cookie httpOnly `zf_session`
+  // (o front em cookie mode reidrata a sessão por aqui, sem token em JS). GET é CSRF-safe.
+  const { token } = resolveRequestToken(req);
+  if (!token) {
     return res.status(401).json({ error: "No token provided" });
   }
 
-  const token = authHeader.split(" ")[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     const user = db.prepare('SELECT id, organization_id, name, email, role, role_profile_id, global_status FROM users WHERE id = ?').get(decoded.userId) as any;

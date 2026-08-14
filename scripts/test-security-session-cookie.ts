@@ -21,6 +21,7 @@ import {
   sessionCookieHeader,
   clearSessionCookieHeader,
 } from "../src/server/sessionCookie.js";
+import { parseCookieSessionFlag } from "../src/lib/sessionMode.js";
 
 let failures = 0; const results: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean) { results.push({ name, ok }); if (!ok) failures++; }
@@ -87,6 +88,12 @@ function main() {
   check("6.1 limpa com Max-Age=0", /Max-Age=0/.test(clr));
   check("6.2 limpa mantém HttpOnly", /HttpOnly/.test(clr));
   check("6.3 limpa mantém nome do cookie", clr.startsWith(`${SESSION_COOKIE}=`));
+
+  // ── 7. Flag de build da Fase 2 (parser puro) — default OFF (0-regressão) ──
+  check("7.1 '1' liga", parseCookieSessionFlag("1") === true);
+  check("7.2 'true'/'on'/'yes' ligam", parseCookieSessionFlag("true") && parseCookieSessionFlag("on") && parseCookieSessionFlag("yes"));
+  check("7.3 vazio/undefined = OFF (default)", parseCookieSessionFlag("") === false && parseCookieSessionFlag(undefined) === false);
+  check("7.4 '0'/'false' = OFF", parseCookieSessionFlag("0") === false && parseCookieSessionFlag("false") === false);
 
   const passed = results.filter((r) => r.ok).length;
   for (const r of results) if (!r.ok) console.log("  x " + r.name);

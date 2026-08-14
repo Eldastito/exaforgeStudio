@@ -804,6 +804,12 @@ export class Scheduler {
       import("./OpportunityMatchingService.js").then((m) => m.OpportunityMatchingService.pass())
         .catch((e) => console.error('[Scheduler] opportunity matching falhou', e));
     } catch (e) { console.error('[Scheduler] pass de opportunity matching falhou', e); }
+    // Product Opportunity (ADR-168 F11): produto em estoque, alta margem, vendendo pouco →
+    // oportunidade na espinha (`business_signals`, D7 — sem tabela paralela; sinal sem R$).
+    try {
+      import("./ProductOpportunityService.js").then((m) => m.ProductOpportunityService.pass())
+        .catch((e) => console.error('[Scheduler] product opportunity falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de product opportunity falhou', e); }
     // Social Attribution (ADR-167 F12): resolve confirmações social_publish com o
     // analytics do post → PUBLISHED vira RESULTADO medido (fecha o closed-loop; §42/D6).
     try {

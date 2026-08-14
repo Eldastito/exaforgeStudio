@@ -156,7 +156,16 @@ export const ContentOutcomeResolver: BusinessOutcomeResolver = {
     ).get(orgId, corr) as any;
     const leads = Number(row?.leads || 0);
     if (leads > 0) {
-      return { resolved: "confirmed", basis: "system_of_record", domain: "content", reason: "lead_generated", evidence: { correlationId: corr, leadCount: leads, stage: "lead" } };
+      // F8: se algum lead já VIROU VENDA, o outcome sobe pro estágio 'sale' com receita/margem
+      // (fact e estimate SEPARADOS — RN-CG-03). Sem venda ainda, fica no estágio 'lead'.
+      const sale = db.prepare(
+        "SELECT COUNT(*) AS sales, COALESCE(SUM(CASE WHEN revenue_basis='fact' THEN revenue ELSE 0 END),0) AS revenue_fact, COALESCE(SUM(CASE WHEN revenue_basis='estimate' THEN revenue ELSE 0 END),0) AS revenue_estimate FROM content_sale_attributions WHERE organization_id = ? AND correlation_id = ?"
+      ).get(orgId, corr) as any;
+      const sales = Number(sale?.sales || 0);
+      const evidence = sales > 0
+        ? { correlationId: corr, leadCount: leads, stage: "sale", salesCount: sales, revenueFact: Number(sale.revenue_fact || 0), revenueEstimate: Number(sale.revenue_estimate || 0) }
+        : { correlationId: corr, leadCount: leads, stage: "lead" };
+      return { resolved: "confirmed", basis: "system_of_record", domain: "content", reason: sales > 0 ? "sale_attributed" : "lead_generated", evidence };
     }
     // Publicou mas ainda não gerou lead → não resolvido (não é falha — pode converter depois).
     return { resolved: "not_confirmed", basis: "system_of_record", domain: "content", reason: "no_lead_yet", evidence: { correlationId: corr } };

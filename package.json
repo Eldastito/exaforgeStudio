@@ -120,6 +120,7 @@
     "test:channel-adaptation": "tsx scripts/test-channel-adaptation.ts",
     "test:creative-experiment": "tsx scripts/test-creative-experiment.ts",
     "test:content-lead-attribution": "tsx scripts/test-content-lead-attribution.ts",
+    "test:content-revenue-attribution": "tsx scripts/test-content-revenue-attribution.ts",
     "test:outcome-resolvers-golden": "tsx scripts/test-outcome-resolvers-golden.ts",
     "test:outcome-dedup": "tsx scripts/test-outcome-dedup.ts",
     "test:outcome-reconciler": "tsx scripts/test-outcome-reconciler.ts",

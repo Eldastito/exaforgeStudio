@@ -100,6 +100,13 @@ const FALLBACK_HIDDEN_BY_VERTICAL: Record<string, string[]> = {
   saude: ["retail", "retail_floor", "escola"],
   educacao: ["clinica", "retail", "retail_floor"],
   hospitalidade: ["clinica", "escola"],
+  // ADR-169 / PRD 12 — Beleza & Salões: mesmo racional de `servicos`. Módulos
+  // como `clinica` (prontuário/TISS/guias) e `escola` (secretaria/família) são
+  // obviamente incoerentes pra um salão; `retail_floor` (fluxo de loja
+  // supervisionada) também. A vertical reusa a agenda profissional/sala/
+  // especialidade da Clínica pelos SERVICES (ClinicAgendaService etc.), sem
+  // ligar o módulo `clinica` — evita expor a UI de prontuário.
+  beleza: ["clinica", "escola", "retail_floor"],
   // 'outro' não esconde nada — dono explora catálogo cheio.
 };
 

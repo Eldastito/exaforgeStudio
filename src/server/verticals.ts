@@ -6,7 +6,7 @@
 // ligados e NÃO entram nesta lista — aqui ficam só os módulos OPCIONAIS.
 
 export type VerticalKey =
-  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "outro";
+  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "beleza" | "outro";
 
 export type Vertical = {
   key: VerticalKey;
@@ -28,6 +28,14 @@ export const CONSENT_BY_VERTICAL: Record<string, string[]> = {
   saude: ["dados_pessoais", "dados_sensiveis", "comunicacoes"],
   educacao: ["dados_pessoais", "comunicacoes", "marketing"],
   hospitalidade: ["dados_pessoais", "marketing", "comunicacoes"],
+  // ADR-169 (Vertical Beleza & Salões, PRD 12). Salão/barbearia/estética/nail
+  // designer: agenda + cadências + comunicações + marketing são o dia-a-dia
+  // (lembrete 24h, retorno de manutenção, oportunidade de vaga). O consent para
+  // FOTO do Simulador de Cabelo é um escopo separado (hair_simulation), semeado
+  // apenas quando F5 (Beauty AI) for ativada — nunca implícito no cadastro.
+  // "use_in_marketing" (publicar antes/depois) é OUTRO consent separado
+  // (RN-BS-04). Aqui só o essencial pra operação.
+  beleza: ["dados_pessoais", "comunicacoes", "marketing"],
   outro: ["marketing", "dados_pessoais", "perfilamento", "comunicacoes"],
 };
 
@@ -137,6 +145,22 @@ export const VERTICALS: Vertical[] = [
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
     descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
     modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "diretor", "rie", "execucao"],
+    saleMode: "unit",
+  },
+  {
+    // ADR-169 / PRD 12 — Beleza & Salões. Já previsto em ADR-092 §60 como
+    // vertical futura represada até o Bloco A do Autônomo (que fechou). Preset
+    // combina agenda (o coração operacional — reusando a agenda profissional/
+    // sala/especialidade da Clínica sem ligar o módulo `clinica`), vendas +
+    // pagamentos (comissão e revenda de produto), campanhas + cadências
+    // (recuperação de cliente, lembrete de manutenção), assinaturas (pacote
+    // de 10 escovas etc.), estudio (antes/depois no Instagram) e as
+    // superfícies transversais (diretor, rie, execucao). O Simulador de
+    // Cabelo (Beauty AI) é opt-in por flag (F5+ do ADR-169) — não entra no
+    // preset porque é sub-feature separada.
+    key: "beleza", label: "Beleza & Salões", icon: "💇",
+    descricao: "Salão, barbearia, estética, nail designer — agenda, retorno de manutenção e simulador de visual.",
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

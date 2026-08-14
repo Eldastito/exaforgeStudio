@@ -51,6 +51,24 @@ Legenda de severidade: 🔴 P0 (bloqueia escala comercial) · 🟠 P1 · 🟡 P2
 que a auditoria supôs, mas o default-open é real. A2/A8 têm mitigações parciais (docs clínicos já são
 privados). A1 afeta só a escrita (`encrypt`), não a leitura.
 
+### 2.1 Varredura do FRONTEND (dados sensíveis no navegador)
+
+Resultado geral: **bom**. Sem segredo hardcoded, sem exposição via `import.meta.env`/`VITE_*`, sem
+sink de XSS, e o tenant **não** é confiado do cliente (nunca há `x-organization-id` no frontend;
+`organizationId` vem do JWT assinado). Achados residuais (todos MED/LOW):
+
+| # | Sev | Achado | Evidência (`arquivo:linha`) |
+| --- | --- | --- | --- |
+| FE1 | 🟠 MED | JWT cru + objeto de usuário completo em `localStorage` (`zappflow_token`/`zappflow_user`) — qualquer XSS exfiltra a sessão inteira. Padrão comum de SPA, mas não é httpOnly cookie. | `src/contexts/AuthContext.tsx:74-75` |
+| FE2 | 🟠 MED | Gating de Master Admin / módulos é **cosmético no cliente** (`isMasterAdmin` vem de `/api/entitlements` e só esconde UI). Seguro SÓ SE todo endpoint privilegiado for enforced server-side (verificar — liga com A6). Nenhum `email === MASTER_ADMIN_EMAIL` no browser (bom). | `src/store/useStore.ts:322`; `Sidebar.tsx`, `ChannelsPanel.tsx:629` |
+| FE3 | 🟠 MED | Custo/margem/lucro ABSOLUTOS renderizados na UI (valores vêm do servidor; cliente só exibe). Confirmar que as rotas de origem (`/api/catalog`, `/api/retail/*`, movimentos de estoque) são role-gated (RN-CG-06/§73) — o front não aplica check de papel. | `CatalogView.tsx:541`, `RetailOpsView.tsx:507-603`, `StockModal.tsx:126` |
+| FE4 | 🟠 MED | `console.log` da mensagem WebSocket inteira (telefone = PII + corpo da mensagem) no console do navegador, em produção. | `src/App.tsx:187` (e `:172/207/231/245`) |
+| FE5 | 🟡 LOW | Chave Web do Firebase commitada (`firebase-applet-config.json`) — pública por design (identificador, não segredo) e aparentemente **dead file** (sem import). Remover para evitar confusão. | `firebase-applet-config.json:5` |
+
+Ações derivadas: FE2/FE3 são **verificações de backend** (o gate real é server-side — casa com A6 e
+o RBAC das rotas de dinheiro); FE1 entra na fatia de sessão (F7); FE4 no redactor de logs (F16/SEC-38);
+FE5 é limpeza (remover arquivo morto).
+
 ---
 
 ## 3. Inventário de superfícies (a completar por fatia)

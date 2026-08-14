@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
+import { LoginRateLimiter } from "../loginRateLimit.js";
 import { bumpSecurityVersion } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
@@ -13,29 +14,18 @@ import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
-// --- Proteção contra força-bruta no login (em memória, por e-mail) ---
-const LOGIN_MAX_ATTEMPTS = 5;
+// --- Proteção contra força-bruta no login (achado A10) ---
+// Limitador extraído e testável (loginRateLimit.ts). Por-e-mail (5/15min) é o
+// comportamento de sempre (0-regressão). Por-IP é uma defesa OPT-IN contra
+// rotação de e-mail (`LOGIN_RATELIMIT_BY_IP=1`) — default off pra não arriscar
+// lockout em NAT compartilhado sem o operador decidir; teto mais alto (20/15min).
 const LOGIN_LOCK_MS = 15 * 60 * 1000; // 15 min
-const loginAttempts = new Map<string, { count: number; lockUntil: number }>();
-
-function loginLockRemainingMs(key: string): number {
-  const rec = loginAttempts.get(key);
-  if (!rec) return 0;
-  if (rec.lockUntil && Date.now() < rec.lockUntil) return rec.lockUntil - Date.now();
-  return 0;
-}
-function registerFailedLogin(key: string) {
-  const rec = loginAttempts.get(key) || { count: 0, lockUntil: 0 };
-  rec.count += 1;
-  if (rec.count >= LOGIN_MAX_ATTEMPTS) {
-    rec.lockUntil = Date.now() + LOGIN_LOCK_MS;
-    rec.count = 0;
-  }
-  loginAttempts.set(key, rec);
-}
-function clearLoginAttempts(key: string) {
-  loginAttempts.delete(key);
-}
+const emailLoginLimiter = new LoginRateLimiter({ maxAttempts: 5, lockMs: LOGIN_LOCK_MS });
+const LOGIN_BY_IP = /^(1|true|yes|on)$/i.test(String(process.env.LOGIN_RATELIMIT_BY_IP || ""));
+const ipLoginLimiter = new LoginRateLimiter({ maxAttempts: 20, lockMs: LOGIN_LOCK_MS });
+// Mesmo padrão de IP que o resto do app (rate-limit global, radar/fashion public).
+const loginClientIp = (req: Request): string =>
+  String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
 
 // Política mínima de senha (cadastro e troca de senha).
 function passwordPolicyError(pw: string): string | null {
@@ -171,7 +161,9 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
   }
 
   const attemptKey = String(email).toLowerCase();
-  const lockMs = loginLockRemainingMs(attemptKey);
+  const ipKey = LOGIN_BY_IP ? loginClientIp(req) : null;
+  const registerFail = () => { emailLoginLimiter.registerFailure(attemptKey); if (ipKey) ipLoginLimiter.registerFailure(ipKey); };
+  const lockMs = Math.max(emailLoginLimiter.remainingMs(attemptKey), ipKey ? ipLoginLimiter.remainingMs(ipKey) : 0);
   if (lockMs > 0) {
     logAuthEvent(null, null, null, 'LOGIN_LOCKED', { email });
     return res.status(429).json({
@@ -183,7 +175,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
     if (!user || !user.password_hash) {
       // Don't reveal if user exists
-      registerFailedLogin(attemptKey);
+      registerFail();
       logAuthEvent(null, null, null, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -195,7 +187,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
-      registerFailedLogin(attemptKey);
+      registerFail();
       logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -223,14 +215,14 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
         } catch (e) { /* noop */ }
       }
       if (!ok) {
-        registerFailedLogin(attemptKey);
+        registerFail();
         logAuthEvent(user.organization_id, user.id, user.id, 'MFA_FAILED', { email });
         return res.status(401).json({ mfaRequired: true, error: "Código 2FA inválido." });
       }
     }
 
     // Login OK: zera o contador de tentativas
-    clearLoginAttempts(attemptKey);
+    emailLoginLimiter.clear(attemptKey); if (ipKey) ipLoginLimiter.clear(ipKey);
 
     // Update last login
     db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id);

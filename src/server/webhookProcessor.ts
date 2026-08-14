@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { signChatMediaUrl } from "./mediaSigning.js";
 import { generateRagResponse } from "./geminiRAG.js";
 import { AIOrchestratorService } from "./AIOrchestratorService.js";
 import { OrdersService } from "./OrdersService.js";
@@ -324,7 +325,7 @@ export async function processIncomingMessage(
        contactAvatar: contact.profile_pic_url,
        provider: channel.provider,
        text: payload.text,
-       mediaUrl: payload.mediaUrl,
+       mediaUrl: signChatMediaUrl(payload.mediaUrl), // SEC-F21: assina só mídia de conversa (/media/private/)
        sender: "contact",
        timestamp: new Date().toISOString()
     };

@@ -9457,6 +9457,12 @@ const initDb = () => {
         ON beauty_visual_analyses (organization_id, simulation_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar beauty_visual_analyses (ADR-169 F8)', e); }
+
+  // ADR-169 F5-transversal-A — Consent transversal de comunicações outbound.
+  // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`
+  // consulta `contact_consents.comunicacoes` do contato-destino antes de
+  // disparar. Sem flag (default), 0-regressão. Aditivo puro.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN outbound_consent_required INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

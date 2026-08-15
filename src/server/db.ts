@@ -9498,6 +9498,16 @@ const initDb = () => {
         ON outbound_send_log (organization_id, contact_id, sent_at);
     `);
   } catch(e){ console.error('[DB] Falha ao criar outbound_send_log (ADR-169 F5-C)', e); }
+
+  // ADR-169 F11 — Detector de simulação abandonada (Beauty Autopilot em SHADOW).
+  // Flag opt-in por org: quando ativa, o Scheduler passa periodicamente varrendo
+  // consultas 'ready' com simulação SUCCEEDED que não avançaram pra 'selected'
+  // dentro de X horas (default 24h) e publica sinal na espinha canônica
+  // (`business_signals` com dedupe `beauty:abandoned_simulation:{consultationId}` —
+  // D6, sem tabela paralela). RN-BS-12: NÃO agenda por IA — o autopilot só
+  // PROPÕE follow-up (fatia futura via DecisionAction+ApprovalPolicy).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_abandoned_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_abandoned_after_hours INTEGER`); } catch(e){}
 };
 
 initDb();

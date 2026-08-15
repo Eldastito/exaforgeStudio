@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { ManipulationRadarService } from "./ManipulationRadarService.js";
+import { OutboundConsentGuardService, OutboundBlockedError } from "./OutboundConsentGuardService.js";
 // Node 18+/22 já possui fetch global — não usar node-fetch (quebra no bundle CJS).
 
 export class MessageProviderService {
@@ -12,6 +13,20 @@ export class MessageProviderService {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+
+    // ADR-169 F5-transversal-A — GATE de consent LGPD no SINK canônico. Opt-in
+    // por org (`outbound_consent_required=1`); default OFF = 0-regressão.
+    // Roda ANTES de qualquer efeito (Radar/rede/log do provider) — se bloqueia,
+    // NADA é disparado e o caller recebe OutboundBlockedError com code tipado.
+    if (channel.organization_id) {
+      const decision = OutboundConsentGuardService.evaluate(channel.organization_id, recipientIdentifier);
+      if (decision.allow === false) {
+        throw new OutboundBlockedError(decision.reason, {
+          contactId: decision.contactId,
+          contactName: decision.contactName,
+        });
+      }
+    }
 
     // Radar de Manipulação (Sinek, ADR-050) — analisa o conteúdo antes do
     // envio. É best-effort: heurístico e rapidíssimo, nunca bloqueia o

@@ -9385,6 +9385,48 @@ const initDb = () => {
   //     purga automática dos avatares (RN-BS-04).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_hair_simulator_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_avatar_retention_days INTEGER DEFAULT 30`); } catch(e){}
+
+  // ADR-169 F6 (BEAUTY-006) — Simulador de Cabelo REAL. Espelha o padrão
+  // `fashion_tryon_jobs` da ADR-037, adaptado à Beleza:
+  //  - `consultation_id` amarra à `beauty_visual_consultations` (F5); a
+  //    foto de referência (aprovada) vem via `avatar_id` (F5).
+  //  - `simulation_type`: 'color' | 'cut' | 'combined' (ambos).
+  //  - `parameters_json`: {color?: 'morena_iluminada', cut?: 'chanel',
+  //    reference_look_id?: id de `beauty_reference_looks`}.
+  //  - `provider_key`: entra no `input_hash` de idempotência (trocar de
+  //    provedor NÃO reaproveita output antigo).
+  //  - `input_hash = sha256(avatarKey:params:providerKey)` — mesmo pedido
+  //    já SUCCEEDED devolve pronto SEM chamar provider (economia).
+  //  - `status`: CREATED → QUEUED → PROCESSING → SUCCEEDED | FAILED_FINAL
+  //    | DELETED | EXPIRED. Fluxo idêntico ao `fashion_tryon_jobs`.
+  //  - `output_storage_key`: caminho no `private_media/beauty/` (nunca
+  //    /media público — RN-BS-04); URL assinada via `fileSigning` do F5.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_visual_simulations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        consultation_id TEXT NOT NULL,
+        avatar_id TEXT NOT NULL,
+        simulation_type TEXT NOT NULL,
+        parameters_json TEXT,
+        reference_look_id TEXT,
+        provider_key TEXT NOT NULL,
+        input_hash TEXT NOT NULL,
+        status TEXT DEFAULT 'CREATED',
+        output_storage_key TEXT,
+        error_code TEXT,
+        error_message_safe TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_sim_org_consult
+        ON beauty_visual_simulations (organization_id, consultation_id, status);
+      CREATE INDEX IF NOT EXISTS idx_beauty_sim_hash
+        ON beauty_visual_simulations (organization_id, input_hash, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_visual_simulations (ADR-169 F6)', e); }
 };
 
 initDb();

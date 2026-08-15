@@ -8,6 +8,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
+import { VERTICALS } from "../verticals.js";
 import { BlueprintSeeder } from "../BlueprintSeeder.js";
 import { UpgradeRecommendationService } from "../UpgradeRecommendationService.js";
 import { AiUsageDashboardService } from "../AiUsageDashboardService.js";
@@ -337,6 +338,35 @@ router.post("/organizations/:id/plan", (req: AuthRequest, res): any => {
     if (!r.ok) return res.status(400).json({ error: r.reason || "Falha ao atribuir plano." });
     logAuthEvent(req.organizationId, adminId, orgId, 'ADMIN_CHANGE_PLAN', { planId });
     res.json({ success: true, plan_id: planId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ADR-169 F19 — Master Admin altera a `vertical` de uma organização. Preenche o
+// gap operacional descoberto na F19: até aqui o Admin só conseguia atribuir
+// blueprint (que carrega módulos/plano/quickstart) mas não conseguia editar o
+// campo `organization_settings.vertical` — que é o gate real da BeautyView
+// (Sidebar mostra "Beauty AI" quando vertical==='beleza') e do
+// `assertBeautyOn(orgId)` (routes/beauty.ts). A ordem correta é:
+//   1) atribuir vertical (esta rota) — carimba a etiqueta de negócio
+//   2) atribuir blueprint (POST /:id/blueprint) — habilita módulos/plano
+// Aceita só `key` do registry `VERTICALS` (verticals.ts), evita string livre
+// que travaria os gates. Body: `{ vertical: VerticalKey | null }`.
+router.patch("/organizations/:id/vertical", (req: AuthRequest, res): any => {
+  const adminId = req.user?.userId;
+  const orgId = String(req.params.id);
+  const v = req.body?.vertical;
+  if (v !== null && (typeof v !== "string" || !VERTICALS.some(x => x.key === v))) {
+    return res.status(400).json({ error: `Vertical inválida. Use uma de: ${VERTICALS.map(x => x.key).join(", ")} ou null.` });
+  }
+  try {
+    const info = db.prepare(
+      `UPDATE organization_settings SET vertical = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND deleted_at IS NULL`
+    ).run(v, orgId);
+    if (info.changes === 0) return res.status(404).json({ error: "Organização não encontrada." });
+    logAuthEvent(req.organizationId, adminId, orgId, 'ADMIN_CHANGE_VERTICAL', { vertical: v });
+    res.json({ success: true, vertical: v });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

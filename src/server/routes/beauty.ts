@@ -33,6 +33,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { BeautyVisualConsultationService, BEAUTY_CONSENT_SCOPES } from "../BeautyVisualConsultationService.js";
 import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimulationService.js";
 import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js";
+import { LookServiceRecommendationService } from "../LookServiceRecommendationService.js";
 
 const router = Router();
 
@@ -254,6 +255,31 @@ router.get("/analyses/:id", (req: AuthRequest, res): any => {
   const a = BeautyHarmonyAnalysisService.getById(orgId, req.params.id);
   if (!a) return res.status(404).json({ error: "Análise não encontrada." });
   res.json(a);
+});
+
+// ─────────────── Look → Serviços do catálogo REAL (F9) ───────────────
+
+// GET /vocabulary/recommendations — keywords + níveis de relevância
+router.get("/vocabulary/recommendations", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(LookServiceRecommendationService.vocabulary());
+});
+
+// GET /simulations/:id/recommendations — recomenda serviços baseado em UMA sim
+router.get("/simulations/:id/recommendations", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = LookServiceRecommendationService.recommendForSimulation(orgId, req.params.id);
+  res.json(r);
+});
+
+// GET /consultations/:id/recommendations — recomenda serviços baseado no goal
+router.get("/consultations/:id/recommendations", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = LookServiceRecommendationService.recommendForConsultation(orgId, req.params.id);
+  res.json(r);
 });
 
 // Cliente escolhe um visual (avança consulta pra 'selected').

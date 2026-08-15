@@ -9463,6 +9463,17 @@ const initDb = () => {
   // consulta `contact_consents.comunicacoes` do contato-destino antes de
   // disparar. Sem flag (default), 0-regressão. Aditivo puro.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN outbound_consent_required INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-169 F5-transversal-B — Quiet-hours CLIENTE transversal.
+  // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`
+  // recusa envio em hora SP dentro da janela silenciosa configurada (default
+  // 22h→8h). NULL nos horários = usa defaults (22, 8). Sem flag (default 0),
+  // 0-regressão. Aditivo puro. NÃO confundir com `proactive_awake_start/end`
+  // (UxPreferences ADR-163 F13) — aquele é a janela do DONO pra receber push;
+  // este é a janela em que o SISTEMA silencia mensagens pra CLIENTE.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_enforced INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_start_hour INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_end_hour INTEGER`); } catch(e){}
 };
 
 initDb();

@@ -94,13 +94,38 @@ export class AppointmentService {
   }
 
   /**
+   * ADR-169 F4 (BEAUTY-004): duração do serviço lida pela agenda.
+   *
+   * Se `productServiceId` referencia um serviço da mesma org com
+   * `duration_minutes > 0` (coluna aditiva ADR-023, escrita por
+   * `POST /api/products` desde sempre mas ignorada pelos motores de agenda),
+   * usar essa duração no cálculo do slot. Guardrails:
+   *  - Multi-tenant: `AND organization_id = ?` — produto de outra org é null.
+   *  - `duration_minutes <= 0` ou NULL → devolve null (cai no slot da org,
+   *    0-regressão pro parque legado que já grava productServiceId).
+   *  - Best-effort: query erra (coluna faltando em legado) → null.
+   */
+  static serviceDurationMin(orgId: string, productServiceId?: string | null): number | null {
+    if (!productServiceId) return null;
+    try {
+      const r = db.prepare(
+        "SELECT duration_minutes FROM products_services WHERE id = ? AND organization_id = ?",
+      ).get(productServiceId, orgId) as any;
+      const d = Number(r?.duration_minutes);
+      return Number.isFinite(d) && d > 0 ? d : null;
+    } catch { return null; }
+  }
+
+  /**
    * ADR-160 F6 — criação CANÔNICA de agendamento (o "record"), extraída da rota
    * POST /appointments pra virar a PORTA ÚNICA do domínio agenda (reusada pela
    * rota e pelo bridge do Fala Tu). Faz só o invariante de negócio: valida o
    * contato (contact_id é NOT NULL — nunca inventa, RN-151), calcula o fim pela
-   * duração do slot quando não veio, insere e audita. Efeitos EXTERNOS (Google
-   * Calendar, e-mail de confirmação ao contato) NÃO moram aqui — são da borda
-   * (rota), pra que um bridge implícito NÃO dispare e-mail pro contato.
+   * duração do serviço (quando `productServiceId` referencia um serviço com
+   * `duration_minutes > 0` — ADR-169 F4) OU pelo slot da org como fallback,
+   * insere e audita. Efeitos EXTERNOS (Google Calendar, e-mail de confirmação
+   * ao contato) NÃO moram aqui — são da borda (rota), pra que um bridge
+   * implícito NÃO dispare e-mail pro contato.
    */
   static create(orgId: string, input: {
     contactId: string; title: string; description?: string | null;
@@ -114,11 +139,18 @@ export class AppointmentService {
     const contact = db.prepare("SELECT id FROM contacts WHERE id = ? AND organization_id = ?").get(contactId, orgId);
     if (!contact) throw new Error("Contato não encontrado nesta organização.");
     const id = randomUUID();
-    // Fim = início + duração do slot, quando não informado (mesma regra da rota).
+    // Fim = início + duração; precedência: (1) endIso explícito do caller,
+    // (2) duração do serviço se `productServiceId` casa com serviço da mesma
+    // org com `duration_minutes > 0` (ADR-169 F4), (3) slot da org (fallback
+    // legado — 0-regressão).
     let endIso = input.scheduledEnd || null;
     if (!endIso && input.scheduledStart) {
       const startMs = AppointmentService.ms(input.scheduledStart);
-      if (startMs != null) endIso = new Date(startMs + AppointmentService.config(orgId).slotMin * 60000).toISOString();
+      if (startMs != null) {
+        const serviceDur = AppointmentService.serviceDurationMin(orgId, input.productServiceId);
+        const durationMin = serviceDur ?? AppointmentService.config(orgId).slotMin;
+        endIso = new Date(startMs + durationMin * 60000).toISOString();
+      }
     }
     db.prepare(`
       INSERT INTO appointments (id, organization_id, ticket_id, contact_id, product_service_id, title, description, scheduled_start, scheduled_end)

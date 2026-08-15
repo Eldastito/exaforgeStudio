@@ -201,6 +201,8 @@
     "test:beauty-registry": "tsx scripts/test-beauty-registry.ts",
     "test:beauty-blueprint-piloto": "tsx scripts/test-beauty-blueprint-piloto.ts",
     "test:beauty-profiles": "tsx scripts/test-beauty-profiles.ts",
+    "test:beauty-service-duration": "tsx scripts/test-beauty-service-duration.ts",
+    "test:beauty-professional-services": "tsx scripts/test-beauty-professional-services.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

@@ -9224,6 +9224,38 @@ const initDb = () => {
   // opt-in convenção nº 10) | 'shadow' (propõe, mas NUNCA executa — RN-CG-08). NÃO existe
   // 'auto' aqui: crescimento autônomo nunca vai direto pra execução. Aditivo.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN growth_autopilot_mode TEXT DEFAULT 'off'`); } catch(e){}
+
+  // ADR-169 F4 (BEAUTY-004) — vínculo N:N profissional↔serviço da vertical
+  // Beleza & Salões. Decisão D6 do ADR-169: tabela nova (opção "a") em vez de
+  // mapear cada serviço como especialidade (opção "b" — `clinic_professional_
+  // specialties`) — evita ambiguidade "corte é especialidade ou serviço?" e
+  // libera comissão por serviço nativamente. `service_id` referencia
+  // `products_services.id` (a tabela canônica de produto+serviço). `is_primary`
+  // marca o serviço-signature do profissional (útil para UI/recomendação).
+  // `commission_percent` fica 0.0 default — cobrado por fatia futura de
+  // comissão; nunca inventa valor. `active=0` "desliga" o vínculo sem apagar
+  // (o profissional pode voltar a atender o serviço). UNIQUE evita duplicar.
+  // A tabela é agnóstica à vertical — nada impede outras verticais reusarem
+  // (é aditiva sobre `products_services`); só a Beleza a preenche por padrão.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS professional_services (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        service_id TEXT NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        commission_percent REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, professional_id, service_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_professional_services_by_prof
+        ON professional_services (organization_id, professional_id, active);
+      CREATE INDEX IF NOT EXISTS idx_professional_services_by_service
+        ON professional_services (organization_id, service_id, active);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar professional_services (ADR-169 F4)', e); }
 };
 
 initDb();

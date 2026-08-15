@@ -205,6 +205,7 @@
     "test:beauty-professional-services": "tsx scripts/test-beauty-professional-services.ts",
     "test:beauty-visual-consultation": "tsx scripts/test-beauty-visual-consultation.ts",
     "test:beauty-hair-simulation": "tsx scripts/test-beauty-hair-simulation.ts",
+    "test:beauty-routes": "tsx scripts/test-beauty-routes.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

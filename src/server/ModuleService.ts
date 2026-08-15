@@ -31,6 +31,11 @@ export class ModuleService {
     events: "eventos",
     executive: "diretor",
     studio: "estudio",
+    // ADR-169 F7 — Beauty AI (Simulador de Cabelo) é extensão do domínio
+    // Estúdio. Preset da vertical `beleza` já inclui `estudio`; mapear
+    // /api/beauty pro mesmo módulo reusa o gating existente sem inventar
+    // módulo próprio (RN-BS-11 nunca inventa capacidade).
+    beauty: "estudio",
     tasks: "execucao",
     prospect: "prospect",
     clinic: "clinica",

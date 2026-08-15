@@ -1,0 +1,231 @@
+/**
+ * Rotas AUTENTICADAS da vertical Beleza & Salões (ADR-169 F7 / BEAUTY-007).
+ *
+ * Montadas em `/api/beauty` DENTRO do `protectedApi` (server.ts) — auth +
+ * enforce module (MODULE_BY_ROUTE mapeia `beauty → estudio`, o mesmo módulo
+ * que já protege o Estúdio de Criação, e que já está no preset da vertical
+ * `beleza` desde a F1). Consumidores: recepção do salão, dona, gerente.
+ *
+ * NÃO expõe endpoints públicos (rota pública `/api/public/beauty/media/:key`
+ * fica em `beautyPublic.ts` — só serve o arquivo assinado, sem PII).
+ *
+ * Gates em CADA rota (belt-and-suspenders — o enforce global já barra
+ * fora do plano/módulo, mas defendemos aqui de novo por clareza):
+ *  - `assertBeautyOn(orgId)`: vertical=`beleza` na `organization_settings`.
+ *    Sem beleza, retorna 404 (não vaza existência da fatia).
+ *  - Endpoints do Simulador exigem também `beauty_hair_simulator_enabled=1`
+ *    (opt-in explícito por org — F5 flag).
+ *
+ * Guardrails RN-BS:
+ *  - RN-BS-04: consent tipado é sempre chamado ANTES de aceitar upload.
+ *  - RN-BS-05: NUNCA logamos foto/base64/prompt.
+ *  - RN-BS-07: `orgId = req.organizationId` (sempre do JWT verificado).
+ *  - RN-BS-08: rotas de "dinheiro" ficariam gated por `requireRole(...)`.
+ *    F7 não expõe valor — só consent/consulta/upload/simulação.
+ *  - RN-BS-11: rota nunca aceita simulationType/params fora do vocab
+ *    fechado (o service já sanitiza — a rota confia).
+ */
+import { Router, Response } from "express";
+import multer from "multer";
+import db from "../db.js";
+import { AuthRequest } from "../middleware/auth.js";
+import { logAuthEvent } from "../auditLog.js";
+import { BeautyVisualConsultationService, BEAUTY_CONSENT_SCOPES } from "../BeautyVisualConsultationService.js";
+import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimulationService.js";
+
+const router = Router();
+
+// Upload de foto — 15 MB, whitelist mimetype (mesmo do FashionAvatar).
+const AVATAR_UPLOAD_MAX_BYTES = 15 * 1024 * 1024;
+const AVATAR_ACCEPTED_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_UPLOAD_MAX_BYTES },
+  fileFilter(_req, file, cb) {
+    if (!AVATAR_ACCEPTED_MIMES.has(file.mimetype)) return cb(new Error("Formato não aceito. Use JPG, PNG ou WEBP."));
+    cb(null, true);
+  },
+});
+
+// ─────────────── Gates ───────────────
+
+function orgVertical(orgId: string): string | null {
+  const r = db.prepare(`SELECT vertical FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`).get(orgId) as any;
+  return r?.vertical || null;
+}
+function isBeautyOn(orgId: string): boolean {
+  return orgVertical(orgId) === "beleza";
+}
+function isSimulatorOn(orgId: string): boolean {
+  if (!isBeautyOn(orgId)) return false;
+  const r = db.prepare(`SELECT beauty_hair_simulator_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  return !!Number(r?.beauty_hair_simulator_enabled);
+}
+
+function requireBeauty(req: AuthRequest, res: Response): string | null {
+  const orgId = req.organizationId;
+  if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  if (!isBeautyOn(orgId)) { res.status(404).json({ error: "Not found" }); return null; }
+  return orgId;
+}
+function requireSimulator(req: AuthRequest, res: Response): string | null {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return null;
+  if (!isSimulatorOn(orgId)) { res.status(403).json({ error: "beauty_hair_simulator_enabled=0", state: "disabled" }); return null; }
+  return orgId;
+}
+
+// ─────────────── Vocabulary (metadados p/ UI) ───────────────
+
+router.get("/vocabulary", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({
+    consentScopes: [...BEAUTY_CONSENT_SCOPES],
+    simulationTypes: [...SIMULATION_TYPES],
+    ...BeautyHairSimulationService.vocabulary(),
+  });
+});
+
+// ─────────────── Consent ───────────────
+
+router.post("/consents", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { contactId, consentType, policyVersion } = req.body || {};
+  if (!contactId || !consentType) return res.status(400).json({ error: "contactId e consentType obrigatórios." });
+  if (!(BEAUTY_CONSENT_SCOPES as readonly string[]).includes(consentType)) {
+    return res.status(400).json({ error: "consentType inválido." });
+  }
+  try {
+    const id = BeautyVisualConsultationService.grantConsent(orgId, String(contactId), consentType, policyVersion);
+    res.json({ ok: true, id });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || "Erro").slice(0, 200) });
+  }
+});
+
+router.delete("/consents", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { contactId, consentType } = req.body || {};
+  if (!contactId || !consentType) return res.status(400).json({ error: "contactId e consentType obrigatórios." });
+  const r = BeautyVisualConsultationService.revokeConsent(orgId, String(contactId), consentType);
+  res.json(r);
+});
+
+// ─────────────── Consultations ───────────────
+
+router.post("/consultations", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { contactId, goal, intensity, expiresInDays } = req.body || {};
+  if (!contactId) return res.status(400).json({ error: "contactId obrigatório." });
+  try {
+    const cons = BeautyVisualConsultationService.startConsultation(orgId, {
+      contactId: String(contactId), goal: goal || null, intensity: intensity || null,
+      expiresInDays: Number.isFinite(expiresInDays) ? Number(expiresInDays) : undefined,
+    });
+    res.json(cons);
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || "Erro").slice(0, 200) });
+  }
+});
+
+router.get("/consultations/:id", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const cons = BeautyVisualConsultationService.getConsultation(orgId, req.params.id);
+  if (!cons) return res.status(404).json({ error: "Consulta não encontrada." });
+  const assets = cons.contactId
+    ? BeautyVisualConsultationService.listAssetsForContact(orgId, cons.contactId).filter((a) => a.consultationId === cons.id)
+    : [];
+  const simulations = BeautyHairSimulationService.listForConsultation(orgId, cons.id);
+  res.json({ consultation: cons, assets, simulations });
+});
+
+router.post("/consultations/:id/upload", avatarUpload.single("file"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  if (!req.file) return res.status(400).json({ error: "Envie uma foto no campo 'file' (multipart/form-data)." });
+  try {
+    const r = await BeautyVisualConsultationService.uploadReferencePhoto(orgId, req.params.id, req.file.buffer);
+    if (!r.ok) return res.status(400).json(r);
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ error: String(e?.message || "Erro").slice(0, 200) });
+  }
+});
+
+// Aprovação/rejeição manual de asset em quarentena (recepção/dona).
+// Em F5+ com validateGuidedPhoto, isso pode virar automático — hoje é manual.
+router.post("/assets/:id/approve", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { safetyReport } = req.body || {};
+  const ok = BeautyVisualConsultationService.approveAsset(orgId, req.params.id, safetyReport && typeof safetyReport === "object" ? safetyReport : undefined);
+  if (!ok) return res.status(404).json({ error: "Asset não encontrado ou não está em quarentena." });
+  try { logAuthEvent(orgId, req.user?.userId || null, req.params.id, "BEAUTY_ASSET_APPROVED_MANUAL", {}); } catch { /* noop */ }
+  res.json({ ok: true });
+});
+
+router.post("/assets/:id/reject", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { reason, safetyReport } = req.body || {};
+  const ok = BeautyVisualConsultationService.rejectAsset(orgId, req.params.id, String(reason || "sem_motivo").slice(0, 200),
+    safetyReport && typeof safetyReport === "object" ? safetyReport : undefined);
+  if (!ok) return res.status(404).json({ error: "Asset não encontrado ou não está em quarentena." });
+  res.json({ ok: true });
+});
+
+// ─────────────── Simulator ───────────────
+
+router.post("/consultations/:id/simulate", (req: AuthRequest, res): any => {
+  const orgId = requireSimulator(req, res);
+  if (!orgId) return;
+  const { simulationType, parameters } = req.body || {};
+  const r = BeautyHairSimulationService.requestSimulation(orgId, req.params.id, {
+    simulationType: simulationType as any,
+    parameters: parameters && typeof parameters === "object" ? parameters : {},
+  });
+  if (!r.ok) return res.status(400).json(r);
+  res.json(r);
+});
+
+router.get("/simulations/:id", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const sim = BeautyHairSimulationService.getSimulation(orgId, req.params.id);
+  if (!sim) return res.status(404).json({ error: "Simulação não encontrada." });
+  res.json(sim);
+});
+
+router.post("/simulations/:id/cancel", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const ok = BeautyHairSimulationService.cancelSimulation(orgId, req.params.id);
+  res.json({ ok });
+});
+
+// Cliente escolhe um visual (avança consulta pra 'selected').
+router.post("/consultations/:id/select", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { simulationId } = req.body || {};
+  if (!simulationId) return res.status(400).json({ error: "simulationId obrigatório." });
+  const cons = BeautyVisualConsultationService.getConsultation(orgId, req.params.id);
+  if (!cons) return res.status(404).json({ error: "Consulta não encontrada." });
+  if (cons.status !== "ready") return res.status(400).json({ error: `Consulta em '${cons.status}' — só 'ready' pode selecionar.` });
+  const sim = BeautyHairSimulationService.getSimulation(orgId, String(simulationId));
+  if (!sim || sim.consultationId !== cons.id) return res.status(404).json({ error: "Simulação não pertence à consulta." });
+  if (sim.status !== "SUCCEEDED") return res.status(400).json({ error: `Simulação em '${sim.status}' — só 'SUCCEEDED' pode ser selecionada.` });
+  db.prepare(
+    `UPDATE beauty_visual_consultations SET status = 'selected', selected_simulation_id = ?, selected_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND organization_id = ?`,
+  ).run(String(simulationId), cons.id, orgId);
+  try { logAuthEvent(orgId, req.user?.userId || null, cons.id, "BEAUTY_CONSULTATION_SELECTED", { simulationId }); } catch { /* noop */ }
+  res.json(BeautyVisualConsultationService.getConsultation(orgId, cons.id));
+});
+
+export default router;

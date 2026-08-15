@@ -199,6 +199,7 @@
     "test:quickstart-onboarding": "tsx scripts/test-quickstart-onboarding.ts",
     "test:lgpd-vertical-consent": "tsx scripts/test-lgpd-vertical-consent.ts",
     "test:beauty-registry": "tsx scripts/test-beauty-registry.ts",
+    "test:beauty-blueprint-piloto": "tsx scripts/test-beauty-blueprint-piloto.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

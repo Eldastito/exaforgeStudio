@@ -132,6 +132,37 @@ export const INITIAL_BLUEPRINTS: CreateBlueprintInput[] = [
       runtimePlaybooks: [],
     },
   },
+  // ADR-169 F2 (BEAUTY-002) — vertical Beleza & Salões. Preset stack "salão"
+  // agnóstico ao porte: coração operacional (agenda + vendas + pagamentos)
+  // como REQUIRED; comunicação, retenção e conteúdo como OPTIONAL (o dono
+  // liga quando quiser). Reusa a agenda profissional/sala/especialidade
+  // dos SERVICES da Clínica sem ligar o módulo `clinica` (RN-BS-05/D5) —
+  // por isso `clinica` fica em `hiddenModules`. `retail`/`retail_floor`
+  // (operação de rede supervisionada), `escola`, `vms` e `prospect` também
+  // são incoerentes pro nicho. `quickStartPack: null` — o pack de beleza
+  // (áreas de atendimento, cadências e FAQ específicas) é fatia futura;
+  // hoje `OnboardingTemplateService.PACKS` só tem os 4 verticais originais.
+  // `defaultBundleKey: null` — se F17 quiser, adiciona um bundle
+  // "growth_beleza" em `PLAN_BUNDLES` (molde: `growth_clinica`).
+  // Beauty AI (Simulador de Cabelo, ADR-169 F5+) NÃO entra em módulos —
+  // vive como flag `beauty_hair_simulator_enabled` em `organization_settings`.
+  {
+    key: "beleza_salao_v1",
+    name: "ZappFlow Beleza & Salões",
+    baseVertical: "beleza",
+    version: 1,
+    minimumPlanId: "start",
+    defaultPlanId: "growth",
+    defaultBundleKey: null,
+    config: {
+      requiredModules: ["agenda", "vendas", "pagamentos"],
+      optionalModules: ["campanhas", "cadencias", "assinaturas", "estudio", "areas", "integracoes", "diretor", "rie", "execucao"],
+      hiddenModules: ["clinica", "escola", "retail", "retail_floor", "vms", "prospect"],
+      commercialUpgrades: ["scale", "enterprise"],
+      quickStartPack: null,
+      runtimePlaybooks: [],
+    },
+  },
   // ADR-154 F2.1 — BLUEPRINT SOLO: assistente pessoal FalaTu vendido como app
   // único. mode='solo' esconde qualquer navegação/menu fora do único módulo
   // requerido (RN-154 §1 — vazamento de módulo hidden = bug de segurança).
@@ -206,6 +237,16 @@ export function inferBlueprintKeyFor(vertical: string | null | undefined, planId
   // Serviços autônomo (chaveiro e afins).
   if (v === "servicos" && p === "autonomo") {
     return { key: "chaveiro_autonomo", reason: "vertical=servicos + plan=autonomo → chaveiro_autonomo" };
+  }
+
+  // ADR-169 F2 — vertical Beleza & Salões: sempre o blueprint canônico,
+  // independente do plano. Mesmo padrão da saúde (`hiddenModules` do
+  // blueprint precisa valer mesmo antes do dono contratar plano superior).
+  // Se o plano contratado for menor que `minimumPlanId="start"` do blueprint,
+  // o assign funciona mas o EntitlementService segue recortando pelo teto do
+  // plano — o `commercialUpgrades` sinaliza o próximo passo comercial.
+  if (v === "beleza") {
+    return { key: "beleza_salao_v1", reason: "vertical=beleza → beleza_salao_v1" };
   }
 
   // Todo o resto (varejo+start+, servicos+start+, food, educacao,

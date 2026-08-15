@@ -9474,6 +9474,30 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_enforced INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_start_hour INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_quiet_hours_end_hour INTEGER`); } catch(e){}
+
+  // ADR-169 F5-transversal-C — Frequency cap por contato.
+  // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`
+  // recusa envio a um contato que já recebeu N ou mais mensagens do sistema
+  // na última janela de H horas (defaults 3 mensagens / 24h). Registra
+  // TENTATIVAS bem-sucedidas em `outbound_send_log` (tabela dedicada
+  // isolada de `messages` — a guard não depende do padrão de escrita dos
+  // callers). Sem flag (default 0), 0-regressão.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_frequency_cap_enforced INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_frequency_cap_max_per_window INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN client_frequency_cap_window_hours INTEGER`); } catch(e){}
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS outbound_send_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_outbound_send_log_org_contact_time
+        ON outbound_send_log (organization_id, contact_id, sent_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar outbound_send_log (ADR-169 F5-C)', e); }
 };
 
 initDb();

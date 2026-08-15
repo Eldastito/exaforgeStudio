@@ -2,6 +2,7 @@ import db from "./db.js";
 import { ManipulationRadarService } from "./ManipulationRadarService.js";
 import { OutboundConsentGuardService, OutboundBlockedError } from "./OutboundConsentGuardService.js";
 import { ClientQuietHoursGuardService, OutboundQuietHoursError } from "./ClientQuietHoursGuardService.js";
+import { ClientFrequencyCapGuardService, OutboundFrequencyCapError } from "./ClientFrequencyCapGuardService.js";
 // Node 18+/22 já possui fetch global — não usar node-fetch (quebra no bundle CJS).
 
 export class MessageProviderService {
@@ -39,6 +40,25 @@ export class MessageProviderService {
       const quiet = ClientQuietHoursGuardService.evaluate(channel.organization_id);
       if (quiet.allow === false) {
         throw new OutboundQuietHoursError(quiet.hourSP, quiet.startHour, quiet.endHour);
+      }
+    }
+
+    // ADR-169 F5-transversal-C — GATE de FREQUENCY CAP no SINK canônico.
+    // Opt-in por org (`client_frequency_cap_enforced=1`); default OFF =
+    // 0-regressão. Roda DEPOIS de quiet-hours (a hora certa é pré-requisito).
+    // Se bloqueia, código tipado (`outbound_blocked:frequency_cap`) deixa o
+    // caller marcar delivery como `blocked_frequency_cap` e (se quiser)
+    // reagendar pós-janela.
+    if (channel.organization_id) {
+      const freq = ClientFrequencyCapGuardService.evaluate(
+        channel.organization_id,
+        recipientIdentifier,
+      );
+      if (freq.allow === false) {
+        throw new OutboundFrequencyCapError(freq.used, freq.cap, freq.windowHours, {
+          contactId: freq.contactId,
+          contactName: freq.contactName,
+        });
       }
     }
 
@@ -111,6 +131,11 @@ export class MessageProviderService {
        // status (delivered/read) que chegam depois pelo webhook. WhatsApp Cloud:
        // messages[0].id; Instagram: message_id.
        const data: any = await response.json().catch(() => null);
+       // F5-transversal-C: registra envio bem-sucedido no log de frequência.
+       // Best-effort (nunca lança pro caller). No-op se flag OFF ou sem contato.
+       if (channel.organization_id) {
+         try { ClientFrequencyCapGuardService.record(channel.organization_id, recipientIdentifier); } catch { /* noop */ }
+       }
        return data?.messages?.[0]?.id || data?.message_id || undefined;
     } else if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
         // Prioriza a chave do ambiente (fonte da verdade no deploy) e só usa a do
@@ -145,6 +170,10 @@ export class MessageProviderService {
            throw new Error(`Erro na Evolution API (${response.status}) em ${endpoint}: ${await response.text()}`);
         }
         const data: any = await response.json().catch(() => null);
+        // F5-transversal-C: registra envio bem-sucedido (best-effort).
+        if (channel.organization_id) {
+          try { ClientFrequencyCapGuardService.record(channel.organization_id, recipientIdentifier); } catch { /* noop */ }
+        }
         return data?.key?.id || data?.id || undefined;
     }
 

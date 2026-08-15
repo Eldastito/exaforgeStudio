@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { ManipulationRadarService } from "./ManipulationRadarService.js";
 import { OutboundConsentGuardService, OutboundBlockedError } from "./OutboundConsentGuardService.js";
+import { ClientQuietHoursGuardService, OutboundQuietHoursError } from "./ClientQuietHoursGuardService.js";
 // Node 18+/22 já possui fetch global — não usar node-fetch (quebra no bundle CJS).
 
 export class MessageProviderService {
@@ -25,6 +26,19 @@ export class MessageProviderService {
           contactId: decision.contactId,
           contactName: decision.contactName,
         });
+      }
+    }
+
+    // ADR-169 F5-transversal-B — GATE de JANELA SILENCIOSA no SINK canônico.
+    // Opt-in por org (`client_quiet_hours_enforced=1`); default OFF = 0-regressão.
+    // Roda DEPOIS do consent (consent é regra mais dura: "não pode falar" vem
+    // antes de "pode mas não agora"). Se bloqueia, o caller pode reenviar
+    // depois da janela — o code tipado (`outbound_blocked:quiet_hours`) deixa
+    // o caller registrar como `blocked_quiet_hours` (não como `failed`).
+    if (channel.organization_id) {
+      const quiet = ClientQuietHoursGuardService.evaluate(channel.organization_id);
+      if (quiet.allow === false) {
+        throw new OutboundQuietHoursError(quiet.hourSP, quiet.startHour, quiet.endHour);
       }
     }
 

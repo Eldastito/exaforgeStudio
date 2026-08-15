@@ -36,6 +36,16 @@ export const PEOPLE_AFFECTING: Record<string, PeopleAffecting> = {
     basis: "critérios de negócio (ICP, evidências), não atributos pessoais",
     fairnessNote: "Alvos são empresas/critérios de negócio; o humano aprova a lista antes de qualquer contato.",
   },
+  // ADR-169 F8 (BEAUTY-008) — sugestão estética da vertical Beleza. RN-BS-03:
+  // IA NUNCA julga aparência. A Análise de Harmonia Visual usa linguagem
+  // DESCRITIVA (contraste/equilíbrio/destaque), nunca RANKING. Registrar como
+  // people-affecting força que qualquer aplicação (mostrar ao cliente,
+  // recomendar serviço com base na análise) exija ATOR HUMANO + MOTIVO.
+  estetica_appearance_advice: {
+    label: "Análise de Harmonia Visual (beleza)",
+    basis: "vocabulário DESCRITIVO fechado (contraste/equilíbrio/destaque/volume/intensidade), nunca ranking nem julgamento de aparência",
+    fairnessNote: "A IA NUNCA julga se a pessoa é 'bonita/feia/atraente'; descreve o efeito visual da mudança pretendida com termos técnicos de estilo. A profissional interpreta e recomenda; o cliente decide. Nenhuma nota, score, rank ou termo pejorativo.",
+  },
 };
 
 export class AiGovernanceService {

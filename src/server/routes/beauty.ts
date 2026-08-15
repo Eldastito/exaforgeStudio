@@ -34,6 +34,7 @@ import { BeautyVisualConsultationService, BEAUTY_CONSENT_SCOPES } from "../Beaut
 import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimulationService.js";
 import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js";
 import { LookServiceRecommendationService } from "../LookServiceRecommendationService.js";
+import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentService.js";
 
 const router = Router();
 
@@ -279,6 +280,44 @@ router.get("/consultations/:id/recommendations", (req: AuthRequest, res): any =>
   const orgId = requireBeauty(req, res);
   if (!orgId) return;
   const r = LookServiceRecommendationService.recommendForConsultation(orgId, req.params.id);
+  res.json(r);
+});
+
+// Availability composta: "quem pode fazer este serviço e quando?" (F10).
+router.get("/consultations/:id/availability", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const serviceId = String(req.query?.serviceId || "");
+  const days = req.query?.days ? Number(req.query.days) : undefined;
+  const fromMs = req.query?.fromMs ? Number(req.query.fromMs) : undefined;
+  const roomId = req.query?.roomId ? String(req.query.roomId) : null;
+  const r = BeautyLookToAppointmentService.availability(orgId, req.params.id, {
+    serviceId,
+    days,
+    fromMs,
+    roomId,
+  });
+  res.json(r);
+});
+
+// Reserva: consulta 'selected' + serviço + profissional + horário → appointment (F10).
+router.post("/consultations/:id/book", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { serviceId, professionalId, startISO } = req.body || {};
+  if (!serviceId || !professionalId || !startISO) {
+    return res.status(400).json({ error: "serviceId, professionalId e startISO obrigatórios." });
+  }
+  const r = BeautyLookToAppointmentService.book(
+    orgId,
+    req.params.id,
+    { serviceId: String(serviceId), professionalId: String(professionalId), startISO: String(startISO) },
+    req.user?.userId || null,
+  );
+  if (r.ok === false) {
+    const code = r.reason === "slot_conflict" ? 409 : r.reason === "consultation_not_found" ? 404 : 400;
+    return res.status(code).json(r);
+  }
   res.json(r);
 });
 

@@ -208,6 +208,7 @@
     "test:beauty-routes": "tsx scripts/test-beauty-routes.ts",
     "test:beauty-harmony-analysis": "tsx scripts/test-beauty-harmony-analysis.ts",
     "test:beauty-look-to-services": "tsx scripts/test-beauty-look-to-services.ts",
+    "test:beauty-look-to-appointment": "tsx scripts/test-beauty-look-to-appointment.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

@@ -9508,6 +9508,16 @@ const initDb = () => {
   // PROPÕE follow-up (fatia futura via DecisionAction+ApprovalPolicy).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_abandoned_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_abandoned_after_hours INTEGER`); } catch(e){}
+
+  // ADR-169 F12 — Detector de manutenção. Coluna aditiva em products_services
+  // (NULL = sem manutenção; INTEGER >0 = dias entre um serviço e o retorno
+  // sugerido, ex.: coloração = 30d, escova progressiva = 90d). Flag opt-in por
+  // org: quando ativa, o Scheduler varre appointments passados e publica sinal
+  // pra contatos cuja janela do serviço venceu SEM haver próximo appointment
+  // já marcado. Sinal na espinha canônica com dedupe
+  // `beauty:maintenance_due:{contactId}:{serviceId}` — D6, sem tabela paralela.
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN maintenance_days INTEGER`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_maintenance_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

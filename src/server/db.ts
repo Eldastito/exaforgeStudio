@@ -9427,6 +9427,36 @@ const initDb = () => {
         ON beauty_visual_simulations (organization_id, input_hash, status);
     `);
   } catch(e){ console.error('[DB] Falha ao criar beauty_visual_simulations (ADR-169 F6)', e); }
+
+  // ADR-169 F8 (BEAUTY-008) — Análise de Harmonia Visual.
+  // Uma linha por CHAMADA de análise (nunca substitui — histórico completo
+  // por consulta, ADR/LGPD auditável). `dimensions_json` é fixo em VOCAB
+  // controlado (contraste/equilíbrio/destaque/volume/intensidade) — nunca
+  // texto livre. `narrative` é DESCRITIVA (nunca julga aparência, nunca
+  // ranking — RN-BS-03). `disclaimer_shown=1` obrigatório (PRD §31).
+  // `simulation_id` opcional: análise pode ser sobre a consulta como um
+  // todo (só reference photo + parâmetros do objetivo) OU sobre uma
+  // simulação específica escolhida.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_visual_analyses (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        consultation_id TEXT NOT NULL,
+        simulation_id TEXT,
+        dimensions_json TEXT NOT NULL,
+        narrative TEXT NOT NULL,
+        disclaimer_shown INTEGER DEFAULT 1,
+        actor_user_id TEXT,
+        reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_analyses_consult
+        ON beauty_visual_analyses (organization_id, consultation_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_beauty_analyses_sim
+        ON beauty_visual_analyses (organization_id, simulation_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_visual_analyses (ADR-169 F8)', e); }
 };
 
 initDb();

@@ -32,6 +32,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { BeautyVisualConsultationService, BEAUTY_CONSENT_SCOPES } from "../BeautyVisualConsultationService.js";
 import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimulationService.js";
+import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js";
 
 const router = Router();
 
@@ -206,6 +207,53 @@ router.post("/simulations/:id/cancel", (req: AuthRequest, res): any => {
   if (!orgId) return;
   const ok = BeautyHairSimulationService.cancelSimulation(orgId, req.params.id);
   res.json({ ok });
+});
+
+// ─────────────── Harmony Analysis (F8) ───────────────
+
+// GET /vocabulary/harmony — dimensões + disclaimer pra UI
+router.get("/vocabulary/harmony", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyHarmonyAnalysisService.vocabulary());
+});
+
+// POST /consultations/:id/analysis — gera análise (exige actor+reason via
+// AiGovernanceService.guardApplied — RN-BS-03)
+router.post("/consultations/:id/analysis", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { simulationId, reason } = req.body || {};
+  const actorId = req.user?.userId || null;
+  try {
+    const analysis = BeautyHarmonyAnalysisService.analyze(orgId, req.params.id, {
+      simulationId: simulationId || null,
+      actorId,
+      reason: String(reason || "").trim() || null,
+    });
+    res.json(analysis);
+  } catch (e: any) {
+    if (e?.code === "human_decision_required") {
+      return res.status(400).json({ error: "human_decision_required", detail: "Análise exige actor + reason (RN-BS-03)." });
+    }
+    res.status(400).json({ error: String(e?.message || "Erro").slice(0, 200) });
+  }
+});
+
+// GET /consultations/:id/analyses — histórico de análises da consulta
+router.get("/consultations/:id/analyses", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyHarmonyAnalysisService.listForConsultation(orgId, req.params.id));
+});
+
+// GET /analyses/:id — 1 análise específica
+router.get("/analyses/:id", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const a = BeautyHarmonyAnalysisService.getById(orgId, req.params.id);
+  if (!a) return res.status(404).json({ error: "Análise não encontrada." });
+  res.json(a);
 });
 
 // Cliente escolhe um visual (avança consulta pra 'selected').

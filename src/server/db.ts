@@ -9256,6 +9256,135 @@ const initDb = () => {
         ON professional_services (organization_id, service_id, active);
     `);
   } catch(e){ console.error('[DB] Falha ao criar professional_services (ADR-169 F4)', e); }
+
+  // ADR-169 F5 (BEAUTY-005) — Fundação da Beauty AI. 4 tabelas novas, todas
+  // aditivas (CREATE-then-ALTER estrito, convenção nº 2). Espelham o padrão
+  // do Fashion Studio (`fashion_*`) mas usam `contact_id` (CRM canônico) em
+  // vez de `customer_id` (storefront). Foto de cliente é dado pessoal
+  // sensível (LGPD Art.5 II) — RN-BS-04 exige consent tipado; RN-BS-05
+  // proíbe log de foto/prompt.
+  //
+  // (a) beauty_consents — consent TIPADO por contato+escopo. Escopos:
+  //     hair_simulation (upload+processamento da foto pro Simulador),
+  //     use_in_marketing (publicar antes/depois no Instagram),
+  //     whatsapp_notification, guardian_approval (menor). Revogar apaga
+  //     assets do escopo (LGPD Art.18). NUNCA delete — soft-off com
+  //     revoked_at preserva prova documental.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_consents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        consent_type TEXT NOT NULL,
+        policy_version TEXT DEFAULT 'v1',
+        granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        revoked_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_consents_org_contact
+        ON beauty_consents (organization_id, contact_id, consent_type);
+      CREATE INDEX IF NOT EXISTS idx_beauty_consents_active
+        ON beauty_consents (organization_id, contact_id, consent_type, revoked_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_consents (ADR-169 F5)', e); }
+
+  // (b) beauty_visual_consultations — sessão da cliente na jornada
+  //     Descobrir→Experimentar→Decidir→Agendar. Uma consulta = 1 objetivo
+  //     (cor/corte/mechas/estilo/completo) + intensidade + fotos + escolha.
+  //     status: draft → ready (foto aprovada) → selected (simulação escolhida)
+  //     → scheduled (virou agendamento — F10) | abandoned (TTL vencido).
+  //     expires_at: TTL configurável (default 30d — PRD §26/27). Anti-orfã:
+  //     scheduled_appointment_id só é preenchido quando F10 amarrar.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_visual_consultations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT,
+        status TEXT DEFAULT 'draft',
+        goal TEXT,
+        intensity TEXT,
+        reference_photo_key TEXT,
+        consent_id TEXT,
+        selected_simulation_id TEXT,
+        selected_at DATETIME,
+        scheduled_appointment_id TEXT,
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_consult_org_status
+        ON beauty_visual_consultations (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_beauty_consult_contact
+        ON beauty_visual_consultations (organization_id, contact_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_visual_consultations (ADR-169 F5)', e); }
+
+  // (c) beauty_avatar_assets — a FOTO em si (dado pessoal sensível).
+  //     storage_key: caminho no private_media (NUNCA /media público).
+  //     status: quarantined → approved | rejected → deleted (soft) | expired.
+  //     safety_report_json: apenas flags booleanas (RN-BS-05 — nunca imagem
+  //     bruta no log/JSON). Retenção: expires_at = agora + beauty_avatar_
+  //     retention_days (default 30). Purga preguiçosa no acesso + Scheduler.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_avatar_assets (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        consultation_id TEXT,
+        storage_key TEXT,
+        status TEXT DEFAULT 'quarantined',
+        safety_report_json TEXT,
+        consent_id TEXT,
+        expires_at DATETIME,
+        deleted_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_avatar_org_contact
+        ON beauty_avatar_assets (organization_id, contact_id, status);
+      CREATE INDEX IF NOT EXISTS idx_beauty_avatar_consultation
+        ON beauty_avatar_assets (organization_id, consultation_id);
+      CREATE INDEX IF NOT EXISTS idx_beauty_avatar_expires
+        ON beauty_avatar_assets (status, expires_at)
+        WHERE status != 'deleted' AND expires_at IS NOT NULL;
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_avatar_assets (ADR-169 F5)', e); }
+
+  // (d) beauty_reference_looks — referências CURADAS pelo salão (fotos de
+  //     antes/depois do próprio Studio, presets do salão). É a "biblioteca
+  //     de looks" que o Simulador (F6) usa como referência de cor/corte —
+  //     e o `LookServiceRecommendationService` (F9) casa com o catálogo.
+  //     `suggested_services_json` = ["service_id_1", ...] só do próprio
+  //     tenant (RN-BS-02: IA nunca sugere serviço fora do catálogo).
+  //     `hair_type`/`length`/`tone`/`cut_style` são TAGS descritivas
+  //     estruturadas (nunca ranking).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_reference_looks (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        image_storage_key TEXT,
+        hair_type TEXT,
+        length TEXT,
+        tone TEXT,
+        cut_style TEXT,
+        suggested_services_json TEXT,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_ref_looks_org
+        ON beauty_reference_looks (organization_id, active);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_reference_looks (ADR-169 F5)', e); }
+
+  // ADR-169 F5 — colunas opt-in em organization_settings (convenção nº 10):
+  //   beauty_hair_simulator_enabled (default 0) — flag master do Simulador
+  //     de Cabelo, checada em F6+.
+  //   beauty_avatar_retention_days (default 30, clamp 1..365) — janela de
+  //     purga automática dos avatares (RN-BS-04).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_hair_simulator_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_avatar_retention_days INTEGER DEFAULT 30`); } catch(e){}
 };
 
 initDb();

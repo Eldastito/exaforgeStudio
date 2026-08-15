@@ -19,7 +19,24 @@ import { randomUUID } from "crypto";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 
 // Whitelist de eventos (§80) — nada fora disso é gravado.
-const EVENT_TYPES = new Set(["view_opened", "action_clicked", "approval_completed", "clarification_requested", "first_value"]);
+const CORE_EVENT_TYPES = ["view_opened", "action_clicked", "approval_completed", "clarification_requested", "first_value"];
+// ADR-169 F16 — eventos beauty pra observability da Beauty AI + dashboard
+// master de adoção do funil visual (§80 + PRD Beauty §33). Cada nome é
+// STATELESS + minimizado (RN-BS-05 — sem foto/prompt no log; só rótulos).
+// Mesma disciplina LGPD do core: opt-in por `ux_telemetry_enabled`, nunca
+// texto livre, sem PII. Extensível — outras verticais que precisem de
+// telemetria específica adicionam suas keys aqui.
+export const BEAUTY_EVENT_TYPES = [
+  "beauty_consultation_started",   // consulta visual aberta (F5)
+  "beauty_photo_uploaded",         // upload da foto de referência (F5)
+  "beauty_simulation_requested",   // sim disparada (F6)
+  "beauty_simulation_selected",    // cliente escolheu um visual (F7)
+  "beauty_analysis_generated",     // análise harmonia gerada (F8)
+  "beauty_appointment_booked",     // agendamento derivado (F10)
+  "beauty_review_sent",            // review invite enviado (F13)
+] as const;
+export type BeautyEventType = (typeof BEAUTY_EVENT_TYPES)[number];
+const EVENT_TYPES = new Set<string>([...CORE_EVENT_TYPES, ...BEAUTY_EVENT_TYPES]);
 
 /** Reduz a um id curto seguro: [a-z0-9_-], minúsculo, ≤ 40 — barra texto livre/PII. */
 function safeId(v: unknown): string | null {
@@ -110,6 +127,57 @@ export class UxTelemetryService {
         sessionsWithAction: withAction,
         abandonedSessions: abandoned,
         rate: viewSessions.size ? Math.round((abandoned / viewSessions.size) * 100) / 100 : 0,
+      },
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * FUNIL BEAUTY AI (ADR-169 F16) — corte dedicado dos eventos beauty pra
+   * o dashboard master do §33 do PRD Beauty. Reusa `ux_telemetry_events`
+   * (nunca tabela paralela) filtrando por `event_type IN BEAUTY_EVENT_TYPES`.
+   * Só pra gestor com visão de negócio (mesmo gate de `summary`). Sem PII —
+   * agregado puro (contagens + taxa de conversão simulate→select→book).
+   *
+   * Cost/uso da IA (custo real do provider Gemini) NÃO vive aqui — vive em
+   * `AiUsageDashboardService.byOrg(orgId).byModule` (ADR-154), já
+   * disponível no master admin. F16 mede ADOÇÃO/FUNIL; F16 não duplica
+   * cost tracking (§37 canonical loop — mesmo dashboard reusa dado).
+   */
+  static beautyMetrics(orgId: string, user: any, opts: { sinceDays?: number } = {}): {
+    windowDays: number;
+    funnel: { started: number; photoUploaded: number; simulationRequested: number; simulationSelected: number; analysisGenerated: number; appointmentBooked: number; reviewSent: number };
+    conversions: { photoRate: number | null; simulateRate: number | null; selectRate: number | null; bookRate: number | null };
+    generatedAt: string;
+  } | { restricted: true } {
+    if (!ContextProjectionService.hasFullBusinessVisibility(orgId, user)) return { restricted: true };
+    const days = Math.max(1, Math.min(365, Number(opts.sinceDays) || 30));
+    const since = `-${days} day`;
+    const rows = db.prepare(
+      `SELECT event_type FROM ux_telemetry_events
+        WHERE organization_id = ? AND datetime(created_at) >= datetime('now', ?)
+          AND event_type LIKE 'beauty_%'`,
+    ).all(orgId, since) as any[];
+    const c = (t: string): number => rows.filter((r) => r.event_type === t).length;
+
+    const started = c("beauty_consultation_started");
+    const photoUploaded = c("beauty_photo_uploaded");
+    const simulationRequested = c("beauty_simulation_requested");
+    const simulationSelected = c("beauty_simulation_selected");
+    const analysisGenerated = c("beauty_analysis_generated");
+    const appointmentBooked = c("beauty_appointment_booked");
+    const reviewSent = c("beauty_review_sent");
+
+    const rate = (num: number, den: number): number | null => (den > 0 ? Math.round((num / den) * 100) / 100 : null);
+
+    return {
+      windowDays: days,
+      funnel: { started, photoUploaded, simulationRequested, simulationSelected, analysisGenerated, appointmentBooked, reviewSent },
+      conversions: {
+        photoRate: rate(photoUploaded, started),
+        simulateRate: rate(simulationRequested, photoUploaded),
+        selectRate: rate(simulationSelected, simulationRequested),
+        bookRate: rate(appointmentBooked, simulationSelected),
       },
       generatedAt: new Date().toISOString(),
     };

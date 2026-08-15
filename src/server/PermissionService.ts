@@ -483,6 +483,111 @@ export class PermissionService {
     return { ok: true };
   }
 
+  // ── ADR-169 F3 (BEAUTY-003) — perfis por-vertical Beleza & Salões ─────────
+  //
+  // 3 perfis contextualizados ao dia-a-dia do salão (PRD §16 exemplo). São
+  // perfis CUSTOMIZADOS (is_system=0) — não entram em SYSTEM_PROFILES, portanto
+  // NÃO são semeados em todas as orgs (0-regressão pras 8 verticais existentes).
+  // Só nascem quando `VerticalBlueprintService.assignToOrganization` atribui o
+  // `beleza_salao_v1` a uma org (side-effect best-effort do assign — mesmo
+  // padrão de `LgpdService.seedConsentForVertical` em `ModuleService.applyVertical`).
+  //
+  // Preservam edições do dono: se um perfil com o mesmo `name` já existe na
+  // org, NÃO recria nem sobrescreve (o admin pode ter customizado). Isso
+  // torna F3 idempotente sob re-assign do blueprint.
+  //
+  // Guardrails:
+  //  - RN-BS-08 (§73): recepção/cabeleireira NUNCA veem financeiro global
+  //    (financeiro/saude_negocio/empresa_proprietario = none). Gerente vê
+  //    resumo (financeiro=read) mas não modifica; dono/admin seguem full.
+  //  - RN-BS-11: perfil não inventa acesso — o que não está no override
+  //    permanece `none` (default de `createProfile.sanitizePerms`).
+  //  - Cross-tenant: cada `seedBeautyProfiles` roda por 1 org — todos os
+  //    INSERTs carregam `organization_id`.
+  private static readonly BEAUTY_PROFILES: Array<{ name: string; permissions: Partial<Record<string, Level>> }> = [
+    {
+      // Recepção — atende cliente na porta, marca horário, cobra saída.
+      // NÃO vê financeiro global; vê catálogo/pagamentos só p/ conferir preço.
+      name: "Recepção (Beleza)",
+      permissions: {
+        atendimento: "write",
+        contatos: "write",
+        agenda: "write",
+        vendas: "write",
+        pagamentos: "read",
+        catalogo: "read",
+        cadencias: "read",
+        assinaturas: "read",
+        relatorios: "read",
+      },
+    },
+    {
+      // Cabeleireira/manicure/esteticista — só o essencial pro trabalho.
+      // Agenda leitura (não remarca — recepção faz); ficha do atendimento
+      // (atendimento=write) pra registrar fórmula/nota no encontro.
+      // NÃO vê financeiro/cobrança/campanhas/cadências.
+      name: "Cabeleireira (Beleza)",
+      permissions: {
+        atendimento: "write",
+        contatos: "read",
+        agenda: "read",
+        catalogo: "read",
+      },
+    },
+    {
+      // Gerente do salão — quase-dono operacional, mas sem tocar dinheiro
+      // (financeiro=read pra ver resumo) nem configurações críticas
+      // (configuracoes=read). Pode gerenciar profissionais/comissões via
+      // usuarios=full quando a fatia comissão for entregue.
+      name: "Gerente (Beleza)",
+      permissions: {
+        atendimento: "full",
+        contatos: "full",
+        vendas: "full",
+        catalogo: "full",
+        agenda: "full",
+        assinaturas: "full",
+        campanhas: "full",
+        cadencias: "full",
+        areas: "full",
+        pagamentos: "full",
+        cobranca: "read",
+        estudio: "full",
+        diretor: "full",
+        rie: "full",
+        execucao: "full",
+        relatorios: "full",
+        integracoes: "full",
+        usuarios: "full",
+        configuracoes: "read",
+        financeiro: "read",
+        saude_negocio: "read",
+      },
+    },
+  ];
+
+  /**
+   * Semeia os 3 perfis da vertical Beleza pra uma org (idempotente).
+   * Perfil já existente com o mesmo `name` é preservado (não recria, não
+   * sobrescreve — respeita ajustes do admin).
+   *
+   * Retorna as chaves criadas NESSA chamada (útil pra audit + teste).
+   */
+  static seedBeautyProfiles(orgId: string): { created: string[]; alreadyExisted: string[] } {
+    const created: string[] = [];
+    const alreadyExisted: string[] = [];
+    for (const spec of PermissionService.BEAUTY_PROFILES) {
+      const existing = db.prepare(
+        `SELECT id FROM role_profiles WHERE organization_id = ? AND name = ?`,
+      ).get(orgId, spec.name) as any;
+      if (existing) { alreadyExisted.push(spec.name); continue; }
+      this.createProfile(orgId, spec.name, spec.permissions);
+      created.push(spec.name);
+    }
+    if (created.length) console.log(`[RBAC] Semeados ${created.length} perfil(is) de beleza p/ org ${orgId}: ${created.join(", ")}.`);
+    return { created, alreadyExisted };
+  }
+
   /** Semeia os templates para TODAS as orgs (backfill idempotente no boot). */
   static backfillSystemProfiles(): { orgs: number } {
     let orgs: any[] = [];

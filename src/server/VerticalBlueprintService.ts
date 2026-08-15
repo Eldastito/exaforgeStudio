@@ -36,6 +36,9 @@ import { randomUUID } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { PLAN_GRADE, PLAN_BUNDLES } from "./plansGrade.js";
 import { OPTIONAL_MODULES } from "./verticals.js";
+// ADR-169 F3: import estático seguro — PermissionService só depende de `db`
+// e `uuid`, portanto NÃO fecha ciclo com este arquivo.
+import { PermissionService } from "./PermissionService.js";
 
 export type BlueprintStatus = "draft" | "published" | "deprecated";
 /**
@@ -332,6 +335,14 @@ export class VerticalBlueprintService {
     try {
       logAuthEvent(orgId, actor || null, null, "BLUEPRINT_ASSIGNED", { blueprintId, key: bp.key, version: bp.version });
     } catch { /* noop */ }
+
+    // ADR-169 F3 (BEAUTY-003): assign do blueprint `beleza_salao_v1` semeia
+    // os perfis por-vertical da Beleza (Recepção/Cabeleireira/Gerente) —
+    // SÍNCRONO. Best-effort: falha aqui NÃO derruba o assign (mesmo padrão
+    // de `seedConsentForVertical` em `ModuleService.applyVertical`).
+    if (bp.baseVertical === "beleza") {
+      try { PermissionService.seedBeautyProfiles(orgId); } catch { /* noop */ }
+    }
 
     return this.getForOrganization(orgId)!;
   }

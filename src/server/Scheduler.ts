@@ -840,6 +840,15 @@ export class Scheduler {
       import("./BeautyMaintenanceDetector.js").then((m) => m.BeautyMaintenanceDetector.pass())
         .catch((e) => console.error('[Scheduler] detector de manutenção beauty falhou', e));
     } catch (e) { console.error('[Scheduler] pass de detector de manutenção beauty falhou', e); }
+    // Beauty — Detector de vaga (ADR-169 F14): "horário ocioso + cliente elegível".
+    // Varre gaps futuros da agenda por profissional dentro do horário de funcionamento;
+    // publica sinal quando há ≥1 cliente elegível (RN-BS-11 — nunca publica "vaga
+    // que ninguém pode ocupar"). Opt-in por org (`beauty_vacancy_detector_enabled=1`);
+    // default OFF = 0-regressão. Dedupe `beauty:vacancy_opportunity:{proId}:{slotStartISO}`.
+    try {
+      import("./BeautyVacancyDetector.js").then((m) => m.BeautyVacancyDetector.pass())
+        .catch((e) => console.error('[Scheduler] detector de vaga beauty falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de detector de vaga beauty falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

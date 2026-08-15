@@ -217,6 +217,7 @@
     "test:beauty-review-invite": "tsx scripts/test-beauty-review-invite.ts",
     "test:beauty-vacancy-opportunity": "tsx scripts/test-beauty-vacancy-opportunity.ts",
     "test:beauty-falatu-intents": "tsx scripts/test-beauty-falatu-intents.ts",
+    "test:beauty-metrics": "tsx scripts/test-beauty-metrics.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

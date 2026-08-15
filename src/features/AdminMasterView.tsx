@@ -100,6 +100,39 @@ export function AdminMasterView() {
     }
   };
 
+  // ADR-169 F19 — Master Admin edita `organization_settings.vertical`. Fecha o
+  // gap operacional: até aqui só dava pra atribuir blueprint (módulos/plano),
+  // mas o campo `vertical` é o gate real do menu da vertical (ex.: Sidebar
+  // mostra "Beauty AI" quando vertical==='beleza'). Aceita só chaves do
+  // registry `VERTICALS` (verticals.ts) — a rota valida no backend.
+  const VERTICAL_OPTIONS: { key: string; label: string }[] = [
+    { key: 'varejo', label: 'Varejo' },
+    { key: 'moda', label: 'Moda' },
+    { key: 'food', label: 'Food' },
+    { key: 'servicos', label: 'Serviços' },
+    { key: 'saude', label: 'Saúde' },
+    { key: 'educacao', label: 'Educação' },
+    { key: 'hospitalidade', label: 'Hospitalidade' },
+    { key: 'beleza', label: 'Beleza & Salões' },
+    { key: 'outro', label: 'Outro' },
+  ];
+  const handleUpdateVertical = async (id: string, vertical: string) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/vertical`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vertical: vertical || null }),
+      });
+      if (res.ok) { toast.success('Vertical atualizada.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao atualizar vertical.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
   const handleToggleFalaTu = async (id: string, enabled: boolean) => {
     setLoadingId(id);
     try {
@@ -192,6 +225,7 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">Plano</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">FalaTu</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Vertical</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
             </thead>
@@ -274,6 +308,22 @@ export function AdminMasterView() {
                         {Number(org.falatu_enabled) ? 'Ligado' : 'Desligado'}
                       </button>
                   </td>
+                  <td className="px-6 py-4">
+                      {/* ADR-169 F19 — vertical da org é o gate real do menu por vertical
+                          (ex.: BeautyView aparece só com vertical==='beleza'). Master
+                          Admin edita aqui; a rota valida contra o registry VERTICALS. */}
+                      <select
+                        className="bg-zinc-950 border border-zinc-800 rounded text-xs p-1 text-zinc-300"
+                        value={org.vertical || ''}
+                        onChange={(e) => handleUpdateVertical(org.organization_id, e.target.value)}
+                        disabled={loadingId === org.organization_id}
+                      >
+                         <option value="">— sem vertical —</option>
+                         {VERTICAL_OPTIONS.map(v => (
+                           <option key={v.key} value={v.key}>{v.label}</option>
+                         ))}
+                      </select>
+                  </td>
                   <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                      {org.status === 'blocked' ? (
                         <Button 
@@ -308,7 +358,7 @@ export function AdminMasterView() {
               ))}
               {organizations.length === 0 && (
                  <tr>
-                    <td colSpan={10} className="px-6 py-8 text-center text-zinc-500">
+                    <td colSpan={11} className="px-6 py-8 text-center text-zinc-500">
                        Nenhuma organização encontrada.
                     </td>
                  </tr>

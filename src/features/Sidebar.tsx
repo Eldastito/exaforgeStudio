@@ -1,11 +1,11 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, vertical } = useStore();
   const { user, logout } = useAuth();
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
@@ -48,6 +48,11 @@ export function Sidebar() {
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
              {mod('rie') && <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />}
              {mod('estudio') && <NavItem icon={<Wand2 />} label="Estúdio de Criação" active={viewMode === 'studio'} onClick={() => setViewMode('studio')} />}
+             {/* ADR-169 F19: Beauty AI é a superfície visual do Estúdio pra vertical=beleza
+                 (consulta visual → simulação → recomendação → agendamento). Só aparece
+                 quando a org é beleza (`vertical === 'beleza'`) E o Estúdio está no
+                 plano, sem inflar o menu das outras verticais. */}
+             {mod('estudio') && vertical === 'beleza' && <NavItem icon={<Palette />} label="Beauty AI" active={viewMode === 'beauty'} onClick={() => setViewMode('beauty')} />}
              {mod('execucao') && <NavItem icon={<ListChecks />} label="Tarefas" active={viewMode === 'tarefas'} onClick={() => setViewMode('tarefas')} />}
              {mod('prospect') && <NavItem icon={<Target />} label="Prospect AI" active={viewMode === 'prospect'} onClick={() => setViewMode('prospect')} />}
              {mod('prospect') && <NavItem icon={<Radar />} label="Radar B2B" active={viewMode === 'radar_b2b'} onClick={() => setViewMode('radar_b2b')} />}

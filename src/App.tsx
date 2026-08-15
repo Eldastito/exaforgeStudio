@@ -15,6 +15,7 @@ import { EventsView } from '@/src/features/EventsView';
 import { ExecutiveView } from '@/src/features/ExecutiveView';
 import { RevenueIntelligenceView } from '@/src/features/rie/RevenueIntelligenceView';
 import { StudioView } from '@/src/features/StudioView';
+import { BeautyView } from '@/src/features/BeautyView';
 import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { RadarB2BView } from '@/src/features/RadarB2BView';
@@ -352,6 +353,7 @@ export default function App() {
              {viewMode === 'diretor' && 'Diretor Executivo IA'}
              {viewMode === 'rie' && 'Revenue Intelligence'}
              {viewMode === 'studio' && 'Estúdio de Criação'}
+             {viewMode === 'beauty' && 'Beauty AI — Consulta Visual'}
              {viewMode === 'tarefas' && 'Tarefas'}
              {viewMode === 'prospect' && 'Prospect AI'}
              {viewMode === 'radar_b2b' && 'Radar B2B'}
@@ -471,6 +473,7 @@ export default function App() {
           {viewMode === 'diretor' && <ExecutiveView />}
           {viewMode === 'rie' && <RevenueIntelligenceView />}
           {viewMode === 'studio' && <StudioView />}
+          {viewMode === 'beauty' && <BeautyView />}
           {viewMode === 'tarefas' && <TasksView />}
           {viewMode === 'prospect' && <ProspectView />}
           {viewMode === 'radar_b2b' && <RadarB2BView />}

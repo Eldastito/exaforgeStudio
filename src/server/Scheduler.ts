@@ -822,6 +822,15 @@ export class Scheduler {
       import("./CreativeLearningService.js").then((m) => m.CreativeLearningService.pass())
         .catch((e) => console.error('[Scheduler] aprendizado criativo falhou', e));
     } catch (e) { console.error('[Scheduler] pass de aprendizado criativo falhou', e); }
+    // Beauty — Detector de simulação abandonada (ADR-169 F11): publica `business_signal`
+    // pra consultas 'ready' com sim SUCCEEDED sem 'selected' há X horas. Opt-in por org
+    // (`beauty_abandoned_detector_enabled=1`); default OFF = 0-regressão. Sem tabela de
+    // alerta paralela (D6 — dedupe `beauty:abandoned_simulation:{consultationId}` no
+    // `business_signals`).
+    try {
+      import("./AbandonedBeautySimulationDetector.js").then((m) => m.AbandonedBeautySimulationDetector.pass())
+        .catch((e) => console.error('[Scheduler] detector de simulação abandonada falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de detector de simulação abandonada falhou', e); }
     // Retenção de avatar do Provador Virtual (FAS-1, ADR-035): apaga o ARQUIVO
     // da foto vencida — mesmo espírito do retentionPass, dado mais sensível.
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }

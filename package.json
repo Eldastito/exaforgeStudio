@@ -214,6 +214,7 @@
     "test:beauty-frequency-cap-transversal": "tsx scripts/test-beauty-frequency-cap-transversal.ts",
     "test:beauty-abandoned-simulation": "tsx scripts/test-beauty-abandoned-simulation.ts",
     "test:beauty-maintenance-detector": "tsx scripts/test-beauty-maintenance-detector.ts",
+    "test:beauty-review-invite": "tsx scripts/test-beauty-review-invite.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

@@ -35,6 +35,10 @@ import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimu
 import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js";
 import { LookServiceRecommendationService } from "../LookServiceRecommendationService.js";
 import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentService.js";
+// Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
+// (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
+// as rotas beauty forem montadas, o handler está disponível pro executor.
+import "../BeautyReviewInviteCommandHandler.js";
 
 const router = Router();
 

@@ -9518,6 +9518,14 @@ const initDb = () => {
   // `beauty:maintenance_due:{contactId}:{serviceId}` — D6, sem tabela paralela.
   try { db.exec(`ALTER TABLE products_services ADD COLUMN maintenance_days INTEGER`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_maintenance_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-169 F14 — Detector de vaga (horário ocioso + cliente elegível). Flag
+  // opt-in por org: quando ativa, o Scheduler varre gaps futuros na agenda por
+  // profissional dentro do horário de funcionamento e publica sinal quando há
+  // ≥1 cliente ELEGÍVEL pra oferta (atendimento com o mesmo pro em <=90d,
+  // sem appt futuro). Sinal `beauty:vacancy_opportunity:{professionalId}:{slotStartISO}`
+  // no `business_signals` — D6, sem tabela paralela.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_vacancy_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

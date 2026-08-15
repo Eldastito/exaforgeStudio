@@ -45,7 +45,10 @@ import { BeautyHairSimulationService } from "./BeautyHairSimulationService.js";
 // arbitrário — cada termo aqui é derivado do vocab do Simulador (F6) +
 // termos comerciais do salão (coloração é uma palavra do domínio, não
 // vem da cliente).
-const KEYWORDS_COLOR = [
+// Exportados desde a F15 (ADR-169) pra reuso pelo `BeautyFalaTuIntents` —
+// classificador determinístico compartilha o mesmo vocab (uma única fonte
+// de verdade sobre o que a plataforma reconhece como "beauty").
+export const KEYWORDS_COLOR = [
   "colora",          // coloração, colorar, colorista
   "cor de cabelo",
   "tintura", "tinta",
@@ -59,7 +62,7 @@ const KEYWORDS_COLOR = [
   "descolora",       // descoloração
   "matiz", "matizador",
 ];
-const KEYWORDS_CUT = [
+export const KEYWORDS_CUT = [
   "corte", "cortar",
   "escova",           // escova é um FINAL, não um corte, mas normalmente
                       // vendido junto — o dono decide manter ou não

@@ -358,6 +358,7 @@
     "test:retail-floor-kiosk": "tsx scripts/test-retail-floor-kiosk.ts",
     "test:retail-floor-talao": "tsx scripts/test-retail-floor-talao.ts",
     "test:retail-floor-replenishment": "tsx scripts/test-retail-floor-replenishment.ts",
+    "test:sicredi-cobranca": "tsx scripts/test-sicredi-cobranca.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",
     "pilot:runtime": "tsx scripts/pilot-runtime.cli.ts",

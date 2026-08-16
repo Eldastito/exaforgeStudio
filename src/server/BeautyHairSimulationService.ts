@@ -336,8 +336,15 @@ export class BeautyHairSimulationService {
     }
     const consultation = BeautyVisualConsultationService.getConsultation(orgId, consultationId);
     if (!consultation) return { ok: false, error: "Consulta não encontrada." };
-    if (consultation.status !== "ready") {
-      return { ok: false, error: `Consulta em status '${consultation.status}' — envie e aprove a foto antes de simular.` };
+    // F27: 'selected' também simula — escolher um visual ("Quero esse") não
+    // congela a exploração; a cliente ainda troca cor/corte antes de agendar
+    // (RN-BS-01: seleção ≠ agendamento). 'scheduled' encerra a exploração e
+    // 'draft' segue exigindo foto aprovada.
+    if (consultation.status !== "ready" && consultation.status !== "selected") {
+      const hint = consultation.status === "draft"
+        ? "envie e aprove a foto antes de simular"
+        : "a consulta já virou agendamento — abra uma consulta nova";
+      return { ok: false, error: `Consulta em status '${consultation.status}' — ${hint}.` };
     }
     if (!consultation.contactId) return { ok: false, error: "Consulta sem contato." };
 
@@ -375,6 +382,22 @@ export class BeautyHairSimulationService {
     if (!provider.available()) {
       return { ok: false, error: "Simulador temporariamente indisponível — tente mais tarde." };
     }
+    // F27 — STUB HONESTO em produção: o stub gera um quadrado colorido de
+    // demonstração, não um visual. Se ele foi alcançado como ÚLTIMO recurso
+    // (nenhuma chave de IA no ambiente) em produção, recusar com instrução
+    // clara é melhor que "suceder" com um bloco vermelho — o dono descobre
+    // na hora o que falta configurar. CI/dev seguem funcionando: lá o stub
+    // é opt-in explícito via BEAUTY_HAIR_SIMULATION_PROVIDER=stub.
+    if (
+      provider.key === "stub_v1" &&
+      process.env.NODE_ENV === "production" &&
+      process.env.BEAUTY_HAIR_SIMULATION_PROVIDER !== "stub"
+    ) {
+      return {
+        ok: false,
+        error: "Nenhuma IA de imagem configurada — defina OPENAI_API_KEY ou GOOGLE_AI_API_KEY/GEMINI_API_KEY nas variáveis de ambiente para gerar imagens reais.",
+      };
+    }
 
     // F26 — REUSO POR CONTEÚDO (economia de geração). O hash usa o SHA do
     // CONTEÚDO da foto (não o id do upload) + org + contato + parâmetros:
@@ -398,11 +421,15 @@ export class BeautyHairSimulationService {
     // Idempotência/reuso: mesmo pedido já processando/pronto → devolve a
     // imagem salva (só SUCCEEDED com output vivo — purga vira EXPIRED e sai
     // deste filtro, então acervo purgado re-gera corretamente).
+    // F27 — quarentena do stub: com provider REAL ativo, linha gerada pelo
+    // stub (quadrado de demonstração) NUNCA satisfaz o pedido — regenera de
+    // verdade. Provider-independência (F26) vale só entre providers reais.
     const existing = db.prepare(
       `SELECT id, status FROM beauty_visual_simulations
         WHERE organization_id = ? AND input_hash = ? AND status IN ('SUCCEEDED','QUEUED','PROCESSING')
+          AND (? = 'stub_v1' OR provider_key != 'stub_v1')
         ORDER BY created_at DESC LIMIT 1`,
-    ).get(orgId, inputHash) as any;
+    ).get(orgId, inputHash, provider.key) as any;
     if (existing) {
       return { ok: true, simulationId: existing.id, status: existing.status as SimulationStatus, reused: true, providerKey: provider.key };
     }
@@ -528,12 +555,16 @@ export class BeautyHairSimulationService {
    * Só SUCCEEDED com output vivo (purga por retenção vira EXPIRED e sai).
    */
   static listForContact(orgId: string, contactId: string, limit = 30): BeautyVisualSimulationRow[] {
+    // F27: com provider REAL ativo, o acervo esconde saídas do stub
+    // (quadrados de demonstração não são "visuais salvos" da cliente).
+    const activeKey = activeProvider().key;
     const rows = db.prepare(
       `SELECT s.* FROM beauty_visual_simulations s
         JOIN beauty_visual_consultations c ON c.id = s.consultation_id AND c.organization_id = s.organization_id
        WHERE s.organization_id = ? AND c.contact_id = ? AND s.status = 'SUCCEEDED'
+         AND (? = 'stub_v1' OR s.provider_key != 'stub_v1')
        ORDER BY s.created_at DESC, s.rowid DESC LIMIT ?`,
-    ).all(orgId, contactId, Math.max(1, Math.min(100, limit))) as any[];
+    ).all(orgId, contactId, activeKey, Math.max(1, Math.min(100, limit))) as any[];
     return rows.map((r) => {
       const row = rowToSimulation(r);
       if (row.outputStorageKey) row.signedUrl = BeautyVisualConsultationService.signedUrl(row.outputStorageKey);

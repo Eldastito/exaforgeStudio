@@ -25,6 +25,17 @@ import React, { useEffect, useState } from 'react';
 import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
+// Extrai a mensagem humana do corpo de erro da API ({error: "..."}) — sem
+// isso o usuário via o JSON cru no aviso e a causa real só no console.
+async function readApiError(r: Response): Promise<string> {
+  const raw = await r.text();
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j.error === 'string' && j.error) return j.error;
+  } catch { /* corpo não-JSON — usa o texto cru */ }
+  return raw || `Erro ${r.status}`;
+}
+
 type Consultation = {
   id: string;
   contactId: string | null;
@@ -318,7 +329,7 @@ export function BeautyView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ simulationType, parameters }),
       });
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) throw new Error(await readApiError(r));
       const { simulationId } = await r.json();
       for (let i = 0; i < 60; i++) {
         await new Promise(r => setTimeout(r, 2000));
@@ -345,7 +356,7 @@ export function BeautyView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ simulationId: simId }),
       });
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) throw new Error(await readApiError(r));
       setSelectedSim(simId);
       await refreshConsultation();
       // Carrega recomendações + análise

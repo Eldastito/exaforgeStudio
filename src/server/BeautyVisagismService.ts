@@ -201,7 +201,18 @@ export class BeautyVisagismService {
     const recommendedColors = undertone === "indeterminado" ? [] : onlyValid(UNDERTONE_COLORS[undertone].recommended, COLOR_VOCAB);
     const recommendedCuts = faceShape === "indeterminado" ? [] : onlyValid(FACESHAPE_CUTS[faceShape][profile], CUT_VOCAB);
 
-    const narrative = renderNarrative({ undertone, faceShape, profile, recommendedColors, recommendedCuts });
+    // F25 — se a ficha capilar registra histórico químico relevante, anexa o
+    // caveat TÉCNICO (viabilidade é decisão da profissional — RN-BS-12).
+    let chemCaveat = "";
+    try {
+      const { BeautyClientService } = await import("./BeautyClientService.js");
+      const prof = BeautyClientService.getProfile(orgId, cons.contactId);
+      if (prof?.chemicalHistory && ["progressiva", "descoloracao", "henna"].includes(prof.chemicalHistory)) {
+        chemCaveat = ` Histórico químico registrado (${prof.chemicalHistory.replace(/_/g, " ")}): a viabilidade de nova química ou descoloração deve ser avaliada pela profissional antes de qualquer procedimento.`;
+      }
+    } catch { /* ficha é opcional */ }
+
+    const narrative = renderNarrative({ undertone, faceShape, profile, recommendedColors, recommendedCuts }) + chemCaveat;
     validateNarrative(narrative);
 
     const id = randomUUID();

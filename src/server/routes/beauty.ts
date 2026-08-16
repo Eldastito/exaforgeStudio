@@ -173,11 +173,41 @@ router.post("/clients", (req: AuthRequest, res): any => {
   const name = String(req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "Informe o nome da cliente." });
   try {
-    const client = BeautyClientService.create(orgId, { name, phone: req.body?.phone });
-    logAuthEvent(orgId, req.user?.userId || null, client.id, "BEAUTY_CLIENT_CREATED", { hasPhone: !!String(req.body?.phone || "").trim() });
+    const client = BeautyClientService.create(orgId, {
+      name,
+      phone: req.body?.phone,
+      email: req.body?.email,
+      profile: req.body?.profile && typeof req.body.profile === "object" ? req.body.profile : undefined,
+    });
+    logAuthEvent(orgId, req.user?.userId || null, client.id, "BEAUTY_CLIENT_CREATED", { hasPhone: !!String(req.body?.phone || "").trim(), hasProfile: !!req.body?.profile });
     res.json({ ok: true, client });
   } catch (e: any) {
     res.status(400).json({ error: String(e?.message || "Erro ao cadastrar cliente.").slice(0, 200) });
+  }
+});
+
+// Ficha técnica capilar (F25) — vocab fechado; ajuda a recomendação e avisa
+// a profissional sobre histórico químico (viabilidade de nova química).
+router.get("/clients/profile-vocabulary", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyClientService.profileVocabulary());
+});
+
+router.get("/clients/:contactId/profile", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ profile: BeautyClientService.getProfile(orgId, req.params.contactId) });
+});
+
+router.put("/clients/:contactId/profile", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  try {
+    const profile = BeautyClientService.saveProfile(orgId, req.params.contactId, req.body || {});
+    res.json({ ok: true, profile });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || "Erro").slice(0, 200) });
   }
 });
 

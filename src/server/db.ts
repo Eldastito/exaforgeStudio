@@ -9486,6 +9486,32 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar beauty_visagism_analyses (ADR-169 F24)', e); }
 
+  // ADR-169 F25 — Ficha técnica capilar do cliente do salão (cadastro de
+  // balcão/lead). SÓ campos que ajudam de verdade na recomendação/simulação:
+  // tipo/espessura/comprimento do cabelo, histórico químico (afeta a
+  // VIABILIDADE de descoloração — a profissional precisa saber), preferência
+  // de manutenção e origem do lead. Peso/altura/idade ficam FORA por
+  // minimização LGPD (não mudam recomendação de cor/corte).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_client_profiles (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        hair_type TEXT,
+        hair_thickness TEXT,
+        hair_length TEXT,
+        chemical_history TEXT,
+        maintenance_pref TEXT,
+        lead_source TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, contact_id)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_client_profiles (ADR-169 F25)', e); }
+
   // ADR-169 F5-transversal-A — Consent transversal de comunicações outbound.
   // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`
   // consulta `contact_consents.comunicacoes` do contato-destino antes de

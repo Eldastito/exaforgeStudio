@@ -182,10 +182,40 @@ class StubHairSimulationProvider implements HairSimulationProvider {
 }
 
 /**
- * Google Gemini (produção). Reusa `editImagesGoogleB64` (mesma função que o
- * Fashion Studio try-on chama, ADR-042) — API `gemini-2.0-flash-exp` por
- * default. Fallback pro Stub quando `GOOGLE_AI_API_KEY`/`GEMINI_API_KEY`
- * não estão setadas.
+ * OpenAI gpt-image-1 (produção — PRIMÁRIO por decisão do operador). Reusa
+ * `editImagesB64` (mesma API de edição do Estúdio) com `input_fidelity:
+ * "high"` pra preservar a identidade da pessoa. Disponível quando
+ * `OPENAI_API_KEY` está setada.
+ */
+class OpenAIHairSimulationProvider implements HairSimulationProvider {
+  key = "openai_hair_v1";
+  available() { return !!process.env.OPENAI_API_KEY; }
+  async generate(input: HairSimulationInput) {
+    try {
+      const { editImagesB64 } = await import("./llm.js");
+      const paramLine = describeParametersSafely(input.parameters);
+      const finalPrompt = `${SAFETY_PROMPT_HAIR}\n\nPARÂMETROS DA MUDANÇA:\n${paramLine}`;
+      const b64 = await editImagesB64(
+        [{ buffer: input.avatar, name: "avatar.jpg", mime: "image/jpeg" }],
+        finalPrompt,
+        { inputFidelity: "high", quality: "medium", size: "1024x1024" },
+      );
+      if (!b64) return { ok: false as const, error: "Provedor OpenAI não retornou imagem.", retryable: true };
+      return { ok: true as const, b64 };
+    } catch (e: any) {
+      const msg = String(e?.message || "Falha no provedor OpenAI");
+      const status = Number((e as any)?.status || 0);
+      const retryable = !(status >= 400 && status < 500);
+      return { ok: false as const, error: msg.slice(0, 200), retryable };
+    }
+  }
+}
+
+/**
+ * Google Gemini (produção — FALLBACK quando o OpenAI falha ou não responde).
+ * Reusa `editImagesGoogleB64` (mesma função que o Fashion Studio try-on
+ * chama, ADR-042) — API `gemini-2.0-flash-exp` por default. Disponível
+ * quando `GOOGLE_AI_API_KEY`/`GEMINI_API_KEY` estão setadas.
  */
 class GoogleGeminiHairSimulationProvider implements HairSimulationProvider {
   key = "google_gemini_hair_v1";
@@ -226,14 +256,30 @@ function describeParametersSafely(p: HairSimulationParameters): string {
 
 const PROVIDERS: Record<string, HairSimulationProvider> = {
   stub: new StubHairSimulationProvider(),
+  openai: new OpenAIHairSimulationProvider(),
   google_gemini: new GoogleGeminiHairSimulationProvider(),
 };
 
+// Ordem de preferência (decisão do operador): OpenAI PRIMÁRIO → Google
+// FALLBACK → Stub (só quando nenhum real está configurado). O env
+// `BEAUTY_HAIR_SIMULATION_PROVIDER` continua mandando quando setado.
 function activeProvider(): HairSimulationProvider {
   const explicit = process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
   if (explicit && PROVIDERS[explicit]) return PROVIDERS[explicit];
+  if (PROVIDERS.openai.available()) return PROVIDERS.openai;
   if (PROVIDERS.google_gemini.available()) return PROVIDERS.google_gemini;
   return PROVIDERS.stub;
+}
+
+/**
+ * Cadeia de fallback do processJob: se o provider primário FALHAR em runtime
+ * (erro/timeout/sem imagem), tenta o próximo provider REAL disponível antes
+ * de marcar FAILED. Nunca cai pro stub como fallback de produção (imagem 1x1
+ * no lugar de uma falha explícita seria PIOR que o erro honesto).
+ */
+function fallbackProvidersFor(primaryKey: string): HairSimulationProvider[] {
+  const order = [PROVIDERS.openai, PROVIDERS.google_gemini];
+  return order.filter((p) => p.key !== primaryKey && p.available());
 }
 
 // ─────────────────────────── SERVICE ───────────────────────────
@@ -391,12 +437,28 @@ export class BeautyHairSimulationService {
       catch { return fail("avatar_missing", "Chave de arquivo inválida."); }
       if (!fs.existsSync(avatarFile)) return fail("avatar_missing", "Arquivo da foto não está mais disponível.");
 
-      // Executa o provider ativo (o mesmo que gerou o input_hash).
+      // Executa o provider ativo (o mesmo que gerou o input_hash). Se ele
+      // FALHAR em runtime, tenta o próximo provider REAL disponível (cadeia
+      // OpenAI→Google, decisão do operador) antes de marcar FAILED.
       const provider = PROVIDERS[job.provider_key] || PROVIDERS.stub;
       const params: HairSimulationParameters = job.parameters_json ? JSON.parse(job.parameters_json) : {};
-      const result = await provider.generate({ avatar: fs.readFileSync(avatarFile), parameters: params });
+      const avatar = fs.readFileSync(avatarFile);
+      let result = await provider.generate({ avatar, parameters: params });
+      let usedProviderKey = provider.key;
+      if (!result.ok) {
+        for (const fb of fallbackProvidersFor(provider.key)) {
+          try { logAuthEvent(job.organization_id, null, simulationId, "BEAUTY_SIMULATION_FALLBACK", { from: usedProviderKey, to: fb.key, error: String((result as any).error || "").slice(0, 120) }); } catch { /* noop */ }
+          result = await fb.generate({ avatar, parameters: params });
+          usedProviderKey = fb.key;
+          if (result.ok) break;
+        }
+      }
       if (!result.ok) {
         return fail((result as any).retryable ? "provider_error" : "provider_rejected", (result as any).error || "Falha do provedor.");
+      }
+      // Registra o provider que DE FATO gerou (fallback pode ter assumido).
+      if (usedProviderKey !== job.provider_key) {
+        db.prepare(`UPDATE beauty_visual_simulations SET provider_key = ? WHERE id = ?`).run(usedProviderKey, simulationId);
       }
 
       // Grava output em private_media/beauty/{uuid}.png (subdir isolado dos

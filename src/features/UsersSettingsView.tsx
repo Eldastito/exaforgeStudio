@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus, Copy, Check } from 'lucide-react';
+import { UserPlus, Lock, Unlock, MessageSquare, Trash2, Plus, Copy, Check, Store, Loader2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { PermissionProfilesPanel } from './PermissionProfilesPanel';
@@ -20,6 +20,11 @@ export function UsersSettingsView() {
   const [managers, setManagers] = useState<any[]>([]);
   const [mgrNumber, setMgrNumber] = useState('');
   const [mgrName, setMgrName] = useState('');
+
+  // Escopo de loja (CRM-002/ADR-173): só aparece se a org tiver lojas (Retail Ops).
+  const [retailStores, setRetailStores] = useState<any[]>([]);
+  const [scopeUser, setScopeUser] = useState<any | null>(null);
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.ok ? r.json() : { stores: [] }).then(d => setRetailStores(Array.isArray(d?.stores) ? d.stores : [])).catch(() => setRetailStores([])); }, []);
 
   const fetchData = async () => {
     try {
@@ -254,6 +259,11 @@ export function UsersSettingsView() {
                   {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'Nunca'}
                 </td>
                 <td className="px-4 py-3 flex gap-2">
+                  {retailStores.length > 0 && (
+                    <button onClick={() => setScopeUser(u)} className="text-sky-400 hover:text-sky-300 transition-colors" title="Lojas que este usuário pode ver">
+                      <Store className="w-4 h-4"/>
+                    </button>
+                  )}
                   {u.id !== user.id && (
                     <>
                       {u.global_status === 'active' ? (
@@ -364,6 +374,61 @@ export function UsersSettingsView() {
           </div>
         </div>
       )}
+
+      {scopeUser && <StoreScopeModal userRow={scopeUser} stores={retailStores} onClose={() => setScopeUser(null)} />}
+    </div>
+  );
+}
+
+// Modal de atribuição de LOJAS a um usuário (CRM-002/ADR-173). owner/admin.
+// Sem loja marcada = "vê todas" (regra do escopo: sem atribuição → sem restrição).
+function StoreScopeModal({ userRow, stores, onClose }: { userRow: any; stores: any[]; onClose: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    apiFetch(`/api/retailops/store-scope/${userRow.id}`).then(r => r.ok ? r.json() : { storeIds: [] })
+      .then(d => setSelected(new Set(Array.isArray(d?.storeIds) ? d.storeIds : [])))
+      .catch(() => {}).finally(() => setLoading(false));
+  }, [userRow.id]);
+  const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/retailops/store-scope/${userRow.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: Array.from(selected) }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha ao salvar.');
+      toast.success('Acesso às lojas atualizado.');
+      onClose();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[420px] p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Store className="w-5 h-5 text-sky-400" /> Lojas de {userRow.name || userRow.email}</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Marque as lojas que este usuário pode ver. <strong>Nenhuma marcada = vê todas</strong> (sem restrição). Owner e admin sempre veem todas.</p>
+        {loading ? (
+          <div className="py-8 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+        ) : (
+          <div className="space-y-1.5 mb-4">
+            {stores.map(s => (
+              <label key={s.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 cursor-pointer hover:border-sky-500/40">
+                <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} className="accent-sky-500" />
+                <span className="text-sm text-zinc-200">{s.name}{s.code ? <span className="text-zinc-500 text-[11px]"> · {s.code}</span> : null}</span>
+              </label>
+            ))}
+            {stores.length === 0 && <p className="text-sm text-zinc-500 text-center py-4">Nenhuma loja cadastrada.</p>}
+          </div>
+        )}
+        <div className="flex justify-between items-center">
+          <span className="text-[11px] text-zinc-500">{selected.size === 0 ? 'Vê todas as lojas' : `${selected.size} loja(s)`}</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
+            <Button onClick={save} disabled={busy || loading} className="bg-sky-600 hover:bg-sky-700 text-white">
+              {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}Salvar
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

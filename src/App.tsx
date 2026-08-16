@@ -17,6 +17,7 @@ import { RevenueIntelligenceView } from '@/src/features/rie/RevenueIntelligenceV
 import { StudioView } from '@/src/features/StudioView';
 import { BeautyView } from '@/src/features/BeautyView';
 import BeautyTvPanel from '@/src/features/BeautyTvPanel';
+import BeautyQueuePanel from '@/src/features/BeautyQueuePanel';
 import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { RadarB2BView } from '@/src/features/RadarB2BView';
@@ -273,6 +274,13 @@ export default function App() {
     };
   }, [token, receiveMessage, updateStageByContactId, hydrate]);
 
+  // F37 — FILA VIRTUAL no celular do cliente (rota PÚBLICA, sem login): quando
+  // a URL traz `?beautyQueue=<id>&exp=&sig=` (o QR que a recepção mostrou), a
+  // página da fila renderiza SEM sessão nem shell. Precede os gates de
+  // loading/login porque o cliente não está autenticado.
+  if ((() => { try { return !!new URLSearchParams(window.location.search).get('beautyQueue'); } catch { return false; } })()) {
+    return <BeautyQueuePanel />;
+  }
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;
   // F36 — JANELA DEDICADA do Painel de TV (monitor extra do salão): mesma

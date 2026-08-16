@@ -38,6 +38,8 @@ import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentServic
 import { BeautyClientService } from "../BeautyClientService.js";
 import { BeautyVisagismService } from "../BeautyVisagismService.js";
 import { BeautyReceptionService } from "../BeautyReceptionService.js";
+import { BeautyQueueService } from "../BeautyQueueService.js";
+import QRCode from "qrcode";
 // Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
 // (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
 // as rotas beauty forem montadas, o handler está disponível pro executor.
@@ -252,6 +254,24 @@ router.post("/reception/appointments/:id/status", (req: AuthRequest, res): any =
   if (!r.ok) return res.status(400).json(r);
   try { logAuthEvent(orgId, req.user?.userId || null, req.params.id, "BEAUTY_RECEPTION_STATUS", { status: (r as any).status }); } catch { /* noop */ }
   res.json(r);
+});
+
+// F37 — link + QR da FILA VIRTUAL de um agendamento. A recepção mostra o QR na
+// tela; o cliente aponta a câmera do celular e abre a página da fila (rota
+// pública `/api/public/beauty/queue/:id`, assinada). O QR precisa de URL
+// ABSOLUTA (é escaneado por OUTRO device) — montada dos headers do proxy.
+router.get("/reception/appointments/:id/queue-link", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const signed = BeautyQueueService.sign(orgId, req.params.id);
+  if (!signed.ok) return res.status(404).json(signed);
+  const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
+  const host = String(req.headers["x-forwarded-host"] || req.get("host") || "").split(",")[0].trim();
+  const params = `beautyQueue=${encodeURIComponent(req.params.id)}&exp=${signed.exp}&sig=${encodeURIComponent(signed.sig)}`;
+  const url = host ? `${proto}://${host}/?${params}` : `/?${params}`;
+  let qr: string | null = null;
+  try { qr = await QRCode.toDataURL(url, { margin: 1, width: 320 }); } catch { qr = null; }
+  res.json({ url, qr, exp: signed.exp });
 });
 
 router.get("/clients/:contactId/profile", (req: AuthRequest, res): any => {

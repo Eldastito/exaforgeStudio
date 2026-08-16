@@ -15,8 +15,26 @@ import { Router, Request, Response } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { BeautyVisualConsultationService } from "../BeautyVisualConsultationService.js";
+import { BeautyQueueService } from "../BeautyQueueService.js";
 
 const router = Router();
+
+// F37 — status PÚBLICO da fila virtual (celular do cliente). Sem sessão: a
+// assinatura HMAC da URL (escopo `beauty_queue`) prova a posse do link que a
+// recepção gerou. Só devolve o PRIMEIRO NOME do próprio cliente + posição —
+// nunca nomes de outros da fila (minimização LGPD). `no-store`: dado ao vivo.
+// GET /api/public/beauty/queue/:id?exp=&sig=
+router.get("/queue/:id", (req: Request, res: Response): any => {
+  const id = String(req.params.id || "");
+  const exp = String(req.query.exp || "");
+  const sig = String(req.query.sig || "");
+  if (!id || !exp || !sig) return res.status(400).json({ error: "bad_request" });
+  const status = BeautyQueueService.status(id, exp, sig);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (!status.found) return res.status(status.state === "not_found" ? 403 : 200).json(status);
+  res.json(status);
+});
 
 // GET /api/public/beauty/media/:key?exp=&sig=
 router.get("/media/:key(*)", (req: Request, res: Response): any => {

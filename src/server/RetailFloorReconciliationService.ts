@@ -121,12 +121,23 @@ export class RetailFloorReconciliationService {
     if (!store) throw new Error("Loja não encontrada.");
     const atts = db.prepare(
       `SELECT a.id, a.seller_id, s.name AS seller_name, s.matricula, a.started_at, a.ended_at,
-              a.declared_value, a.declared_pieces, a.reconciliation_state
+              a.declared_value, a.declared_pieces, a.reconciliation_state, a.boleta_number
          FROM retail_floor_attendances a
          JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
         WHERE a.organization_id = ? AND a.store_id = ? AND date(a.started_at) = ? AND a.outcome = 'converted'
         ORDER BY a.started_at, a.rowid`
     ).all(orgId, storeId, date) as any[];
+    // Talão↔boleta (ADR-175): cliques ATIVOS de boleta do dia (chave sem zeros à
+    // esquerda). Casamento DERIVADO na leitura (RN-004) — advisório.
+    const clickKeys = new Set<string>(
+      (db.prepare(
+        `SELECT boleta_number FROM retail_boleta_events
+          WHERE organization_id = ? AND store_id = ? AND status = 'active' AND day = ?`
+      ).all(orgId, storeId, date) as any[])
+        .map((r) => String(r.boleta_number ?? "").replace(/\D/g, "").replace(/^0+/, ""))
+        .filter(Boolean)
+    );
+    const boletaKey = (s: any) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || null;
     const erp = db.prepare(
       `SELECT matricula, COALESCE(SUM(valor), 0) AS valor, COALESCE(SUM(pecas), 0) AS pecas
          FROM retail_erp_seller_sales
@@ -140,16 +151,25 @@ export class RetailFloorReconciliationService {
 
     return {
       storeId, date,
-      attendances: atts.map((a) => ({
-        id: a.id, sellerId: a.seller_id, sellerName: a.seller_name || null, matricula: a.matricula,
-        startedAt: a.started_at, endedAt: a.ended_at,
-        declaredValue: a.declared_value != null ? Number(a.declared_value) : null,
-        declaredPieces: a.declared_pieces != null ? Number(a.declared_pieces) : null,
-        state: a.reconciliation_state,
-      })),
+      attendances: atts.map((a) => {
+        const bk = boletaKey(a.boleta_number);
+        return {
+          id: a.id, sellerId: a.seller_id, sellerName: a.seller_name || null, matricula: a.matricula,
+          startedAt: a.started_at, endedAt: a.ended_at,
+          declaredValue: a.declared_value != null ? Number(a.declared_value) : null,
+          declaredPieces: a.declared_pieces != null ? Number(a.declared_pieces) : null,
+          state: a.reconciliation_state,
+          boletaNumber: a.boleta_number || null,
+          // null = venda sem talão informado; true/false = talão bate (ou não)
+          // com um clique de boleta do dia. Advisório (o clique é opcional).
+          boletaClickMatched: bk == null ? null : clickKeys.has(bk),
+        };
+      }),
       totals: {
         declaredCount: atts.length,
         pending: count("pending"), confirmed: count("confirmed"), unmatched: count("unmatched"),
+        withBoleta: atts.filter((a) => a.boleta_number != null).length,
+        boletaClickMatched: atts.filter((a) => { const bk = boletaKey(a.boleta_number); return bk != null && clickKeys.has(bk); }).length,
         declaredValue: Math.round(declaredTotal * 100) / 100,
         erpValue: Math.round(erpTotal * 100) / 100,
         gap: Math.round((declaredTotal - erpTotal) * 100) / 100,

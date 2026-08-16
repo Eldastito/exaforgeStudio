@@ -179,6 +179,7 @@ router.post("/attendances/:id/finish", (req: AuthRequest, res) => {
       returnTo: req.body?.returnTo ?? null,
       declaredValue: req.body?.declaredValue ?? null,
       declaredPieces: req.body?.declaredPieces ?? null,
+      boletaNumber: req.body?.boletaNumber ?? null,
       notes: req.body?.notes || null,
     }, req.user));
   } catch (e: any) { fail(res, e); }

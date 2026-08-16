@@ -48,6 +48,18 @@ const RETURN_TO = ["waiting", "break"];
 type UserRef = { userId?: string; id?: string; role?: string };
 const uid = (u: UserRef) => u?.userId || u?.id || null;
 
+// Talão (ADR-175): preserva a largura dos zeros do talão ("017752") no display,
+// mas casa por chave sem zeros à esquerda ("017752" ≡ "17752") — mesma regra do
+// RetailBoletaService.matchKey, replicada aqui pra não criar dependência.
+function talaoDisplay(s: any): string | null {
+  const digits = String(s ?? "").replace(/\D/g, "");
+  return digits ? digits : null;
+}
+function talaoKey(s: any): string | null {
+  const digits = String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  return digits || (String(s ?? "").replace(/\D/g, "") ? "0" : null);
+}
+
 export class RetailFloorAttendanceService {
   /**
    * Inicia atendimento pro vendedor `waiting` do turno aberto da loja.
@@ -114,7 +126,7 @@ export class RetailFloorAttendanceService {
    * motivo hierárquico (Fatia 4). O vendedor volta pra fila (`waiting`,
    * default) ou vai pra pausa (`returnTo='break'`).
    */
-  static finish(orgId: string, attendanceId: string, opts: { outcome: string; reason?: any; returnTo?: string | null; declaredValue?: number | null; declaredPieces?: number | null; notes?: string | null }, user: UserRef): any {
+  static finish(orgId: string, attendanceId: string, opts: { outcome: string; reason?: any; returnTo?: string | null; declaredValue?: number | null; declaredPieces?: number | null; boletaNumber?: string | null; notes?: string | null }, user: UserRef): any {
     const att = db.prepare(`SELECT * FROM retail_floor_attendances WHERE organization_id = ? AND id = ?`).get(orgId, attendanceId) as any;
     if (!att) throw new Error("Atendimento não encontrado.");
     if (att.ended_at) throw new Error("Atendimento já encerrado.");
@@ -134,17 +146,50 @@ export class RetailFloorAttendanceService {
     if (declaredValue != null && !(declaredValue >= 0)) throw new Error("Valor declarado inválido.");
     if (declaredPieces != null && !(declaredPieces >= 0)) throw new Error("Peças declaradas inválidas.");
 
+    // Talão (ADR-175): só vale em conversão. Valida formato + unicidade no turno.
+    // O casamento com a boleta clicada é DERIVADO na leitura (RN-004), não aqui.
+    let boletaNumber: string | null = null;
+    if (opts.boletaNumber != null && String(opts.boletaNumber).trim() !== "") {
+      if (!converted) throw new Error("Talão só se aplica a venda realizada (converted).");
+      boletaNumber = talaoDisplay(opts.boletaNumber);
+      if (!boletaNumber) throw new Error("Nº do talão inválido (só dígitos, ex.: 017752).");
+      const key = talaoKey(boletaNumber);
+      const dup = db.prepare(
+        `SELECT id FROM retail_floor_attendances WHERE organization_id = ? AND shift_id = ? AND id <> ? AND boleta_number IS NOT NULL AND CAST(boleta_number AS INTEGER) = CAST(? AS INTEGER)`
+      ).get(orgId, att.shift_id, attendanceId, key) as any;
+      if (dup) throw new Error(`Talão ${boletaNumber} já vinculado a outro atendimento deste turno.`);
+    }
+
     const tx = db.transaction(() => {
       db.prepare(
-        `UPDATE retail_floor_attendances SET ended_at = CURRENT_TIMESTAMP, outcome = ?, outcome_reason_json = ?, reconciliation_state = ?, declared_value = ?, declared_pieces = ?, notes = ? WHERE organization_id = ? AND id = ?`
-      ).run(outcome, reason ? JSON.stringify(reason) : null, converted ? "pending" : null, declaredValue, declaredPieces, opts.notes || null, orgId, attendanceId);
+        `UPDATE retail_floor_attendances SET ended_at = CURRENT_TIMESTAMP, outcome = ?, outcome_reason_json = ?, reconciliation_state = ?, declared_value = ?, declared_pieces = ?, boleta_number = ?, notes = ? WHERE organization_id = ? AND id = ?`
+      ).run(outcome, reason ? JSON.stringify(reason) : null, converted ? "pending" : null, declaredValue, declaredPieces, boletaNumber, opts.notes || null, orgId, attendanceId);
       db.prepare(
         `UPDATE retail_floor_queue_state SET status = ?, status_changed_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND shift_id = ? AND seller_id = ? AND status = 'serving'`
       ).run(returnTo, orgId, att.shift_id, att.seller_id);
     });
     tx();
-    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, shiftId: att.shift_id, storeId: att.store_id, sellerId: att.seller_id, outcome, reasonCategory: reason?.category || null, returnTo, byManager: !isSelf }); } catch { /* noop */ }
+    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_ATTENDANCE_FINISH", { attendanceId, shiftId: att.shift_id, storeId: att.store_id, sellerId: att.seller_id, outcome, reasonCategory: reason?.category || null, returnTo, boletaNumber, byManager: !isSelf }); } catch { /* noop */ }
     return this.get(orgId, attendanceId);
+  }
+
+  /**
+   * Casamento talão↔boleta (ADR-175) — DERIVADO por query (RN-004). Para um
+   * conjunto de atendimentos, diz quais talões batem com um clique de boleta
+   * ATIVO da loja (retail_boleta_events) no mesmo dia do turno. Advisório: a
+   * ausência de clique NÃO invalida a venda (o clique da boleta é paralelo/
+   * opcional) — é sinal de "talão sem hora real registrada".
+   * Retorna Set de chaves (talaoKey) que casaram.
+   */
+  static boletaClickKeys(orgId: string, storeId: string, shiftOpenedAt: string): Set<string> {
+    const rows = db.prepare(
+      `SELECT boleta_number FROM retail_boleta_events
+        WHERE organization_id = ? AND store_id = ? AND status = 'active'
+          AND day >= date(?, '-1 day') AND day <= date(?, '+1 day')`
+    ).all(orgId, storeId, shiftOpenedAt, shiftOpenedAt) as any[];
+    const set = new Set<string>();
+    for (const r of rows) { const k = talaoKey(r.boleta_number); if (k) set.add(k); }
+    return set;
   }
 
   /**
@@ -238,6 +283,7 @@ export class RetailFloorAttendanceService {
       reconciliationState: row.reconciliation_state || null,
       declaredValue: row.declared_value != null ? Number(row.declared_value) : null,
       declaredPieces: row.declared_pieces != null ? Number(row.declared_pieces) : null,
+      boletaNumber: row.boleta_number || null,
       notes: row.notes || null,
     };
   }

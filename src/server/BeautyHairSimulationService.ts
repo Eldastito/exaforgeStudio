@@ -39,8 +39,10 @@
  *    revalida antes de qualquer chamada ao provider (belt-and-suspenders).
  *  - RN-BS-05: logs sem foto/base64/prompt. Só `error_code`/
  *    `error_message_safe`.
- *  - RN-BS-06: idempotência real por `input_hash = sha256(avatarKey:
- *    stableParams:providerKey)`. Retry NUNCA gera duas vezes.
+ *  - RN-BS-06: idempotência real por `input_hash = sha256(org:contato:
+ *    sha256(bytesDaFoto):stableParams)` (F26). Retry NUNCA gera duas
+ *    vezes; a MESMA foto re-enviada noutra consulta reusa o acervo; o
+ *    provider fica FORA do hash (trocar de IA não invalida imagem salva).
  *  - RN-BS-07: isolamento cross-tenant duro em toda query.
  *  - RN-BS-11: sem foto approved → não simula (erro amigável); sem
  *    consent ativo → não simula.
@@ -374,11 +376,28 @@ export class BeautyHairSimulationService {
       return { ok: false, error: "Simulador temporariamente indisponível — tente mais tarde." };
     }
 
+    // F26 — REUSO POR CONTEÚDO (economia de geração). O hash usa o SHA do
+    // CONTEÚDO da foto (não o id do upload) + org + contato + parâmetros:
+    //  - mesma foto re-enviada numa consulta NOVA (cliente voltou no mês
+    //    seguinte) → mesmo hash → reusa a imagem salva, zero custo de IA;
+    //  - o PROVIDER fica FORA do hash — trocar OpenAI↔Google não invalida o
+    //    acervo (uma imagem já gerada vale igual, o barato é reusar);
+    //  - org+contato DENTRO do hash: colisão cross-tenant/cross-cliente é
+    //    impossível por construção (além do filtro org na query — RN-BS-07).
+    // Fallback: se o arquivo não puder ser lido agora, usa o id do upload
+    // (comportamento antigo — nunca bloqueia o fluxo por causa do cache).
+    let contentKey: string;
+    try {
+      const avatarBytes = fs.readFileSync(path.join(PRIVATE_MEDIA_DIR, safeStorageKey(asset.storage_key)));
+      contentKey = crypto.createHash("sha256").update(avatarBytes).digest("hex");
+    } catch { contentKey = String(asset.id); }
     const inputHash = crypto.createHash("sha256")
-      .update(`${asset.id}:${stableStringify(params)}:${provider.key}`)
+      .update(`${orgId}:${consultation.contactId}:${contentKey}:${stableStringify(params)}`)
       .digest("hex");
 
-    // Idempotência: mesmo pedido já processando/pronto → devolve.
+    // Idempotência/reuso: mesmo pedido já processando/pronto → devolve a
+    // imagem salva (só SUCCEEDED com output vivo — purga vira EXPIRED e sai
+    // deste filtro, então acervo purgado re-gera corretamente).
     const existing = db.prepare(
       `SELECT id, status FROM beauty_visual_simulations
         WHERE organization_id = ? AND input_hash = ? AND status IN ('SUCCEEDED','QUEUED','PROCESSING')
@@ -500,6 +519,26 @@ export class BeautyHairSimulationService {
       row.signedUrl = BeautyVisualConsultationService.signedUrl(row.outputStorageKey);
     }
     return row;
+  }
+
+  /**
+   * F26 — Histórico de visuais do CLIENTE (todas as consultas): as imagens já
+   * geradas ficam salvas e podem ser REVISTAS sem custo de IA — a cliente que
+   * volta no mês seguinte compara o acervo antes de decidir gerar algo novo.
+   * Só SUCCEEDED com output vivo (purga por retenção vira EXPIRED e sai).
+   */
+  static listForContact(orgId: string, contactId: string, limit = 30): BeautyVisualSimulationRow[] {
+    const rows = db.prepare(
+      `SELECT s.* FROM beauty_visual_simulations s
+        JOIN beauty_visual_consultations c ON c.id = s.consultation_id AND c.organization_id = s.organization_id
+       WHERE s.organization_id = ? AND c.contact_id = ? AND s.status = 'SUCCEEDED'
+       ORDER BY s.created_at DESC, s.rowid DESC LIMIT ?`,
+    ).all(orgId, contactId, Math.max(1, Math.min(100, limit))) as any[];
+    return rows.map((r) => {
+      const row = rowToSimulation(r);
+      if (row.outputStorageKey) row.signedUrl = BeautyVisualConsultationService.signedUrl(row.outputStorageKey);
+      return row;
+    });
   }
 
   /** Lista simulações de uma consulta (ordena mais recente primeiro). */

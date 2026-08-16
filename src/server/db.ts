@@ -9729,6 +9729,14 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_manager_solutions_org ON manager_solution_proposals (organization_id, state);
     `);
   } catch (e) { /* noop */ }
+
+  // FLOOR — talão da venda no atendimento convertido (PRD Moda/TOULON; ADR-175).
+  // Liga o atendimento (lista da vez) ao nº do talão manuscrito → conciliação
+  // venda-a-venda com a boleta/PDV (hoje é agregada por filial+matrícula).
+  // Aditivo. Único por turno: dois atendimentos não podem reivindicar o mesmo
+  // talão no mesmo turno (índice parcial).
+  try { db.exec(`ALTER TABLE retail_floor_attendances ADD COLUMN boleta_number TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_floor_attendance_boleta ON retail_floor_attendances (organization_id, shift_id, boleta_number) WHERE boleta_number IS NOT NULL`); } catch (e) { /* noop */ }
 };
 
 initDb();

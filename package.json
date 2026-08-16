@@ -356,6 +356,7 @@
     "test:retail-floor-pilot": "tsx scripts/test-retail-floor-pilot.ts",
     "test:retail-floor-team": "tsx scripts/test-retail-floor-team.ts",
     "test:retail-floor-kiosk": "tsx scripts/test-retail-floor-kiosk.ts",
+    "test:retail-floor-talao": "tsx scripts/test-retail-floor-talao.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",
     "pilot:runtime": "tsx scripts/pilot-runtime.cli.ts",

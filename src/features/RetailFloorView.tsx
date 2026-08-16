@@ -1096,6 +1096,7 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
   const [outcome, setOutcome] = useState<'converted' | 'not_converted' | 'walkout'>('converted');
   const [value, setValue] = useState('');
   const [pieces, setPieces] = useState('');
+  const [talao, setTalao] = useState('');
   const [category, setCategory] = useState('');
   const [prodReason, setProdReason] = useState('');
   const [size, setSize] = useState(''); const [color, setColor] = useState(''); const [catLabel, setCatLabel] = useState('');
@@ -1150,6 +1151,7 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
     if (outcome === 'converted') {
       if (value) payload.declaredValue = Number(value.replace(',', '.'));
       if (pieces) payload.declaredPieces = Number(pieces);
+      if (talao.trim()) payload.boletaNumber = talao.trim();
     }
     if (outcome === 'not_converted') {
       if (!category) return toast.error('Informe o motivo.');
@@ -1236,7 +1238,10 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
             <Input value={value} onChange={setValue} placeholder="Valor (R$)" />
             <Input value={pieces} onChange={setPieces} placeholder="Peças" />
           </div>
-          <p className="text-xs text-[var(--color-text-muted)]">Fica "Pendente PDV" até a conciliação com o caixa confirmar.</p>
+          {/* Talão (ADR-175): liga a venda ao nº do talão manuscrito → conciliação
+              venda-a-venda com a boleta/PDV. Opcional, mas confere a hora real. */}
+          <Input value={talao} onChange={(v: string) => setTalao(v.replace(/\D/g, ''))} placeholder="Nº do talão (ex.: 017752)" inputMode="numeric" />
+          <p className="text-xs text-[var(--color-text-muted)]">Fica "Pendente PDV" até a conciliação com o caixa confirmar. O nº do talão ajuda a casar com a boleta.</p>
         </div>
       )}
 
@@ -1466,7 +1471,7 @@ function ReconPanel({ storeId, isManager }: { storeId: string; isManager: boolea
       <div className="overflow-x-auto rounded-2xl border border-[var(--color-border)]">
         <table className="w-full text-sm">
           <thead className="bg-[var(--color-surface-2)] text-left text-xs text-[var(--color-text-muted)]">
-            <tr><th className="p-3">Vendedor</th><th className="p-3">Início</th><th className="p-3">Valor</th><th className="p-3">Estado</th>{isManager && <th className="p-3"></th>}</tr>
+            <tr><th className="p-3">Vendedor</th><th className="p-3">Início</th><th className="p-3">Valor</th><th className="p-3">Talão</th><th className="p-3">Estado</th>{isManager && <th className="p-3"></th>}</tr>
           </thead>
           <tbody>
             {(data?.attendances || []).map((a: any) => (
@@ -1474,6 +1479,11 @@ function ReconPanel({ storeId, isManager }: { storeId: string; isManager: boolea
                 <td className="p-3 text-[var(--color-text-strong)]">{a.sellerName || a.matricula}</td>
                 <td className="p-3 text-[var(--color-text-muted)]">{String(a.startedAt).slice(11, 16)}</td>
                 <td className="p-3">{a.declaredValue != null ? brl(a.declaredValue) : '—'}</td>
+                <td className="p-3">
+                  {a.boletaNumber
+                    ? <span className="inline-flex items-center gap-1 font-mono text-[var(--color-text-strong)]" title={a.boletaClickMatched ? 'Talão casou com clique de boleta do dia' : 'Talão sem clique de boleta correspondente'}>{a.boletaNumber}{a.boletaClickMatched === true ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : a.boletaClickMatched === false ? <AlertTriangle className="h-3.5 w-3.5 text-amber-400" /> : null}</span>
+                    : <span className="text-[var(--color-text-muted)]">—</span>}
+                </td>
                 <td className="p-3"><span className={cn('inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold', RECON[a.state]?.cls || 'text-zinc-400 border-zinc-700')}>{RECON[a.state]?.label || a.state || '—'}</span></td>
                 {isManager && (
                   <td className="p-3">
@@ -1485,7 +1495,7 @@ function ReconPanel({ storeId, isManager }: { storeId: string; isManager: boolea
                 )}
               </tr>
             ))}
-            {!data?.attendances?.length && <tr><td colSpan={5} className="p-6 text-center text-[var(--color-text-muted)]">Nenhuma conversão declarada no dia.</td></tr>}
+            {!data?.attendances?.length && <tr><td colSpan={6} className="p-6 text-center text-[var(--color-text-muted)]">Nenhuma conversão declarada no dia.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1955,9 +1965,9 @@ function Modal({ title, subtitle, children, onClose }: { title: string; subtitle
   );
 }
 
-function Input({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder: string; className?: string }) {
+function Input({ value, onChange, placeholder, className, inputMode }: { value: string; onChange: (v: string) => void; placeholder: string; className?: string; inputMode?: 'numeric' | 'text' | 'decimal' | 'tel' }) {
   return (
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} inputMode={inputMode}
       className={cn('rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] focus:border-[var(--color-flow)] focus:outline-none focus:ring-1 focus:ring-[var(--color-flow)]/30', className)} />
   );
 }

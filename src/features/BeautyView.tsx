@@ -118,8 +118,16 @@ export function BeautyView() {
     if (!consultation) return;
     setBusy(true); setError(null);
     try {
+      // NOME DO CAMPO: 'file' — o backend usa `avatarUpload.single("file")` em
+      // routes/beauty.ts:192. Mandar em outro nome (ex.: 'photo') faz o multer
+      // lançar `MulterError: Unexpected field` porque single() só aceita UM
+      // campo com o nome registrado; qualquer arquivo em outro campo dispara
+      // LIMIT_UNEXPECTED_FILE, que não é tratado no try/catch do handler (ele
+      // acontece ANTES) e cai no error handler default do Express — resposta
+      // vira HTML "Internal Server Error" (500) em vez de JSON. Padrão idêntico
+      // ao FashionAvatarService pra consistência entre as duas superfícies.
       const fd = new FormData();
-      fd.append('photo', file);
+      fd.append('file', file);
       const r = await apiFetch(`/api/beauty/consultations/${consultation.id}/upload`, {
         method: 'POST',
         body: fd,

@@ -99,15 +99,17 @@ async function main() {
     return id;
   };
 
-  const call = async (method: string, url: string, opts: { orgId?: string | null; body?: any; headers?: any; fileBuf?: Buffer } = {}) => {
+  const call = async (method: string, url: string, opts: { orgId?: string | null; body?: any; headers?: any; fileBuf?: Buffer; fileField?: string } = {}) => {
     const headers: Record<string, string> = { ...(opts.headers || {}) };
     if (opts.orgId !== null && opts.orgId !== undefined) headers["x-test-org"] = opts.orgId;
     let body: any = undefined;
     if (opts.fileBuf) {
-      // multipart mínimo (field 'file' com jpeg)
+      // multipart mínimo — field 'file' por default (o contrato do backend);
+      // `fileField` permite testar campo ERRADO (regressão do 500-HTML).
+      const field = opts.fileField || "file";
       const bd = `--------------${randomUUID().replace(/-/g, "")}`;
       const parts: Buffer[] = [];
-      parts.push(Buffer.from(`--${bd}\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`));
+      parts.push(Buffer.from(`--${bd}\r\nContent-Disposition: form-data; name="${field}"; filename="photo.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`));
       parts.push(opts.fileBuf);
       parts.push(Buffer.from(`\r\n--${bd}--\r\n`));
       body = Buffer.concat(parts);
@@ -193,6 +195,18 @@ async function main() {
       orgId: orgA, // sem file
     });
     check("POST /upload sem file → 400", r.status === 400);
+
+    // Regressão do 500-HTML (BeautyView mandava field 'photo' em vez de 'file'):
+    // campo inesperado agora vira JSON 400 pelo wrapper uploadSingleFile — NUNCA
+    // HTML "Internal Server Error" (que quebrava o parse no frontend).
+    r = await call("POST", `/api/beauty/consultations/${consultationId}/upload`, {
+      orgId: orgA, fileBuf: jpeg, fileField: "photo",
+    });
+    check("POST /upload com field errado ('photo') → 400 JSON (não 500 HTML)",
+      r.status === 400 && r.json !== null && typeof r.json?.error === "string",
+      `status=${r.status} json=${r.json ? "sim" : "null(HTML?)"}`);
+    check("POST /upload field errado → code=LIMIT_UNEXPECTED_FILE",
+      r.json?.code === "LIMIT_UNEXPECTED_FILE", `code=${r.json?.code}`);
 
     // ===== 5. Approve asset → consulta ready =====
     r = await call("POST", `/api/beauty/assets/${assetId}/approve`, {

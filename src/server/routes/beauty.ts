@@ -54,6 +54,24 @@ const avatarUpload = multer({
   },
 });
 
+// Wrapper do multer que TRADUZ erro de upload em JSON 400 — sem ele, um erro
+// do middleware (campo inesperado, arquivo grande demais, mimetype recusado)
+// acontece ANTES do try/catch do handler e cai no error handler default do
+// Express, que responde HTML `<pre>Internal Server Error</pre>` (500). O
+// frontend então mostra HTML cru no lugar de uma mensagem útil. Com isto,
+// qualquer falha de upload vira `{ error }` legível e o status certo (400).
+function uploadSingleFile(req: AuthRequest, res: Response, next: () => void): void {
+  avatarUpload.single("file")(req as any, res as any, (err: any) => {
+    if (!err) return next();
+    const code = err?.code;
+    const msg =
+      code === "LIMIT_FILE_SIZE" ? "Foto muito grande. O limite é 15 MB." :
+      code === "LIMIT_UNEXPECTED_FILE" ? "Campo de upload inesperado. Envie a foto no campo 'file'." :
+      String(err?.message || "Falha no upload da foto.");
+    res.status(400).json({ error: msg, code: code || "upload_error" });
+  });
+}
+
 // ─────────────── Gates ───────────────
 
 function orgVertical(orgId: string): string | null {
@@ -189,7 +207,7 @@ router.get("/consultations/:id", (req: AuthRequest, res): any => {
   res.json({ consultation: cons, assets, simulations });
 });
 
-router.post("/consultations/:id/upload", avatarUpload.single("file"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/consultations/:id/upload", uploadSingleFile, async (req: AuthRequest, res): Promise<any> => {
   const orgId = requireBeauty(req, res);
   if (!orgId) return;
   if (!req.file) return res.status(400).json({ error: "Envie uma foto no campo 'file' (multipart/form-data)." });

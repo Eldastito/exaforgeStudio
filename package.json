@@ -360,6 +360,7 @@
     "test:retail-floor-talao": "tsx scripts/test-retail-floor-talao.ts",
     "test:retail-floor-replenishment": "tsx scripts/test-retail-floor-replenishment.ts",
     "test:sicredi-cobranca": "tsx scripts/test-sicredi-cobranca.ts",
+    "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",
     "pilot:runtime": "tsx scripts/pilot-runtime.cli.ts",

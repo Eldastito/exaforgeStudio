@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireMasterAdmin } from "../middleware/auth.js";
 import { LegalAdvisorService } from "../LegalAdvisorService.js";
+import { LaborLawAdvisorService } from "../LaborLawAdvisorService.js";
 
 // Consultora Jurídica (ADR-115) — orientação ancorada no CDC. Rota core (não é
 // módulo opcional): capacidade GLOBAL, disponível em todas as verticais.
@@ -46,6 +47,33 @@ router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   } catch (e) {
     console.error("[legal] falha na consulta:", e);
     res.status(500).json({ error: "Não consegui responder agora. Tente novamente." });
+  }
+});
+
+// ---- Trabalhista (ADR-178) — scaffold honesto, gated em curadoria jurídica ----
+
+// GET /api/legal/labor/status — taxonomia + estado da base (aguardando curadoria?).
+router.get("/labor/status", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LaborLawAdvisorService.status());
+});
+
+// GET /api/legal/labor/advise?q= — orientação GROUNDED na base curada; base
+// vazia/sem match → "aguardando validação jurídica" (nunca inventa CLT).
+router.get("/labor/advise", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const q = String(req.query?.q || "").trim();
+  res.json(LaborLawAdvisorService.advise(q, { orgId, actorId: req.user?.userId }));
+});
+
+// POST /api/legal/labor/curate — publica entrada CURADA (master-only; exige
+// reviewedBy — o jurista que revisou). Curadoria de plataforma (RN-178-004).
+router.post("/labor/curate", requireMasterAdmin, (req: AuthRequest, res): any => {
+  try {
+    res.json(LaborLawAdvisorService.curate(req.body || {}, req.user?.userId));
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "erro" });
   }
 });
 

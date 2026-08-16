@@ -9760,6 +9760,32 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_sicredi_cobranca_org ON sicredi_cobranca_connections (organization_id);
     `);
   } catch (e) { /* noop */ }
+
+  // LEGAL — base trabalhista CURADA (PRD Moda/TOULON; ADR-178). GLOBAL (lei federal
+  // é a mesma p/ todos — SEM organization_id), escrita SÓ pelo admin master, lida
+  // por todos os tenants. NASCE VAZIA: nenhuma regra trabalhista é publicada sem
+  // REVISÃO JURÍDICA humana (reviewed_by obrigatório). O advisor só orienta
+  // ancorado no que está aqui; vazio → "aguardando validação jurídica", nunca
+  // inventa CLT. Aditivo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS labor_law_entries (
+        id TEXT PRIMARY KEY,
+        topic TEXT NOT NULL,                               -- taxonomia (admissao|jornada|ferias|rescisao|...)
+        title TEXT NOT NULL,
+        guidance TEXT NOT NULL,                            -- orientação CURADA (texto revisado)
+        citations_json TEXT,                               -- artigos/normas (CLT, súmulas) citados
+        terms_json TEXT,                                   -- termos p/ recuperação determinística
+        source TEXT,                                       -- origem da curadoria
+        reviewed_by TEXT NOT NULL,                         -- QUEM revisou juridicamente (obrigatório)
+        status TEXT NOT NULL DEFAULT 'published',          -- published|archived
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_labor_law_entries_topic ON labor_law_entries (topic, status);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

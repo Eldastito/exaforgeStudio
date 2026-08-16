@@ -5,7 +5,7 @@
  *
  *  1. `INITIAL_BLUEPRINTS` inclui `beleza_salao_v1` com shape completo
  *     (baseVertical="beleza", modo suite, min=start, default=growth,
- *     bundle=null, hidden coerente com FALLBACK da F1, quickStartPack=null
+ *     bundle=null, hidden coerente com FALLBACK da F1, quickStartPack='beleza'
  *     por design — F17 pode adicionar pack próprio).
  *  2. `BlueprintSeeder.seedInitialBlueprints` publica `beleza_salao_v1` no
  *     boot (idempotente — 2ª chamada não duplica).
@@ -78,7 +78,7 @@ async function main() {
   check("hiddenModules esconde clinica (D5 — reusa services, não a UI)", cfg?.hiddenModules.includes("clinica") === true);
   check("hiddenModules esconde escola + retail + retail_floor + vms + prospect (coerência com FALLBACK F1)", cfg?.hiddenModules.every(_ => true) && ["escola", "retail", "retail_floor", "vms", "prospect"].every(m => cfg?.hiddenModules.includes(m)));
   check("commercialUpgrades sugere scale + enterprise (upgrade natural pra Beauty AI)", !!cfg && cfg.commercialUpgrades.includes("scale") && cfg.commercialUpgrades.includes("enterprise"));
-  check("quickStartPack=null (pack de beleza é fatia futura F17+)", cfg?.quickStartPack === null);
+  check("quickStartPack='beleza' (ADR-169 F21 — pack de beleza em PACKS)", cfg?.quickStartPack === "beleza");
   check("runtimePlaybooks=[] (F11–F14 popularão)", Array.isArray(cfg?.runtimePlaybooks) && cfg?.runtimePlaybooks.length === 0);
 
   // ===== 2. Seed publica no boot =====

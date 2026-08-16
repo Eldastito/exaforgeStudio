@@ -139,9 +139,10 @@ export const INITIAL_BLUEPRINTS: CreateBlueprintInput[] = [
   // dos SERVICES da Clínica sem ligar o módulo `clinica` (RN-BS-05/D5) —
   // por isso `clinica` fica em `hiddenModules`. `retail`/`retail_floor`
   // (operação de rede supervisionada), `escola`, `vms` e `prospect` também
-  // são incoerentes pro nicho. `quickStartPack: null` — o pack de beleza
-  // (áreas de atendimento, cadências e FAQ específicas) é fatia futura;
-  // hoje `OnboardingTemplateService.PACKS` só tem os 4 verticais originais.
+  // são incoerentes pro nicho. `quickStartPack: "beleza"` (ADR-169 F21) —
+  // o pack de beleza (Recepção do Salão + Consultoria de Visual + Pós-
+  // atendimento/Fidelização + cadências + FAQ + liga a Beauty AI) já existe
+  // em `OnboardingTemplateService.PACKS`.
   // `defaultBundleKey: null` — se F17 quiser, adiciona um bundle
   // "growth_beleza" em `PLAN_BUNDLES` (molde: `growth_clinica`).
   // Beauty AI (Simulador de Cabelo, ADR-169 F5+) NÃO entra em módulos —
@@ -159,7 +160,7 @@ export const INITIAL_BLUEPRINTS: CreateBlueprintInput[] = [
       optionalModules: ["campanhas", "cadencias", "assinaturas", "estudio", "areas", "integracoes", "diretor", "rie", "execucao"],
       hiddenModules: ["clinica", "escola", "retail", "retail_floor", "vms", "prospect"],
       commercialUpgrades: ["scale", "enterprise"],
-      quickStartPack: null,
+      quickStartPack: "beleza",
       runtimePlaybooks: [],
     },
   },

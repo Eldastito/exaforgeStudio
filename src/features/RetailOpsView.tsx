@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { useAuth } from '@/src/contexts/AuthContext';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -357,6 +358,8 @@ function PatternsTab() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [learning, setLearning] = useState(false);
+  const [proposeFor, setProposeFor] = useState<any | null>(null);
+  const [propTick, setPropTick] = useState(0);
 
   const effOf = (type: string) => typeStats.find((s) => s.pattern_type === type);
 
@@ -438,17 +441,146 @@ function PatternsTab() {
                 {eff && eff.acted > 0 && <span className="text-[11px] text-indigo-300">eficácia das ações {Math.round(Number(eff.effectiveness) * 100)}% ({eff.acted}x)</span>}
               </div>
               {p.description && <p className="mt-1.5 text-sm text-zinc-200">{p.description}</p>}
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-zinc-500">Agiu sobre isso? Como foi:</span>
                 <button onClick={() => recordOutcome(p, 'worked')} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Funcionou</button>
                 <button onClick={() => recordOutcome(p, 'no_effect')} className="rounded border border-zinc-600 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">Sem efeito</button>
                 <button onClick={() => recordOutcome(p, 'backfired')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Piorou</button>
+                <button onClick={() => setProposeFor(p)} className="ml-auto inline-flex items-center gap-1 rounded border border-indigo-500/30 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10"><Lightbulb className="w-3 h-3" /> Sugerir solução</button>
               </div>
             </div>
             );
           })}
         </div>
       )}
+
+      <SolutionsPanel refreshKey={propTick} />
+      {proposeFor && <SolutionProposalModal pattern={proposeFor} onClose={() => setProposeFor(null)} onCreated={() => { setProposeFor(null); setPropTick(t => t + 1); }} />}
+    </div>
+  );
+}
+
+// Modal "Sugerir solução" (LEARN-001): o gerente propõe uma solução ligada a um
+// padrão. Nasce rascunho; o ciclo governado segue no painel abaixo.
+function SolutionProposalModal({ pattern, onClose, onCreated }: { pattern: any; onClose: () => void; onCreated: () => void }) {
+  const [title, setTitle] = useState('');
+  const [proposal, setProposal] = useState('');
+  const [conditions, setConditions] = useState('');
+  const [expectedMetric, setExpectedMetric] = useState('');
+  const [baseline, setBaseline] = useState('');
+  const [risks, setRisks] = useState('');
+  const [busy, setBusy] = useState(false);
+  const field = "w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500";
+  const save = async () => {
+    if (!title.trim() || !proposal.trim()) { toast.error('Informe título e proposta.'); return; }
+    setBusy(true);
+    try {
+      const body: any = { title, proposal, conditions: conditions || undefined, expectedMetric: expectedMetric || undefined, risks: risks || undefined, storeId: pattern.store_id || null };
+      if (baseline.trim()) body.baseline = Number(baseline.replace(',', '.'));
+      const r = await apiFetch(`/api/retailops/patterns/${pattern.id}/solution-proposals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar.');
+      toast.success('Proposta criada (rascunho). Submeta para revisão no painel abaixo.');
+      onCreated();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[460px] p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Lightbulb className="w-5 h-5 text-indigo-400" /> Sugerir solução</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Para o padrão: <span className="text-zinc-400">{pattern.description || pattern.pattern_type}</span>. A proposta passa por revisão e teste antes de virar conhecimento — não é aplicada automaticamente.</p>
+        <label className="text-xs text-zinc-400 mb-1 block">Título *</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} className={`${field} mb-3`} placeholder="Ex.: Dupla conferência no fechamento" />
+        <label className="text-xs text-zinc-400 mb-1 block">Proposta *</label>
+        <textarea value={proposal} onChange={e => setProposal(e.target.value)} className={`${field} h-20 mb-3 resize-none`} placeholder="O que fazer, na prática." />
+        <label className="text-xs text-zinc-400 mb-1 block">Em que condição funciona</label>
+        <input value={conditions} onChange={e => setConditions(e.target.value)} className={`${field} mb-3`} placeholder="Ex.: fins de semana movimentados" />
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Indicador esperado</label>
+            <input value={expectedMetric} onChange={e => setExpectedMetric(e.target.value)} className={field} placeholder="Ex.: divergência R$" />
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Valor inicial</label>
+            <input value={baseline} onChange={e => setBaseline(e.target.value)} inputMode="decimal" className={field} placeholder="Ex.: 300" />
+          </div>
+        </div>
+        <label className="text-xs text-zinc-400 mb-1 block">Riscos / limitações</label>
+        <input value={risks} onChange={e => setRisks(e.target.value)} className={`${field} mb-4`} placeholder="Opcional" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} disabled={busy} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">Cancelar</button>
+          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}Criar proposta</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SOLUTION_STATE: Record<string, { label: string; cls: string }> = {
+  draft: { label: 'Rascunho', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
+  in_review: { label: 'Em revisão', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  approved_for_test: { label: 'Aprovada p/ teste', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  testing: { label: 'Em teste', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+  validated: { label: 'Validada', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  promoted: { label: 'Na memória', cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40' },
+  rejected: { label: 'Rejeitada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  archived: { label: 'Arquivada', cls: 'text-zinc-500 bg-zinc-500/10 border-zinc-600/30' },
+  revoked: { label: 'Revogada', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+};
+
+// Painel de gestão das propostas (LEARN-002/003/004/005). Ações de governança
+// (aprovar/promover/etc.) só para owner/admin; submeter é de qualquer um.
+function SolutionsPanel({ refreshKey }: { refreshKey?: number }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'owner' || user?.role === 'admin';
+  const [items, setItems] = useState<any[]>([]);
+  const load = () => apiFetch('/api/retailops/solution-proposals').then(r => r.json()).then(d => setItems(Array.isArray(d?.proposals) ? d.proposals : [])).catch(() => {});
+  useEffect(() => { load(); }, [refreshKey]);
+  const op = async (id: string, path: string, body?: any) => {
+    try {
+      const r = await apiFetch(`/api/retailops/solution-proposals/${id}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha');
+      toast.success('Proposta atualizada.'); load();
+    } catch (e: any) { toast.error(e.message); }
+  };
+  const recordOutcome = (id: string) => {
+    const final = prompt('Valor final medido (número):'); if (final === null) return;
+    const conf = prompt('Confiança do resultado (0 a 1):'); if (conf === null) return;
+    op(id, 'record-outcome', { final: Number(String(final).replace(',', '.')), confidence: Number(String(conf).replace(',', '.')) });
+  };
+  const withReason = (id: string, path: string, q: string) => { const reason = prompt(q); if (reason === null) return; op(id, path, { reason }); };
+  const active = items.filter(p => !['archived'].includes(p.state));
+  if (active.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <h4 className="text-sm font-semibold text-zinc-200 mb-2 flex items-center gap-2"><Lightbulb className="w-4 h-4 text-indigo-400" /> Propostas de solução ({active.length})</h4>
+      <div className="space-y-2">
+        {active.map(p => (
+          <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm text-zinc-100 font-medium">{p.title}</span>
+              <Badge map={SOLUTION_STATE} s={p.state} />
+              {!p.store_id && <span className="text-[10px] text-zinc-500 border border-zinc-700 rounded px-1.5">rede</span>}
+              {p.outcome_final != null && <span className="text-[11px] text-emerald-300">resultado {p.outcome_final}{p.outcome_confidence != null ? ` · conf. ${Math.round(p.outcome_confidence * 100)}%` : ''}</span>}
+            </div>
+            {p.proposal_text && <p className="mt-1 text-[13px] text-zinc-300">{p.proposal_text}</p>}
+            {p.rejection_reason && <p className="mt-1 text-[11px] text-red-300/80">Motivo: {p.rejection_reason}</p>}
+            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+              {p.state === 'draft' && <button onClick={() => op(p.id, 'submit')} className="rounded border border-indigo-500/30 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10">Submeter p/ revisão</button>}
+              {isAdmin && p.state === 'in_review' && <>
+                <button onClick={() => op(p.id, 'approve-test')} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Aprovar p/ teste</button>
+                <button onClick={() => withReason(p.id, 'reject', 'Motivo da rejeição:')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Rejeitar</button>
+              </>}
+              {isAdmin && p.state === 'approved_for_test' && <button onClick={() => op(p.id, 'start-test')} className="rounded border border-sky-500/30 px-2 py-0.5 text-[11px] text-sky-300 hover:bg-sky-500/10">Iniciar teste</button>}
+              {isAdmin && p.state === 'testing' && <>
+                <button onClick={() => recordOutcome(p.id)} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Registrar resultado</button>
+                <button onClick={() => withReason(p.id, 'reject', 'Motivo da rejeição:')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Rejeitar</button>
+              </>}
+              {isAdmin && p.state === 'validated' && <button onClick={() => op(p.id, 'promote')} className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200 hover:bg-emerald-500/20">Promover à memória</button>}
+              {isAdmin && p.state === 'promoted' && <button onClick={() => withReason(p.id, 'revoke', 'Motivo da revogação:')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Revogar</button>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

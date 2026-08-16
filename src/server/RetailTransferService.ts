@@ -18,7 +18,9 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailInventoryService } from "./RetailInventoryService.js";
+import { RetailStockPolicyService } from "./RetailStockPolicyService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { haversineKm } from "./geo.js";
 
 type NewItem = { productId: string; variantId?: string | null; quantity: number };
 type CreateInput = { originStoreId: string; destStoreId: string; note?: string; items: NewItem[]; source?: "manual" | "ai_suggested"; signalId?: string | null; decisionActionId?: string | null };
@@ -186,6 +188,85 @@ export class RetailTransferService {
     }
     if (bestH == null) return fallback;
     return `por volta das ${String(bestH).padStart(2, "0")}h (horário mais tranquilo da loja)`;
+  }
+
+  /**
+   * REPOSIÇÃO da grade (PRD Moda/TOULON, INV-005): loja que TRABALHA o produto
+   * (tem outros tamanhos com saldo) mas está ZERADA numa variação que outra loja
+   * tem sobrando → sugestão de transferência entre filiais. Enriquece cada
+   * sugestão com:
+   *  - identificação da peça (referência, EAN, unidade, cor, tamanho);
+   *  - saldo da loja NECESSITADA + mínimo/meta/falta (política, se houver);
+   *  - saldo da DOADORA + TRANSFERÍVEL = max(saldo doadora − mínimo da doadora, 0)
+   *    (RN nº 4: a doadora não fica abaixo do mínimo dela). Sem política de
+   *    doadora, todo o excedente é considerado transferível (min desconhecido).
+   *  - distância (mais próximas primeiro) e melhor horário da doadora.
+   * Determinístico, isolado por organização.
+   */
+  static replenishmentSuggestions(orgId: string, opts: { minDonor?: number; limit?: number } = {}): { count: number; suggestions: any[] } {
+    const minDonor = Math.max(1, int(opts.minDonor) || 2);
+    const limit = Math.min(500, Math.max(10, int(opts.limit) || 200));
+    const rows = db.prepare(`
+      WITH carrier AS (
+        SELECT rsi.store_id, rsi.product_service_id,
+               SUM(CASE WHEN rsi.quantity_available > 0 THEN rsi.quantity_available ELSE 0 END) AS tot
+          FROM retail_store_inventory rsi
+          JOIN retail_stores s ON s.id = rsi.store_id AND s.active = 1
+         WHERE rsi.organization_id = ?
+         GROUP BY rsi.store_id, rsi.product_service_id
+        HAVING tot > 0
+      )
+      SELECT p.name AS product_name, p.external_ref AS product_external_ref, p.default_uom AS product_uom,
+             COALESCE(v.name, '—') AS variant_name, v.size, v.color,
+             v.external_ref AS variant_sku, COALESCE(v.sku, p.ean) AS variant_ean,
+             sn.name AS needy_store, sd.name AS donor_store, sd.code AS donor_code, d.quantity_available AS donor_qty,
+             c.store_id AS needy_store_id, d.store_id AS donor_store_id,
+             d.product_service_id, d.variant_id,
+             COALESCE(n.quantity_available, 0) AS needy_qty,
+             sn.latitude AS needy_lat, sn.longitude AS needy_lng, sd.latitude AS donor_lat, sd.longitude AS donor_lng
+        FROM retail_store_inventory d
+        JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
+        JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
+        JOIN retail_stores sn ON sn.id = c.store_id
+        JOIN products_services p ON p.id = d.product_service_id
+        LEFT JOIN product_variants v ON v.id = d.variant_id
+        LEFT JOIN retail_store_inventory n ON n.store_id = c.store_id AND n.product_service_id = d.product_service_id AND COALESCE(n.variant_id, '') = COALESCE(d.variant_id, '')
+       WHERE d.organization_id = ? AND d.quantity_available >= ? AND d.variant_id IS NOT NULL AND d.variant_id <> ''
+         AND COALESCE(n.quantity_available, 0) <= 0
+       ORDER BY d.quantity_available DESC, p.name ASC
+       LIMIT ?
+    `).all(orgId, orgId, minDonor, limit) as any[];
+
+    const orgHasPolicies = RetailStockPolicyService.hasAny(orgId);
+    const timeCache = new Map<string, string>();
+    const suggestions = rows.map((r) => {
+      const dist = haversineKm(r.needy_lat, r.needy_lng, r.donor_lat, r.donor_lng);
+      const code = String(r.donor_code || "");
+      if (!timeCache.has(code)) timeCache.set(code, this.suggestBestWindow(orgId, code));
+
+      // Necessitada: meta/falta pela política dela.
+      const needyPol = orgHasPolicies ? RetailStockPolicyService.resolve(orgId, r.needy_store_id, r.product_service_id, r.variant_id) : null;
+      const needyQ = RetailStockPolicyService.computeQuantities(int(r.needy_qty), needyPol);
+      // Doadora: transferível preservando o mínimo dela (sem política → excedente todo).
+      const donorPol = orgHasPolicies ? RetailStockPolicyService.resolve(orgId, r.donor_store_id, r.product_service_id, r.variant_id) : null;
+      const donorMin = donorPol ? donorPol.min_qty : 0;
+      const transferable_qty = Math.max(int(r.donor_qty) - donorMin, 0);
+
+      const { needy_lat, needy_lng, donor_lat, donor_lng, ...rest } = r;
+      return {
+        ...rest,
+        needy_current_qty: int(r.needy_qty),
+        needy_min_qty: needyQ.min_qty,
+        needy_target_qty: needyQ.target_qty,
+        shortage_qty: needyQ.shortage_qty,
+        qty_to_zero: needyQ.qty_to_zero,
+        donor_min_qty: donorPol ? donorMin : null,
+        transferable_qty,
+        distance_km: Number.isFinite(dist) ? dist : null,
+        best_time: timeCache.get(code),
+      };
+    }).sort((a, b) => (a.distance_km == null ? Infinity : a.distance_km) - (b.distance_km == null ? Infinity : b.distance_km));
+    return { count: suggestions.length, suggestions };
   }
 
   static list(orgId: string, opts: { status?: string; limit?: number; offset?: number } = {}): any[] {

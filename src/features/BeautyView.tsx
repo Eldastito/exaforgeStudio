@@ -22,8 +22,9 @@
  * Portanto entrada é `contactId` já cadastrado, não um formulário público.
  */
 import React, { useEffect, useState } from 'react';
-import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star, Download, Trash2 } from 'lucide-react';
+import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star, Download, Trash2, Users } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import BeautyReceptionPanel from './BeautyReceptionPanel';
 
 // Extrai a mensagem humana do corpo de erro da API ({error: "..."}) — sem
 // isso o usuário via o JSON cru no aviso e a causa real só no console.
@@ -110,6 +111,8 @@ export function BeautyView() {
   const [pLeadSource, setPLeadSource] = useState<string>('');
   const [pLeadSourceOther, setPLeadSourceOther] = useState<string>(''); // F33 — texto do "Outro"
 
+  // F34 — abas: Painel da Recepção (agenda do dia, busca) × Nova consulta (fluxo Beauty AI).
+  const [tab, setTab] = useState<'consulta' | 'recepcao'>('consulta');
   const [contactId, setContactId] = useState<string>('');
   const [goal, setGoal] = useState<string>('coloração');
   const [busy, setBusy] = useState(false);
@@ -508,6 +511,26 @@ export function BeautyView() {
           </p>
         </div>
       </header>
+
+      {/* F34 — abas: Recepção (agenda do dia, tempo real, busca) × Nova consulta. */}
+      <div className="flex gap-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <button onClick={() => setTab('recepcao')}
+          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px ${tab === 'recepcao' ? 'border-pink-500 text-pink-500' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <Users className="w-4 h-4" /> Recepção
+        </button>
+        <button onClick={() => setTab('consulta')}
+          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px ${tab === 'consulta' ? 'border-pink-500 text-pink-500' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <Sparkles className="w-4 h-4" /> Nova consulta (Beauty AI)
+        </button>
+      </div>
+
+      {tab === 'recepcao' && (
+        <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
+          <BeautyReceptionPanel />
+        </section>
+      )}
+
+      {tab === 'consulta' && (<>
 
       {/* F28 — banner de modo demonstração: quando não há IA de imagem REAL
           configurada no servidor, as imagens sairiam como quadrados de teste.
@@ -1064,6 +1087,8 @@ export function BeautyView() {
           </p>
         </section>
       )}
+
+      </>)}
     </div>
     </div>
   );

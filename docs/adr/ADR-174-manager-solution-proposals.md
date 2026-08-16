@@ -48,12 +48,29 @@ em `dormant` — sai da recuperação confiável, mantendo o histórico.
 instrução** ("ignore previous", "system:", `<|...|>`) e **segredos**
 (`api_key`, `password:`…), e limita o tamanho. Higiene de texto — não é IA.
 
+### Recuperação pela IA (LEARN-006) — **IMPLEMENTADO**
+
+`ManagerSolutionRetrievalService` (determinístico, read-only). `forPattern(orgId,
+patternId)` / `retrieve(orgId, {patternType, storeId, excludePatternId})`
+recuperam **só** padrões `manager_solution` `status='validated'` cuja proposta
+está `promoted` (revogadas viram `dormant` e **somem**, LEARN-007), casando o
+**mesmo tipo de problema** (o `pattern_type` que a proposta referenciou). Cada
+item **DECLARA**: `origin:"humana"` + autor + onde funcionou (loja/rede) +
+evidência (baseline/final/confiança/período), e traz **cautela graduada** — nunca
+afirma eficácia geral:
+
+- confiança < 0,6 → *insuficiente / trate como HIPÓTESE, teste antes*;
+- evidência LOCAL (uma loja) → *não generalizável, teste controlado antes*;
+- rede + confiante → `generalizable`, mas *ACOMPANHAR ao aplicar*.
+
 ## Rotas (§9.5)
 
 `GET/POST /solution-proposals`, `POST /patterns/:patternId/solution-proposals`,
 `POST /solution-proposals/:id/{submit,approve-test,start-test,record-outcome,
 promote,reject,revoke,archive}`. Criar/listar/submeter: qualquer usuário
 autenticado (o gerente propõe). Aprovar/promover/rejeitar: owner/admin.
+`GET /patterns/:patternId/solutions` (LEARN-006): recupera as soluções validadas
+relevantes ao padrão — leitura, qualquer usuário autenticado.
 
 ## Consequências
 
@@ -65,8 +82,7 @@ autenticado (o gerente propõe). Aprovar/promover/rejeitar: owner/admin.
 
 - **UI "Sugerir solução"** (campo nos sinais/padrões/tarefas) + painel de gestão
   das propostas — próxima fatia.
-- **Recuperação pela IA (LEARN-006):** a IA recuperar soluções validadas em
-  contexto semelhante, declarando origem humana + evidência, e sugerindo teste
-  controlado — fatia própria (os padrões `manager_solution` já ficam na memória).
+- (nada pendente nesta linha — LEARN-006 entregue acima.)
 
-Teste: `scripts/test-manager-solution.ts` (19 checks).
+Testes: `scripts/test-manager-solution.ts` (19 checks) +
+`scripts/test-manager-solution-retrieval.ts` (11 checks, LEARN-006).

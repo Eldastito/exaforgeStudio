@@ -735,6 +735,9 @@ export class Scheduler {
   static async tick() {
     await this.reactivationPass().catch(e => console.error('[Scheduler] reativação falhou', e));
     await this.reminderPass().catch(e => console.error('[Scheduler] lembretes falhou', e));
+    // ADR-171 — materializa as tarefas recorrentes vencidas (idempotente). Passe
+    // horário: a granularidade da recorrência é a hora local (local_time).
+    try { const { TaskRecurrenceService } = await import('./TaskRecurrenceService.js'); TaskRecurrenceService.materializeDuePass(new Date()); } catch (e) { console.error('[Scheduler] tarefas recorrentes falhou', e); }
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));

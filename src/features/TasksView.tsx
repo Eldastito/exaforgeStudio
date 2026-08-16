@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag, Paperclip, Camera, Check } from 'lucide-react';
+import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag, Paperclip, Camera, Check, Repeat, Pause, Play, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -38,6 +38,7 @@ export function TasksView() {
   const [creating, setCreating] = useState(false);
   const [detail, setDetail] = useState<Task | null>(null);
   const [completing, setCompleting] = useState<Task | null>(null);
+  const [recurTick, setRecurTick] = useState(0);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -78,6 +79,8 @@ export function TasksView() {
           </Button>
         </div>
       </div>
+
+      <RecurrenceRulesPanel users={users} refreshKey={recurTick} />
 
       {loading ? (
         <div className="flex items-center gap-2 text-zinc-500 text-sm"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
@@ -126,7 +129,7 @@ export function TasksView() {
         </div>
       )}
 
-      {creating && <CreateModal users={users} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load(); }} />}
+      {creating && <CreateModal users={users} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); load(); setRecurTick(t => t + 1); }} />}
       {completing && <CompleteTaskModal task={completing} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); load(); }} />}
       {detail && <DetailDrawer task={detail} users={users} onClose={() => setDetail(null)} onRefresh={load} />}
     </div>
@@ -200,6 +203,96 @@ function CompleteTaskModal({ task, onClose, onDone }: { task: Task; onClose: () 
   );
 }
 
+const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+/** Primeira data de ocorrência (calendário local, sem tz) — espelha o motor. */
+function firstOccurrenceDate(freq: string, interval: number, byWeekday: number[], dayOfMonth: number, startsOn: string): { y: number; mo: number; d: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startsOn)) return null;
+  const [y, m, d0] = startsOn.split('-').map(Number);
+  const start = Date.UTC(y, m - 1, d0);
+  const iv = Math.max(1, interval);
+  for (let i = 0; i < 400; i++) {
+    const cur = new Date(start + i * 86400000);
+    const cy = cur.getUTCFullYear(), cm = cur.getUTCMonth() + 1, cd = cur.getUTCDate(), wd = cur.getUTCDay();
+    let match = false;
+    if (freq === 'daily') match = i % iv === 0;
+    else if (freq === 'weekly') {
+      const wds = byWeekday.length ? byWeekday : [new Date(start).getUTCDay()];
+      if (wds.includes(wd)) {
+        const wStart = Math.floor(start / 86400000) - new Date(start).getUTCDay();
+        const wCur = Math.floor(cur.getTime() / 86400000) - wd;
+        match = Math.round((wCur - wStart) / 7) % iv === 0;
+      }
+    } else if (freq === 'monthly') {
+      const dim = new Date(Date.UTC(cy, cm, 0)).getUTCDate();
+      const dom = Math.min(Math.max(1, dayOfMonth || d0), dim);
+      if (cd === dom) { const months = (cy - y) * 12 + (cm - m); match = months >= 0 && months % iv === 0; }
+    }
+    if (match) return { y: cy, mo: cm, d: cd };
+  }
+  return null;
+}
+
+function ruleSummary(r: any): string {
+  const iv = Math.max(1, Number(r.interval) || 1);
+  const at = ` às ${r.local_time || '09:00'}`;
+  if (r.frequency === 'daily') return (iv === 1 ? 'Todo dia' : `A cada ${iv} dias`) + at;
+  if (r.frequency === 'weekly') {
+    let wds: number[] = []; try { wds = JSON.parse(r.by_weekday || '[]'); } catch { wds = []; }
+    const dias = wds.length ? wds.map(n => WEEKDAYS[n]).join(', ') : '—';
+    return (iv === 1 ? 'Toda semana' : `A cada ${iv} semanas`) + ` (${dias})` + at;
+  }
+  return (iv === 1 ? 'Todo mês' : `A cada ${iv} meses`) + ` no dia ${r.day_of_month || '?'}` + at;
+}
+
+// Regras recorrentes (ADR-171): lista + pausar/retomar/encerrar. Colapsável.
+function RecurrenceRulesPanel({ users, refreshKey }: { users: OrgUser[]; refreshKey?: number }) {
+  const [rules, setRules] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const load = () => apiFetch('/api/tasks/recurrence').then(r => r.json()).then(d => { setRules(Array.isArray(d?.rules) ? d.rules : []); setLoaded(true); }).catch(() => setLoaded(true));
+  useEffect(() => { load(); }, [refreshKey]);
+  const userName = (id: string) => users.find(u => u.id === id)?.name || users.find(u => u.id === id)?.email || 'Sem dono';
+  const op = async (id: string, path: string, method = 'POST') => {
+    try {
+      const r = await apiFetch(`/api/tasks/recurrence/${id}${path}`, { method });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha');
+      toast.success('Regra atualizada.'); load();
+    } catch (e: any) { toast.error(e.message); }
+  };
+  const active = rules.filter(r => r.status !== 'completed');
+  if (loaded && active.length === 0) return null;
+  return (
+    <div className="mb-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-indigo-200">
+        <Repeat className="w-4 h-4" /> Tarefas recorrentes <span className="text-indigo-300/70">({active.length})</span>
+        <span className="ml-auto text-indigo-300/60 text-xs">{open ? 'ocultar' : 'ver'}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 space-y-2">
+          {active.map(r => (
+            <div key={r.id} className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-zinc-100 truncate flex items-center gap-2">
+                  {r.title}
+                  {r.status === 'paused' && <span className="text-[10px] rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5">pausada</span>}
+                </div>
+                <div className="text-[11px] text-zinc-500">{ruleSummary(r)} · {userName(r.assigned_to)}{r.next_run_at ? ` · próxima: ${fmt(r.next_run_at)}` : ''}</div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {r.status === 'active'
+                  ? <button onClick={() => op(r.id, '/pause')} title="Pausar" className="rounded border border-zinc-700 p-1.5 text-zinc-300 hover:bg-zinc-800"><Pause className="w-3.5 h-3.5" /></button>
+                  : <button onClick={() => op(r.id, '/resume')} title="Retomar" className="rounded border border-emerald-500/40 p-1.5 text-emerald-300 hover:bg-emerald-500/10"><Play className="w-3.5 h-3.5" /></button>}
+                <button onClick={() => { if (confirm('Encerrar esta recorrência? As tarefas já criadas continuam.')) op(r.id, '', 'DELETE'); }} title="Encerrar" className="rounded border border-zinc-700 p-1.5 text-zinc-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose: () => void; onCreated: () => void }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -210,67 +303,178 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
   const [resultLabel, setResultLabel] = useState('');
   const [resultBaseline, setResultBaseline] = useState('');
   const [busy, setBusy] = useState(false);
+  // Recorrência (ADR-171)
+  const today = new Date().toISOString().slice(0, 10);
+  const [repeat, setRepeat] = useState(false);
+  const [frequency, setFrequency] = useState('weekly');
+  const [interval, setIntervalN] = useState('1');
+  const [byWeekday, setByWeekday] = useState<number[]>([new Date().getDay()]);
+  const [dayOfMonth, setDayOfMonth] = useState(String(new Date().getDate()));
+  const [localTime, setLocalTime] = useState('09:00');
+  const [startsOn, setStartsOn] = useState(today);
+  const [endMode, setEndMode] = useState<'never' | 'date' | 'count'>('never');
+  const [endsOn, setEndsOn] = useState('');
+  const [maxOccurrences, setMaxOccurrences] = useState('10');
+
+  const toggleWeekday = (n: number) => setByWeekday(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n].sort());
+
+  const summary = (() => {
+    const iv = Math.max(1, parseInt(interval, 10) || 1);
+    const at = ` às ${localTime}`;
+    let base = '';
+    if (frequency === 'daily') base = iv === 1 ? 'Todo dia' : `A cada ${iv} dias`;
+    else if (frequency === 'weekly') {
+      const dias = (byWeekday.length ? byWeekday : [new Date(startsOn + 'T00:00').getDay()]).map(n => WEEKDAYS[n]).join(', ');
+      base = (iv === 1 ? 'Toda semana' : `A cada ${iv} semanas`) + ` (${dias})`;
+    } else base = (iv === 1 ? 'Todo mês' : `A cada ${iv} meses`) + ` no dia ${dayOfMonth || '?'}`;
+    const first = firstOccurrenceDate(frequency, iv, byWeekday, parseInt(dayOfMonth, 10) || 0, startsOn);
+    const firstStr = first ? `${String(first.d).padStart(2, '0')}/${String(first.mo).padStart(2, '0')}/${first.y}` : '—';
+    return { text: base + at, first: firstStr };
+  })();
 
   const submit = async () => {
     if (!title.trim()) { toast.error('Informe um título.'); return; }
     setBusy(true);
     try {
-      const baselineNum = resultBaseline.trim() ? Number(resultBaseline.replace(/\./g, '').replace(',', '.')) : null;
-      const r = await apiFetch('/api/tasks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null, resultLabel: resultLabel.trim() || null, resultBaseline: baselineNum }),
-      });
-      if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar.');
-      toast.success('Tarefa criada! 📋');
+      if (repeat) {
+        const payload: any = {
+          title, description, assignedTo: assignedTo || null, priority,
+          frequency, interval: Math.max(1, parseInt(interval, 10) || 1),
+          localTime, startsOn, timezone: 'America/Sao_Paulo',
+        };
+        if (frequency === 'weekly') payload.byWeekday = byWeekday;
+        if (frequency === 'monthly') payload.dayOfMonth = parseInt(dayOfMonth, 10) || new Date(startsOn + 'T00:00').getDate();
+        if (endMode === 'date' && endsOn) payload.endsOn = endsOn;
+        if (endMode === 'count') payload.maxOccurrences = Math.max(1, parseInt(maxOccurrences, 10) || 1);
+        const r = await apiFetch('/api/tasks/recurrence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar a recorrência.');
+        toast.success('Tarefa recorrente criada! 🔁');
+      } else {
+        const baselineNum = resultBaseline.trim() ? Number(resultBaseline.replace(/\./g, '').replace(',', '.')) : null;
+        const r = await apiFetch('/api/tasks', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null, resultLabel: resultLabel.trim() || null, resultBaseline: baselineNum }),
+        });
+        if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar.');
+        toast.success('Tarefa criada! 📋');
+      }
       onCreated();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
 
+  const field = "w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[460px] p-6">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[460px] p-6 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Plus className="w-5 h-5 text-indigo-400" /> Nova tarefa</h3>
         <label className="text-xs text-zinc-400 mb-1 block">Título *</label>
-        <input value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 mb-3 outline-none focus:border-indigo-500" placeholder="Ex.: Ligar para o cliente sobre o orçamento" />
+        <input value={title} onChange={e => setTitle(e.target.value)} className={`${field} mb-3`} placeholder="Ex.: Conferir o malote das lojas" />
         <label className="text-xs text-zinc-400 mb-1 block">Descrição</label>
-        <textarea value={description} onChange={e => setDescription(e.target.value)} className="w-full h-20 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 mb-3 resize-none outline-none focus:border-indigo-500" placeholder="Detalhes da tarefa (opcional)" />
+        <textarea value={description} onChange={e => setDescription(e.target.value)} className={`${field} h-20 mb-3 resize-none`} placeholder="Detalhes da tarefa (opcional)" />
         <div className="grid grid-cols-2 gap-3 mb-3">
           <div>
             <label className="text-xs text-zinc-400 mb-1 block">Responsável</label>
-            <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500">
+            <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className={field}>
               <option value="">Sem dono</option>
               {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
             </select>
           </div>
           <div>
             <label className="text-xs text-zinc-400 mb-1 block">Prioridade</label>
-            <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500">
+            <select value={priority} onChange={e => setPriority(e.target.value)} className={field}>
               <option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option>
             </select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Prazo</label>
-            <input type="datetime-local" value={due} onChange={e => setDue(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500 [color-scheme:dark]" />
+
+        {/* Toggle Repetir (ADR-171) — começa DESLIGADO (§10.3) */}
+        <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+          <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)} className="accent-indigo-500" />
+          <span className="text-sm text-zinc-200 flex items-center gap-1.5"><Repeat className="w-4 h-4 text-indigo-400" /> Repetir tarefa</span>
+        </label>
+
+        {!repeat ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Prazo</label>
+                <input type="datetime-local" value={due} onChange={e => setDue(e.target.value)} className={`${field} [color-scheme:dark]`} />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Referência</label>
+                <input value={refLabel} onChange={e => setRefLabel(e.target.value)} className={field} placeholder="Ex.: Orçamento #41" />
+              </div>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 mb-4">
+              <div className="text-[11px] text-zinc-400 mb-2">Resultado a medir <span className="text-zinc-600">(opcional)</span></div>
+              <div className="grid grid-cols-2 gap-3">
+                <input value={resultLabel} onChange={e => setResultLabel(e.target.value)} className={field} placeholder="O que medir (ex.: Divergência R$)" />
+                <input value={resultBaseline} onChange={e => setResultBaseline(e.target.value)} inputMode="decimal" className={field} placeholder="Valor inicial (ex.: 3.200)" />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-3 mb-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Frequência</label>
+                <select value={frequency} onChange={e => setFrequency(e.target.value)} className={field}>
+                  <option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">A cada</label>
+                <input type="number" min={1} value={interval} onChange={e => setIntervalN(e.target.value)} className={field} />
+              </div>
+            </div>
+            {frequency === 'weekly' && (
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Dias da semana</label>
+                <div className="flex gap-1">
+                  {WEEKDAYS.map((w, n) => (
+                    <button key={n} type="button" onClick={() => toggleWeekday(n)}
+                      className={`w-9 h-8 rounded text-[11px] border ${byWeekday.includes(n) ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>{w}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {frequency === 'monthly' && (
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Dia do mês</label>
+                <input type="number" min={1} max={31} value={dayOfMonth} onChange={e => setDayOfMonth(e.target.value)} className={field} />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Horário</label>
+                <input type="time" value={localTime} onChange={e => setLocalTime(e.target.value)} className={`${field} [color-scheme:dark]`} />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Início</label>
+                <input type="date" value={startsOn} onChange={e => setStartsOn(e.target.value)} className={`${field} [color-scheme:dark]`} />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Término</label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select value={endMode} onChange={e => setEndMode(e.target.value as any)} className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100">
+                  <option value="never">Sem término</option><option value="date">Até a data</option><option value="count">Após N vezes</option>
+                </select>
+                {endMode === 'date' && <input type="date" value={endsOn} onChange={e => setEndsOn(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 [color-scheme:dark]" />}
+                {endMode === 'count' && <input type="number" min={1} value={maxOccurrences} onChange={e => setMaxOccurrences(e.target.value)} className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" />}
+              </div>
+            </div>
+            <div className="text-[12px] text-indigo-200/90 border-t border-indigo-500/20 pt-2">
+              🔁 {summary.text}, a partir de {startsOn.split('-').reverse().join('/')}.
+              <div className="text-zinc-400 text-[11px] mt-0.5">Primeiro disparo: <strong>{summary.first}</strong> às {localTime} (horário de São Paulo).</div>
+            </div>
           </div>
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Referência</label>
-            <input value={refLabel} onChange={e => setRefLabel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="Ex.: Orçamento #41" />
-          </div>
-        </div>
-        {/* Resultado a medir (ADR-134) — opcional: liga a tarefa a um número antes → depois */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 mb-4">
-          <div className="text-[11px] text-zinc-400 mb-2">Resultado a medir <span className="text-zinc-600">(opcional — ex.: reduzir a divergência de estoque)</span></div>
-          <div className="grid grid-cols-2 gap-3">
-            <input value={resultLabel} onChange={e => setResultLabel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="O que medir (ex.: Divergência R$)" />
-            <input value={resultBaseline} onChange={e => setResultBaseline(e.target.value)} inputMode="decimal" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500" placeholder="Valor inicial (ex.: 3.200)" />
-          </div>
-        </div>
+        )}
+
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
           <Button onClick={submit} disabled={busy} className="zf-button zf-button-primary">
-            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}Criar
+            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}{repeat ? 'Criar recorrência' : 'Criar'}
           </Button>
         </div>
       </div>

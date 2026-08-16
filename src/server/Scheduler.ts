@@ -738,6 +738,9 @@ export class Scheduler {
     // ADR-171 — materializa as tarefas recorrentes vencidas (idempotente). Passe
     // horário: a granularidade da recorrência é a hora local (local_time).
     try { const { TaskRecurrenceService } = await import('./TaskRecurrenceService.js'); TaskRecurrenceService.materializeDuePass(new Date()); } catch (e) { console.error('[Scheduler] tarefas recorrentes falhou', e); }
+    // ADR-172 — lembrete por WhatsApp das tarefas recorrentes materializadas
+    // (opt-in por regra; respeita quiet-hours/dedupe/limite; retry embutido).
+    try { const { TaskReminderService } = await import('./TaskReminderService.js'); await TaskReminderService.runPass(new Date()); } catch (e) { console.error('[Scheduler] lembrete de tarefa recorrente falhou', e); }
     await CadenceService.processTick(this.io).catch(e => console.error('[Scheduler] cadências falhou', e));
     await this.subscriptionPass().catch(e => console.error('[Scheduler] assinaturas falhou', e));
     await this.orderExpiryPass().catch(e => console.error('[Scheduler] expiração de pedidos falhou', e));

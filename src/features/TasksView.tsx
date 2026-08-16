@@ -315,6 +315,7 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
   const [endMode, setEndMode] = useState<'never' | 'date' | 'count'>('never');
   const [endsOn, setEndsOn] = useState('');
   const [maxOccurrences, setMaxOccurrences] = useState('10');
+  const [notifyWhatsapp, setNotifyWhatsapp] = useState(false);
 
   const toggleWeekday = (n: number) => setByWeekday(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n].sort());
 
@@ -346,6 +347,7 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
         if (frequency === 'monthly') payload.dayOfMonth = parseInt(dayOfMonth, 10) || new Date(startsOn + 'T00:00').getDate();
         if (endMode === 'date' && endsOn) payload.endsOn = endsOn;
         if (endMode === 'count') payload.maxOccurrences = Math.max(1, parseInt(maxOccurrences, 10) || 1);
+        if (notifyWhatsapp) payload.notificationPolicy = { whatsapp: true };
         const r = await apiFetch('/api/tasks/recurrence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar a recorrência.');
         toast.success('Tarefa recorrente criada! 🔁');
@@ -464,6 +466,11 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
                 {endMode === 'count' && <input type="number" min={1} value={maxOccurrences} onChange={e => setMaxOccurrences(e.target.value)} className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" />}
               </div>
             </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none border-t border-indigo-500/20 pt-2">
+              <input type="checkbox" checked={notifyWhatsapp} onChange={e => setNotifyWhatsapp(e.target.checked)} className="accent-indigo-500" />
+              <span className="text-[12px] text-zinc-300 flex items-center gap-1.5"><MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" /> Avisar o responsável por WhatsApp</span>
+            </label>
+            {notifyWhatsapp && <p className="text-[10px] text-zinc-500 -mt-1">Só envia se o responsável tiver WhatsApp cadastrado no perfil; respeita a janela de silêncio e não repete o mesmo aviso.</p>}
             <div className="text-[12px] text-indigo-200/90 border-t border-indigo-500/20 pt-2">
               🔁 {summary.text}, a partir de {startsOn.split('-').reverse().join('/')}.
               <div className="text-zinc-400 text-[11px] mt-0.5">Primeiro disparo: <strong>{summary.first}</strong> às {localTime} (horário de São Paulo).</div>

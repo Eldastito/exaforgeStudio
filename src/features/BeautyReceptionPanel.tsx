@@ -11,7 +11,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, Users, Clock, RefreshCw, CheckCircle2, PlayCircle, User, Tv } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
-import BeautyTvPanel from './BeautyTvPanel';
+
+// F36 — abre o Painel de TV numa JANELA SEPARADA (mesma sessão) pra arrastar
+// pro monitor extra. NÃO sequestra a tela da recepção (era o problema do F35).
+function openTvWindow() {
+  const url = `${window.location.pathname}?beautyTv=1`;
+  window.open(url, 'beautyTvSalao', 'width=1400,height=800,menubar=no,toolbar=no');
+}
 
 type Appt = {
   id: string; startTime: string | null; endTime: string | null;
@@ -45,9 +51,6 @@ export default function BeautyReceptionPanel() {
 
   // Profissional selecionado
   const [proDay, setProDay] = useState<{ professional: { name: string } | null; appointments: Appt[]; freeSlots: string[] } | null>(null);
-
-  // F35 — modo TV (vitrine em tela cheia pro monitor do salão).
-  const [tvMode, setTvMode] = useState(false);
 
   const loadBoard = useCallback(async () => {
     setLoading(true);
@@ -101,12 +104,12 @@ export default function BeautyReceptionPanel() {
 
   return (
     <div className="space-y-4">
-      {tvMode && <BeautyTvPanel onClose={() => setTvMode(false)} />}
       <div className="flex items-center justify-between">
         <h2 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" /> Painel da Recepção</h2>
         <div className="flex items-center gap-3">
-          <button onClick={() => setTvMode(true)} className="text-xs flex items-center gap-1 px-2 py-1 rounded bg-pink-500/15 text-pink-500 hover:bg-pink-500/25">
-            <Tv className="w-3 h-3" /> Modo TV
+          <button onClick={openTvWindow} title="Abre numa janela separada pra arrastar pro monitor do salão"
+            className="text-xs flex items-center gap-1 px-2 py-1 rounded bg-pink-500/15 text-pink-500 hover:bg-pink-500/25">
+            <Tv className="w-3 h-3" /> Abrir Modo TV
           </button>
           <button onClick={loadBoard} disabled={loading} className="text-xs flex items-center gap-1 text-slate-500 hover:text-pink-500 disabled:opacity-50">
             <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Atualizar

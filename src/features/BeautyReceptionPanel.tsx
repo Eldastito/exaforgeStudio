@@ -9,8 +9,9 @@
  * Auto-refresh a cada 20s pra "tempo real" (quem entrou/saiu de atendimento).
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { Search, Users, Clock, RefreshCw, CheckCircle2, PlayCircle, User } from 'lucide-react';
+import { Search, Users, Clock, RefreshCw, CheckCircle2, PlayCircle, User, Tv } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import BeautyTvPanel from './BeautyTvPanel';
 
 type Appt = {
   id: string; startTime: string | null; endTime: string | null;
@@ -44,6 +45,9 @@ export default function BeautyReceptionPanel() {
 
   // Profissional selecionado
   const [proDay, setProDay] = useState<{ professional: { name: string } | null; appointments: Appt[]; freeSlots: string[] } | null>(null);
+
+  // F35 — modo TV (vitrine em tela cheia pro monitor do salão).
+  const [tvMode, setTvMode] = useState(false);
 
   const loadBoard = useCallback(async () => {
     setLoading(true);
@@ -97,11 +101,17 @@ export default function BeautyReceptionPanel() {
 
   return (
     <div className="space-y-4">
+      {tvMode && <BeautyTvPanel onClose={() => setTvMode(false)} />}
       <div className="flex items-center justify-between">
         <h2 className="font-semibold flex items-center gap-2"><Users className="w-4 h-4" /> Painel da Recepção</h2>
-        <button onClick={loadBoard} disabled={loading} className="text-xs flex items-center gap-1 text-slate-500 hover:text-pink-500 disabled:opacity-50">
-          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Atualizar
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setTvMode(true)} className="text-xs flex items-center gap-1 px-2 py-1 rounded bg-pink-500/15 text-pink-500 hover:bg-pink-500/25">
+            <Tv className="w-3 h-3" /> Modo TV
+          </button>
+          <button onClick={loadBoard} disabled={loading} className="text-xs flex items-center gap-1 text-slate-500 hover:text-pink-500 disabled:opacity-50">
+            <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+          </button>
+        </div>
       </div>
       {err && <div className="text-xs text-red-500">{err}</div>}
 

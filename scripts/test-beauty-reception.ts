@@ -159,8 +159,28 @@ async function main() {
   check("Painel consome as rotas /reception/*",
     fs.readFileSync(path.join(process.cwd(), "src/features/BeautyReceptionPanel.tsx"), "utf8").includes("/api/beauty/reception/today"));
 
+  // ===== F35 — Painel de TV: privacidade do nome + fiação =====
+  // Regra pura (espelha tvDisplayName do BeautyTvPanel): primeiro nome +
+  // inicial do sobrenome — tela pública mostra "Emily S.", não o nome cheio.
+  const tvName = (full: string) => {
+    const p = String(full || "").trim().split(/\s+/).filter(Boolean);
+    if (!p.length) return "Cliente";
+    if (p.length === 1) return p[0];
+    return `${p[0]} ${p[p.length - 1][0].toUpperCase()}.`;
+  };
+  check("nome na TV: 'Emily Souza' → 'Emily S.'", tvName("Emily Souza") === "Emily S.");
+  check("nome na TV: um nome só fica inteiro", tvName("Madonna") === "Madonna");
+  check("nome na TV: vazio → 'Cliente'", tvName("") === "Cliente");
+  const tvSrc = fs.readFileSync(path.join(process.cwd(), "src/features/BeautyTvPanel.tsx"), "utf8");
+  check("BeautyTvPanel consome /reception/today (sem endpoint público)", tvSrc.includes("/api/beauty/reception/today"));
+  check("BeautyTvPanel exibe pelo nome mascarado (não o clientName cru)",
+    tvSrc.includes("tvDisplayName(a.clientName)") && !/>\{a\.clientName\}</.test(tvSrc));
+  const recepSrc = fs.readFileSync(path.join(process.cwd(), "src/features/BeautyReceptionPanel.tsx"), "utf8");
+  check("Recepção tem botão 'Modo TV' que abre o BeautyTvPanel",
+    recepSrc.includes("Modo TV") && recepSrc.includes("BeautyTvPanel") && recepSrc.includes("setTvMode"));
+
   // ===== Report =====
-  console.log("\n=== TEST beauty-reception (ADR-169 F34) ===\n");
+  console.log("\n=== TEST beauty-reception (ADR-169 F34+F35) ===\n");
   for (const x of results) console.log(`${x.ok ? "✅" : "❌"} ${x.name}${x.note ? ` — ${x.note}` : ""}`);
   console.log(`\n${results.length - failures}/${results.length} checks passed`);
   process.exit(failures > 0 ? 1 : 0);

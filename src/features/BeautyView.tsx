@@ -40,7 +40,11 @@ type Simulation = {
   consultationId: string;
   status: 'CREATED' | 'QUEUED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED_FINAL';
   parameters: { color?: string | null; cut?: string | null } | null;
-  outputSignedUrl?: string | null;
+  // CAMPO: 'signedUrl' — o backend (BeautyHairSimulationService.getSimulation /
+  // listForConsultation) devolve a URL da imagem gerada como `signedUrl`, NÃO
+  // `outputSignedUrl`. Ler o campo errado fazia a imagem nunca renderizar
+  // (caía no fallback que só mostrava o texto "SUCCEEDED").
+  signedUrl?: string | null;
 };
 
 type Asset = {
@@ -67,6 +71,12 @@ type ProfessionalSlot = {
 
 type Contact = { id: string; name: string; identifier?: string };
 
+// Rótulo legível pt-BR pra uma chave snake_case do vocabulário
+// (ex.: 'loiro_platinado' → 'Loiro Platinado').
+function vocabLabel(key: string): string {
+  return key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 export function BeautyView() {
   // F22: a lista de clientes vem de GET /api/beauty/clients (lê a tabela
   // `contacts` direto), NÃO de useStore.contacts — que é hidratado de
@@ -82,6 +92,18 @@ export function BeautyView() {
   const [goal, setGoal] = useState<string>('coloração');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Vocabulário de cores/cortes carregado do backend (GET /vocabulary) — a
+  // fonte única (RN-BS-11). Assim as opções acompanham COLOR_VOCAB/CUT_VOCAB
+  // sem hardcode no frontend.
+  const [colors, setColors] = useState<string[]>([]);
+  const [cuts, setCuts] = useState<string[]>([]);
+  useEffect(() => {
+    apiFetch('/api/beauty/vocabulary')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) { setColors(Array.isArray(d.colors) ? d.colors : []); setCuts(Array.isArray(d.cuts) ? d.cuts : []); } })
+      .catch(() => {});
+  }, []);
 
   async function loadClients(selectId?: string): Promise<void> {
     try {
@@ -313,7 +335,11 @@ export function BeautyView() {
   const scheduled = consultation?.status === 'scheduled';
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
+    // O <main> do App tem overflow-hidden — a view precisa rolar por conta
+    // própria, senão o conteúdo que passa da altura da tela fica inacessível
+    // (sem barra de rolagem). h-full + overflow-y-auto resolve.
+    <div className="h-full w-full overflow-y-auto">
+    <div className="p-6 space-y-6 max-w-5xl mx-auto pb-16">
       <header className="flex items-center gap-3">
         <div className="p-2 rounded-lg bg-pink-500/10">
           <Sparkles className="w-6 h-6 text-pink-500" />
@@ -476,16 +502,46 @@ export function BeautyView() {
         </section>
       )}
 
-      {/* PASSO 3 — Simular visual */}
+      {/* PASSO 3 — Simular visual (cores + cortes do vocabulário do backend) */}
       {canSimulate && (
         <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
           <h2 className="font-semibold mb-3 flex items-center gap-2"><Palette className="w-4 h-4" /> 3. Simular visual</h2>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => requestSimulation('color', 'morena_iluminada')} disabled={busy} className="px-3 py-2 rounded bg-purple-500/20 text-purple-500 hover:bg-purple-500/30 text-sm">Morena Iluminada</button>
-            <button onClick={() => requestSimulation('color', 'balayage')} disabled={busy} className="px-3 py-2 rounded bg-amber-500/20 text-amber-500 hover:bg-amber-500/30 text-sm">Balayage</button>
-            <button onClick={() => requestSimulation('color', 'loiro')} disabled={busy} className="px-3 py-2 rounded bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30 text-sm">Loiro</button>
-            <button onClick={() => requestSimulation('cut', 'bob')} disabled={busy} className="px-3 py-2 rounded bg-blue-500/20 text-blue-500 hover:bg-blue-500/30 text-sm">Corte Bob</button>
-            <button onClick={() => requestSimulation('cut', 'chanel')} disabled={busy} className="px-3 py-2 rounded bg-cyan-500/20 text-cyan-500 hover:bg-cyan-500/30 text-sm">Corte Chanel</button>
+          <p className="text-xs text-slate-500 mb-2">Escolha uma <b>cor</b> ou um <b>corte</b>. A IA gera o resultado a partir da foto.</p>
+
+          <div className="mb-4">
+            <p className="text-xs font-medium text-pink-400 mb-1.5">Cores</p>
+            <div className="flex flex-wrap gap-2">
+              {colors.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => requestSimulation('color', c)}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-full border text-sm hover:bg-pink-500/10 disabled:opacity-50"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  {vocabLabel(c)}
+                </button>
+              ))}
+              {colors.length === 0 && <span className="text-xs text-slate-500">carregando cores…</span>}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-blue-400 mb-1.5">Cortes</p>
+            <div className="flex flex-wrap gap-2">
+              {cuts.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => requestSimulation('cut', c)}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-full border text-sm hover:bg-blue-500/10 disabled:opacity-50"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  {vocabLabel(c)}
+                </button>
+              ))}
+              {cuts.length === 0 && <span className="text-xs text-slate-500">carregando cortes…</span>}
+            </div>
           </div>
         </section>
       )}
@@ -497,8 +553,8 @@ export function BeautyView() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {simulations.map((s) => (
               <div key={s.id} className={`rounded border overflow-hidden ${selectedSim === s.id ? 'ring-2 ring-pink-500' : ''}`} style={{ borderColor: 'var(--color-border)' }}>
-                {s.outputSignedUrl && s.status === 'SUCCEEDED' ? (
-                  <img src={s.outputSignedUrl} alt={`sim ${s.id.slice(0, 6)}`} className="w-full aspect-square object-cover" />
+                {s.signedUrl && s.status === 'SUCCEEDED' ? (
+                  <img src={s.signedUrl} alt={`sim ${s.id.slice(0, 6)}`} className="w-full aspect-square object-cover" />
                 ) : (
                   <div className="w-full aspect-square bg-slate-500/10 flex items-center justify-center text-xs text-slate-400">
                     {s.status === 'PROCESSING' || s.status === 'QUEUED' ? <Loader2 className="w-6 h-6 animate-spin" /> : s.status}
@@ -597,6 +653,7 @@ export function BeautyView() {
           </p>
         </section>
       )}
+    </div>
     </div>
   );
 }

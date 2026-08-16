@@ -302,6 +302,39 @@ async function main() {
     fakeOut.includes(Buffer.from([0xDE,0xAD,0xBE,0xEF])));
   delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
 
+  // ===== 12c. F31 — deletar imagem + purga dos stubs legados =====
+  // deleteSimulation: apaga o arquivo e marca DELETED (some da UI/galeria).
+  process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub";
+  const consDel = await prepareReady(orgA, seedContact(orgA, "Del"));
+  const reqDel = BeautyHairSimulationService.requestSimulation(orgA, consDel.id, { simulationType: "color", parameters: { color: "loiro" } });
+  const delId = (reqDel as any).simulationId as string;
+  await BeautyHairSimulationService.processJob(delId);
+  const delRowBefore = db.prepare(`SELECT output_storage_key FROM beauty_visual_simulations WHERE id = ?`).get(delId) as any;
+  const delFile = path.join(tmpDir, "private_media", delRowBefore.output_storage_key);
+  check("imagem existe antes do delete", fs.existsSync(delFile));
+  check("deleteSimulation retorna true", BeautyHairSimulationService.deleteSimulation(orgA, delId) === true);
+  const delRowAfter = db.prepare(`SELECT status, output_storage_key FROM beauty_visual_simulations WHERE id = ?`).get(delId) as any;
+  check("row vira DELETED sem output após delete", delRowAfter.status === "DELETED" && !delRowAfter.output_storage_key);
+  check("arquivo removido do disco após delete", !fs.existsSync(delFile));
+  check("delete cross-org não acha (idempotente/false)", BeautyHairSimulationService.deleteSimulation(orgB, delId) === false);
+  check("simulação DELETED some do listForConsultation", BeautyHairSimulationService.listForConsultation(orgA, consDel.id).every((s) => s.id !== delId));
+
+  // purgeStubOutputs: com STUB explícito ativo NÃO apaga (guarda dura).
+  const stubCountBefore = (db.prepare(`SELECT COUNT(*) AS n FROM beauty_visual_simulations WHERE provider_key='stub_v1'`).get() as any).n;
+  check("há stubs no banco pra testar a purga", stubCountBefore > 0);
+  check("purgeStubOutputs com STUB ativo → 0 (guarda: não apaga acervo de stub)",
+    BeautyHairSimulationService.purgeStubOutputs() === 0);
+  // Com provider REAL ativo, purga os stubs legados (arquivo + linha).
+  delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
+  process.env.OPENAI_API_KEY = "sk-test-purge";
+  const removed = BeautyHairSimulationService.purgeStubOutputs();
+  check("purgeStubOutputs com provider REAL → remove os stubs legados", removed >= stubCountBefore && removed > 0);
+  check("nenhum stub_v1 sobra após a purga",
+    (db.prepare(`SELECT COUNT(*) AS n FROM beauty_visual_simulations WHERE provider_key='stub_v1'`).get() as any).n === 0);
+  check("simulações NÃO-stub sobrevivem à purga (fake_marker_v1 intacto)",
+    !!db.prepare(`SELECT id FROM beauty_visual_simulations WHERE id = ?`).get(fakeSimId));
+  delete process.env.OPENAI_API_KEY;
+
   // ===== 13. Fiação: rota + BeautyView consomem o acervo =====
   const routesSrc = fs.readFileSync(path.join(process.cwd(), "src/server/routes/beauty.ts"), "utf8");
   check("rota GET /clients/:contactId/simulations existe",
@@ -313,6 +346,13 @@ async function main() {
     routesSrc.includes(`"/simulator-status"`) && routesSrc.includes("simulatorStatus"));
   check("BeautyView tem banner de modo demonstração (F28)",
     viewSrc.includes("simulator-status") && viewSrc.includes("Modo demonstração"));
+  check("rota DELETE /simulations/:id + purge-stubs existem (F31)",
+    routesSrc.includes(`router.delete("/simulations/:id"`) && routesSrc.includes("purge-stubs") && routesSrc.includes("purgeStubOutputs"));
+  check("BeautyView tem botões Baixar + Deletar (F31)",
+    viewSrc.includes("downloadSimulation") && viewSrc.includes("deleteSimulation") && viewSrc.includes("Baixar"));
+  const schedulerSrc = fs.readFileSync(path.join(process.cwd(), "src/server/Scheduler.ts"), "utf8");
+  check("Scheduler chama purgeStubOutputs uma vez (F31)",
+    schedulerSrc.includes("purgeStubOutputs") && schedulerSrc.includes("beautyStubsPurged"));
 
   // ===== Report =====
   console.log("\n=== TEST beauty-simulation-reuse (ADR-169 F26) ===\n");

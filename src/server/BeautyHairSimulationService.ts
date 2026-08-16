@@ -599,6 +599,53 @@ export class BeautyHairSimulationService {
     return r.changes > 0;
   }
 
+  /**
+   * F31 — Deleta uma simulação (qualquer status ≠ DELETED) do PRÓPRIO tenant:
+   * apaga o arquivo de output e marca a linha como DELETED (preserva a linha
+   * pro histórico de auditoria, mas some da UI e da galeria). O botão de
+   * "deletar" da BeautyView chama isto. Idempotente. */
+  static deleteSimulation(orgId: string, simulationId: string): boolean {
+    const row = db.prepare(
+      `SELECT output_storage_key FROM beauty_visual_simulations
+        WHERE id = ? AND organization_id = ? AND status != 'DELETED'`,
+    ).get(simulationId, orgId) as any;
+    if (!row) return false;
+    if (row.output_storage_key) {
+      try { fs.rmSync(path.join(PRIVATE_MEDIA_DIR, safeStorageKey(row.output_storage_key)), { force: true }); }
+      catch { /* anti-traversal / arquivo já sumiu */ }
+    }
+    db.prepare(
+      `UPDATE beauty_visual_simulations
+          SET status = 'DELETED', output_storage_key = NULL, completed_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND organization_id = ?`,
+    ).run(simulationId, orgId);
+    try { logAuthEvent(orgId, null, simulationId, "BEAUTY_SIMULATION_DELETED", {}); } catch { /* noop */ }
+    return true;
+  }
+
+  /**
+   * F31 — Limpeza dos STUBS LEGADOS (quadrados de demonstração 1x1 gerados
+   * quando o servidor ainda não tinha chave de IA, antes do fix da F30). Apaga
+   * arquivo + linha das simulações `provider_key='stub_v1'`. GUARDA DURA: só
+   * roda quando um provider REAL está ativo — nunca apaga o acervo de um
+   * ambiente que usa o stub de propósito (CI/demo com opt-in explícito).
+   * Rodado uma vez por boot no Scheduler; idempotente (some após a 1ª limpeza).
+   * Retorna quantas linhas foram removidas. */
+  static purgeStubOutputs(): number {
+    if (activeProvider().key === "stub_v1") return 0; // stub é o ativo → não mexe
+    const rows = db.prepare(
+      `SELECT id, output_storage_key FROM beauty_visual_simulations WHERE provider_key = 'stub_v1'`,
+    ).all() as any[];
+    for (const r of rows) {
+      if (r.output_storage_key) {
+        try { fs.rmSync(path.join(PRIVATE_MEDIA_DIR, safeStorageKey(r.output_storage_key)), { force: true }); }
+        catch { /* anti-traversal */ }
+      }
+    }
+    const info = db.prepare(`DELETE FROM beauty_visual_simulations WHERE provider_key = 'stub_v1'`).run();
+    return info.changes;
+  }
+
   /** Lê 1 simulação — inclui `signedUrl` só para SUCCEEDED. */
   static getSimulation(orgId: string, simulationId: string): BeautyVisualSimulationRow | null {
     const r = db.prepare(

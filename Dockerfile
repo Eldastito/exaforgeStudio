@@ -64,20 +64,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV NODE_ENV=production
 EXPOSE 3000
 
-# Copia o app já buildado + node_modules de produção (nativos compilados) do builder.
-COPY --from=builder /app /app
+# Copia o app já buildado + node_modules de produção (nativos compilados) do builder
+# JÁ com owner=node:node no momento da cópia (--chown). Antes disso rodávamos
+# `RUN chown -R node:node /app` num passo separado, que caminhava por centenas de
+# milhares de arquivos do node_modules chamando chown() em cada um — no ambiente
+# do Coolify isso estourava a memória do container de build e o daemon matava o
+# passo com exit code 255 (OOM-kill silencioso, sem stderr). Fazer o chown no
+# próprio COPY é ~10x mais barato: o BuildKit aplica o owner à medida que copia,
+# em vez de re-iterar toda a árvore depois. SEC-F23 preservado: o app segue rodando
+# como usuário `node` (uid/gid 1000).
+COPY --chown=node:node --from=builder /app /app
 
 # SEC-F23 (achado A16): roda como usuário SEM privilégio (não-root) — reduz o impacto
 # de uma eventual exploração (um processo comprometido não é root do container). A imagem
-# base `node:*` já traz o usuário `node` (uid/gid 1000); todo o /app passa a pertencer a ele.
+# base `node:*` já traz o usuário `node` (uid/gid 1000); todo o /app já pertence a ele
+# pelo `--chown` acima.
 #
 # IMPORTANTE (validar no deploy): o app escreve em DATA_DIR (SQLite, mídia, .jwt_secret).
 # Sem DATA_DIR definido, o default é /app (que fica gravável pelo `node`). SE você MONTA um
 # volume e aponta DATA_DIR pra ele, esse volume precisa ser GRAVÁVEL pelo uid 1000 — senão
 # o app não sobe (permissão negada ao escrever o banco). No Coolify/host, garanta a
 # permissão do volume (ex.: chown 1000:1000 no diretório do volume) OU deixe DATA_DIR no
-# default. Reversível: se algo travar, basta remover as duas linhas abaixo (chown + USER).
-RUN chown -R node:node /app
+# default. Reversível: se algo travar, basta trocar o `--chown` no COPY acima por
+# uma cópia simples + reintroduzir `RUN chown -R node:node /app` e remover o USER.
 USER node
 
 # `tini` como PID 1 real do container (ENTRYPOINT, não CMD — isso importa:

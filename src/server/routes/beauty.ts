@@ -351,6 +351,26 @@ router.post("/simulations/:id/cancel", (req: AuthRequest, res): any => {
   res.json({ ok });
 });
 
+// F31 — deleta uma imagem gerada (apaga o arquivo + marca DELETED). O botão
+// "Deletar" da BeautyView chama isto. Qualquer papel da vertical pode limpar
+// o acervo da consulta em que está trabalhando.
+router.delete("/simulations/:id", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const ok = BeautyHairSimulationService.deleteSimulation(orgId, req.params.id);
+  if (!ok) return res.status(404).json({ error: "Simulação não encontrada." });
+  res.json({ ok: true });
+});
+
+// F31 — limpeza ÚNICA dos stubs legados (quadrados de demonstração). Owner/
+// admin; roda também no boot pelo Scheduler. Só age com provider real ativo.
+router.post("/simulations/purge-stubs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const removed = BeautyHairSimulationService.purgeStubOutputs();
+  res.json({ ok: true, removed });
+});
+
 // ─────────────── Harmony Analysis (F8) ───────────────
 
 // GET /vocabulary/harmony — dimensões + disclaimer pra UI

@@ -22,7 +22,7 @@
  * Portanto entrada é `contactId` já cadastrado, não um formulário público.
  */
 import React, { useEffect, useState } from 'react';
-import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star } from 'lucide-react';
+import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star, Download, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
 // Extrai a mensagem humana do corpo de erro da API ({error: "..."}) — sem
@@ -359,6 +359,45 @@ export function BeautyView() {
     finally { setBusy(false); }
   }
 
+  // F31 — baixar a imagem gerada (pra enviar pra cliente). Busca os bytes e
+  // dispara o download com nome amigável; funciona mesmo a URL assinada
+  // servindo inline (Content-Type image/*).
+  async function downloadSimulation(sim: Simulation): Promise<void> {
+    if (!sim.signedUrl) return;
+    try {
+      const r = await apiFetch(sim.signedUrl);
+      if (!r.ok) throw new Error('Falha ao baixar a imagem.');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const parts = [sim.parameters?.color, sim.parameters?.cut].filter(Boolean).map((p) => vocabLabel(p as string));
+      a.href = url;
+      a.download = `visual-${parts.join('-') || sim.id.slice(0, 6)}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { setError(e?.message || 'Erro ao baixar a imagem.'); }
+  }
+
+  // F31 — deletar uma imagem gerada (apaga do servidor). Pede confirmação.
+  async function deleteSimulation(simId: string): Promise<void> {
+    if (!window.confirm('Deletar esta imagem? Esta ação não pode ser desfeita.')) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch(`/api/beauty/simulations/${simId}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(await readApiError(r));
+      if (selectedSim === simId) setSelectedSim(null);
+      await refreshConsultation();
+      // Recarrega a galeria do histórico (some a imagem deletada).
+      if (contactId) {
+        apiFetch(`/api/beauty/clients/${contactId}/simulations`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => setClientHistory(Array.isArray(d?.simulations) ? d.simulations : []))
+          .catch(() => {});
+      }
+    } catch (e: any) { setError(e?.message || 'Erro ao deletar a imagem.'); }
+    finally { setBusy(false); }
+  }
+
   async function selectSimulation(simId: string): Promise<void> {
     if (!consultation) return;
     setBusy(true); setError(null);
@@ -659,6 +698,18 @@ export function BeautyView() {
                 <div className="p-1 text-[10px] text-slate-500 truncate">
                   {s.parameters?.color ? vocabLabel(s.parameters.color) : ''}{s.parameters?.color && s.parameters?.cut ? ' · ' : ''}{s.parameters?.cut ? vocabLabel(s.parameters.cut) : ''}
                 </div>
+                {s.signedUrl && (
+                  <div className="flex border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    <button onClick={() => downloadSimulation(s)} title="Baixar" disabled={busy}
+                      className="flex-1 py-1 flex items-center justify-center text-slate-500 hover:bg-pink-500/10 hover:text-pink-500 disabled:opacity-50">
+                      <Download className="w-3 h-3" />
+                    </button>
+                    <button onClick={() => deleteSimulation(s.id)} title="Deletar" disabled={busy}
+                      className="flex-1 py-1 flex items-center justify-center text-slate-500 hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50 border-l" style={{ borderColor: 'var(--color-border)' }}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -875,6 +926,19 @@ export function BeautyView() {
                     <button onClick={() => selectSimulation(s.id)} disabled={busy} className="w-full px-2 py-1 rounded text-xs bg-pink-500/20 text-pink-500 hover:bg-pink-500/30 flex items-center justify-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Quero esse
                     </button>
+                  )}
+                  {/* F31 — baixar (pra enviar pra cliente) + deletar a imagem. */}
+                  {s.status === 'SUCCEEDED' && s.signedUrl && (
+                    <div className="flex gap-1">
+                      <button onClick={() => downloadSimulation(s)} disabled={busy} title="Baixar imagem"
+                        className="flex-1 px-2 py-1 rounded text-xs border hover:bg-pink-500/10 disabled:opacity-50 flex items-center justify-center gap-1" style={{ borderColor: 'var(--color-border)' }}>
+                        <Download className="w-3 h-3" /> Baixar
+                      </button>
+                      <button onClick={() => deleteSimulation(s.id)} disabled={busy} title="Deletar imagem"
+                        className="px-2 py-1 rounded text-xs border text-red-500 hover:bg-red-500/10 disabled:opacity-50 flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   )}
                   {/* F25 — trocar SÓ a cor deste visual (mesmo corte), usando as
                       cores que o visagismo indicou. Cada clique gera de novo. */}

@@ -73,6 +73,9 @@ export class Scheduler {
   private static timer: NodeJS.Timeout | null = null;
   private static fastTimer: NodeJS.Timeout | null = null;
   private static io: any = null;
+  // F31 — limpeza dos stubs legados da Beauty AI: roda UMA vez por boot (após
+  // o fix da F30, com provider real ativo) e some. Guarda idempotente.
+  private static beautyStubsPurged = false;
 
   static start(io?: any) {
     this.io = io;
@@ -860,6 +863,23 @@ export class Scheduler {
     try { FashionAvatarService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de avatar (fashion) falhou', e); }
     // Resultados de try-on vencidos (FAS-3, ADR-037): mesma janela de retenção.
     try { FashionTryOnService.purgeExpired(); } catch (e) { console.error('[Scheduler] retenção de try-on (fashion) falhou', e); }
+    // Beauty — retenção de simulações vencidas (ADR-169 F16): mesma janela dos avatares.
+    try {
+      import("./BeautyHairSimulationService.js").then((m) => m.BeautyHairSimulationService.purgeExpired())
+        .catch((e) => console.error('[Scheduler] retenção de simulação beauty falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de retenção de simulação beauty falhou', e); }
+    // Beauty — limpeza ÚNICA dos stubs legados (ADR-169 F31): quadrados 1x1 de
+    // demonstração gerados antes do fix da F30. Só com provider real ativo
+    // (guarda dura no service); roda 1x por boot e some (idempotente).
+    if (!Scheduler.beautyStubsPurged) {
+      Scheduler.beautyStubsPurged = true;
+      try {
+        import("./BeautyHairSimulationService.js").then((m) => {
+          const n = m.BeautyHairSimulationService.purgeStubOutputs();
+          if (n > 0) console.log(`[Scheduler] limpeza de stubs legados da Beauty AI: ${n} removidos`);
+        }).catch((e) => console.error('[Scheduler] limpeza de stubs beauty falhou', e));
+      } catch (e) { console.error('[Scheduler] pass de limpeza de stubs beauty falhou', e); }
+    }
     await this.abandonedCartPass().catch(e => console.error('[Scheduler] carrinho abandonado falhou', e));
     await this.npsPass().catch(e => console.error('[Scheduler] pesquisa de satisfação falhou', e));
     await this.memoryPass().catch(e => console.error('[Scheduler] memória do cliente falhou', e));

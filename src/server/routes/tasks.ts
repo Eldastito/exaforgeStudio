@@ -47,6 +47,18 @@ router.get("/recurrence/:id", (req: AuthRequest, res): any => {
   res.json(r);
 });
 
+// PATCH /api/tasks/recurrence/:id — edita "esta e as próximas" (TASK-005)
+router.patch("/recurrence/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { applyToOpen, ...patch } = req.body || {};
+    const r = TaskRecurrenceService.update(orgId, req.params.id, patch, { applyToOpen }, actor(req));
+    if (!r) return res.status(404).json({ error: "Regra não encontrada." });
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // POST /api/tasks/recurrence/:id/pause | /resume ; DELETE encerra
 router.post("/recurrence/:id/pause", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

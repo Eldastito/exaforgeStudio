@@ -129,12 +129,17 @@ export function BeautyView() {
     if (!contactId) { setError('Selecione um contato'); return; }
     setBusy(true); setError(null);
     try {
-      // 1. Consent tipado
-      await apiFetch('/api/beauty/consents', {
+      // 1. Consent tipado. CAMPO: 'consentType' — o backend
+      // (routes/beauty.ts POST /consents) lê `consentType`, NÃO `scope`.
+      // Mandar `scope` fazia o consent falhar em silêncio (400 não checado)
+      // e o upload da foto depois travava com "é preciso aceitar o termo de
+      // uso da imagem (hair_simulation)". Checamos a resposta pra falhar alto.
+      const rc = await apiFetch('/api/beauty/consents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactId, scope: 'hair_simulation' }),
+        body: JSON.stringify({ contactId, consentType: 'hair_simulation' }),
       });
+      if (!rc.ok) { const e = await rc.json().catch(() => ({})); throw new Error(e.error || 'Falha ao registrar o consent (hair_simulation).'); }
       // 2. Inicia consulta
       const r = await apiFetch('/api/beauty/consultations', {
         method: 'POST',

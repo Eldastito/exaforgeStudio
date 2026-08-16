@@ -103,20 +103,43 @@ export const SAFETY_PROMPT_HAIR =
 // Vocabulário fechado — RN-BS-11 (nunca aceitar texto livre pro prompt).
 // Extensível: adicionar aqui, não em rota.
 export const COLOR_VOCAB = new Set([
+  // Loiros (família mais pedida — do escuro ao platinado + reflexos)
   "loiro", "loiro_claro", "loiro_escuro", "loiro_platinado",
+  "loiro_dourado", "loiro_mel", "loiro_perola", "loiro_acinzentado",
+  "loiro_champagne", "loiro_morango", "loiro_bege",
+  // Castanhos
   "castanho", "castanho_claro", "castanho_escuro",
-  "preto", "preto_azulado",
-  "ruivo", "ruivo_acobreado",
-  "grisalho", "prateado",
-  "mechas", "balayage", "morena_iluminada", "ombre_hair",
+  "castanho_dourado", "castanho_acobreado", "castanho_acinzentado",
+  "castanho_avermelhado", "chocolate", "chocolate_avermelhado",
+  "caramelo", "mel", "nozes",
+  // Pretos
+  "preto", "preto_azulado", "preto_intenso",
+  // Ruivos / avermelhados
+  "ruivo", "ruivo_acobreado", "ruivo_acaju", "ruivo_borgonha",
+  "acaju", "vermelho", "vermelho_cereja", "borgonha",
+  // Grisalhos / acinzentados
+  "grisalho", "prateado", "grafite", "cinza", "branco",
+  // Coloração fantasia (RN-BS-11 — só se o salão oferecer)
+  "rose", "rose_gold", "rosa", "azul", "azul_petroleo",
+  "verde", "roxo", "lilas", "lavanda",
+  // Técnicas / mechas (não é 1 cor sólida — o prompt trata como efeito)
+  "mechas", "mechas_californianas", "balayage", "morena_iluminada",
+  "ombre_hair", "luzes", "reflexo", "californianas", "degrade_ombre",
 ]);
 export const CUT_VOCAB = new Set([
-  "curto", "medio", "longo",
-  "bob", "chanel", "long_bob",
-  "franja", "franja_lateral",
-  "camadas", "repicado",
-  "raspado", "degrade",
-  "ondulado", "cacheado", "liso",
+  // Comprimento base
+  "curto", "medio", "longo", "repicado", "camadas", "corte_reto",
+  "corte_v", "corte_u",
+  // Cortes femininos clássicos
+  "bob", "long_bob", "chanel", "chanel_de_bico", "pixie", "joaozinho",
+  "shaggy", "wolf_cut",
+  // Franjas
+  "franja", "franja_lateral", "franja_reta", "franja_cortina", "franja_repicada",
+  // Cortes masculinos / unissex
+  "social", "undercut", "moicano", "degrade", "degrade_navalhado",
+  "americano", "black_power", "topete", "corte_maquina", "raspado",
+  // Textura / finalização
+  "ondulado", "cacheado", "liso", "volume",
 ]);
 
 // ─────────────────────────── PROVIDERS ───────────────────────────

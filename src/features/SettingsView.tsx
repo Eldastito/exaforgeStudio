@@ -1499,9 +1499,71 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
               )}
             </div>
           )}
+
+          {/* ADR-169 F20 — recursos da vertical Beleza (seção separada dos módulos
+              canônicos porque `beauty_hair_simulator_enabled` é uma flag opt-in
+              POR-ORG dentro do módulo estúdio, não um módulo próprio; o gate
+              real do menu "Beauty AI" na Sidebar é vertical==='beleza' && módulo
+              estúdio, mas o Simulador de Cabelo em si é um sub-recurso IA que
+              o dono liga sob demanda). Só aparece pra org com vertical=beleza. */}
+          <BeautyRecursosSection />
         </div>
       )}
     </>
+  );
+}
+
+// ADR-169 F20 — sub-seção Módulos exclusiva da vertical Beleza. Toggle da flag
+// `beauty_hair_simulator_enabled` (F5, opt-in por org). Consome as 2 rotas
+// novas da F20 em routes/beauty.ts: GET /api/beauty/settings devolve o estado
+// atual; PATCH /api/beauty/settings/hair-simulator (owner/admin) flipa. Não
+// aparece pra outras verticais (o próprio backend responde 404 no GET, o que
+// já esconde a UI). Sem mensagem de erro pra outras verticais — silêncio total.
+function BeautyRecursosSection() {
+  const vertical = useStore(s => s.vertical);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (vertical !== 'beleza') { setEnabled(null); return; }
+    apiFetch('/api/beauty/settings')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setEnabled(d ? !!d.hairSimulatorEnabled : null))
+      .catch(() => setEnabled(null));
+  }, [vertical]);
+  if (vertical !== 'beleza' || enabled === null) return null;
+  const toggle = async () => {
+    const next = !enabled;
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/beauty/settings/hair-simulator', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (r.ok) { setEnabled(next); toast.success(next ? 'Beauty AI ligada.' : 'Beauty AI desligada.'); }
+      else { const e = await r.json().catch(() => ({})); toast.error(e.error || 'Falha ao atualizar.'); }
+    } finally { setSaving(false); }
+  };
+  return (
+    <div>
+      <p className="text-sm font-semibold text-pink-300 mb-2">💇 Recursos da vertical Beleza</p>
+      <p className="text-xs text-zinc-500 mb-3">Sub-recursos IA específicos do salão. Ligue quando quiser começar a oferecer.</p>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-100">Beauty AI — Simulador de Cabelo</p>
+            <p className="text-xs text-zinc-500">
+              Consulta visual com foto: cliente vê o resultado antes de decidir.
+              Consent LGPD tipado, foto privada com URL assinada, análise descritiva.
+            </p>
+          </div>
+          <button onClick={toggle} disabled={saving}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-600' : 'bg-zinc-700'} ${saving ? 'opacity-50' : ''}`}>
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

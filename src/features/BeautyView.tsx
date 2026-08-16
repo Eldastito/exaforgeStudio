@@ -24,7 +24,6 @@
 import React, { useEffect, useState } from 'react';
 import { Wand2, Upload, Sparkles, Palette, CalendarClock, CheckCircle2, XCircle, Loader2, User, Star } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
-import { useStore } from '@/src/store/useStore';
 
 type Consultation = {
   id: string;
@@ -69,13 +68,51 @@ type ProfessionalSlot = {
 type Contact = { id: string; name: string; identifier?: string };
 
 export function BeautyView() {
-  const { contacts } = useStore();
-  const contactsArr: Contact[] = Object.values(contacts).map((c: any) => ({ id: c.id, name: c.name || 'Sem nome', identifier: c.identifier || '' }));
+  // F22: a lista de clientes vem de GET /api/beauty/clients (lê a tabela
+  // `contacts` direto), NÃO de useStore.contacts — que é hidratado de
+  // /api/tickets e só enxerga contatos que já tiveram conversa. Um salão
+  // atende clientes walk-in (sem mensagem prévia), então o seletor precisa
+  // ver TODOS os contatos + permitir cadastrar um novo na hora.
+  const [contactsArr, setContactsArr] = useState<Contact[]>([]);
+  const [newName, setNewName] = useState<string>('');
+  const [newPhone, setNewPhone] = useState<string>('');
+  const [showNewClient, setShowNewClient] = useState<boolean>(false);
 
   const [contactId, setContactId] = useState<string>('');
   const [goal, setGoal] = useState<string>('coloração');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function loadClients(selectId?: string): Promise<void> {
+    try {
+      const r = await apiFetch('/api/beauty/clients');
+      if (!r.ok) return;
+      const d = await r.json();
+      if (Array.isArray(d?.clients)) {
+        setContactsArr(d.clients);
+        if (selectId) setContactId(selectId);
+      }
+    } catch { /* noop */ }
+  }
+  useEffect(() => { loadClients(); }, []);
+
+  async function createClient(): Promise<void> {
+    const name = newName.trim();
+    if (!name) { setError('Informe o nome da cliente.'); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch('/api/beauty/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, phone: newPhone.trim() }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Falha ao cadastrar cliente.'); }
+      const d = await r.json();
+      await loadClients(d?.client?.id);
+      setNewName(''); setNewPhone(''); setShowNewClient(false);
+    } catch (e: any) { setError(e?.message || 'Erro ao cadastrar cliente.'); }
+    finally { setBusy(false); }
+  }
 
   const [consultation, setConsultation] = useState<Consultation | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -294,9 +331,61 @@ export function BeautyView() {
       {/* PASSO 1 — Nova consulta */}
       <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
         <h2 className="font-semibold mb-3 flex items-center gap-2"><User className="w-4 h-4" /> 1. Nova consulta visual</h2>
+
+        {/* F22 — cadastro de cliente walk-in (a que chegou no balcão sem
+            mensagem prévia). Cria o contato na hora e já seleciona. */}
+        {showNewClient && !consultation && (
+          <div className="mb-3 p-3 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
+            <p className="text-xs text-slate-400 mb-2">Cadastrar cliente que está no balcão</p>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-xs text-slate-500">Nome</label>
+                <input
+                  className="w-full mt-1 p-2 rounded border bg-transparent"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="ex.: Emily Souza"
+                  disabled={busy}
+                />
+              </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-xs text-slate-500">Telefone (WhatsApp)</label>
+                <input
+                  className="w-full mt-1 p-2 rounded border bg-transparent"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  placeholder="ex.: 11999998888"
+                  disabled={busy}
+                />
+              </div>
+              <button
+                onClick={createClient}
+                disabled={busy || !newName.trim()}
+                className="px-3 py-2 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2"
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
+                Cadastrar
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
-            <label className="text-xs text-slate-500">Cliente</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-slate-500">Cliente</label>
+              {!consultation && (
+                <button
+                  type="button"
+                  onClick={() => setShowNewClient(v => !v)}
+                  className="text-xs text-pink-400 hover:text-pink-300"
+                >
+                  {showNewClient ? 'Cancelar' : '+ Nova cliente'}
+                </button>
+              )}
+            </div>
             <select
               className="w-full mt-1 p-2 rounded border bg-transparent"
               style={{ borderColor: 'var(--color-border)' }}
@@ -309,6 +398,9 @@ export function BeautyView() {
                 <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` (${c.identifier})` : ''}</option>
               ))}
             </select>
+            {contactsArr.length === 0 && !showNewClient && (
+              <p className="text-xs text-slate-500 mt-1">Nenhuma cliente cadastrada. Clique em <b>+ Nova cliente</b> pra cadastrar a que está no balcão.</p>
+            )}
           </div>
           <div className="flex-1 min-w-[200px]">
             <label className="text-xs text-slate-500">Objetivo (goal)</label>

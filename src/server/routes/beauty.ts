@@ -35,6 +35,7 @@ import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimu
 import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js";
 import { LookServiceRecommendationService } from "../LookServiceRecommendationService.js";
 import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentService.js";
+import { BeautyClientService } from "../BeautyClientService.js";
 // Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
 // (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
 // as rotas beauty forem montadas, o handler está disponível pro executor.
@@ -148,6 +149,35 @@ router.patch("/settings/hair-simulator", requireRole("owner", "admin"), (req: Au
   if (info.changes === 0) return res.status(404).json({ error: "Not found" });
   logAuthEvent(orgId, req.user?.userId, orgId, 'ADMIN_BEAUTY_HAIR_SIMULATOR_TOGGLE', { enabled });
   res.json({ ok: true, hairSimulatorEnabled: enabled });
+});
+
+// ─────────────── Clientes walk-in (F22 / BEAUTY-023) ───────────────
+//
+// Cadastro manual de cliente pra recepção do salão: a cliente CHEGA no balcão
+// sem ter mandado mensagem antes, então não existe contato ainda. Sem isto o
+// seletor de cliente da Beauty AI fica vazio e o fluxo inteiro trava. Reusa a
+// tabela `contacts` (§37 — sem CRM paralelo). `GET` lê a tabela direto (não
+// `/api/tickets`, que só enxerga contatos com conversa). Só `requireBeauty`
+// (sem requireRole — a recepção precisa cadastrar; o RBAC do módulo já roda no
+// enforce global).
+router.get("/clients", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ clients: BeautyClientService.list(orgId) });
+});
+
+router.post("/clients", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Informe o nome da cliente." });
+  try {
+    const client = BeautyClientService.create(orgId, { name, phone: req.body?.phone });
+    logAuthEvent(orgId, req.user?.userId || null, client.id, "BEAUTY_CLIENT_CREATED", { hasPhone: !!String(req.body?.phone || "").trim() });
+    res.json({ ok: true, client });
+  } catch (e: any) {
+    res.status(400).json({ error: String(e?.message || "Erro ao cadastrar cliente.").slice(0, 200) });
+  }
 });
 
 // ─────────────── Consent ───────────────

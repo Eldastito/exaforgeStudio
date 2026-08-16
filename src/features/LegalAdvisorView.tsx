@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Scale, Loader2, Send, BookOpen, ShieldAlert, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
+import { Scale, Loader2, Send, BookOpen, ShieldAlert, Sparkles, ChevronDown, ChevronUp, Briefcase, Clock } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -64,6 +64,7 @@ export function LegalAdvisorView() {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<Answer[]>([]);
+  const [mode, setMode] = useState<'cdc' | 'trabalhista'>('cdc');
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const loadThemes = () => apiFetch('/api/legal/history').then((r) => r.json()).then((d: any) => { if (d && typeof d.total === 'number') setThemes(d); }).catch(() => {});
@@ -103,6 +104,19 @@ export function LegalAdvisorView() {
           </div>
         </div>
 
+        {/* Abas: consumo (CDC) × trabalhista */}
+        <div className="mt-4 flex gap-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-1">
+          <button onClick={() => setMode('cdc')} className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${mode === 'cdc' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            <Scale className="w-3.5 h-3.5" /> Consumo (CDC)
+          </button>
+          <button onClick={() => setMode('trabalhista')} className={`flex-1 inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${mode === 'trabalhista' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            <Briefcase className="w-3.5 h-3.5" /> Trabalhista
+          </button>
+        </div>
+
+        {mode === 'trabalhista' && <LaborAdvisorPanel />}
+
+        {mode === 'cdc' && (<>
         {/* Disclaimer sempre visível */}
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-200/90">
           <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
@@ -188,7 +202,117 @@ export function LegalAdvisorView() {
             </button>
           </div>
         </div>
+        </>)}
       </div>
     </div>
+  );
+}
+
+// ---- Consultora Trabalhista (ADR-178) ----
+// Scaffold honesto: orienta GROUNDED na base curada; enquanto a base aguarda
+// validação jurídica, diz isso claramente e NUNCA inventa CLT. Disclaimer sempre.
+interface LaborTopic { key: string; label: string; entries: number }
+interface LaborStatus { curated: boolean; awaitingCuration: boolean; entriesCount: number; topics: LaborTopic[]; disclaimer: string; note: string | null }
+interface LaborAnswer { grounded: boolean; awaitingCuration: boolean; orientacao: string; citations: any[]; topic: string | null; reviewedBy: string | null; disclaimer: string; question?: string }
+
+function LaborAdvisorPanel() {
+  const [status, setStatus] = useState<LaborStatus | null>(null);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<LaborAnswer[]>([]);
+  const endRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { apiFetch('/api/legal/labor/status').then(r => r.json()).then(setStatus).catch(() => {}); }, []);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history, busy]);
+
+  const ask = async (question: string) => {
+    const text = question.trim();
+    if (text.length < 3 || busy) return;
+    setBusy(true); setQ('');
+    try {
+      const r = await apiFetch(`/api/legal/labor/advise?q=${encodeURIComponent(text)}`);
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) setHistory(h => [...h, { ...d, question: text }]);
+      else toast.error(d.error || 'Não consegui responder.');
+    } catch { toast.error('Falha na consulta.'); }
+    finally { setBusy(false); }
+  };
+
+  const cameOnce = history.length === 0;
+  return (
+    <>
+      {/* Disclaimer + estado da base */}
+      <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-200/90">
+        <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+        <span>{status?.disclaimer || 'Orientação trabalhista de caráter informativo — não substitui advogado ou contador.'}</span>
+      </div>
+
+      {status?.awaitingCuration && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-[12px] text-sky-200/90">
+          <Clock className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{status.note || 'A base trabalhista está em validação jurídica — nenhuma regra é publicada sem revisão de um advogado/contador. Você pode consultar, mas ainda não há orientação curada.'}</span>
+        </div>
+      )}
+
+      {/* Temas (taxonomia) */}
+      {cameOnce && status?.topics?.length ? (
+        <div className="mt-5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Temas trabalhistas</div>
+          <div className="flex flex-wrap gap-2">
+            {status.topics.map(t => (
+              <button key={t.key} onClick={() => ask(t.label)} disabled={busy}
+                className="rounded-full border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">
+                {t.label}{t.entries > 0 && <span className="ml-1 text-emerald-400">· {t.entries}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Histórico */}
+      <div className="mt-5 space-y-4">
+        {history.map((a, i) => (
+          <div key={i} className="space-y-2">
+            <div className="flex justify-end">
+              <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-indigo-600/90 px-3.5 py-2 text-sm text-white">{a.question}</div>
+            </div>
+            <div className="rounded-2xl rounded-bl-sm border border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-indigo-300/80 mb-1.5">
+                {a.grounded ? <><Sparkles className="w-3.5 h-3.5" /> Orientação</> : <><Clock className="w-3.5 h-3.5" /> Aguardando curadoria</>}
+              </div>
+              <p className="text-sm text-zinc-100 whitespace-pre-line">{a.orientacao}</p>
+              {a.grounded && a.citations?.length > 0 && (
+                <div className="mt-3 border-t border-zinc-800 pt-3">
+                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-zinc-500 mb-2"><BookOpen className="w-3.5 h-3.5" /> Base legal</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {a.citations.map((c: any, j: number) => (
+                      <span key={j} className="rounded-full border border-zinc-700 bg-zinc-950/50 px-2 py-0.5 text-[10px] text-zinc-300">{c.norma || c.ref || JSON.stringify(c)}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {a.grounded && a.reviewedBy && <p className="mt-2 text-[10px] text-zinc-500">Revisado por: {a.reviewedBy}</p>}
+              <p className="mt-3 text-[11px] text-amber-200/70 border-t border-zinc-800 pt-2">{a.disclaimer}</p>
+            </div>
+          </div>
+        ))}
+        {busy && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Consultando…</div>}
+        <div ref={endRef} />
+      </div>
+
+      {/* Caixa de pergunta */}
+      <div className="sticky bottom-0 mt-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-3">
+        <div className="flex items-end gap-2 rounded-xl border border-zinc-800 bg-zinc-900 p-2">
+          <textarea value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(q); } }}
+            rows={1} placeholder="Pergunte sobre férias, rescisão, jornada…"
+            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none" />
+          <button onClick={() => ask(q)} disabled={busy || q.trim().length < 3}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

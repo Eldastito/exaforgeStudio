@@ -93,7 +93,27 @@ async function main() {
   const custEmpty = RetailPdvCustomerService.list(A, {}, { restrictCodes: [] });
   check("restrição vazia não vaza cliente", custEmpty.total === 0);
 
-  // ===== 5. Isolamento =====
+  // ===== 5. Enforcement: reposição (loja necessitada) =====
+  const { RetailTransferService } = await import("../src/server/RetailTransferService.js");
+  // Produto com 2 variações; L1 (necessitada) trabalha o produto mas zerada em varM;
+  // L2 (doadora) tem varM sobrando. A sugestão tem needy_store_id = L1.
+  const prodR = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name) VALUES (?, ?, 'product', 'Calça')`).run(prodR, A);
+  const varM = randomUUID(), varG = randomUUID();
+  db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, size, active) VALUES (?, ?, ?, 'M', 'M', 1)`).run(varM, A, prodR);
+  db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, size, active) VALUES (?, ?, ?, 'G', 'G', 1)`).run(varG, A, prodR);
+  RetailInventoryService.setQuantity(A, l1, prodR, varG, 4); // L1 carrier
+  RetailInventoryService.setQuantity(A, l1, prodR, varM, 0); // L1 precisa de varM
+  RetailInventoryService.setQuantity(A, l2, prodR, varM, 5); // L2 doa varM
+  RetailInventoryService.setQuantity(A, l2, prodR, varG, 3);
+  const repAll = RetailTransferService.replenishmentSuggestions(A, {});
+  check("reposição sem restrição vê a sugestão (needy L1)", repAll.suggestions.some((s: any) => s.needy_store_id === l1));
+  const repL1 = RetailTransferService.replenishmentSuggestions(A, { restrictNeedyStoreIds: [l1] });
+  check("reposição restrita a L1 mantém a sugestão", repL1.suggestions.length >= 1 && repL1.suggestions.every((s: any) => s.needy_store_id === l1));
+  const repL2 = RetailTransferService.replenishmentSuggestions(A, { restrictNeedyStoreIds: [l2] });
+  check("reposição restrita a L2 não vê a de L1", !repL2.suggestions.some((s: any) => s.needy_store_id === l1));
+
+  // ===== 6. Isolamento =====
   check("escopo da org B não vê usuário da A", RetailStoreScopeService.forUser(B, gerente).length === 0);
 
   console.log("\n=== TEST: Trava de loja por usuário (CRM-002) ===\n");

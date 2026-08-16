@@ -232,18 +232,29 @@ async function main() {
   db.prepare(`UPDATE beauty_visual_consultations SET status = 'selected' WHERE id = ? AND organization_id = ?`)
     .run(cons2.id, orgA);
 
-  // ===== 12. F27 — stub honesto: produção sem chave RECUSA com instrução =====
-  process.env.NODE_ENV = "production";
+  // ===== 12. F28 — stub honesto ROBUSTO: sem chave RECUSA, sem depender de NODE_ENV =====
+  // (F27 gateava por NODE_ENV=production; o container do Coolify nem sempre
+  // reporta 'production' e o stub silenciava. F28: stub IMPLÍCITO → recusa,
+  // em QUALQUER ambiente, exceto opt-in explícito.)
   delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER; // stub vira último recurso
   delete process.env.OPENAI_API_KEY;
   delete process.env.GOOGLE_AI_API_KEY;
   delete process.env.GEMINI_API_KEY;
-  const reqProd = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+  // NODE_ENV segue 'test' aqui de propósito — a recusa NÃO pode depender dele.
+  const reqNoKey = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
     simulationType: "color", parameters: { color: "caramelo" },
   });
-  check("produção sem IA configurada → recusa honesta citando as chaves",
-    reqProd.ok === false && /OPENAI_API_KEY/.test((reqProd as any).error || ""));
-  process.env.NODE_ENV = "test";
+  check("stub implícito sem chave → recusa honesta citando as chaves (independe de NODE_ENV)",
+    reqNoKey.ok === false && /OPENAI_API_KEY/.test((reqNoKey as any).error || ""));
+  const statusNoKey = BeautyHairSimulationService.simulatorStatus(orgA);
+  check("simulatorStatus reporta isReal=false + chaves ausentes",
+    statusNoKey.isReal === false && statusNoKey.activeProviderKey === "stub_v1" &&
+    !statusNoKey.keys.openai && !statusNoKey.keys.google && !statusNoKey.keys.gemini);
+  process.env.OPENAI_API_KEY = "sk-test-real";
+  const statusWithKey = BeautyHairSimulationService.simulatorStatus(orgA);
+  check("simulatorStatus com OPENAI_API_KEY → isReal=true + provider openai",
+    statusWithKey.isReal === true && statusWithKey.activeProviderKey === "openai_hair_v1" && statusWithKey.keys.openai === true);
+  delete process.env.OPENAI_API_KEY;
   process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub"; // opt-in explícito volta a valer
   const reqOptIn = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
     simulationType: "color", parameters: { color: "caramelo" },
@@ -257,6 +268,10 @@ async function main() {
   const viewSrc = fs.readFileSync(path.join(process.cwd(), "src/features/BeautyView.tsx"), "utf8");
   check("BeautyView carrega o histórico da cliente (galeria sem custo de IA)",
     viewSrc.includes("/simulations") && viewSrc.includes("clientHistory"));
+  check("rota GET /simulator-status existe (diagnóstico F28)",
+    routesSrc.includes(`"/simulator-status"`) && routesSrc.includes("simulatorStatus"));
+  check("BeautyView tem banner de modo demonstração (F28)",
+    viewSrc.includes("simulator-status") && viewSrc.includes("Modo demonstração"));
 
   // ===== Report =====
   console.log("\n=== TEST beauty-simulation-reuse (ADR-169 F26) ===\n");

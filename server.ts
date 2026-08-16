@@ -44,6 +44,7 @@ import clinicRoutes from "./src/server/routes/clinic.js";
 import escolaRoutes from "./src/server/routes/escola.js";
 import retailOpsRoutes from "./src/server/routes/retailops.js";
 import retailFloorRoutes from "./src/server/routes/retailFloor.js";
+import finRoutes from "./src/server/routes/fin.js";
 import comigoRoutes from "./src/server/routes/comigo.js";
 import lossRoutes from "./src/server/routes/loss.js";
 import legalRoutes from "./src/server/routes/legal.js";
@@ -623,6 +624,7 @@ async function startServer() {
   protectedApi.use("/escola", escolaRoutes);
   protectedApi.use("/retailops", retailOpsRoutes);
   protectedApi.use("/retail-floor", retailFloorRoutes);
+  protectedApi.use("/fin", finRoutes);
   protectedApi.use("/comigo", comigoRoutes);
   protectedApi.use("/loss", lossRoutes);
   protectedApi.use("/legal", legalRoutes);

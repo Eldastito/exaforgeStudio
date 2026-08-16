@@ -9737,6 +9737,29 @@ const initDb = () => {
   // talão no mesmo turno (índice parcial).
   try { db.exec(`ALTER TABLE retail_floor_attendances ADD COLUMN boleta_number TEXT`); } catch (e) { /* noop */ }
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_floor_attendance_boleta ON retail_floor_attendances (organization_id, shift_id, boleta_number) WHERE boleta_number IS NOT NULL`); } catch (e) { /* noop */ }
+
+  // FIN — conexão de COBRANÇA Sicredi (PRD Moda/TOULON; ADR-177). SCAFFOLD
+  // honesto: 1 conexão por org, credenciais CIFRADAS (config_enc/AES-GCM), estado
+  // OBSERVÁVEL. Nunca "connected" enquanto a homologação bancária não fecha —
+  // fica em 'awaiting_homologation' e as capacidades ficam indisponíveis. Opt-in;
+  // não emite PIX/boleto real (a chamada à API vive num stub honesto até as
+  // credenciais + homologação chegarem). Aditivo; isolado por organização.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sicredi_cobranca_connections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        config_enc TEXT,                                   -- JSON de credenciais CIFRADO (cooperativa/posto/conta/client_id/secret)
+        connection_state TEXT NOT NULL DEFAULT 'not_configured', -- not_configured|awaiting_homologation|connected|disabled
+        state_detail TEXT,
+        enabled INTEGER NOT NULL DEFAULT 0,                -- opt-in; 0 = desligada
+        configured_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sicredi_cobranca_org ON sicredi_cobranca_connections (organization_id);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

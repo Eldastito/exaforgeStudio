@@ -28,7 +28,7 @@
 import { Router, Response } from "express";
 import multer from "multer";
 import db from "../db.js";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { BeautyVisualConsultationService, BEAUTY_CONSENT_SCOPES } from "../BeautyVisualConsultationService.js";
 import { BeautyHairSimulationService, SIMULATION_TYPES } from "../BeautyHairSimulationService.js";
@@ -92,6 +92,44 @@ router.get("/vocabulary", (req: AuthRequest, res): any => {
     simulationTypes: [...SIMULATION_TYPES],
     ...BeautyHairSimulationService.vocabulary(),
   });
+});
+
+// ─────────────── Beauty AI settings (F20 / BEAUTY-021) ───────────────
+//
+// Toggle da flag `beauty_hair_simulator_enabled` (F5, aditiva em
+// `organization_settings`) que hoje só existia por DB. Fecha o gap operacional
+// descoberto na F19: sem esta rota, o dono não tinha como ligar o Simulador
+// pela UI (Master Admin conseguia via manipulação direta de DB; dono não).
+// Convenções:
+//  - Gate `requireBeauty` (404 sem vertical=beleza — belt-and-suspenders com
+//    o enforce global; não vaza existência do toggle pra outras verticais).
+//  - `requireRole('owner','admin')`: quem contrata é o dono; recepção/
+//    estilista NÃO ligam/desligam recurso IA (política operacional §31 do
+//    PRD — atendente é operacional, não administrativo). Master Admin
+//    passa como owner por ter platform_role.
+//  - `logAuthEvent` grava `ADMIN_BEAUTY_HAIR_SIMULATOR_TOGGLE` em
+//    auth_audit_logs (rastreabilidade LGPD — quem ligou/desligou e quando).
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = db.prepare(
+    `SELECT beauty_hair_simulator_enabled FROM organization_settings WHERE organization_id = ?`
+  ).get(orgId) as any;
+  res.json({
+    hairSimulatorEnabled: !!Number(r?.beauty_hair_simulator_enabled),
+  });
+});
+
+router.patch("/settings/hair-simulator", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const enabled = !!req.body?.enabled;
+  const info = db.prepare(
+    `UPDATE organization_settings SET beauty_hair_simulator_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND deleted_at IS NULL`
+  ).run(enabled ? 1 : 0, orgId);
+  if (info.changes === 0) return res.status(404).json({ error: "Not found" });
+  logAuthEvent(orgId, req.user?.userId, orgId, 'ADMIN_BEAUTY_HAIR_SIMULATOR_TOGGLE', { enabled });
+  res.json({ ok: true, hairSimulatorEnabled: enabled });
 });
 
 // ─────────────── Consent ───────────────

@@ -17,7 +17,6 @@ import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResp
 import { RetailBoletaService } from "../RetailBoletaService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
-import { haversineKm } from "../geo.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
@@ -1081,48 +1080,11 @@ router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest,
 router.get("/replenishment", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const minDonor = Math.max(1, parseInt(String(req.query.minDonor || "2"), 10) || 2);
-  const limit = Math.min(500, Math.max(10, parseInt(String(req.query.limit || "200"), 10) || 200));
   try {
-    const rows = db.prepare(`
-      WITH carrier AS (
-        SELECT rsi.store_id, rsi.product_service_id,
-               SUM(CASE WHEN rsi.quantity_available > 0 THEN rsi.quantity_available ELSE 0 END) AS tot
-          FROM retail_store_inventory rsi
-          JOIN retail_stores s ON s.id = rsi.store_id AND s.active = 1
-         WHERE rsi.organization_id = ?
-         GROUP BY rsi.store_id, rsi.product_service_id
-        HAVING tot > 0
-      )
-      SELECT p.name AS product_name, COALESCE(v.name, '—') AS variant_name, v.size, v.color,
-             sn.name AS needy_store, sd.name AS donor_store, sd.code AS donor_code, d.quantity_available AS donor_qty,
-             c.store_id AS needy_store_id, d.store_id AS donor_store_id,
-             d.product_service_id, d.variant_id,
-             sn.latitude AS needy_lat, sn.longitude AS needy_lng, sd.latitude AS donor_lat, sd.longitude AS donor_lng
-        FROM retail_store_inventory d
-        JOIN retail_stores sd ON sd.id = d.store_id AND sd.active = 1
-        JOIN carrier c ON c.product_service_id = d.product_service_id AND c.store_id <> d.store_id
-        JOIN retail_stores sn ON sn.id = c.store_id
-        JOIN products_services p ON p.id = d.product_service_id
-        LEFT JOIN product_variants v ON v.id = d.variant_id
-        LEFT JOIN retail_store_inventory n ON n.store_id = c.store_id AND n.product_service_id = d.product_service_id AND COALESCE(n.variant_id, '') = COALESCE(d.variant_id, '')
-       WHERE d.organization_id = ? AND d.quantity_available >= ? AND d.variant_id IS NOT NULL AND d.variant_id <> ''
-         AND COALESCE(n.quantity_available, 0) <= 0
-       ORDER BY d.quantity_available DESC, p.name ASC
-       LIMIT ?
-    `).all(orgId, orgId, minDonor, limit) as any[];
-    // Fase 3: anota a DISTÂNCIA (loja com sobra ↔ loja com falta) e o melhor
-    // horário da loja de origem; ordena as mais PRÓXIMAS primeiro (sem coords
-    // vai para o fim). O código da loja alimenta o melhor horário via PDV.
-    const timeCache = new Map<string, string>();
-    const suggestions = rows.map((r) => {
-      const dist = haversineKm(r.needy_lat, r.needy_lng, r.donor_lat, r.donor_lng);
-      const code = String(r.donor_code || "");
-      if (!timeCache.has(code)) timeCache.set(code, RetailTransferService.suggestBestWindow(orgId, code));
-      const { needy_lat, needy_lng, donor_lat, donor_lng, ...rest } = r;
-      return { ...rest, distance_km: Number.isFinite(dist) ? dist : null, best_time: timeCache.get(code) };
-    }).sort((a, b) => (a.distance_km == null ? Infinity : a.distance_km) - (b.distance_km == null ? Infinity : b.distance_km));
-    res.json({ count: suggestions.length, suggestions });
+    res.json(RetailTransferService.replenishmentSuggestions(orgId, {
+      minDonor: req.query.minDonor ? parseInt(String(req.query.minDonor), 10) : undefined,
+      limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+    }));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

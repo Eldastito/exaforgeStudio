@@ -4612,6 +4612,7 @@ function NegativeStockTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [q, setQ] = useState('');
+  const [policyRow, setPolicyRow] = useState<any | null>(null);
   const load = (offset: number, append: boolean) => {
     append ? setLoadingMore(true) : setLoading(true);
     apiFetch(`/api/retailops/stock/negative?storeId=${storeId}&q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${offset}`)
@@ -4683,8 +4684,8 @@ function NegativeStockTab() {
                     <td className="px-3 py-2 text-right text-amber-300">{it.qty_to_zero != null ? it.qty_to_zero : '—'}</td>
                     <td className="px-3 py-2 text-right">
                       {it.shortage_qty != null
-                        ? <span className="font-semibold text-orange-300">{it.shortage_qty}</span>
-                        : <span className="text-[11px] text-zinc-500" title="Defina o estoque-alvo desta peça para calcular a falta">Meta não configurada</span>}
+                        ? <button onClick={() => setPolicyRow(it)} className="font-semibold text-orange-300 hover:underline" title="Editar a meta de estoque desta peça">{it.shortage_qty}</button>
+                        : <button onClick={() => setPolicyRow(it)} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800" title="Defina o estoque-alvo desta peça para calcular a falta">Definir meta</button>}
                     </td>
                     <td className="px-3 py-2 text-zinc-500 text-[12px] whitespace-nowrap">{it.source_synced_at ? String(it.source_synced_at).slice(0, 10).split('-').reverse().join('/') : '—'}</td>
                   </tr>
@@ -4701,6 +4702,59 @@ function NegativeStockTab() {
           </button>
         </div>
       )}
+      {policyRow && <StockPolicyModal row={policyRow} onClose={() => setPolicyRow(null)} onDone={() => { setPolicyRow(null); load(0, false); }} />}
+    </div>
+  );
+}
+
+// Modal "Definir meta de estoque" (INV-004): mínimo/alvo por loja+produto+variante
+// da peça negativa. É o que ACENDE a coluna "Falta p/ meta". Config = owner/admin
+// (o servidor barra o resto; aqui a UI trata o 403 com aviso claro).
+function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => void; onDone: () => void }) {
+  const [minQty, setMinQty] = useState<string>(row.min_qty != null ? String(row.min_qty) : '0');
+  const [targetQty, setTargetQty] = useState<string>(row.target_qty != null ? String(row.target_qty) : '');
+  const [busy, setBusy] = useState(false);
+  const variant = [row.variant_color, row.variant_size].filter(Boolean).join(' / ');
+  const submit = async () => {
+    const min = Number(minQty), target = Number(targetQty);
+    if (!Number.isFinite(target) || targetQty.trim() === '') { toast.error('Informe o estoque-alvo.'); return; }
+    if (min < 0 || target < 0) { toast.error('Mínimo e alvo não podem ser negativos.'); return; }
+    if (target < min) { toast.error('O alvo deve ser maior ou igual ao mínimo.'); return; }
+    setBusy(true);
+    try {
+      const res = await apiFetch('/api/retailops/stock-policies', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: row.store_id, productId: row.product_service_id, variantId: row.variant_id || null, minQty: min, targetQty: target }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Meta de estoque salva.'); onDone(); }
+      else if (res.status === 403) toast.error('Só owner/admin pode configurar metas de estoque.');
+      else toast.error(d?.error || 'Não foi possível salvar a meta.');
+    } catch { toast.error('Falha ao salvar a meta.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-950 p-4" onClick={e => e.stopPropagation()}>
+        <div className="text-sm text-zinc-100 font-medium">Meta de estoque</div>
+        <div className="text-xs text-zinc-400 mt-1">{row.product_name || row.product_service_id}{variant ? <span className="text-zinc-500"> · {variant}</span> : null}</div>
+        <div className="text-[11px] text-zinc-500 mt-0.5">{row.store_name}{row.store_code ? ` · ${row.store_code}` : ''}</div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <label className="text-xs text-zinc-400">Mínimo
+            <input type="number" min={0} value={minQty} onChange={e => setMinQty(e.target.value)} className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+          <label className="text-xs text-zinc-400">Alvo
+            <input type="number" min={0} value={targetQty} onChange={e => setTargetQty(e.target.value)} placeholder="ex.: 3" className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+          </label>
+        </div>
+        <p className="text-[11px] text-zinc-500 mt-2">A <strong>falta</strong> é calculada como alvo − saldo. O mínimo é preservado quando esta loja doa em transferências.</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={submit} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-600/30 disabled:opacity-50">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Salvar meta
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

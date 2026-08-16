@@ -9458,6 +9458,34 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar beauty_visual_analyses (ADR-169 F8)', e); }
 
+  // ADR-169 F24 — Visagismo: subtom de pele → cores que harmonizam +
+  // formato do rosto → cortes que equilibram (feminino/masculino/neutro).
+  // Recomendação TÉCNICA (RN-BS-03 — nunca julga a pessoa). Histórico por
+  // consulta pra auditoria LGPD. `source`: manual (profissional avaliou),
+  // ai (Gemini classificou da foto) ou pending (indeterminado — não inventa).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS beauty_visagism_analyses (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        consultation_id TEXT NOT NULL,
+        undertone TEXT NOT NULL,
+        face_shape TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        source TEXT NOT NULL,
+        recommended_colors_json TEXT NOT NULL,
+        recommended_cuts_json TEXT NOT NULL,
+        narrative TEXT NOT NULL,
+        disclaimer_shown INTEGER DEFAULT 1,
+        actor_user_id TEXT,
+        reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_beauty_visagism_consult
+        ON beauty_visagism_analyses (organization_id, consultation_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar beauty_visagism_analyses (ADR-169 F24)', e); }
+
   // ADR-169 F5-transversal-A — Consent transversal de comunicações outbound.
   // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`
   // consulta `contact_consents.comunicacoes` do contato-destino antes de

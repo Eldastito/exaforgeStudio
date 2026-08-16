@@ -225,6 +225,7 @@
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",
+    "test:beauty-visagism": "tsx scripts/test-beauty-visagism.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",
     "test:rbac-enforcement": "tsx scripts/test-rbac-enforcement.ts",

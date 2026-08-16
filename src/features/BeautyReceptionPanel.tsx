@@ -9,7 +9,7 @@
  * Auto-refresh a cada 20s pra "tempo real" (quem entrou/saiu de atendimento).
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { Search, Users, Clock, RefreshCw, CheckCircle2, PlayCircle, User, Tv } from 'lucide-react';
+import { Search, Users, Clock, RefreshCw, CheckCircle2, PlayCircle, User, Tv, QrCode, X } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
 // F36 — abre o Painel de TV numa JANELA SEPARADA (mesma sessão) pra arrastar
@@ -51,6 +51,21 @@ export default function BeautyReceptionPanel() {
 
   // Profissional selecionado
   const [proDay, setProDay] = useState<{ professional: { name: string } | null; appointments: Appt[]; freeSlots: string[] } | null>(null);
+
+  // F37 — QR da fila virtual (aviso "é a sua vez" no celular do cliente)
+  const [qrModal, setQrModal] = useState<{ appt: Appt; url: string; qr: string | null } | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+
+  async function openQr(appt: Appt) {
+    setQrLoading(true);
+    setQrModal({ appt, url: '', qr: null });
+    try {
+      const r = await apiFetch(`/api/beauty/reception/appointments/${appt.id}/queue-link`);
+      if (r.ok) { const d = await r.json(); setQrModal({ appt, url: d.url || '', qr: d.qr || null }); }
+      else setQrModal(null);
+    } catch { setQrModal(null); }
+    finally { setQrLoading(false); }
+  }
 
   const loadBoard = useCallback(async () => {
     setLoading(true);
@@ -238,6 +253,9 @@ export default function BeautyReceptionPanel() {
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
                   {badge(a.status, a.statusLabel)}
+                  {a.status !== 'completed' && a.status !== 'no_show' && (
+                    <button onClick={() => openQr(a)} title="QR da fila — avisar o cliente no celular" className="text-fuchsia-500 hover:opacity-70"><QrCode className="w-4 h-4" /></button>
+                  )}
                   {(a.status === 'pending' || a.status === 'confirmed') && (
                     <button onClick={() => setStatus(a.id, 'in_progress')} title="Iniciar atendimento" className="text-emerald-500 hover:opacity-70"><PlayCircle className="w-4 h-4" /></button>
                   )}
@@ -247,6 +265,27 @@ export default function BeautyReceptionPanel() {
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* F37 — Modal do QR da fila: o cliente escaneia e acompanha a vez no celular */}
+      {qrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setQrModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl p-6 text-center" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold flex items-center gap-1"><QrCode className="w-4 h-4 text-fuchsia-500" /> Fila no celular</span>
+              <button onClick={() => setQrModal(null)} className="text-slate-400 hover:text-pink-500"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-3"><b>{qrModal.appt.clientName}</b> aponta a câmera do celular pra este QR e acompanha a vez — o celular avisa quando for a hora.</p>
+            {qrLoading || !qrModal.qr ? (
+              <div className="h-64 flex items-center justify-center text-xs text-slate-500">{qrLoading ? 'Gerando QR…' : 'Não foi possível gerar o QR.'}</div>
+            ) : (
+              <img src={qrModal.qr} alt="QR da fila" className="mx-auto rounded-lg bg-white p-2" style={{ width: 256, height: 256 }} />
+            )}
+            {qrModal.url && (
+              <p className="mt-3 text-[10px] text-slate-500 break-all">{qrModal.url}</p>
+            )}
           </div>
         </div>
       )}

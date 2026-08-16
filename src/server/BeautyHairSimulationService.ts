@@ -284,6 +284,28 @@ function fallbackProvidersFor(primaryKey: string): HairSimulationProvider[] {
   return order.filter((p) => p.key !== primaryKey && p.available());
 }
 
+/**
+ * Resolve o provider a partir do `provider_key` GRAVADO na linha (ex.:
+ * "openai_hair_v1"). BUG histórico (F25→F29): o `processJob` fazia
+ * `PROVIDERS[job.provider_key]`, mas `PROVIDERS` é indexado por "stub"/
+ * "openai"/"google_gemini", NÃO pelo `.key` ("stub_v1"/"openai_hair_v1"/
+ * "google_gemini_hair_v1"). O lookup dava SEMPRE `undefined` e caía no stub —
+ * então TODA geração de produção saía como o quadrado 1x1, mesmo com o OpenAI
+ * ativo e escolhido no pedido. Os testes não pegavam porque em CI o provider é
+ * o stub mesmo (o lookup quebrado "acertava" por acidente). Aqui casamos pelo
+ * `.key` de verdade. */
+export function providerByStoredKey(storedKey: string): HairSimulationProvider | null {
+  return Object.values(PROVIDERS).find((p) => p.key === storedKey) || null;
+}
+
+/**
+ * Registra um provider (SÓ para teste) — permite exercitar a resolução do
+ * `processJob` ponta-a-ponta sem chamada de rede a IA real. Não usar em
+ * produção. */
+export function __registerHairProviderForTest(id: string, provider: HairSimulationProvider): void {
+  PROVIDERS[id] = provider;
+}
+
 // ─────────────────────────── SERVICE ───────────────────────────
 
 export interface BeautyVisualSimulationRow {
@@ -521,10 +543,14 @@ export class BeautyHairSimulationService {
       catch { return fail("avatar_missing", "Chave de arquivo inválida."); }
       if (!fs.existsSync(avatarFile)) return fail("avatar_missing", "Arquivo da foto não está mais disponível.");
 
-      // Executa o provider ativo (o mesmo que gerou o input_hash). Se ele
-      // FALHAR em runtime, tenta o próximo provider REAL disponível (cadeia
-      // OpenAI→Google, decisão do operador) antes de marcar FAILED.
-      const provider = PROVIDERS[job.provider_key] || PROVIDERS.stub;
+      // Executa o provider ESCOLHIDO no pedido (casado pelo `.key` gravado —
+      // ver providerByStoredKey; antes o lookup quebrado caía sempre no stub).
+      // Se a linha aponta um provider que não existe mais / não está
+      // disponível, usa o ATIVO agora (nunca o stub silenciosamente — o stub
+      // implícito já foi barrado no requestSimulation, F28). Se ele FALHAR em
+      // runtime, tenta o próximo provider REAL (cadeia OpenAI→Google) antes de
+      // marcar FAILED.
+      const provider = providerByStoredKey(job.provider_key) || activeProvider();
       const params: HairSimulationParameters = job.parameters_json ? JSON.parse(job.parameters_json) : {};
       const avatar = fs.readFileSync(avatarFile);
       let result = await provider.generate({ avatar, parameters: params });

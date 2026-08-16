@@ -11,6 +11,7 @@ import { RetailFloorService, RetailFloorSettingsService } from "../RetailFloorSe
 import { RetailFloorShiftService, RetailFloorQueueService } from "../RetailFloorShiftService.js";
 import { RetailFloorAttendanceService } from "../RetailFloorAttendanceService.js";
 import { RetailFloorScanService } from "../RetailFloorScanService.js";
+import { RetailFloorReplenishmentService } from "../RetailFloorReplenishmentService.js";
 import { RetailFloorReconciliationService } from "../RetailFloorReconciliationService.js";
 import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
 import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics, RetailFloorOpsMetricsService } from "../RetailFloorAnalyticsService.js";
@@ -214,6 +215,17 @@ router.post("/attendances/:id/unmet-demand", (req: AuthRequest, res) => {
       size: req.body?.size ?? null,
       color: req.body?.color ?? null,
       categoryLabel: req.body?.categoryLabel ?? null,
+    }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Reposição na ruptura (ADR-176): pede transferência da peça consultada num scan
+// que tem estoque na rede. targetStoreId opcional (default = maior doador).
+router.post("/attendances/:id/replenishment", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorReplenishmentService.request(req.organizationId!, req.params.id, {
+      scanId: String(req.body?.scanId || ""),
+      targetStoreId: req.body?.targetStoreId ?? null,
     }, req.user));
   } catch (e: any) { fail(res, e); }
 });

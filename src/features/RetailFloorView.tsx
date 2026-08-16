@@ -6,7 +6,7 @@ import {
   Loader2, RefreshCw, Play, Square, Coffee, UserX, LogIn, Barcode,
   Scale, Clock, Users, DoorOpen, DoorClosed, AlertTriangle, Check, X,
   ChevronDown, Timer, UserPlus, ArrowLeft, ScanLine, ShoppingBag, Camera,
-  Lock, LockOpen, Pencil, Store,
+  Lock, LockOpen, Pencil, Store, ArrowLeftRight,
 } from 'lucide-react';
 import { BarcodeCameraScanner } from '@/src/components/BarcodeCameraScanner';
 import { apiFetch } from '@/src/lib/api';
@@ -1336,6 +1336,18 @@ function ScanPanel({ attendance, onClose }: any) {
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
+  // Reposição na ruptura (ADR-176): pede transferência da loja doadora num toque.
+  const [requested, setRequested] = useState<string | null>(null);
+  const doReplenish = async (targetStoreId?: string) => {
+    if (!result?.scanId) return;
+    setBusy(true);
+    try {
+      const r = await api(`/attendances/${attendance.id}/replenishment`, { scanId: result.scanId, targetStoreId: targetStoreId ?? null });
+      setRequested(r?.target?.storeName || 'loja');
+      toast.success(`Transferência pedida a ${r?.target?.storeName || 'loja'}.`);
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
 
   return (
     <Modal title="Consultar peça" subtitle={attendance.sellerName} onClose={onClose}>
@@ -1389,12 +1401,23 @@ function ScanPanel({ attendance, onClose }: any) {
               </div>
               {result.otherStores?.length > 0 && (
                 <div className="mt-3 space-y-1">
-                  <div className="text-[10px] font-semibold uppercase text-[var(--color-text-muted)]">Disponível em</div>
+                  <div className="text-[10px] font-semibold uppercase text-[var(--color-text-muted)]">
+                    {result.localStock > 0 ? 'Disponível em' : 'Sem estoque aqui — pedir transferência de'}
+                  </div>
                   {result.otherStores.map((s: any, i: number) => (
-                    <div key={i} className="flex justify-between text-xs text-[var(--color-text-muted)]">
-                      <span>{s.storeName}</span><span className="font-semibold text-emerald-400">{s.quantity}</span>
-                    </div>
+                    result.localStock > 0 ? (
+                      <div key={i} className="flex justify-between text-xs text-[var(--color-text-muted)]">
+                        <span>{s.storeName}</span><span className="font-semibold text-emerald-400">{s.quantity}</span>
+                      </div>
+                    ) : (
+                      <button key={i} disabled={busy || !!requested} onClick={() => doReplenish(s.storeId)}
+                        className="flex w-full items-center justify-between rounded-lg border border-[var(--color-flow)]/30 bg-[var(--color-flow)]/5 px-3 py-2 text-xs text-[var(--color-text-strong)] transition-all hover:bg-[var(--color-flow)]/15 disabled:opacity-50">
+                        <span className="inline-flex items-center gap-1.5"><ArrowLeftRight className="h-3.5 w-3.5 text-[var(--color-flow)]" />{s.storeName}</span>
+                        <span className="font-semibold text-emerald-400">{s.quantity}</span>
+                      </button>
+                    )
                   ))}
+                  {requested && <div className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-400"><Check className="h-3.5 w-3.5" /> Transferência pedida a {requested}.</div>}
                 </div>
               )}
               {result.unmetDemand && <div className="mt-3 text-xs text-rose-300">Sem estoque em toda a rede — demanda registrada.</div>}

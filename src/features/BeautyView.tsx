@@ -105,6 +105,40 @@ export function BeautyView() {
       .catch(() => {});
   }, []);
 
+  // Visagismo (F24): análise facial técnica (subtom + formato do rosto) →
+  // recomendação de cor + corte. NUNCA pontua atratividade (RN-BS-03).
+  const [vProfile, setVProfile] = useState<string>('feminino');
+  const [vUndertone, setVUndertone] = useState<string>(''); // '' = deixar a IA classificar (ou indeterminado)
+  const [vFaceShape, setVFaceShape] = useState<string>('');
+  const [visagism, setVisagism] = useState<any | null>(null);
+  const [visagismAiAvailable, setVisagismAiAvailable] = useState<boolean>(false);
+  useEffect(() => {
+    apiFetch('/api/beauty/vocabulary/visagism')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setVisagismAiAvailable(!!d.aiAvailable); })
+      .catch(() => {});
+  }, []);
+
+  async function runVisagism(): Promise<void> {
+    if (!consultation) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch(`/api/beauty/consultations/${consultation.id}/visagism`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile: vProfile,
+          undertone: vUndertone || undefined,
+          faceShape: vFaceShape || undefined,
+          reason: 'orientar cor e corte por visagismo',
+        }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || e.error || 'Falha no visagismo.'); }
+      setVisagism(await r.json());
+    } catch (e: any) { setError(e?.message || 'Erro no visagismo.'); }
+    finally { setBusy(false); }
+  }
+
   async function loadClients(selectId?: string): Promise<void> {
     try {
       const r = await apiFetch('/api/beauty/clients');
@@ -543,6 +577,90 @@ export function BeautyView() {
               {cuts.length === 0 && <span className="text-xs text-slate-500">carregando cortes…</span>}
             </div>
           </div>
+        </section>
+      )}
+
+      {/* VISAGISMO — análise facial técnica → cor + corte (RN-BS-03: sem nota) */}
+      {canSimulate && (
+        <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
+          <h2 className="font-semibold mb-1 flex items-center gap-2"><Star className="w-4 h-4" /> Visagismo (cor + corte por análise facial)</h2>
+          <p className="text-xs text-slate-500 mb-3">
+            Recomendação técnica: subtom de pele → cores que harmonizam · formato do rosto → cortes que equilibram a proporção.
+            {visagismAiAvailable
+              ? ' Deixe subtom/rosto em branco pra a IA analisar a foto, ou informe manualmente.'
+              : ' A IA de análise facial não está configurada — informe subtom e formato do rosto manualmente (a profissional avalia).'}
+          </p>
+          <div className="flex flex-wrap gap-3 items-end mb-3">
+            <div>
+              <label className="text-xs text-slate-500">Perfil</label>
+              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
+                value={vProfile} onChange={(e) => setVProfile(e.target.value)} disabled={busy}>
+                <option value="feminino">Feminino</option>
+                <option value="masculino">Masculino</option>
+                <option value="neutro">Neutro</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Subtom de pele</label>
+              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
+                value={vUndertone} onChange={(e) => setVUndertone(e.target.value)} disabled={busy}>
+                <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
+                <option value="quente">Quente</option>
+                <option value="frio">Frio</option>
+                <option value="neutro">Neutro</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Formato do rosto</label>
+              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
+                value={vFaceShape} onChange={(e) => setVFaceShape(e.target.value)} disabled={busy}>
+                <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
+                <option value="oval">Oval</option>
+                <option value="redondo">Redondo</option>
+                <option value="quadrado">Quadrado</option>
+                <option value="coracao">Coração</option>
+                <option value="alongado">Alongado</option>
+                <option value="triangular">Triangular</option>
+              </select>
+            </div>
+            <button onClick={runVisagism} disabled={busy}
+              className="px-4 py-2 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2">
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              Analisar visagismo
+            </button>
+          </div>
+
+          {visagism && (
+            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
+              <p className="text-sm text-slate-400 italic mb-2">{visagism.narrative}</p>
+              {Array.isArray(visagism.recommendedColors) && visagism.recommendedColors.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-medium text-pink-400 mb-1">Cores que harmonizam (clique pra simular)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {visagism.recommendedColors.map((c: string) => (
+                      <button key={c} onClick={() => requestSimulation('color', c)} disabled={busy}
+                        className="px-3 py-1 rounded-full border text-xs hover:bg-pink-500/10 disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+                        {vocabLabel(c)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {Array.isArray(visagism.recommendedCuts) && visagism.recommendedCuts.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-blue-400 mb-1">Cortes que equilibram (clique pra simular)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {visagism.recommendedCuts.map((c: string) => (
+                      <button key={c} onClick={() => requestSimulation('cut', c)} disabled={busy}
+                        className="px-3 py-1 rounded-full border text-xs hover:bg-blue-500/10 disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+                        {vocabLabel(c)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </section>
       )}
 

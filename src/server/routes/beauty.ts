@@ -36,6 +36,7 @@ import { BeautyHarmonyAnalysisService } from "../BeautyHarmonyAnalysisService.js
 import { LookServiceRecommendationService } from "../LookServiceRecommendationService.js";
 import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentService.js";
 import { BeautyClientService } from "../BeautyClientService.js";
+import { BeautyVisagismService } from "../BeautyVisagismService.js";
 // Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
 // (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
 // as rotas beauty forem montadas, o handler está disponível pro executor.
@@ -346,6 +347,42 @@ router.get("/analyses/:id", (req: AuthRequest, res): any => {
   const a = BeautyHarmonyAnalysisService.getById(orgId, req.params.id);
   if (!a) return res.status(404).json({ error: "Análise não encontrada." });
   res.json(a);
+});
+
+// ─────────────── Visagismo (F24) — subtom→cor + formato rosto→corte ───────────────
+//
+// Análise FACIAL técnica (formato do rosto, subtom de pele) → recomendação de
+// corte + cor. RN-BS-03: NUNCA pontua atratividade nem julga a pessoa — só
+// recomenda tecnicamente. Requer actor+reason (guardApplied).
+router.get("/vocabulary/visagism", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyVisagismService.vocabulary());
+});
+
+router.post("/consultations/:id/visagism", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const { profile, undertone, faceShape, reason } = req.body || {};
+  try {
+    const analysis = await BeautyVisagismService.analyze(orgId, req.params.id, {
+      actorId: req.user?.userId || null,
+      reason: String(reason || "").trim() || null,
+      profile, undertone, faceShape,
+    });
+    res.json(analysis);
+  } catch (e: any) {
+    if (e?.code === "human_decision_required") {
+      return res.status(400).json({ error: "human_decision_required", detail: "Visagismo exige actor + reason (RN-BS-03)." });
+    }
+    res.status(400).json({ error: String(e?.message || "Erro").slice(0, 200) });
+  }
+});
+
+router.get("/consultations/:id/visagism-analyses", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyVisagismService.listForConsultation(orgId, req.params.id));
 });
 
 // ─────────────── Look → Serviços do catálogo REAL (F9) ───────────────

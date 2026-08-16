@@ -23,6 +23,7 @@ import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
+import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -625,25 +626,14 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
 });
 
 // CLIENTES DO PDV (Fase 3, opt-in): busca por nome/CPF/celular + aniversariantes
-// do mês (?birthdayMonth=MM). Base separada dos contatos do WhatsApp.
+// do mês (?birthdayMonth=MM) + filtro por FILIAL (?store=<código da loja>, CRM-001).
+// Base separada dos contatos do WhatsApp. Resposta enriquecida com loja e
+// timestamp de sync (RetailPdvCustomerService). Isolado por organização.
 router.get("/pdv-customers", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const q = String(req.query.q || "").trim();
-  const bMonth = String(req.query.birthdayMonth || "").trim().padStart(2, "0");
-  const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || "100"), 10) || 100));
-  const offset = Math.max(0, parseInt(String(req.query.offset || "0"), 10) || 0);
-  const where: string[] = ["organization_id = ?"]; const args: any[] = [orgId];
-  if (q) { where.push("(nome LIKE ? OR cpf LIKE ? OR celular LIKE ?)"); const like = `%${q}%`; args.push(like, like, like); }
-  if (/^\d{2}$/.test(bMonth)) { where.push("substr(nascimento, 6, 2) = ?"); args.push(bMonth); }
   try {
-    const total = Number((db.prepare(`SELECT COUNT(*) c FROM retail_pdv_customers WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
-    const rows = db.prepare(
-      `SELECT codigo_n, nome, cpf, celular, email, nascimento, filial, cidade, ultima_compra
-         FROM retail_pdv_customers WHERE ${where.join(" AND ")}
-        ORDER BY nome LIMIT ? OFFSET ?`
-    ).all(...args, limit, offset) as any[];
-    res.json({ total, customers: rows });
+    res.json(RetailPdvCustomerService.list(orgId, req.query as any));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

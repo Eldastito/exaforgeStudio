@@ -207,7 +207,16 @@ async function main() {
     reqReal.ok && (reqReal as any).reused === false && (reqReal as any).providerKey === "openai_hair_v1");
   check("galeria esconde saídas do stub quando provider REAL ativo",
     BeautyHairSimulationService.listForContact(orgA, anaId).every((s) => s.providerKey !== "stub_v1"));
+  // F29 — a seção "Resultados" (listForConsultation) também esconde o stub
+  // quando há IA real: os quadrados de demonstração antigos somem da tela.
+  check("seção Resultados esconde stub quando provider REAL ativo (F29)",
+    BeautyHairSimulationService.listForConsultation(orgA, cons1.id).every((s) => s.providerKey !== "stub_v1"));
   delete process.env.OPENAI_API_KEY;
+  check("com stub ativo (CI) a seção Resultados volta a mostrar tudo (F29)",
+    (() => { process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub";
+             const r = BeautyHairSimulationService.listForConsultation(orgA, cons1.id);
+             delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
+             return r.length >= 1; })());
   process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub";
   check("com stub ativo (CI/demo) o acervo volta a valer (reused=true)",
     (() => { const r = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, { simulationType: "color", parameters: { color: "loiro" } }); return r.ok && (r as any).reused === true; })());

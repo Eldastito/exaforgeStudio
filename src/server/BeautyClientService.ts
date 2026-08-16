@@ -47,6 +47,7 @@ export interface BeautyClientProfile {
   chemicalHistory: string | null;
   maintenancePref: string | null;
   leadSource: string | null;
+  leadSourceOther: string | null;
   notes: string | null;
 }
 
@@ -62,18 +63,22 @@ export class BeautyClientService {
   static saveProfile(orgId: string, contactId: string, p: Partial<BeautyClientProfile>): BeautyClientProfile {
     const contact = db.prepare(`SELECT id FROM contacts WHERE id = ? AND organization_id = ?`).get(contactId, orgId);
     if (!contact) throw new Error("Contato não encontrado nesta organização.");
+    const lead = inVocab(p.leadSource, LEAD_SOURCES);
     const clean = {
       hair_type: inVocab(p.hairType, HAIR_TYPES),
       hair_thickness: inVocab(p.hairThickness, HAIR_THICKNESS),
       hair_length: inVocab(p.hairLength, HAIR_LENGTHS),
       chemical_history: inVocab(p.chemicalHistory, CHEMICAL_HISTORY),
       maintenance_pref: inVocab(p.maintenancePref, MAINTENANCE_PREFS),
-      lead_source: inVocab(p.leadSource, LEAD_SOURCES),
+      lead_source: lead,
+      // F33 — detalhe do "Outro" só faz sentido quando lead_source='outro';
+      // em qualquer outra origem o texto livre é ignorado (não polui a ficha).
+      lead_source_other: lead === "outro" ? (String(p.leadSourceOther || "").trim().slice(0, 120) || null) : null,
       notes: String(p.notes || "").slice(0, 500) || null,
     };
     db.prepare(
-      `INSERT INTO beauty_client_profiles (id, organization_id, contact_id, hair_type, hair_thickness, hair_length, chemical_history, maintenance_pref, lead_source, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO beauty_client_profiles (id, organization_id, contact_id, hair_type, hair_thickness, hair_length, chemical_history, maintenance_pref, lead_source, lead_source_other, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(organization_id, contact_id) DO UPDATE SET
          hair_type = COALESCE(excluded.hair_type, hair_type),
          hair_thickness = COALESCE(excluded.hair_thickness, hair_thickness),
@@ -81,10 +86,17 @@ export class BeautyClientService {
          chemical_history = COALESCE(excluded.chemical_history, chemical_history),
          maintenance_pref = COALESCE(excluded.maintenance_pref, maintenance_pref),
          lead_source = COALESCE(excluded.lead_source, lead_source),
+         -- F33: se a origem não foi tocada (excluded null) → mantém; se virou
+         -- 'outro' → grava o texto novo; se virou origem do vocab → limpa o
+         -- detalhe (senão o COALESCE preservaria o texto antigo, poluindo).
+         lead_source_other = CASE
+           WHEN excluded.lead_source IS NULL THEN lead_source_other
+           WHEN excluded.lead_source = 'outro' THEN excluded.lead_source_other
+           ELSE NULL END,
          notes = COALESCE(excluded.notes, notes),
          updated_at = CURRENT_TIMESTAMP`,
     ).run(randomUUID(), orgId, contactId, clean.hair_type, clean.hair_thickness, clean.hair_length,
-          clean.chemical_history, clean.maintenance_pref, clean.lead_source, clean.notes);
+          clean.chemical_history, clean.maintenance_pref, clean.lead_source, clean.lead_source_other, clean.notes);
     return this.getProfile(orgId, contactId)!;
   }
 
@@ -94,7 +106,7 @@ export class BeautyClientService {
     return {
       hairType: r.hair_type, hairThickness: r.hair_thickness, hairLength: r.hair_length,
       chemicalHistory: r.chemical_history, maintenancePref: r.maintenance_pref,
-      leadSource: r.lead_source, notes: r.notes,
+      leadSource: r.lead_source, leadSourceOther: r.lead_source_other ?? null, notes: r.notes,
     };
   }
 

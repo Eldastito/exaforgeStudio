@@ -37,6 +37,7 @@ import { LookServiceRecommendationService } from "../LookServiceRecommendationSe
 import { BeautyLookToAppointmentService } from "../BeautyLookToAppointmentService.js";
 import { BeautyClientService } from "../BeautyClientService.js";
 import { BeautyVisagismService } from "../BeautyVisagismService.js";
+import { BeautyReceptionService } from "../BeautyReceptionService.js";
 // Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
 // (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
 // as rotas beauty forem montadas, o handler está disponível pro executor.
@@ -211,6 +212,46 @@ router.get("/clients/profile-vocabulary", (req: AuthRequest, res): any => {
   const orgId = requireBeauty(req, res);
   if (!orgId) return;
   res.json(BeautyClientService.profileVocabulary());
+});
+
+// ─────────────── Painel da Recepção (F34 / BEAUTY-035) ───────────────
+//
+// A recepção precisa, simples e rápido: buscar cliente antes de cadastrar,
+// buscar profissional (agenda dele + horários vagos), ver a agenda do dia em
+// tempo real (quem está sendo atendido e por quem) e quem está trabalhando.
+// Read-mostly; a única escrita é mover o atendimento pelo funil (setStatus).
+
+// Q1 — busca cliente (dedupe antes de cadastrar). ?q= por nome/telefone.
+router.get("/reception/clients", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ clients: BeautyReceptionService.searchClients(orgId, String(req.query.q || ""), 15) });
+});
+
+// Q3+Q4 — quadro do dia (agenda + em atendimento AGORA + profissionais). ?date=YYYY-MM-DD opcional.
+router.get("/reception/today", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyReceptionService.dayBoard(orgId, req.query.date ? String(req.query.date) : undefined));
+});
+
+// Q2 — dia de um profissional (agendamentos + horários vagos).
+router.get("/reception/professional/:id", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = BeautyReceptionService.professionalDay(orgId, req.params.id, req.query.date ? String(req.query.date) : undefined);
+  if (!r.professional) return res.status(404).json({ error: "Profissional não encontrado ou inativo." });
+  res.json(r);
+});
+
+// Tempo real — mover o atendimento pelo funil (chegou/em atendimento/finalizado).
+router.post("/reception/appointments/:id/status", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = BeautyReceptionService.setStatus(orgId, req.params.id, String(req.body?.status || ""));
+  if (!r.ok) return res.status(400).json(r);
+  try { logAuthEvent(orgId, req.user?.userId || null, req.params.id, "BEAUTY_RECEPTION_STATUS", { status: (r as any).status }); } catch { /* noop */ }
+  res.json(r);
 });
 
 router.get("/clients/:contactId/profile", (req: AuthRequest, res): any => {

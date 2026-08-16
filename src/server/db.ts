@@ -9607,6 +9607,49 @@ const initDb = () => {
   // sem appt futuro). Sinal `beauty:vacancy_opportunity:{professionalId}:{slotStartISO}`
   // no `business_signals` — D6, sem tabela paralela.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN beauty_vacancy_detector_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // Tarefas recorrentes (PRD Moda/TOULON, frente TASK; ADR-171). A REGRA é um
+  // template; cada disparo do Scheduler MATERIALIZA uma tarefa normal em `tasks`.
+  // next_run_at é guardado em UTC; local_time + timezone (IANA) definem a hora
+  // local. Idempotência por occurrence_dedupe_key nas tarefas materializadas.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_recurrence_rules (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        assigned_to TEXT,
+        store_id TEXT,
+        priority TEXT DEFAULT 'media',
+        frequency TEXT NOT NULL,               -- daily | weekly | monthly
+        interval INTEGER NOT NULL DEFAULT 1,   -- a cada N (dias/semanas/meses)
+        by_weekday TEXT,                       -- JSON [0..6] (0=domingo) p/ weekly
+        day_of_month INTEGER,                  -- 1..31 p/ monthly (clampa no fim do mês)
+        local_time TEXT NOT NULL DEFAULT '09:00', -- HH:MM na timezone da regra
+        timezone TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
+        starts_on TEXT NOT NULL,               -- YYYY-MM-DD (data local de início)
+        ends_on TEXT,                          -- YYYY-MM-DD (fim por data) ou NULL
+        max_occurrences INTEGER,               -- fim por contagem ou NULL
+        next_run_at DATETIME,                  -- próximo disparo (UTC ISO)
+        status TEXT DEFAULT 'active',          -- active | paused | completed
+        notification_policy_json TEXT,         -- política de lembrete (TASK-007, fatia futura)
+        created_by TEXT,
+        updated_by TEXT,
+        version INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_recurrence_due ON task_recurrence_rules (status, next_run_at);
+      CREATE INDEX IF NOT EXISTS idx_task_recurrence_org ON task_recurrence_rules (organization_id);
+    `);
+  } catch (e) { /* noop */ }
+  // Colunas de OCORRÊNCIA nas tarefas materializadas + índice único p/ dedupe.
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN recurrence_rule_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN scheduled_occurrence_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN occurrence_dedupe_key TEXT`); } catch(e){}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_occurrence_dedupe ON tasks (organization_id, occurrence_dedupe_key) WHERE occurrence_dedupe_key IS NOT NULL`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_rule ON tasks (recurrence_rule_id)`); } catch(e){}
 };
 
 initDb();

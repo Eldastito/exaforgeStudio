@@ -89,19 +89,23 @@ export class TaskService {
     title: string; description?: string; assignedTo?: string | null; priority?: string;
     dueAt?: string | null; source?: string; contactId?: string | null; ticketId?: string | null; refLabel?: string | null; budget?: number;
     resultLabel?: string | null; resultBaseline?: number | null;
+    // Materialização de recorrência (ADR-171): amarra a tarefa à regra e carrega
+    // a chave de dedupe (idempotência via índice único parcial em `tasks`).
+    recurrenceRuleId?: string | null; scheduledOccurrenceAt?: string | null; occurrenceDedupeKey?: string | null;
   }, actorId?: string): any {
     const title = String(input.title || "").trim();
     if (!title) throw new Error("Informe um título para a tarefa.");
     const priority = PRIORITIES.includes(String(input.priority)) ? input.priority : "media";
-    const source = ["manual", "ric", "ia", "vision", "radar", "falatu"].includes(String(input.source)) ? input.source : "manual";
+    const source = ["manual", "ric", "ia", "vision", "radar", "falatu", "recurrence"].includes(String(input.source)) ? input.source : "manual";
     const id = randomUUID();
     const resultLabel = String(input.resultLabel || "").trim() || null;
     const resultBaseline = input.resultBaseline != null && input.resultBaseline !== undefined && String(input.resultBaseline) !== "" ? Number(input.resultBaseline) : null;
     db.prepare(`
-      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount, result_label, result_baseline)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount, result_label, result_baseline, recurrence_rule_id, scheduled_occurrence_at, occurrence_dedupe_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, title, input.description || "", input.assignedTo || null, actorId || null, priority,
-      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0), resultLabel, resultBaseline);
+      input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0), resultLabel, resultBaseline,
+      input.recurrenceRuleId || null, input.scheduledOccurrenceAt || null, input.occurrenceDedupeKey || null);
     if (input.assignedTo) this.notifyAssignee(orgId, input.assignedTo, title);
     return this.get(orgId, id);
   }

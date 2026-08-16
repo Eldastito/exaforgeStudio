@@ -212,6 +212,18 @@ export function BeautyView() {
   const [scheduledAppointmentId, setScheduledAppointmentId] = useState<string | null>(null);
   const [analysisNarrative, setAnalysisNarrative] = useState<string | null>(null);
 
+  // F26 — histórico de visuais do cliente: imagens já geradas ficam salvas;
+  // rever não custa IA. Carrega quando a cliente é selecionada e recarrega
+  // quando uma nova simulação conclui.
+  const [clientHistory, setClientHistory] = useState<Simulation[]>([]);
+  useEffect(() => {
+    if (!contactId) { setClientHistory([]); return; }
+    apiFetch(`/api/beauty/clients/${contactId}/simulations`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setClientHistory(Array.isArray(d?.simulations) ? d.simulations : []))
+      .catch(() => setClientHistory([]));
+  }, [contactId, simulations.length]);
+
   // ─── Consulta / upload ───────────────────────────────────────────────
   async function grantConsentAndStart(): Promise<void> {
     if (!contactId) { setError('Selecione um contato'); return; }
@@ -589,6 +601,31 @@ export function BeautyView() {
           </div>
         )}
       </section>
+
+      {/* F26 — Visuais salvos da cliente (todas as consultas). Rever é grátis;
+          só gerar algo NOVO custa IA. */}
+      {contactId && clientHistory.length > 0 && (
+        <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
+          <h2 className="font-semibold mb-1 flex items-center gap-2"><Star className="w-4 h-4" /> Visuais salvos desta cliente</h2>
+          <p className="text-xs text-slate-500 mb-3">
+            Imagens já geradas em consultas anteriores — rever e comparar não gasta geração de IA.
+          </p>
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+            {clientHistory.map((s) => (
+              <div key={s.id} className="rounded border overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                {s.signedUrl ? (
+                  <img src={s.signedUrl} alt="visual salvo" className="w-full aspect-square object-cover" />
+                ) : (
+                  <div className="w-full aspect-square bg-slate-500/10 flex items-center justify-center text-[10px] text-slate-400">expirado</div>
+                )}
+                <div className="p-1 text-[10px] text-slate-500 truncate">
+                  {s.parameters?.color ? vocabLabel(s.parameters.color) : ''}{s.parameters?.color && s.parameters?.cut ? ' · ' : ''}{s.parameters?.cut ? vocabLabel(s.parameters.cut) : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* PASSO 2 — Upload foto + aprovar */}
       {consultation && (

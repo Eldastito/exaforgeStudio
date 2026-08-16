@@ -186,6 +186,15 @@ router.post("/clients", (req: AuthRequest, res): any => {
   }
 });
 
+// F26 — histórico de visuais do cliente (todas as consultas). As imagens já
+// geradas ficam SALVAS — rever/comparar não custa IA; só gerar algo NOVO
+// custa. É o acervo que a cliente revê quando volta no mês seguinte.
+router.get("/clients/:contactId/simulations", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ simulations: BeautyHairSimulationService.listForContact(orgId, req.params.contactId) });
+});
+
 // Ficha técnica capilar (F25) — vocab fechado; ajuda a recomendação e avisa
 // a profissional sobre histórico químico (viabilidade de nova química).
 router.get("/clients/profile-vocabulary", (req: AuthRequest, res): any => {

@@ -68,22 +68,43 @@ export class RetailInventoryService {
   }
 
   /** Negativos por loja, com filtro (loja/produto) e paginação server-side —
-   *  a lista pode ser grande numa rede com muitos SKUs. Retorna total + página. */
+   *  a lista pode ser grande numa rede com muitos SKUs. Retorna total + página.
+   *
+   *  PRD Moda/TOULON (INV-001/002): enriquece cada negativo com a IDENTIFICAÇÃO
+   *  completa da peça — referência, unidade, cor, tamanho, SKU e EAN — para o
+   *  vendedor saber EXATAMENTE qual produto está negativo. Mapeamento do dado
+   *  Alterdata (ver AlterdataSupplyMapper): o EAN/código de barras é gravado em
+   *  `product_variants.sku`; `external_ref` é a referência do ERP; a unidade vem
+   *  de `products_services.default_uom`. Tudo aditivo — os campos flat antigos
+   *  (store_name, product_name, i.*) continuam iguais para não quebrar a tela. */
   static listNegative(orgId: string, opts: { storeId?: string; q?: string; limit?: number; offset?: number } = {}): { total: number; items: any[] } {
     const where: string[] = ["i.organization_id = ?", "i.quantity_available < 0"];
     const args: any[] = [orgId];
     if (opts.storeId) { where.push("i.store_id = ?"); args.push(String(opts.storeId)); }
     const q = String(opts.q || "").trim();
-    if (q) { where.push("p.name LIKE ?"); args.push(`%${q}%`); }
+    // Busca por nome, referência do produto, EAN (sku da variante) ou ref da variante.
+    if (q) {
+      const like = `%${q}%`;
+      where.push("(p.name LIKE ? OR p.external_ref LIKE ? OR pv.sku LIKE ? OR pv.external_ref LIKE ?)");
+      args.push(like, like, like, like);
+    }
     const base = `FROM retail_store_inventory i
                     JOIN retail_stores s ON s.id = i.store_id
                LEFT JOIN products_services p ON p.id = i.product_service_id
+               LEFT JOIN product_variants pv ON pv.id = i.variant_id AND pv.organization_id = i.organization_id
                    WHERE ${where.join(" AND ")}`;
     const total = Number((db.prepare(`SELECT COUNT(*) c ${base}`).get(...args) as any)?.c || 0);
     const limit = Math.min(500, Math.max(1, Math.trunc(Number(opts.limit) || 100)));
     const offset = Math.max(0, Math.trunc(Number(opts.offset) || 0));
     const items = db.prepare(
-      `SELECT i.*, s.name AS store_name, p.name AS product_name ${base} ORDER BY i.quantity_available ASC LIMIT ? OFFSET ?`
+      `SELECT i.*,
+              s.name AS store_name, s.code AS store_code,
+              p.name AS product_name, p.external_ref AS product_external_ref, p.default_uom AS product_uom,
+              pv.name AS variant_name, pv.color AS variant_color, pv.size AS variant_size,
+              pv.external_ref AS variant_sku,
+              COALESCE(pv.sku, p.ean) AS variant_ean,
+              i.updated_at AS source_synced_at
+         ${base} ORDER BY i.quantity_available ASC LIMIT ? OFFSET ?`
     ).all(...args, limit, offset) as any[];
     return { total, items };
   }

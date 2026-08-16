@@ -1855,6 +1855,33 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_retail_stock_alerts ON retail_stock_alerts (organization_id, status);
 
+      -- Política de estoque por loja/produto/variante (PRD Moda/TOULON, INV-004).
+      -- Define mínimo e ALVO — é o que dá sentido a "quanto falta" (shortage). Sem
+      -- política, a falta NÃO é inventada (a tela mostra "Meta não configurada").
+      -- store_id/variant_id = '' (sentinel) quando a política é da organização/do
+      -- produto inteiro. Precedência na resolução (mais específica primeiro):
+      -- loja+variante > loja+produto > org+variante > org+produto.
+      CREATE TABLE IF NOT EXISTS retail_stock_policies (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT DEFAULT '',                 -- '' = todas as lojas (org)
+        product_id TEXT NOT NULL,
+        variant_id TEXT DEFAULT '',               -- '' = todas as variantes do produto
+        min_qty REAL NOT NULL DEFAULT 0,
+        target_qty REAL NOT NULL DEFAULT 0,       -- alvo (>= mínimo)
+        source TEXT DEFAULT 'manual',             -- manual | erp | recommendation
+        effective_from DATETIME,
+        effective_to DATETIME,
+        active INTEGER DEFAULT 1,
+        created_by TEXT,
+        updated_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      );
+      -- Uma política ATIVA por escopo (org, loja, produto, variante).
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_stock_policies_scope
+        ON retail_stock_policies (organization_id, store_id, product_id, variant_id) WHERE active = 1;
+
       -- Transferência de estoque ENTRE LOJAS (ADR-083, Fase G — Reposição da
       -- grade). Ao despachar, dá baixa na loja de ORIGEM e a transferência fica
       -- 'in_transit' (peças "na estrada"); na RECEPÇÃO, dá entrada na loja de

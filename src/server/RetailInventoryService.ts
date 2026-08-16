@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { RetailStockPolicyService } from "./RetailStockPolicyService.js";
 
 // Causas prováveis de estoque negativo (heurística; a explicação com dados de
 // venda vem quando a conciliação externa — Fase E — estiver ligada).
@@ -106,6 +107,18 @@ export class RetailInventoryService {
               i.updated_at AS source_synced_at
          ${base} ORDER BY i.quantity_available ASC LIMIT ? OFFSET ?`
     ).all(...args, limit, offset) as any[];
+
+    // INV-003/004: números de FALTA por item. `qty_to_zero` (sair do negativo)
+    // sempre existe; `shortage_qty`/min/target SÓ com política (senão null —
+    // "Meta não configurada", nunca falta inventada). Resolve por precedência;
+    // curto-circuita se a org não tem NENHUMA política.
+    const orgHasPolicies = RetailStockPolicyService.hasAny(orgId);
+    for (const it of items) {
+      const pol = orgHasPolicies
+        ? RetailStockPolicyService.resolve(orgId, it.store_id, it.product_service_id, it.variant_id)
+        : null;
+      Object.assign(it, RetailStockPolicyService.computeQuantities(Number(it.quantity_available || 0), pol));
+    }
     return { total, items };
   }
 

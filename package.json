@@ -380,6 +380,7 @@
     "test:retail-card-acquirer": "tsx scripts/test-retail-card-acquirer.ts",
     "test:retail-pdv-customers-by-store": "tsx scripts/test-retail-pdv-customers-by-store.ts",
     "test:retail-negative-stock-enriched": "tsx scripts/test-retail-negative-stock-enriched.ts",
+    "test:retail-stock-policy": "tsx scripts/test-retail-stock-policy.ts",
     "test:executive-retail-commission-block": "tsx scripts/test-executive-retail-commission-block.ts",
     "test:retail-ops-signals": "tsx scripts/test-retail-ops-signals.ts",
     "test:order-seller-attribution": "tsx scripts/test-order-seller-attribution.ts",

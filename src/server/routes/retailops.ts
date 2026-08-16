@@ -24,6 +24,7 @@ import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
 import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
+import { RetailStockPolicyService } from "../RetailStockPolicyService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -1370,6 +1371,35 @@ router.get("/stock/by-store/:storeId", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ items: RetailInventoryService.byStore(orgId, req.params.storeId) });
+});
+
+// POLÍTICA DE ESTOQUE (INV-004): mínimo/alvo por loja/produto/variante. É o que
+// dá sentido a "quanto falta" no estoque negativo. Config = owner/admin (§12.1).
+router.get("/stock-policies", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({
+    policies: RetailStockPolicyService.list(orgId, {
+      storeId: req.query.storeId !== undefined ? String(req.query.storeId) : undefined,
+      productId: req.query.productId ? String(req.query.productId) : undefined,
+    }),
+  });
+});
+
+router.post("/stock-policies", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.status(201).json(RetailStockPolicyService.set(orgId, req.body || {}, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete("/stock-policies/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = RetailStockPolicyService.remove(orgId, req.params.id, req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "policy_not_found" });
+  res.json({ ok: true });
 });
 
 router.get("/stock/alerts", (req: AuthRequest, res): any => {

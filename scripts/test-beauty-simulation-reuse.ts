@@ -270,6 +270,38 @@ async function main() {
   });
   check("stub via opt-in explícito segue funcionando (CI/demo)", reqOptIn.ok === true);
 
+  // ===== 12b. F30 — processJob USA o provider escolhido (bug do lookup) =====
+  // Regressão do bug real de produção: processJob fazia PROVIDERS[job.provider_key]
+  // (ex.: PROVIDERS["openai_hair_v1"] → undefined) e caía SEMPRE no stub. Toda
+  // geração de produção saía como quadrado, mesmo com OpenAI ativo.
+  const { providerByStoredKey, __registerHairProviderForTest } = await import("../src/server/BeautyHairSimulationService.js");
+  check("providerByStoredKey('stub_v1') → stub", providerByStoredKey("stub_v1")?.key === "stub_v1");
+  check("providerByStoredKey('openai_hair_v1') → openai (NÃO stub)",
+    providerByStoredKey("openai_hair_v1")?.key === "openai_hair_v1");
+  check("providerByStoredKey('google_gemini_hair_v1') → google",
+    providerByStoredKey("google_gemini_hair_v1")?.key === "google_gemini_hair_v1");
+  check("providerByStoredKey(desconhecido) → null", providerByStoredKey("nao_existe_v9") === null);
+
+  // Ponta-a-ponta sem rede: registra um provider FAKE, cria uma linha com o
+  // provider_key dele, roda processJob e prova que a saída veio do FAKE (não
+  // do stub). Com o bug antigo, PROVIDERS["fake_marker_v1"] era undefined → stub.
+  const FAKE_PNG = Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0xDE,0xAD,0xBE,0xEF]).toString("base64");
+  __registerHairProviderForTest("fake_marker", { key: "fake_marker_v1", available: () => true, generate: async () => ({ ok: true, b64: FAKE_PNG }) });
+  const consFake = await prepareReady(orgA, seedContact(orgA, "Fake"));
+  process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "fake_marker"; // ativo p/ passar o guard F28
+  const reqFake = BeautyHairSimulationService.requestSimulation(orgA, consFake.id, { simulationType: "color", parameters: { color: "loiro" } });
+  check("requestSimulation grava provider_key do provider ativo (fake_marker_v1)",
+    reqFake.ok && (reqFake as any).providerKey === "fake_marker_v1");
+  const fakeSimId = (reqFake as any).simulationId as string;
+  await BeautyHairSimulationService.processJob(fakeSimId);
+  const fakeRow = db.prepare(`SELECT provider_key, output_storage_key, status FROM beauty_visual_simulations WHERE id = ?`).get(fakeSimId) as any;
+  check("processJob resolveu o provider CERTO (row segue fake_marker_v1, não stub)",
+    fakeRow.status === "SUCCEEDED" && fakeRow.provider_key === "fake_marker_v1");
+  const fakeOut = fs.readFileSync(path.join(tmpDir, "private_media", fakeRow.output_storage_key));
+  check("output veio do provider FAKE (bytes DEADBEEF), NÃO do stub",
+    fakeOut.includes(Buffer.from([0xDE,0xAD,0xBE,0xEF])));
+  delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
+
   // ===== 13. Fiação: rota + BeautyView consomem o acervo =====
   const routesSrc = fs.readFileSync(path.join(process.cwd(), "src/server/routes/beauty.ts"), "utf8");
   check("rota GET /clients/:contactId/simulations existe",

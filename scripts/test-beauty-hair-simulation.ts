@@ -130,6 +130,9 @@ async function main() {
   check("vocabulary().colors não vazio", vocab.colors.length > 0);
   check("vocabulary().cuts não vazio", vocab.cuts.length > 0);
   check("vocabulary().types === SIMULATION_TYPES", vocab.types.join(",") === SIMULATION_TYPES.join(","));
+  check("vocabulary().goals prontos pro dropdown ({value,label}) — F32",
+    Array.isArray(vocab.goals) && vocab.goals.length > 0 &&
+    vocab.goals.every((g) => typeof g.value === "string" && typeof g.label === "string"));
 
   // ===== 4. Provider ativo é o Stub (env forçado) =====
   check("providerKey='stub_v1' (BEAUTY_HAIR_SIMULATION_PROVIDER=stub)",

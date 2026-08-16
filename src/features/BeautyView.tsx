@@ -119,10 +119,17 @@ export function BeautyView() {
   // sem hardcode no frontend.
   const [colors, setColors] = useState<string[]>([]);
   const [cuts, setCuts] = useState<string[]>([]);
+  // F32 — objetivos de consulta prontos (dropdown): o usuário clica e escolhe
+  // em vez de digitar. Fonte única no backend (CONSULTATION_GOALS).
+  const [goals, setGoals] = useState<{ value: string; label: string }[]>([]);
   useEffect(() => {
     apiFetch('/api/beauty/vocabulary')
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) { setColors(Array.isArray(d.colors) ? d.colors : []); setCuts(Array.isArray(d.cuts) ? d.cuts : []); } })
+      .then(d => { if (d) {
+        setColors(Array.isArray(d.colors) ? d.colors : []);
+        setCuts(Array.isArray(d.cuts) ? d.cuts : []);
+        if (Array.isArray(d.goals) && d.goals.length) { setGoals(d.goals); setGoal((g) => g === 'coloração' ? d.goals[0].value : g); }
+      } })
       .catch(() => {});
   }, []);
 
@@ -653,15 +660,19 @@ export function BeautyView() {
             )}
           </div>
           <div className="flex-1 min-w-[200px]">
-            <label className="text-xs text-slate-500">Objetivo (goal)</label>
-            <input
+            <label className="text-xs text-slate-500">O que a cliente quer?</label>
+            <select
               className="w-full mt-1 p-2 rounded border bg-transparent"
               style={{ borderColor: 'var(--color-border)' }}
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
-              placeholder="ex.: coloração, mechas, escova"
               disabled={busy || !!consultation}
-            />
+            >
+              {goals.length === 0 && <option value={goal}>{goal}</option>}
+              {goals.map((g) => (
+                <option key={g.value} value={g.value}>{g.label}</option>
+              ))}
+            </select>
           </div>
           <button
             onClick={grantConsentAndStart}

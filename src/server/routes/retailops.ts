@@ -25,6 +25,7 @@ import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
 import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
 import { RetailStockPolicyService } from "../RetailStockPolicyService.js";
 import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
+import { ManagerSolutionService } from "../ManagerSolutionService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -1372,6 +1373,49 @@ router.get("/stock/by-store/:storeId", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ items: RetailInventoryService.byStore(orgId, req.params.storeId) });
 });
+
+// PROPOSTAS DE SOLUÇÃO DO GERENTE (LEARN, ADR-174). Criar/listar/submeter: qualquer
+// usuário autenticado (o gerente propõe). Aprovar/promover/rejeitar: owner/admin.
+const authorized = (req: AuthRequest) => ["owner", "admin"].includes(req.user?.role);
+router.get("/solution-proposals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ proposals: ManagerSolutionService.list(orgId, { state: req.query.state ? String(req.query.state) : undefined }) });
+});
+router.get("/solution-proposals/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const p = ManagerSolutionService.get(orgId, req.params.id);
+  if (!p) return res.status(404).json({ error: "not_found" });
+  res.json(p);
+});
+router.post("/solution-proposals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(ManagerSolutionService.create(orgId, req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/patterns/:patternId/solution-proposals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(ManagerSolutionService.create(orgId, { ...(req.body || {}), refType: "pattern", refId: req.params.patternId }, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+const solutionOp = (name: string, fn: (orgId: string, id: string, req: AuthRequest) => any, gated: boolean) => {
+  const handler = (req: AuthRequest, res: any): any => {
+    const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const out = fn(orgId, req.params.id, req);
+      if (!out) return res.status(404).json({ error: "not_found" });
+      res.json(out);
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  };
+  gated ? router.post(`/solution-proposals/:id/${name}`, requireRole("owner", "admin"), handler) : router.post(`/solution-proposals/:id/${name}`, handler);
+};
+solutionOp("submit", (o, id, req) => ManagerSolutionService.submit(o, id, req.user?.userId), false);
+solutionOp("approve-test", (o, id, req) => ManagerSolutionService.approveForTest(o, id, req.user?.userId, authorized(req)), true);
+solutionOp("start-test", (o, id, req) => ManagerSolutionService.startTest(o, id, req.body?.actionTaskId, req.user?.userId), true);
+solutionOp("record-outcome", (o, id, req) => ManagerSolutionService.recordOutcome(o, id, { final: req.body?.final, confidence: req.body?.confidence, period: req.body?.period }, req.user?.userId), true);
+solutionOp("promote", (o, id, req) => ManagerSolutionService.promote(o, id, req.user?.userId, authorized(req)), true);
+solutionOp("reject", (o, id, req) => ManagerSolutionService.reject(o, id, req.body?.reason, req.user?.userId), true);
+solutionOp("revoke", (o, id, req) => ManagerSolutionService.revoke(o, id, req.body?.reason, req.user?.userId), true);
+solutionOp("archive", (o, id, req) => ManagerSolutionService.archive(o, id, req.user?.userId), true);
 
 // POLÍTICA DE ESTOQUE (INV-004): mínimo/alvo por loja/produto/variante. É o que
 // dá sentido a "quanto falta" no estoque negativo. Config = owner/admin (§12.1).

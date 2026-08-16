@@ -9695,6 +9695,40 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_user_stores_user ON user_stores (organization_id, user_id);
     `);
   } catch (e) { /* noop */ }
+
+  // Propostas de solução do gerente (PRD Moda/TOULON, frente LEARN; ADR-174).
+  // Conhecimento HUMANO governado: proposta → revisão → teste → resultado
+  // assegurado → promoção à memória de padrões (nunca "treino automático").
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS manager_solution_proposals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT,                          -- NULL = escopo da organização (várias lojas)
+        ref_type TEXT,                          -- signal | pattern | task
+        ref_id TEXT,
+        author_user_id TEXT,
+        title TEXT NOT NULL,
+        proposal_text TEXT NOT NULL,
+        conditions TEXT,                        -- condição em que funciona
+        expected_metric TEXT,                   -- indicador esperado
+        baseline REAL,
+        observation_deadline TEXT,              -- prazo de observação (YYYY-MM-DD)
+        risks TEXT,
+        state TEXT NOT NULL DEFAULT 'draft',    -- draft | in_review | approved_for_test | testing | validated | promoted | rejected | archived | revoked
+        approver_user_id TEXT,
+        action_task_id TEXT,                    -- experimento vinculado (ação/tarefa)
+        outcome_final REAL,                     -- métrica final medida
+        outcome_confidence REAL,                -- 0..1
+        outcome_period TEXT,
+        promoted_pattern_id TEXT,               -- linha em retail_store_patterns (p/ revogar)
+        rejection_reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_manager_solutions_org ON manager_solution_proposals (organization_id, state);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

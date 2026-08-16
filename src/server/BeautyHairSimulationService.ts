@@ -144,6 +144,30 @@ export const CUT_VOCAB = new Set([
   "ondulado", "cacheado", "liso", "volume",
 ]);
 
+/**
+ * F32 — Objetivos de consulta prontos pra a UI (dropdown do campo "Objetivo").
+ * Vocabulário FECHADO e GENÉRICO de salão (RN-BS-11; §17/§65 — nada hardcoded
+ * de nenhum tenant específico): o usuário CLICA e escolhe em vez de digitar.
+ * `value` é o que vai gravado em `beauty_visual_consultations.goal` (metadado
+ * descritivo — não entra no prompt da IA, que só recebe cor/corte validados).
+ * `label` é o texto pt-BR mostrado. Ordenados do mais comum ao mais específico.
+ */
+export const CONSULTATION_GOALS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "coloracao", label: "Mudar a cor do cabelo" },
+  { value: "mechas", label: "Fazer mechas ou luzes" },
+  { value: "balayage", label: "Balayage / iluminado" },
+  { value: "clarear", label: "Clarear os fios (ficar mais loira)" },
+  { value: "escurecer", label: "Escurecer os fios" },
+  { value: "ruivo", label: "Virar ruiva" },
+  { value: "cobrir_grisalhos", label: "Cobrir os grisalhos" },
+  { value: "corte", label: "Mudar o corte" },
+  { value: "franja", label: "Experimentar franja" },
+  { value: "transformacao", label: "Transformação completa (cor + corte)" },
+  { value: "visagismo", label: "Descobrir o que combina comigo (visagismo)" },
+  { value: "evento", label: "Visual para um evento especial" },
+  { value: "repaginar", label: "Repaginar o visual (ainda decidindo o quê)" },
+];
+
 // ─────────────────────────── PROVIDERS ───────────────────────────
 
 /**
@@ -371,8 +395,8 @@ export class BeautyHairSimulationService {
   }
 
   /** Vocabulário para UI (rota `/api/beauty/simulation/vocabulary` no F7+). */
-  static vocabulary(): { colors: string[]; cuts: string[]; types: readonly string[] } {
-    return { colors: [...COLOR_VOCAB], cuts: [...CUT_VOCAB], types: SIMULATION_TYPES };
+  static vocabulary(): { colors: string[]; cuts: string[]; types: readonly string[]; goals: ReadonlyArray<{ value: string; label: string }> } {
+    return { colors: [...COLOR_VOCAB], cuts: [...CUT_VOCAB], types: SIMULATION_TYPES, goals: CONSULTATION_GOALS };
   }
 
   /**

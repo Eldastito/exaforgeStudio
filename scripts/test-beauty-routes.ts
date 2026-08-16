@@ -144,6 +144,11 @@ async function main() {
     check("vocabulary retorna consentScopes + simulationTypes + colors + cuts",
       Array.isArray(r.json?.consentScopes) && Array.isArray(r.json?.simulationTypes) &&
       Array.isArray(r.json?.colors) && Array.isArray(r.json?.cuts));
+    // F32 — objetivos de consulta prontos pro dropdown ({value,label}).
+    check("vocabulary retorna goals com {value,label} (F32)",
+      Array.isArray(r.json?.goals) && r.json.goals.length > 0 &&
+      r.json.goals.every((g: any) => typeof g?.value === "string" && typeof g?.label === "string") &&
+      r.json.goals.some((g: any) => g.value === "coloracao"));
 
     // ===== 2. Consent =====
     r = await call("POST", "/api/beauty/consents", {

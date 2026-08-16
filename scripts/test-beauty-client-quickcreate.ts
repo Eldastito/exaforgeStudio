@@ -128,6 +128,27 @@ async function main() {
     // ===== 9. Service unit: list ordena e não vaza cross-org =====
     const listA = BeautyClientService.list(orgA).map(c => c.name);
     check("BeautyClientService.list só traz contatos da orgA", listA.includes("Emily S.") && !listA.includes("Fernanda"));
+
+    // ===== 10. Ficha capilar (F25) =====
+    r = await call("POST", "/api/beauty/clients", {
+      orgId: orgA,
+      body: { name: "Paula", phone: "11888887777", email: "paula@email.com",
+              profile: { hairType: "cacheado", chemicalHistory: "progressiva", leadSource: "instagram" } },
+    });
+    check("POST com email + ficha capilar → 200", r.status === 200, r.text);
+    const paulaId = r.json?.client?.id;
+    r = await call("GET", `/api/beauty/clients/${paulaId}/profile`, { orgId: orgA });
+    check("GET profile devolve a ficha", r.json?.profile?.hairType === "cacheado" && r.json?.profile?.chemicalHistory === "progressiva" && r.json?.profile?.leadSource === "instagram", r.text);
+    // vocab fechado: valor fora do vocab vira null (nunca grava lixo)
+    r = await call("PUT", `/api/beauty/clients/${paulaId}/profile`, { orgId: orgA, body: { hairThickness: "grosso", hairType: "verde_neon" } });
+    check("PUT profile: valor fora do vocab é descartado; válido gravado",
+      r.json?.profile?.hairThickness === "grosso" && r.json?.profile?.hairType === "cacheado", r.text);
+    // isolamento: orgB não lê a ficha da Paula
+    r = await call("GET", `/api/beauty/clients/${paulaId}/profile`, { orgId: orgB });
+    check("orgB não lê a ficha da Paula (isolamento)", r.json?.profile === null);
+    // vocabulário da ficha exposto
+    r = await call("GET", "/api/beauty/clients/profile-vocabulary", { orgId: orgA });
+    check("GET profile-vocabulary devolve vocabs fechados", Array.isArray(r.json?.hairTypes) && r.json.hairTypes.includes("cacheado"));
   } finally {
     server.close();
   }

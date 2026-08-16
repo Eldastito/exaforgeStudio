@@ -86,7 +86,17 @@ export function BeautyView() {
   const [contactsArr, setContactsArr] = useState<Contact[]>([]);
   const [newName, setNewName] = useState<string>('');
   const [newPhone, setNewPhone] = useState<string>('');
+  const [newEmail, setNewEmail] = useState<string>('');
   const [showNewClient, setShowNewClient] = useState<boolean>(false);
+  // Ficha capilar (F25) — vocab fechado; ajuda a recomendação e avisa a
+  // profissional sobre histórico químico. Idade/peso/altura ficam FORA
+  // (minimização LGPD — não mudam recomendação de cor/corte).
+  const [pHairType, setPHairType] = useState<string>('');
+  const [pThickness, setPThickness] = useState<string>('');
+  const [pLength, setPLength] = useState<string>('');
+  const [pChemical, setPChemical] = useState<string>('');
+  const [pMaintenance, setPMaintenance] = useState<string>('');
+  const [pLeadSource, setPLeadSource] = useState<string>('');
 
   const [contactId, setContactId] = useState<string>('');
   const [goal, setGoal] = useState<string>('coloração');
@@ -104,6 +114,14 @@ export function BeautyView() {
       .then(d => { if (d) { setColors(Array.isArray(d.colors) ? d.colors : []); setCuts(Array.isArray(d.cuts) ? d.cuts : []); } })
       .catch(() => {});
   }, []);
+
+  // Fluxo GUIADO da simulação (F25): a cliente escolhe a COR → decide o
+  // CORTE (manter o atual / escolher / sugestão do visagismo) → 1 clique em
+  // "Gerar novo visual". A imagem só é gerada quando as escolhas fecham
+  // (cada geração custa IA — nada de disparar por chip).
+  const [chosenColor, setChosenColor] = useState<string | null>(null);
+  const [cutMode, setCutMode] = useState<'keep' | 'choose' | 'suggest' | null>(null);
+  const [chosenCut, setChosenCut] = useState<string | null>(null);
 
   // Visagismo (F24): análise facial técnica (subtom + formato do rosto) →
   // recomendação de cor + corte. NUNCA pontua atratividade (RN-BS-03).
@@ -160,12 +178,26 @@ export function BeautyView() {
       const r = await apiFetch('/api/beauty/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone: newPhone.trim() }),
+        body: JSON.stringify({
+          name,
+          phone: newPhone.trim(),
+          email: newEmail.trim(),
+          profile: {
+            hairType: pHairType || undefined,
+            hairThickness: pThickness || undefined,
+            hairLength: pLength || undefined,
+            chemicalHistory: pChemical || undefined,
+            maintenancePref: pMaintenance || undefined,
+            leadSource: pLeadSource || undefined,
+          },
+        }),
       });
       if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'Falha ao cadastrar cliente.'); }
       const d = await r.json();
       await loadClients(d?.client?.id);
-      setNewName(''); setNewPhone(''); setShowNewClient(false);
+      setNewName(''); setNewPhone(''); setNewEmail('');
+      setPHairType(''); setPThickness(''); setPLength(''); setPChemical(''); setPMaintenance(''); setPLeadSource('');
+      setShowNewClient(false);
     } catch (e: any) { setError(e?.message || 'Erro ao cadastrar cliente.'); }
     finally { setBusy(false); }
   }
@@ -256,27 +288,35 @@ export function BeautyView() {
     if (d?.simulations) setSimulations(d.simulations);
   }
 
-  async function requestSimulation(type: 'color' | 'cut' | 'combined', paramName: string): Promise<void> {
+  // Gera UMA simulação com cor e/ou corte explícitos. A imagem real pode
+  // demorar (gpt-image/Gemini) — poll mais paciente (60 × 2s = 2min).
+  async function generateSimulation(params: { color?: string | null; cut?: string | null }): Promise<void> {
     if (!consultation) return;
+    const color = params.color || null;
+    const cut = params.cut || null;
+    if (!color && !cut) { setError('Escolha ao menos a cor ou o corte.'); return; }
     setBusy(true); setError(null);
     try {
-      const parameters = type === 'combined'
-        ? { color: paramName.split('/')[0], cut: paramName.split('/')[1] }
-        : { [type]: paramName };
+      const simulationType = color && cut ? 'combined' : color ? 'color' : 'cut';
+      const parameters: any = {};
+      if (color) parameters.color = color;
+      if (cut) parameters.cut = cut;
       const r = await apiFetch(`/api/beauty/consultations/${consultation.id}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ simulationType: type, parameters }),
+        body: JSON.stringify({ simulationType, parameters }),
       });
       if (!r.ok) throw new Error(await r.text());
-      // Poll status até SUCCEEDED
       const { simulationId } = await r.json();
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 500));
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
         const sr = await apiFetch(`/api/beauty/simulations/${simulationId}`);
         if (sr.ok) {
           const s = await sr.json();
-          if (s?.status === 'SUCCEEDED' || s?.status === 'FAILED_FINAL') break;
+          if (s?.status === 'SUCCEEDED' || s?.status === 'FAILED_FINAL') {
+            if (s?.status === 'FAILED_FINAL') setError(s?.errorMessageSafe || 'A geração da imagem falhou — tente de novo.');
+            break;
+          }
         }
       }
       await refreshConsultation();
@@ -425,13 +465,69 @@ export function BeautyView() {
                   disabled={busy}
                 />
               </div>
+              <div className="flex-1 min-w-[160px]">
+                <label className="text-xs text-slate-500">E-mail (opcional)</label>
+                <input
+                  className="w-full mt-1 p-2 rounded border bg-transparent"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="ex.: emily@email.com"
+                  disabled={busy}
+                />
+              </div>
+            </div>
+
+            {/* Ficha capilar (opcional) — ajuda a IA e a profissional. */}
+            <p className="text-xs text-slate-400 mt-3 mb-1">Ficha capilar (opcional — ajuda na recomendação)</p>
+            <div className="flex flex-wrap gap-2">
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pHairType} onChange={(e) => setPHairType(e.target.value)} disabled={busy}>
+                <option value="">Tipo de cabelo…</option>
+                <option value="liso">Liso</option><option value="ondulado">Ondulado</option>
+                <option value="cacheado">Cacheado</option><option value="crespo">Crespo</option>
+              </select>
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pThickness} onChange={(e) => setPThickness(e.target.value)} disabled={busy}>
+                <option value="">Espessura…</option>
+                <option value="fino">Fino</option><option value="medio">Médio</option><option value="grosso">Grosso</option>
+              </select>
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pLength} onChange={(e) => setPLength(e.target.value)} disabled={busy}>
+                <option value="">Comprimento…</option>
+                <option value="curto">Curto</option><option value="medio">Médio</option><option value="longo">Longo</option>
+              </select>
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pChemical} onChange={(e) => setPChemical(e.target.value)} disabled={busy}>
+                <option value="">Histórico químico…</option>
+                <option value="virgem">Virgem (sem química)</option><option value="coloracao">Coloração</option>
+                <option value="descoloracao">Descoloração</option><option value="progressiva">Progressiva</option>
+                <option value="henna">Henna</option>
+              </select>
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pMaintenance} onChange={(e) => setPMaintenance(e.target.value)} disabled={busy}>
+                <option value="">Manutenção…</option>
+                <option value="baixa">Prefere baixa manutenção</option>
+                <option value="media">Manutenção média</option>
+                <option value="alta">Topa alta manutenção</option>
+              </select>
+              <select className="p-2 rounded border bg-transparent text-sm" style={{ borderColor: 'var(--color-border)' }}
+                value={pLeadSource} onChange={(e) => setPLeadSource(e.target.value)} disabled={busy}>
+                <option value="">Como conheceu o salão…</option>
+                <option value="indicacao">Indicação</option><option value="instagram">Instagram</option>
+                <option value="passou_na_porta">Passou na porta</option><option value="google">Google</option>
+                <option value="whatsapp">WhatsApp</option><option value="outro">Outro</option>
+              </select>
+            </div>
+
+            <div className="mt-3">
               <button
                 onClick={createClient}
                 disabled={busy || !newName.trim()}
-                className="px-3 py-2 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2"
+                className="px-4 py-2 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <User className="w-4 h-4" />}
-                Cadastrar
+                Cadastrar cliente
               </button>
             </div>
           </div>
@@ -536,22 +632,25 @@ export function BeautyView() {
         </section>
       )}
 
-      {/* PASSO 3 — Simular visual (cores + cortes do vocabulário do backend) */}
+      {/* PASSO 3 — Novo visual GUIADO: cor → corte → gerar (F25). A imagem só
+          é gerada quando as escolhas fecham (cada geração custa IA). */}
       {canSimulate && (
         <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
-          <h2 className="font-semibold mb-3 flex items-center gap-2"><Palette className="w-4 h-4" /> 3. Simular visual</h2>
-          <p className="text-xs text-slate-500 mb-2">Escolha uma <b>cor</b> ou um <b>corte</b>. A IA gera o resultado a partir da foto.</p>
+          <h2 className="font-semibold mb-3 flex items-center gap-2"><Palette className="w-4 h-4" /> 3. Montar o novo visual</h2>
 
+          {/* 3a — Cor */}
           <div className="mb-4">
-            <p className="text-xs font-medium text-pink-400 mb-1.5">Cores</p>
-            <div className="flex flex-wrap gap-2">
+            <p className="text-xs font-medium text-pink-400 mb-1.5">
+              1º) Escolha a cor {chosenColor && <span className="text-slate-400">— selecionada: <b>{vocabLabel(chosenColor)}</b></span>}
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
               {colors.map((c) => (
                 <button
                   key={c}
-                  onClick={() => requestSimulation('color', c)}
+                  onClick={() => setChosenColor(chosenColor === c ? null : c)}
                   disabled={busy}
-                  className="px-3 py-1.5 rounded-full border text-sm hover:bg-pink-500/10 disabled:opacity-50"
-                  style={{ borderColor: 'var(--color-border)' }}
+                  className={`px-3 py-1.5 rounded-full border text-sm disabled:opacity-50 ${chosenColor === c ? 'bg-pink-500 text-white border-pink-500' : 'hover:bg-pink-500/10'}`}
+                  style={chosenColor === c ? {} : { borderColor: 'var(--color-border)' }}
                 >
                   {vocabLabel(c)}
                 </button>
@@ -560,23 +659,82 @@ export function BeautyView() {
             </div>
           </div>
 
-          <div>
-            <p className="text-xs font-medium text-blue-400 mb-1.5">Cortes</p>
-            <div className="flex flex-wrap gap-2">
-              {cuts.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => requestSimulation('cut', c)}
-                  disabled={busy}
-                  className="px-3 py-1.5 rounded-full border text-sm hover:bg-blue-500/10 disabled:opacity-50"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  {vocabLabel(c)}
+          {/* 3b — Decisão do corte */}
+          {chosenColor && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-blue-400 mb-1.5">2º) E o corte?</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <button onClick={() => { setCutMode('keep'); setChosenCut(null); }} disabled={busy}
+                  className={`px-3 py-1.5 rounded border text-sm ${cutMode === 'keep' ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                  style={cutMode === 'keep' ? {} : { borderColor: 'var(--color-border)' }}>
+                  Manter o corte atual
                 </button>
-              ))}
-              {cuts.length === 0 && <span className="text-xs text-slate-500">carregando cortes…</span>}
+                <button onClick={() => { setCutMode('choose'); setChosenCut(null); }} disabled={busy}
+                  className={`px-3 py-1.5 rounded border text-sm ${cutMode === 'choose' ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                  style={cutMode === 'choose' ? {} : { borderColor: 'var(--color-border)' }}>
+                  Escolher um corte
+                </button>
+                <button onClick={async () => { setCutMode('suggest'); setChosenCut(null); if (!visagism) await runVisagism(); }} disabled={busy}
+                  className={`px-3 py-1.5 rounded border text-sm ${cutMode === 'suggest' ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                  style={cutMode === 'suggest' ? {} : { borderColor: 'var(--color-border)' }}>
+                  ✨ Sugestão da IA (visagismo)
+                </button>
+              </div>
+
+              {cutMode === 'choose' && (
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+                  {cuts.map((c) => (
+                    <button key={c} onClick={() => setChosenCut(chosenCut === c ? null : c)} disabled={busy}
+                      className={`px-3 py-1.5 rounded-full border text-sm disabled:opacity-50 ${chosenCut === c ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                      style={chosenCut === c ? {} : { borderColor: 'var(--color-border)' }}>
+                      {vocabLabel(c)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {cutMode === 'suggest' && (
+                <div className="rounded border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
+                  {!visagism && <p className="text-xs text-slate-500">Analisando os traços do rosto e o tom de pele…</p>}
+                  {visagism && (
+                    <>
+                      <p className="text-xs text-slate-400 italic mb-2">{visagism.narrative}</p>
+                      {Array.isArray(visagism.recommendedCuts) && visagism.recommendedCuts.length > 0 ? (
+                        <>
+                          <p className="text-xs font-medium text-blue-400 mb-1">Cortes sugeridos pra combinar com "{vocabLabel(chosenColor)}" — escolha um:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {visagism.recommendedCuts.map((c: string) => (
+                              <button key={c} onClick={() => setChosenCut(chosenCut === c ? null : c)} disabled={busy}
+                                className={`px-3 py-1.5 rounded-full border text-sm ${chosenCut === c ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                                style={chosenCut === c ? {} : { borderColor: 'var(--color-border)' }}>
+                                {vocabLabel(c)}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Sem sugestão automática (formato do rosto não determinado). Informe o formato do rosto na seção Visagismo abaixo, ou escolha o corte manualmente.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-          </div>
+          )}
+
+          {/* 3c — Gerar */}
+          {chosenColor && cutMode && (cutMode === 'keep' || chosenCut) && (
+            <button
+              onClick={() => generateSimulation({ color: chosenColor, cut: cutMode === 'keep' ? null : chosenCut })}
+              disabled={busy}
+              className="px-5 py-2.5 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2 font-medium"
+            >
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+              {busy ? 'Gerando o novo visual… (pode levar até 2 min)' : `Gerar novo visual — ${vocabLabel(chosenColor)}${chosenCut ? ' + ' + vocabLabel(chosenCut) : ' (corte atual)'}`}
+            </button>
+          )}
         </section>
       )}
 
@@ -635,11 +793,12 @@ export function BeautyView() {
               <p className="text-sm text-slate-400 italic mb-2">{visagism.narrative}</p>
               {Array.isArray(visagism.recommendedColors) && visagism.recommendedColors.length > 0 && (
                 <div className="mb-2">
-                  <p className="text-xs font-medium text-pink-400 mb-1">Cores que harmonizam (clique pra simular)</p>
+                  <p className="text-xs font-medium text-pink-400 mb-1">Cores que harmonizam (clique pra usar no novo visual)</p>
                   <div className="flex flex-wrap gap-2">
                     {visagism.recommendedColors.map((c: string) => (
-                      <button key={c} onClick={() => requestSimulation('color', c)} disabled={busy}
-                        className="px-3 py-1 rounded-full border text-xs hover:bg-pink-500/10 disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+                      <button key={c} onClick={() => setChosenColor(c)} disabled={busy}
+                        className={`px-3 py-1 rounded-full border text-xs disabled:opacity-50 ${chosenColor === c ? 'bg-pink-500 text-white border-pink-500' : 'hover:bg-pink-500/10'}`}
+                        style={chosenColor === c ? {} : { borderColor: 'var(--color-border)' }}>
                         {vocabLabel(c)}
                       </button>
                     ))}
@@ -648,11 +807,12 @@ export function BeautyView() {
               )}
               {Array.isArray(visagism.recommendedCuts) && visagism.recommendedCuts.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium text-blue-400 mb-1">Cortes que equilibram (clique pra simular)</p>
+                  <p className="text-xs font-medium text-blue-400 mb-1">Cortes que equilibram (clique pra usar no novo visual)</p>
                   <div className="flex flex-wrap gap-2">
                     {visagism.recommendedCuts.map((c: string) => (
-                      <button key={c} onClick={() => requestSimulation('cut', c)} disabled={busy}
-                        className="px-3 py-1 rounded-full border text-xs hover:bg-blue-500/10 disabled:opacity-50" style={{ borderColor: 'var(--color-border)' }}>
+                      <button key={c} onClick={() => { setCutMode('choose'); setChosenCut(c); }} disabled={busy}
+                        className={`px-3 py-1 rounded-full border text-xs disabled:opacity-50 ${chosenCut === c ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
+                        style={chosenCut === c ? {} : { borderColor: 'var(--color-border)' }}>
                         {vocabLabel(c)}
                       </button>
                     ))}
@@ -680,14 +840,30 @@ export function BeautyView() {
                 )}
                 <div className="p-2 space-y-1">
                   <div className="text-xs text-slate-500">
-                    {s.parameters?.color && <span>Cor: {s.parameters.color}</span>}
+                    {s.parameters?.color && <span>Cor: {vocabLabel(s.parameters.color)}</span>}
                     {s.parameters?.color && s.parameters?.cut && ' · '}
-                    {s.parameters?.cut && <span>Corte: {s.parameters.cut}</span>}
+                    {s.parameters?.cut && <span>Corte: {vocabLabel(s.parameters.cut)}</span>}
                   </div>
                   {s.status === 'SUCCEEDED' && canSelect && (
                     <button onClick={() => selectSimulation(s.id)} disabled={busy} className="w-full px-2 py-1 rounded text-xs bg-pink-500/20 text-pink-500 hover:bg-pink-500/30 flex items-center justify-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Quero esse
                     </button>
+                  )}
+                  {/* F25 — trocar SÓ a cor deste visual (mesmo corte), usando as
+                      cores que o visagismo indicou. Cada clique gera de novo. */}
+                  {s.status === 'SUCCEEDED' && visagism && Array.isArray(visagism.recommendedColors) && visagism.recommendedColors.length > 0 && (
+                    <div className="pt-1">
+                      <p className="text-[10px] text-slate-500 mb-1">Trocar a cor deste visual:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {visagism.recommendedColors.filter((c: string) => c !== s.parameters?.color).slice(0, 6).map((c: string) => (
+                          <button key={c} onClick={() => generateSimulation({ color: c, cut: s.parameters?.cut || null })} disabled={busy}
+                            className="px-2 py-0.5 rounded-full border text-[10px] hover:bg-pink-500/10 disabled:opacity-50"
+                            style={{ borderColor: 'var(--color-border)' }}>
+                            {vocabLabel(c)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>

@@ -2363,7 +2363,7 @@ function ReplenishmentTab() {
           {stores.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
-        <span className="text-xs text-zinc-500">{shown.length} sugestão(ões) — loja com o produto na grade, porém zerada num tamanho que outra filial tem sobrando (≥2).</span>
+        <span className="text-xs text-zinc-500">{shown.length} sugestão(ões) — loja com o produto na grade, porém zerada num tamanho que outra filial tem sobrando (≥2). <strong>Transferível</strong> já preserva o mínimo da loja que doa.</span>
       </div>
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
@@ -2376,9 +2376,11 @@ function ReplenishmentTab() {
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Produto</th>
                 <th className="px-3 py-2 text-left font-medium">Variação</th>
+                <th className="px-3 py-2 text-left font-medium">Un.</th>
                 <th className="px-3 py-2 text-left font-medium">Falta em</th>
                 <th className="px-3 py-2 text-left font-medium">Sobra em</th>
-                <th className="px-3 py-2 text-right font-medium">Qtd disponível</th>
+                <th className="px-3 py-2 text-right font-medium" title="Saldo da loja que tem sobra">Disponível</th>
+                <th className="px-3 py-2 text-right font-medium" title="Quanto pode sair sem furar o mínimo da loja que doa">Transferível</th>
                 <th className="px-3 py-2 text-right font-medium">Distância</th>
                 <th className="px-3 py-2 text-right font-medium">Ação</th>
               </tr>
@@ -2386,11 +2388,28 @@ function ReplenishmentTab() {
             <tbody>
               {shown.map((r, i) => (
                 <tr key={i} className="border-t border-zinc-800/70">
-                  <td className="px-3 py-2 text-zinc-200">{r.product_name}</td>
+                  <td className="px-3 py-2 text-zinc-200">
+                    <div>{r.product_name}</div>
+                    {(r.product_external_ref || r.variant_ean) && (
+                      <div className="text-[11px] text-zinc-500">
+                        {r.product_external_ref ? <>ref {r.product_external_ref}</> : null}
+                        {r.product_external_ref && r.variant_ean ? ' · ' : null}
+                        {r.variant_ean ? <>EAN {r.variant_ean}</> : null}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-zinc-300">{[r.size, r.color].filter(Boolean).join(' / ') || r.variant_name}</td>
-                  <td className="px-3 py-2 text-rose-300">{r.needy_store}</td>
+                  <td className="px-3 py-2 text-zinc-400">{r.product_uom || '—'}</td>
+                  <td className="px-3 py-2 text-rose-300">
+                    <div>{r.needy_store}</div>
+                    <div className="text-[11px] text-zinc-500">
+                      saldo {r.needy_current_qty ?? 0}
+                      {r.shortage_qty != null ? <> · falta <span className="text-orange-300">{r.shortage_qty}</span></> : <> · <span title="Defina o estoque-alvo desta peça">meta não configurada</span></>}
+                    </div>
+                  </td>
                   <td className="px-3 py-2 text-emerald-300">{r.donor_store}</td>
                   <td className="px-3 py-2 text-right text-zinc-100">{r.donor_qty}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-emerald-300">{r.transferable_qty != null ? r.transferable_qty : r.donor_qty}</td>
                   <td className="px-3 py-2 text-right text-zinc-400">{r.distance_km != null ? `${r.distance_km} km` : '—'}</td>
                   <td className="px-3 py-2 text-right">
                     <button onClick={() => setXfer(r)} disabled={!r.donor_store_id || !r.needy_store_id}
@@ -2413,7 +2432,10 @@ function ReplenishmentTab() {
 // para a que está com a grade furada. Cria a transferência já EM TRÂNSITO (baixa
 // na origem); a entrada no destino acontece na aba Transferências, na recepção.
 function TransferModal({ row, onClose, onDone }: { row: any; onClose: () => void; onDone: () => void }) {
-  const max = Math.max(1, Number(row.donor_qty) || 1);
+  // Teto = transferível (preserva o mínimo da doadora, RN nº 4). Sem política de
+  // doadora, cai no saldo disponível.
+  const cap = row.transferable_qty != null ? Number(row.transferable_qty) : Number(row.donor_qty);
+  const max = Math.max(1, cap || 1);
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const variant = [row.size, row.color].filter(Boolean).join(' / ') || row.variant_name;
@@ -2567,31 +2589,40 @@ function PdvCustomersTab() {
   const PAGE = 100;
   const [q, setQ] = useState('');
   const [bMonth, setBMonth] = useState('');
+  const [storeFilter, setStoreFilter] = useState('');
+  const [stores, setStores] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const load = (offset: number, append: boolean) => {
     append ? setLoadingMore(true) : setLoading(true);
-    apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&limit=${PAGE}&offset=${offset}`)
+    apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&store=${encodeURIComponent(storeFilter)}&limit=${PAGE}&offset=${offset}`)
       .then(r => r.json())
       .then(d => {
         if (d && !d.error) {
           setTotal(Number(d.total) || 0);
           setCustomers(prev => append ? [...prev, ...(d.customers || [])] : (d.customers || []));
+          if (Array.isArray(d.stores)) setStores(d.stores);
         }
       })
       .catch(() => toast.error('Falha ao carregar clientes.'))
       .finally(() => { setLoading(false); setLoadingMore(false); });
   };
-  useEffect(() => { const t = setTimeout(() => load(0, false), 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, bMonth]);
+  useEffect(() => { const t = setTimeout(() => load(0, false), 300); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, bMonth, storeFilter]);
   const data = { total, customers };
   const MESES = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
   return (
     <div>
-      <p className="text-[12px] text-zinc-500 mb-3">Base de clientes do PDV (nome, CPF, celular, e-mail, aniversário) — separada dos contatos do WhatsApp, para campanhas e relacionamento. Requer o opt-in "Importar clientes do PDV" em Integrações → Alterdata.</p>
+      <p className="text-[12px] text-zinc-500 mb-3">Base de clientes do PDV (nome, CPF, celular, e-mail, aniversário) — separada dos contatos do WhatsApp, para campanhas e relacionamento. Requer o opt-in "Importar clientes do PDV" em Integrações → Alterdata. A <strong>Loja</strong> é a filial de cadastro/origem do cliente.</p>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nome, CPF ou celular…" className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
+        {stores.length > 0 && (
+          <select value={storeFilter} onChange={e => setStoreFilter(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-2 text-sm text-zinc-100" title="Filtrar por loja/filial">
+            <option value="">Todas as lojas</option>
+            {stores.map((s: any) => <option key={s.id} value={s.code}>{s.name}</option>)}
+          </select>
+        )}
         <select value={bMonth} onChange={e => setBMonth(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-2 text-sm text-zinc-100" title="Aniversariantes do mês">
           {MESES.map((m, i) => <option key={i} value={i === 0 ? '' : String(i).padStart(2, '0')}>{i === 0 ? 'Aniversário: todos os meses' : `Aniversário: ${m}`}</option>)}
         </select>
@@ -2600,12 +2631,13 @@ function PdvCustomersTab() {
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
       ) : customers.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum cliente do PDV {q || bMonth ? 'para este filtro' : 'importado ainda'}. Ligue "Importar clientes do PDV" em Integrações → Alterdata e sincronize.</div>
+        <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum cliente do PDV {q || bMonth || storeFilter ? 'para este filtro' : 'importado ainda'}. Ligue "Importar clientes do PDV" em Integrações → Alterdata e sincronize.</div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/60 text-zinc-400"><tr>
               <th className="px-3 py-2 text-left font-medium">Nome</th>
+              <th className="px-3 py-2 text-left font-medium">Loja</th>
               <th className="px-3 py-2 text-left font-medium">Celular</th>
               <th className="px-3 py-2 text-left font-medium">E-mail</th>
               <th className="px-3 py-2 text-left font-medium">Aniversário</th>
@@ -2615,6 +2647,7 @@ function PdvCustomersTab() {
               {data.customers.map((c: any) => (
                 <tr key={c.codigo_n} className="border-t border-zinc-800/70">
                   <td className="px-3 py-2 text-zinc-200">{c.nome || '—'}</td>
+                  <td className="px-3 py-2 text-zinc-300">{c.store_name || (c.filial ? <span className="text-zinc-500" title="Filial não mapeada a uma loja cadastrada">Filial {c.filial}</span> : '—')}</td>
                   <td className="px-3 py-2 text-zinc-300">{c.celular || '—'}</td>
                   <td className="px-3 py-2 text-zinc-400">{c.email || '—'}</td>
                   <td className="px-3 py-2 text-zinc-300">{c.nascimento ? c.nascimento.slice(5).split('-').reverse().join('/') : '—'}</td>
@@ -4597,7 +4630,7 @@ function NegativeStockTab() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque.</p>
+        <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque. <span className="text-zinc-500">Busque por nome, referência ou código de barras.</span></p>
         <button onClick={() => load(0, false)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
       </div>
       {(total > 0 || filtered) && (
@@ -4623,14 +4656,37 @@ function NegativeStockTab() {
               <thead className="bg-zinc-900/60 text-zinc-400"><tr>
                 <th className="px-3 py-2 text-left font-medium">Loja</th>
                 <th className="px-3 py-2 text-left font-medium">Produto</th>
+                <th className="px-3 py-2 text-left font-medium">Cor / Tam.</th>
+                <th className="px-3 py-2 text-left font-medium">Un.</th>
                 <th className="px-3 py-2 text-right font-medium">Saldo</th>
+                <th className="px-3 py-2 text-right font-medium" title="Quantidade só para sair do negativo (até zero)">Até zero</th>
+                <th className="px-3 py-2 text-right font-medium" title="Quantidade para chegar na meta de estoque (exige meta configurada)">Falta p/ meta</th>
+                <th className="px-3 py-2 text-left font-medium">Atualização</th>
               </tr></thead>
               <tbody>
                 {items.map((it: any) => (
                   <tr key={it.id} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-zinc-200">{it.store_name}</td>
-                    <td className="px-3 py-2 text-zinc-300">{it.product_name || it.product_service_id}</td>
+                    <td className="px-3 py-2 text-zinc-200 whitespace-nowrap">{it.store_name}{it.store_code ? <span className="text-zinc-500 text-[11px]"> · {it.store_code}</span> : null}</td>
+                    <td className="px-3 py-2 text-zinc-300">
+                      <div>{it.product_name || it.product_service_id}</div>
+                      {(it.product_external_ref || it.variant_ean) && (
+                        <div className="text-[11px] text-zinc-500">
+                          {it.product_external_ref ? <>ref {it.product_external_ref}</> : null}
+                          {it.product_external_ref && it.variant_ean ? ' · ' : null}
+                          {it.variant_ean ? <>EAN {it.variant_ean}</> : null}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{[it.variant_color, it.variant_size].filter(Boolean).join(' / ') || '—'}</td>
+                    <td className="px-3 py-2 text-zinc-400">{it.product_uom || '—'}</td>
                     <td className="px-3 py-2 text-right font-semibold text-red-300">{Number(it.quantity_available)}</td>
+                    <td className="px-3 py-2 text-right text-amber-300">{it.qty_to_zero != null ? it.qty_to_zero : '—'}</td>
+                    <td className="px-3 py-2 text-right">
+                      {it.shortage_qty != null
+                        ? <span className="font-semibold text-orange-300">{it.shortage_qty}</span>
+                        : <span className="text-[11px] text-zinc-500" title="Defina o estoque-alvo desta peça para calcular a falta">Meta não configurada</span>}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-500 text-[12px] whitespace-nowrap">{it.source_synced_at ? String(it.source_synced_at).slice(0, 10).split('-').reverse().join('/') : '—'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -495,7 +495,12 @@ router.post("/consultations/:id/select", (req: AuthRequest, res): any => {
   if (!simulationId) return res.status(400).json({ error: "simulationId obrigatório." });
   const cons = BeautyVisualConsultationService.getConsultation(orgId, req.params.id);
   if (!cons) return res.status(404).json({ error: "Consulta não encontrada." });
-  if (cons.status !== "ready") return res.status(400).json({ error: `Consulta em '${cons.status}' — só 'ready' pode selecionar.` });
+  // F27: re-seleção permitida — a cliente escolhe o visual A, gera mais
+  // opções e muda pro B quantas vezes quiser ANTES de agendar. Só
+  // 'scheduled' (já virou agendamento) trava a troca.
+  if (cons.status !== "ready" && cons.status !== "selected") {
+    return res.status(400).json({ error: `Consulta em '${cons.status}' — não é possível selecionar.` });
+  }
   const sim = BeautyHairSimulationService.getSimulation(orgId, String(simulationId));
   if (!sim || sim.consultationId !== cons.id) return res.status(404).json({ error: "Simulação não pertence à consulta." });
   if (sim.status !== "SUCCEEDED") return res.status(400).json({ error: `Simulação em '${sim.status}' — só 'SUCCEEDED' pode ser selecionada.` });

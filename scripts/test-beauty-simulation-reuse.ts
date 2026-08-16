@@ -195,7 +195,62 @@ async function main() {
   check("histórico da Bia só tem os visuais da Bia",
     BeautyHairSimulationService.listForContact(orgA, biaId).every((s) => s.id !== simCut && s.id !== simRegen && s.id !== sim1));
 
-  // ===== 10. Fiação: rota + BeautyView consomem o acervo =====
+  // ===== 10. F27 — stub NUNCA vale como acervo pra provider REAL =====
+  // simRegen foi gerado pelo stub. Com OpenAI ativo, o mesmo pedido NÃO
+  // pode ser satisfeito pelo quadrado de demonstração — regenera de verdade.
+  delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER;
+  process.env.OPENAI_API_KEY = "sk-test-quarentena";
+  const reqReal = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+    simulationType: "color", parameters: { color: "loiro" },
+  });
+  check("provider REAL ativo ignora acervo do stub (reused=false)",
+    reqReal.ok && (reqReal as any).reused === false && (reqReal as any).providerKey === "openai_hair_v1");
+  check("galeria esconde saídas do stub quando provider REAL ativo",
+    BeautyHairSimulationService.listForContact(orgA, anaId).every((s) => s.providerKey !== "stub_v1"));
+  delete process.env.OPENAI_API_KEY;
+  process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub";
+  check("com stub ativo (CI/demo) o acervo volta a valer (reused=true)",
+    (() => { const r = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, { simulationType: "color", parameters: { color: "loiro" } }); return r.ok && (r as any).reused === true; })());
+
+  // ===== 11. F27 — 'selected' ainda simula; 'scheduled' trava =====
+  // "Quero esse" não pode congelar a exploração (o bug do 400 em produção):
+  // a cliente escolhe o visual A e AINDA troca a cor / gera o B.
+  db.prepare(`UPDATE beauty_visual_consultations SET status = 'selected', selected_simulation_id = ? WHERE id = ? AND organization_id = ?`)
+    .run(simRegen, cons2.id, orgA);
+  const reqSelected = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+    simulationType: "color", parameters: { color: "ruivo" },
+  });
+  check("consulta 'selected' AINDA simula (troca de cor pós-escolha — F27)",
+    reqSelected.ok === true);
+  db.prepare(`UPDATE beauty_visual_consultations SET status = 'scheduled' WHERE id = ? AND organization_id = ?`)
+    .run(cons2.id, orgA);
+  const reqScheduled = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+    simulationType: "color", parameters: { color: "mel" },
+  });
+  check("consulta 'scheduled' (já agendou) NÃO simula mais",
+    reqScheduled.ok === false && /agendamento/.test((reqScheduled as any).error || ""));
+  db.prepare(`UPDATE beauty_visual_consultations SET status = 'selected' WHERE id = ? AND organization_id = ?`)
+    .run(cons2.id, orgA);
+
+  // ===== 12. F27 — stub honesto: produção sem chave RECUSA com instrução =====
+  process.env.NODE_ENV = "production";
+  delete process.env.BEAUTY_HAIR_SIMULATION_PROVIDER; // stub vira último recurso
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.GOOGLE_AI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  const reqProd = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+    simulationType: "color", parameters: { color: "caramelo" },
+  });
+  check("produção sem IA configurada → recusa honesta citando as chaves",
+    reqProd.ok === false && /OPENAI_API_KEY/.test((reqProd as any).error || ""));
+  process.env.NODE_ENV = "test";
+  process.env.BEAUTY_HAIR_SIMULATION_PROVIDER = "stub"; // opt-in explícito volta a valer
+  const reqOptIn = BeautyHairSimulationService.requestSimulation(orgA, cons2.id, {
+    simulationType: "color", parameters: { color: "caramelo" },
+  });
+  check("stub via opt-in explícito segue funcionando (CI/demo)", reqOptIn.ok === true);
+
+  // ===== 13. Fiação: rota + BeautyView consomem o acervo =====
   const routesSrc = fs.readFileSync(path.join(process.cwd(), "src/server/routes/beauty.ts"), "utf8");
   check("rota GET /clients/:contactId/simulations existe",
     routesSrc.includes(`"/clients/:contactId/simulations"`) && routesSrc.includes("listForContact"));

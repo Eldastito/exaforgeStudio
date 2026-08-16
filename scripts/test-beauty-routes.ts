@@ -272,11 +272,13 @@ async function main() {
     check("consulta grava selected_simulation_id", r.json?.selectedSimulationId === simulationId);
     check("selected_at preenchido", !!r.json?.selectedAt);
 
-    // Não pode selecionar de novo (consulta não está mais em 'ready')
+    // F27: re-seleção PERMITIDA — a cliente troca de visual quantas vezes
+    // quiser antes de agendar ('scheduled' é o que trava).
     r = await call("POST", `/api/beauty/consultations/${consultationId}/select`, {
       orgId: orgA, body: { simulationId },
     });
-    check("POST /select 2ª vez (consulta 'selected') → 400", r.status === 400);
+    check("POST /select 2ª vez (re-seleção antes de agendar) → 200 (F27)",
+      r.status === 200 && r.json?.status === "selected");
 
     // ===== 8. Multi-tenant duro =====
     r = await call("GET", `/api/beauty/consultations/${consultationId}`, { orgId: orgB });

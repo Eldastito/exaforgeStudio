@@ -176,11 +176,21 @@ async function main() {
   check("BeautyTvPanel exibe pelo nome mascarado (não o clientName cru)",
     tvSrc.includes("tvDisplayName(a.clientName)") && !/>\{a\.clientName\}</.test(tvSrc));
   const recepSrc = fs.readFileSync(path.join(process.cwd(), "src/features/BeautyReceptionPanel.tsx"), "utf8");
-  check("Recepção tem botão 'Modo TV' que abre o BeautyTvPanel",
-    recepSrc.includes("Modo TV") && recepSrc.includes("BeautyTvPanel") && recepSrc.includes("setTvMode"));
+  // F36 — "Abrir Modo TV" abre uma JANELA SEPARADA (não sequestra a tela da
+  // recepção); a rota autônoma é renderizada pelo App via ?beautyTv=1.
+  check("Recepção abre o Modo TV em janela separada (window.open ?beautyTv=1)",
+    recepSrc.includes("window.open") && recepSrc.includes("beautyTv=1") && recepSrc.includes("Modo TV"));
+  check("Recepção NÃO renderiza mais o BeautyTvPanel inline (não hijack da tela)",
+    !recepSrc.includes("BeautyTvPanel"));
+  const appSrc = fs.readFileSync(path.join(process.cwd(), "src/App.tsx"), "utf8");
+  check("App renderiza o BeautyTvPanel como rota autônoma (?beautyTv=1)",
+    appSrc.includes("BeautyTvPanel") && appSrc.includes("beautyTv") && appSrc.includes("get('beautyTv')"));
+  // F36 — a TV chama o próximo: destaque + sinal quando muda.
+  check("TV chama o próximo (nextInLine + 'Chamando o próximo' + flash/bipe)",
+    tvSrc.includes("nextInLine") && tvSrc.includes("Chamando o próximo") && tvSrc.includes("setFlash") && tvSrc.includes("AudioContext"));
 
   // ===== Report =====
-  console.log("\n=== TEST beauty-reception (ADR-169 F34+F35) ===\n");
+  console.log("\n=== TEST beauty-reception (ADR-169 F34+F35+F36) ===\n");
   for (const x of results) console.log(`${x.ok ? "✅" : "❌"} ${x.name}${x.note ? ` — ${x.note}` : ""}`);
   console.log(`\n${results.length - failures}/${results.length} checks passed`);
   process.exit(failures > 0 ? 1 : 0);

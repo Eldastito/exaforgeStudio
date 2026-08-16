@@ -16,6 +16,7 @@ import { ExecutiveView } from '@/src/features/ExecutiveView';
 import { RevenueIntelligenceView } from '@/src/features/rie/RevenueIntelligenceView';
 import { StudioView } from '@/src/features/StudioView';
 import { BeautyView } from '@/src/features/BeautyView';
+import BeautyTvPanel from '@/src/features/BeautyTvPanel';
 import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { RadarB2BView } from '@/src/features/RadarB2BView';
@@ -274,6 +275,13 @@ export default function App() {
 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">Carregando...</div>;
   if (!user) return <LoginView />;
+  // F36 — JANELA DEDICADA do Painel de TV (monitor extra do salão): mesma
+  // sessão logada, SEM o shell (sidebar/main) — assim a recepção NÃO perde a
+  // tela dela. Aberta via window.open('?beautyTv=1') e arrastada pro 2º
+  // monitor. `?beautyTv=1` não é limpo pelo app (só ?solo/?blueprint são).
+  if ((() => { try { return new URLSearchParams(window.location.search).get('beautyTv') === '1'; } catch { return false; } })()) {
+    return <BeautyTvPanel onClose={() => { try { window.close(); } catch { /* noop */ } }} />;
+  }
   if (user.role === 'owner' && user.onboarding_status === 'pending') return <OnboardingView />;
 
   return (

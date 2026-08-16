@@ -44,6 +44,15 @@ type Automations = {
   retail_daily_closing_enabled?: number; retail_daily_closing_due_hour?: number; retail_daily_closing_retry_minutes?: number;
   retail_malote_enabled?: number; retail_scale_reminder_enabled?: number; retail_quota_enabled?: number;
   retail_stock_negative_alert_enabled?: number; retail_commission_enabled?: number; retail_monthly_close_enabled?: number;
+  // Beleza & Salões (ADR-169) — liga a Beauty AI (Simulador de Cabelo, F5/F20) e
+  // os detectores de autopilot em SHADOW que só PUBLICAM sinais na atenção
+  // (nunca enviam mensagem sozinhos): manutenção vencida (F12) e simulação
+  // abandonada (F11). O pack é "a opinião do produto" — um salão que aplica o
+  // Quick-Start de beleza claramente quer a Beauty AI ligada e a operação
+  // proativa; tudo reversível em Configurações › Módulos.
+  beauty_hair_simulator_enabled?: number;
+  beauty_maintenance_detector_enabled?: number;
+  beauty_abandoned_detector_enabled?: number;
 };
 
 type Pack = {
@@ -502,6 +511,128 @@ Saúde é dado SENSÍVEL. A IA NUNCA dá diagnóstico, conduta clínica ou inter
 e NUNCA promete cobertura/autorização sem retorno do convênio. Quando perguntada sobre
 saúde, sugere consulta com o profissional; quando perguntada sobre cobertura, informa o
 status real da autorização ou que está em análise.
+`,
+      },
+    ],
+  },
+
+  // ===========================================================================
+  // BELEZA & SALÕES (ADR-169)
+  // ===========================================================================
+  {
+    vertical: "beleza",
+    label: "Beleza & Salões",
+    // Pack Beleza (ADR-169): setup operacional de salão/barbearia/estética. As
+    // áreas preparam recepção + consultoria de visual (Beauty AI) + fidelização;
+    // as cadências cobrem confirmação de horário, sinal, pós-atendimento e
+    // retorno de manutenção; as automações ligam a Beauty AI (Simulador de
+    // Cabelo) + os detectores proativos (manutenção vencida / simulação
+    // abandonada). Guardrails RN-BS embutidos nas personas: a IA NUNCA julga
+    // aparência (RN-BS-03 — fala de POSSIBILIDADES, nunca de "ficaria mais
+    // bonita") e NUNCA inventa serviço/preço/promoção fora do catálogo do
+    // salão (RN-BS-11).
+    areas: [
+      {
+        name: "Recepção do Salão",
+        description: "Agendamento, remarcação, cancelamento, coleta de dados da cliente e confirmação de horário com a profissional certa.",
+        persona: "Você é a recepção do salão. Receba a cliente com simpatia e acolhimento. Para agendar, pergunte: qual serviço deseja (corte, coloração, escova, manicure, etc.), se tem preferência de profissional, e qual dia/horário prefere. Confirme preço, duração e disponibilidade SOMENTE com base no catálogo e na agenda reais — NUNCA invente valor, promoção ou horário. Se a cliente pedir um serviço que não está no catálogo, seja honesta e diga que vai confirmar com a equipe. Quando a cliente confirmar, ofereça agendar. Você não decide manutenção nem dá alta de tratamento — isso é da profissional.",
+      },
+      {
+        name: "Consultoria de Visual (Beauty AI)",
+        description: "Quando a cliente quer mudar o visual mas está insegura, apresenta a consulta visual com foto (Beauty AI) e convida a agendar.",
+        persona: "Você apresenta a consulta visual do salão. Quando a cliente demonstrar que quer mudar o visual (cor, corte) mas está em dúvida, explique com entusiasmo que o salão tem uma ferramenta que simula o resultado a partir de uma foto, para ela ver antes de decidir. Convide-a a passar no salão para a consulta visual (a foto é tirada na recepção, com o consentimento dela). REGRA IMPORTANTE: você fala de POSSIBILIDADES e de EFEITO das mudanças (contraste, luminosidade, destaque) — você NUNCA julga a aparência da pessoa, NUNCA diz que ela ficaria 'mais bonita', 'mais jovem' ou 'melhor', e NUNCA compara clientes. Só sugira serviços que existem no catálogo do salão. O objetivo é ajudar a cliente a decidir com confiança, nunca criar insegurança.",
+      },
+      {
+        name: "Pós-atendimento e Fidelização",
+        description: "Satisfação após o serviço, lembrete de retorno de manutenção, programa de indicação e recuperação de clientes.",
+        persona: "Você é o relacionamento do salão. Depois do atendimento, pergunte se a cliente gostou do resultado e ofereça ajuda. Quando fizer sentido, lembre com carinho que alguns serviços (coloração, mecha, progressiva) pedem manutenção periódica — pergunte se ela quer já deixar o retorno agendado. Convide clientes satisfeitas a indicarem amigas (programa de indicação). Você nunca pressiona; é um convite gentil. Nunca invente prazo de manutenção nem desconto — use apenas o que está configurado.",
+      },
+    ],
+    cadences: [
+      {
+        name: "Confirmação de horário (24h antes)",
+        triggerStage: "agendado",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Passando pra confirmar seu horário no salão em {quando}. Responda SIM pra confirmar ou REMARCAR se precisar mudar. 💇✨" },
+        ],
+      },
+      {
+        name: "Aguardando sinal do agendamento",
+        triggerStage: "aguardando_pagamento",
+        steps: [
+          { delayHours: 4, message: "Oi {nome}! Pra garantir seu horário, falta só o sinal. Quer que eu te reenvie o PIX?" },
+          { delayHours: 20, message: "Oi {nome}! Seu horário ainda está reservado aguardando o sinal. Posso confirmar pra você?" },
+        ],
+      },
+      {
+        name: "Pós-atendimento (satisfação)",
+        triggerStage: "entregue_concluido",
+        steps: [
+          { delayHours: 3, message: "Oi {nome}! Como você ficou com o resultado de hoje? Adoraríamos saber o que achou. ⭐ Se puder deixar uma avaliação, ajuda muito o salão!" },
+        ],
+      },
+      {
+        name: "Retorno de manutenção",
+        triggerStage: "retorno_recomendado",
+        steps: [
+          { delayHours: 24, message: "Oi {nome}! Já faz um tempinho do seu último {servico} — costuma ser a época de dar aquele retoque pra manter o visual lindo. Quer que eu veja os próximos horários?" },
+        ],
+      },
+    ],
+    automations: {
+      // Salão típico trabalha com sinal/PIX pra reduzir no-show, NPS pós-serviço
+      // e indicação (o boca a boca é o motor de crescimento do setor).
+      order_expiry_enabled: 0,
+      pix_reminder_enabled: 1, pix_reminder_max: 2, pix_reminder_minutes: 60,
+      abandoned_cart_enabled: 0,
+      nps_enabled: 1, nps_delay_hours: 3,
+      referral_enabled: 1, referral_reward_percent: 10, referral_welcome_percent: 10,
+      procurement_enabled: 0,
+      quote_validity_hours: 72, quote_followup_hours: 24, quote_followup_max: 2,
+      // Beleza (ADR-169): liga a Beauty AI + os detectores proativos em SHADOW.
+      beauty_hair_simulator_enabled: 1,
+      beauty_maintenance_detector_enabled: 1,
+      beauty_abandoned_detector_enabled: 1,
+    },
+    faq: [
+      {
+        title: "FAQ Beleza & Salões — base inicial",
+        content: `# Perguntas comuns da cliente
+
+## Serviços oferecidos
+- Liste os serviços do salão com preço e duração (preencher com os reais no Catálogo).
+- A IA só oferece serviços que estão no catálogo — nunca inventa serviço ou promoção.
+
+## Consulta visual (Beauty AI)
+- O salão oferece uma simulação de visual: a partir de uma foto, a cliente vê como ficaria com uma nova cor ou corte ANTES de decidir.
+- A foto é tirada no salão com o consentimento da cliente (termo de uso da imagem). A foto é privada e guardada com segurança; a cliente pode pedir a exclusão a qualquer momento (LGPD).
+- A ferramenta descreve POSSIBILIDADES (contraste, luminosidade, destaque) — nunca julga a aparência da pessoa.
+
+## Preços e formas de pagamento
+- Indicar a tabela de preços real (preencher). Aceitamos PIX, cartão e dinheiro.
+- Alguns serviços pedem sinal para reservar o horário (definir valor/percentual).
+
+## Manutenção
+- Coloração, mecha e progressiva pedem retoque periódico. Preencher o intervalo real de cada serviço (ex.: coloração a cada 4 semanas).
+- A cliente recebe um lembrete gentil quando chega a época — nunca é cobrança, é um convite.
+
+## Cancelamento e remarcação
+- Pedimos aviso com X horas de antecedência (preencher).
+
+## Higiene e produtos
+- Descrever os cuidados de higiene do salão e as marcas de produtos usadas (preencher).
+
+## Programa de indicação
+- Indicou uma amiga que fechou serviço? Ganhe X% de desconto no próximo (definir a regra real).
+
+## ⚠️ O que a IA nunca faz
+A IA NUNCA julga a aparência de ninguém (não diz "ficaria mais bonita/jovem"), NUNCA
+inventa preço, serviço ou promoção fora do catálogo, e NUNCA decide manutenção ou dá
+"alta" de tratamento — isso é sempre da profissional. Quando não souber, é honesta e diz
+que vai confirmar com a equipe.
+
+## ⚠️ Substitua estas respostas pelas regras REAIS do seu salão.
+Enquanto não substituir, a IA responde com honestidade em vez de inventar preço, prazo ou promoção.
 `,
       },
     ],

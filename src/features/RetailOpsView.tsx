@@ -448,6 +448,7 @@ function PatternsTab() {
                 <button onClick={() => recordOutcome(p, 'backfired')} className="rounded border border-red-500/30 px-2 py-0.5 text-[11px] text-red-300 hover:bg-red-500/10">Piorou</button>
                 <button onClick={() => setProposeFor(p)} className="ml-auto inline-flex items-center gap-1 rounded border border-indigo-500/30 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10"><Lightbulb className="w-3 h-3" /> Sugerir solução</button>
               </div>
+              <PatternSolutions patternId={p.id} refreshKey={propTick} />
             </div>
             );
           })}
@@ -581,6 +582,44 @@ function SolutionsPanel({ refreshKey }: { refreshKey?: number }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// LEARN-006: recupera as soluções JÁ VALIDADAS relevantes a este padrão. A IA
+// declara ORIGEM HUMANA + onde funcionou + evidência e traz a cautela adequada;
+// nunca afirma eficácia geral. Carrega sob demanda (expander).
+function PatternSolutions({ patternId, refreshKey }: { patternId: string; refreshKey?: number }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<any[] | null>(null);
+  const load = () => apiFetch(`/api/retailops/patterns/${patternId}/solutions`).then(r => r.json()).then(d => setItems(Array.isArray(d?.solutions) ? d.solutions : [])).catch(() => setItems([]));
+  useEffect(() => { if (open) load(); }, [open, refreshKey]);
+  return (
+    <div className="mt-2 border-t border-zinc-800/60 pt-2">
+      <button onClick={() => setOpen(o => !o)} className="text-[11px] text-zinc-400 hover:text-zinc-200 inline-flex items-center gap-1">
+        <Lightbulb className="w-3 h-3 text-indigo-400" /> {open ? 'Ocultar' : 'Ver'} soluções validadas
+      </button>
+      {open && (
+        items === null ? <p className="mt-1 text-[11px] text-zinc-500">Carregando…</p> :
+        items.length === 0 ? <p className="mt-1 text-[11px] text-zinc-500">Nenhuma solução validada para este tipo de problema ainda.</p> :
+        <div className="mt-1.5 space-y-1.5">
+          {items.map((s, i) => (
+            <div key={s.proposalId || i} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[13px] text-zinc-100 font-medium">{s.title}</span>
+                <span className="text-[10px] text-indigo-300 border border-indigo-500/30 rounded px-1.5">origem humana</span>
+                <span className="text-[10px] text-zinc-400 border border-zinc-700 rounded px-1.5">{s.scope === 'rede' ? 'rede' : 'loja'}</span>
+                {s.generalizable
+                  ? <span className="text-[10px] text-emerald-300 border border-emerald-500/30 rounded px-1.5">generalizável</span>
+                  : <span className="text-[10px] text-amber-300 border border-amber-500/30 rounded px-1.5">testar antes</span>}
+              </div>
+              {s.proposal && <p className="mt-1 text-[12px] text-zinc-300">{s.proposal}</p>}
+              <p className="mt-1 text-[11px] text-zinc-500">Funcionou em <span className="text-zinc-300">{s.whereWorked}</span>{s.evidence?.confidence != null ? ` · confiança ${Math.round(Number(s.evidence.confidence) * 100)}%` : ''}{s.evidence?.final != null ? ` · resultado ${s.evidence.final}` : ''}</p>
+              {s.caveat && <p className="mt-1 text-[11px] text-amber-300/80">{s.caveat}</p>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

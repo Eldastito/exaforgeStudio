@@ -26,6 +26,7 @@ import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
 import { RetailStockPolicyService } from "../RetailStockPolicyService.js";
 import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
 import { ManagerSolutionService } from "../ManagerSolutionService.js";
+import { ManagerSolutionRetrievalService } from "../ManagerSolutionRetrievalService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -1396,6 +1397,12 @@ router.post("/patterns/:patternId/solution-proposals", (req: AuthRequest, res): 
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.status(201).json(ManagerSolutionService.create(orgId, { ...(req.body || {}), refType: "pattern", refId: req.params.patternId }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+// LEARN-006: recupera soluções validadas relevantes a um padrão (com procedência
+// + cautela). Read-only; qualquer usuário autenticado.
+router.get("/patterns/:patternId/solutions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ solutions: ManagerSolutionRetrievalService.forPattern(orgId, req.params.patternId) });
 });
 const solutionOp = (name: string, fn: (orgId: string, id: string, req: AuthRequest) => any, gated: boolean) => {
   const handler = (req: AuthRequest, res: any): any => {

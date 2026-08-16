@@ -108,6 +108,7 @@ export function BeautyView() {
   const [pChemical, setPChemical] = useState<string>('');
   const [pMaintenance, setPMaintenance] = useState<string>('');
   const [pLeadSource, setPLeadSource] = useState<string>('');
+  const [pLeadSourceOther, setPLeadSourceOther] = useState<string>(''); // F33 — texto do "Outro"
 
   const [contactId, setContactId] = useState<string>('');
   const [goal, setGoal] = useState<string>('coloração');
@@ -219,6 +220,7 @@ export function BeautyView() {
             chemicalHistory: pChemical || undefined,
             maintenancePref: pMaintenance || undefined,
             leadSource: pLeadSource || undefined,
+            leadSourceOther: pLeadSource === 'outro' ? (pLeadSourceOther.trim() || undefined) : undefined,
           },
         }),
       });
@@ -226,7 +228,7 @@ export function BeautyView() {
       const d = await r.json();
       await loadClients(d?.client?.id);
       setNewName(''); setNewPhone(''); setNewEmail('');
-      setPHairType(''); setPThickness(''); setPLength(''); setPChemical(''); setPMaintenance(''); setPLeadSource('');
+      setPHairType(''); setPThickness(''); setPLength(''); setPChemical(''); setPMaintenance(''); setPLeadSource(''); setPLeadSourceOther('');
       setShowNewClient(false);
     } catch (e: any) { setError(e?.message || 'Erro ao cadastrar cliente.'); }
     finally { setBusy(false); }
@@ -614,6 +616,19 @@ export function BeautyView() {
                 <option value="passou_na_porta">Passou na porta</option><option value="google">Google</option>
                 <option value="whatsapp">WhatsApp</option><option value="outro">Outro</option>
               </select>
+              {/* F33 — "Outro" selecionado → abre campo pra digitar a origem. */}
+              {pLeadSource === 'outro' && (
+                <input
+                  className="p-2 rounded border bg-transparent text-sm"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  value={pLeadSourceOther}
+                  onChange={(e) => setPLeadSourceOther(e.target.value)}
+                  placeholder="Qual? (ex.: feira, panfleto, TikTok)"
+                  disabled={busy}
+                  maxLength={120}
+                  autoFocus
+                />
+              )}
             </div>
 
             <div className="mt-3">

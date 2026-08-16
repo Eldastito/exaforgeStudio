@@ -149,6 +149,15 @@ async function main() {
     // vocabulário da ficha exposto
     r = await call("GET", "/api/beauty/clients/profile-vocabulary", { orgId: orgA });
     check("GET profile-vocabulary devolve vocabs fechados", Array.isArray(r.json?.hairTypes) && r.json.hairTypes.includes("cacheado"));
+
+    // F33 — origem "Outro" com texto livre.
+    r = await call("PUT", `/api/beauty/clients/${paulaId}/profile`, { orgId: orgA, body: { leadSource: "outro", leadSourceOther: "Feira de beleza" } });
+    check("PUT leadSource='outro' + leadSourceOther grava o detalhe",
+      r.json?.profile?.leadSource === "outro" && r.json?.profile?.leadSourceOther === "Feira de beleza", r.text);
+    // troca pra origem do vocab → o detalhe do 'outro' é limpo (não polui)
+    r = await call("PUT", `/api/beauty/clients/${paulaId}/profile`, { orgId: orgA, body: { leadSource: "instagram", leadSourceOther: "ignorar" } });
+    check("origem NÃO-outro descarta o leadSourceOther",
+      r.json?.profile?.leadSource === "instagram" && !r.json?.profile?.leadSourceOther, r.text);
   } finally {
     server.close();
   }

@@ -9531,6 +9531,7 @@ const initDb = () => {
         chemical_history TEXT,
         maintenance_pref TEXT,
         lead_source TEXT,
+        lead_source_other TEXT,
         notes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -9538,6 +9539,9 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar beauty_client_profiles (ADR-169 F25)', e); }
+  // ADR-169 F33 — detalhe do "Outro" da origem do lead (texto livre quando
+  // lead_source='outro'). Aditivo pra bancos existentes.
+  try { db.exec(`ALTER TABLE beauty_client_profiles ADD COLUMN lead_source_other TEXT`); } catch(e){}
 
   // ADR-169 F5-transversal-A — Consent transversal de comunicações outbound.
   // Flag opt-in por org: quando ativa, `MessageProviderService.sendMessage`

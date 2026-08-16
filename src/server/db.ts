@@ -9650,6 +9650,29 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE tasks ADD COLUMN occurrence_dedupe_key TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_occurrence_dedupe ON tasks (organization_id, occurrence_dedupe_key) WHERE occurrence_dedupe_key IS NOT NULL`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_rule ON tasks (recurrence_rule_id)`); } catch(e){}
+
+  // Log de lembretes de tarefa (PRD Moda/TOULON, TASK-007; ADR-172). Dedupe por
+  // (org, tarefa, canal, tipo) — nunca manda o mesmo lembrete duas vezes.
+  // status: sent | failed (candidato a retry). Também é a trilha de auditoria.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_reminder_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        assigned_to TEXT,
+        channel TEXT NOT NULL,                 -- whatsapp | (futuro: outros)
+        reminder_type TEXT NOT NULL DEFAULT 'materialized',
+        status TEXT NOT NULL DEFAULT 'sent',   -- sent | failed
+        attempts INTEGER DEFAULT 1,
+        detail TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_task_reminder_dedupe ON task_reminder_log (organization_id, task_id, channel, reminder_type);
+      CREATE INDEX IF NOT EXISTS idx_task_reminder_status ON task_reminder_log (status);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

@@ -150,6 +150,64 @@ export class TaskRecurrenceService {
     return this.get(orgId, id);
   }
 
+  /**
+   * Edita a regra — escopo "ESTA E AS PRÓXIMAS" (TASK-005). As mudanças valem
+   * para as ocorrências FUTURAS (next_run_at recomputado) e, opcionalmente,
+   * propagam os campos de CONTEÚDO (título/descrição/responsável/prioridade)
+   * para as ocorrências já materializadas AINDA ABERTAS (a_fazer/fazendo).
+   * NUNCA reescreve ocorrências CONCLUÍDAS/canceladas (feito/cancelada).
+   * (O escopo "só esta ocorrência" é a edição da tarefa individual, TaskService.update.)
+   */
+  static update(orgId: string, id: string, patch: any, opts: { applyToOpen?: boolean } = {}, actorId?: string): any | null {
+    const cur = this.get(orgId, id);
+    if (!cur) return null;
+    const fields: string[] = []; const vals: any[] = [];
+    const set = (col: string, v: any) => { fields.push(`${col} = ?`); vals.push(v); };
+
+    if (patch.title !== undefined) { const t = String(patch.title).trim(); if (t) set("title", t); }
+    if (patch.description !== undefined) set("description", patch.description || null);
+    if (patch.assignedTo !== undefined) set("assigned_to", patch.assignedTo || null);
+    if (patch.priority !== undefined) set("priority", patch.priority || "media");
+    if (patch.frequency !== undefined && ["daily", "weekly", "monthly"].includes(patch.frequency)) set("frequency", patch.frequency);
+    if (patch.interval !== undefined) set("interval", Math.max(1, Math.trunc(Number(patch.interval) || 1)));
+    if (patch.byWeekday !== undefined) set("by_weekday", Array.isArray(patch.byWeekday) ? JSON.stringify(patch.byWeekday.filter((n: any) => Number.isInteger(n) && n >= 0 && n <= 6)) : null);
+    if (patch.dayOfMonth !== undefined) set("day_of_month", patch.dayOfMonth != null && patch.dayOfMonth !== "" ? Math.min(31, Math.max(1, Math.trunc(Number(patch.dayOfMonth)))) : null);
+    if (patch.localTime !== undefined && /^\d{2}:\d{2}$/.test(String(patch.localTime))) set("local_time", patch.localTime);
+    if (patch.timezone !== undefined) set("timezone", patch.timezone || "America/Sao_Paulo");
+    if (patch.startsOn !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(String(patch.startsOn).slice(0, 10))) set("starts_on", String(patch.startsOn).slice(0, 10));
+    if (patch.endsOn !== undefined) set("ends_on", patch.endsOn ? String(patch.endsOn).slice(0, 10) : null);
+    if (patch.maxOccurrences !== undefined) set("max_occurrences", patch.maxOccurrences != null && patch.maxOccurrences !== "" ? Math.max(1, Math.trunc(Number(patch.maxOccurrences))) : null);
+    if (patch.notificationPolicy !== undefined) set("notification_policy_json", patch.notificationPolicy ? JSON.stringify(patch.notificationPolicy) : null);
+
+    if (fields.length) {
+      db.prepare(`UPDATE task_recurrence_rules SET ${fields.join(", ")}, version = version + 1, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(...vals, actorId || null, orgId, id);
+    }
+
+    // Recomputa o próximo disparo a partir de AGORA se algo do CRONOGRAMA mudou
+    // (só quando a regra segue ativa — não ressuscita regra pausada/encerrada).
+    const scheduleTouched = ["frequency", "interval", "byWeekday", "dayOfMonth", "localTime", "timezone", "startsOn", "endsOn", "maxOccurrences"].some(k => patch[k] !== undefined);
+    const after = this.get(orgId, id);
+    if (scheduleTouched && after.status === "active") {
+      const next = this.computeNextRun(after, new Date());
+      if (!next) this.markCompleted(orgId, id);
+      else db.prepare(`UPDATE task_recurrence_rules SET next_run_at = ? WHERE organization_id = ? AND id = ?`).run(next.toISOString(), orgId, id);
+    }
+
+    // Propaga CONTEÚDO às ocorrências abertas (nunca às concluídas/canceladas).
+    if (opts.applyToOpen !== false) {
+      const tf: string[] = []; const tv: any[] = [];
+      if (patch.title !== undefined && String(patch.title).trim()) { tf.push("title = ?"); tv.push(String(patch.title).trim()); }
+      if (patch.description !== undefined) { tf.push("description = ?"); tv.push(patch.description || ""); }
+      if (patch.assignedTo !== undefined) { tf.push("assigned_to = ?"); tv.push(patch.assignedTo || null); }
+      if (patch.priority !== undefined) { tf.push("priority = ?"); tv.push(patch.priority || "media"); }
+      if (tf.length) {
+        db.prepare(`UPDATE tasks SET ${tf.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND recurrence_rule_id = ? AND status IN ('a_fazer','fazendo')`).run(...tv, orgId, id);
+      }
+    }
+    try { logAuthEvent(orgId, actorId || "system", id, "TASK_RECURRENCE_UPDATED", { fields: Object.keys(patch) }); } catch { /* noop */ }
+    return this.get(orgId, id);
+  }
+
   static get(orgId: string, id: string): any | null {
     return (db.prepare(`SELECT * FROM task_recurrence_rules WHERE organization_id = ? AND id = ?`).get(orgId, id) as any) || null;
   }

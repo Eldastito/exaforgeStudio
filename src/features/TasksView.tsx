@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag, Paperclip, Camera, Check, Repeat, Pause, Play, Trash2 } from 'lucide-react';
+import { ListChecks, Plus, Loader2, Sparkles, Calendar, User as UserIcon, X, MessageSquarePlus, Flag, Paperclip, Camera, Check, Repeat, Pause, Play, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -250,6 +250,7 @@ function RecurrenceRulesPanel({ users, refreshKey }: { users: OrgUser[]; refresh
   const [rules, setRules] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [editRule, setEditRule] = useState<any | null>(null);
   const load = () => apiFetch('/api/tasks/recurrence').then(r => r.json()).then(d => { setRules(Array.isArray(d?.rules) ? d.rules : []); setLoaded(true); }).catch(() => setLoaded(true));
   useEffect(() => { load(); }, [refreshKey]);
   const userName = (id: string) => users.find(u => u.id === id)?.name || users.find(u => u.id === id)?.email || 'Sem dono';
@@ -280,6 +281,7 @@ function RecurrenceRulesPanel({ users, refreshKey }: { users: OrgUser[]; refresh
                 <div className="text-[11px] text-zinc-500">{ruleSummary(r)} · {userName(r.assigned_to)}{r.next_run_at ? ` · próxima: ${fmt(r.next_run_at)}` : ''}</div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => setEditRule(r)} title="Editar (esta e as próximas)" className="rounded border border-zinc-700 p-1.5 text-zinc-300 hover:bg-zinc-800"><Pencil className="w-3.5 h-3.5" /></button>
                 {r.status === 'active'
                   ? <button onClick={() => op(r.id, '/pause')} title="Pausar" className="rounded border border-zinc-700 p-1.5 text-zinc-300 hover:bg-zinc-800"><Pause className="w-3.5 h-3.5" /></button>
                   : <button onClick={() => op(r.id, '/resume')} title="Retomar" className="rounded border border-emerald-500/40 p-1.5 text-emerald-300 hover:bg-emerald-500/10"><Play className="w-3.5 h-3.5" /></button>}
@@ -289,6 +291,105 @@ function RecurrenceRulesPanel({ users, refreshKey }: { users: OrgUser[]; refresh
           ))}
         </div>
       )}
+      {editRule && <EditRuleModal rule={editRule} users={users} onClose={() => setEditRule(null)} onSaved={() => { setEditRule(null); load(); }} />}
+    </div>
+  );
+}
+
+// Editar a SÉRIE (TASK-005 "esta e as próximas"): muda a regra + as ocorrências
+// abertas; nunca reescreve as concluídas. "Só esta" = editar a tarefa no quadro.
+function EditRuleModal({ rule, users, onClose, onSaved }: { rule: any; users: OrgUser[]; onClose: () => void; onSaved: () => void }) {
+  const [title, setTitle] = useState(rule.title || '');
+  const [assignedTo, setAssignedTo] = useState(rule.assigned_to || '');
+  const [priority, setPriority] = useState(rule.priority || 'media');
+  const [frequency, setFrequency] = useState(rule.frequency || 'weekly');
+  const [interval, setIntervalN] = useState(String(rule.interval || 1));
+  const [byWeekday, setByWeekday] = useState<number[]>(() => { try { return JSON.parse(rule.by_weekday || '[]'); } catch { return []; } });
+  const [dayOfMonth, setDayOfMonth] = useState(String(rule.day_of_month || 1));
+  const [localTime, setLocalTime] = useState(rule.local_time || '09:00');
+  const [notifyWhatsapp, setNotifyWhatsapp] = useState(() => { try { return JSON.parse(rule.notification_policy_json || '{}').whatsapp === true; } catch { return false; } });
+  const [busy, setBusy] = useState(false);
+  const toggleWeekday = (n: number) => setByWeekday(prev => prev.includes(n) ? prev.filter(x => x !== n) : [...prev, n].sort());
+  const field = "w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-indigo-500";
+  const save = async () => {
+    if (!title.trim()) { toast.error('Informe um título.'); return; }
+    setBusy(true);
+    try {
+      const patch: any = { title, assignedTo: assignedTo || null, priority, frequency, interval: Math.max(1, parseInt(interval, 10) || 1), localTime, notificationPolicy: { whatsapp: notifyWhatsapp } };
+      if (frequency === 'weekly') patch.byWeekday = byWeekday;
+      if (frequency === 'monthly') patch.dayOfMonth = parseInt(dayOfMonth, 10) || 1;
+      const r = await apiFetch(`/api/tasks/recurrence/${rule.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha ao salvar.');
+      toast.success('Recorrência atualizada (esta e as próximas).');
+      onSaved();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Repeat className="w-5 h-5 text-indigo-400" /> Editar recorrência</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Vale para <strong>esta e as próximas</strong> ocorrências. As já concluídas não mudam.</p>
+        <label className="text-xs text-zinc-400 mb-1 block">Título</label>
+        <input value={title} onChange={e => setTitle(e.target.value)} className={`${field} mb-3`} />
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Responsável</label>
+            <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className={field}>
+              <option value="">Sem dono</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Prioridade</label>
+            <select value={priority} onChange={e => setPriority(e.target.value)} className={field}>
+              <option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">Frequência</label>
+            <select value={frequency} onChange={e => setFrequency(e.target.value)} className={field}>
+              <option value="daily">Diária</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-zinc-400 mb-1 block">A cada</label>
+            <input type="number" min={1} value={interval} onChange={e => setIntervalN(e.target.value)} className={field} />
+          </div>
+        </div>
+        {frequency === 'weekly' && (
+          <div className="mb-3">
+            <label className="text-xs text-zinc-400 mb-1 block">Dias da semana</label>
+            <div className="flex gap-1">
+              {WEEKDAYS.map((w, n) => (
+                <button key={n} type="button" onClick={() => toggleWeekday(n)}
+                  className={`w-9 h-8 rounded text-[11px] border ${byWeekday.includes(n) ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>{w}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {frequency === 'monthly' && (
+          <div className="mb-3">
+            <label className="text-xs text-zinc-400 mb-1 block">Dia do mês</label>
+            <input type="number" min={1} max={31} value={dayOfMonth} onChange={e => setDayOfMonth(e.target.value)} className={field} />
+          </div>
+        )}
+        <div className="mb-3">
+          <label className="text-xs text-zinc-400 mb-1 block">Horário</label>
+          <input type="time" value={localTime} onChange={e => setLocalTime(e.target.value)} className={`${field} [color-scheme:dark]`} />
+        </div>
+        <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
+          <input type="checkbox" checked={notifyWhatsapp} onChange={e => setNotifyWhatsapp(e.target.checked)} className="accent-indigo-500" />
+          <span className="text-[12px] text-zinc-300 flex items-center gap-1.5"><MessageSquarePlus className="w-3.5 h-3.5 text-emerald-400" /> Avisar o responsável por WhatsApp</span>
+        </label>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
+          <Button onClick={save} disabled={busy} className="zf-button zf-button-primary">
+            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}Salvar
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -148,6 +148,18 @@ export function BeautyView() {
       .catch(() => {});
   }, []);
 
+  // F28 — status do simulador (owner/admin): diz se há IA de imagem REAL
+  // configurada no servidor. Se `isReal=false`, as imagens sairiam como
+  // quadrados de demonstração — então o banner avisa em vez de deixar o dono
+  // no escuro. Rota role-gated: não-admin recebe 403 e o banner some.
+  const [simStatus, setSimStatus] = useState<{ isReal: boolean; activeProviderKey: string; keys: { openai: boolean; google: boolean; gemini: boolean } } | null>(null);
+  useEffect(() => {
+    apiFetch('/api/beauty/simulator-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && typeof d.isReal === 'boolean') setSimStatus(d); })
+      .catch(() => {});
+  }, []);
+
   async function runVisagism(): Promise<void> {
     if (!consultation) return;
     setBusy(true); setError(null);
@@ -449,6 +461,21 @@ export function BeautyView() {
         </div>
       </header>
 
+      {/* F28 — banner de modo demonstração: quando não há IA de imagem REAL
+          configurada no servidor, as imagens sairiam como quadrados de teste.
+          Avisa o dono (owner/admin) com a causa exata: a chave não chegou ao
+          container. Só aparece pra quem pode agir (rota role-gated). */}
+      {simStatus && !simStatus.isReal && (
+        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/40 text-sm text-amber-600 dark:text-amber-400 flex items-start gap-2">
+          <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <b>Modo demonstração — nenhuma IA de imagem detectada no servidor.</b> As simulações sairão como quadrados de teste até configurar a chave.
+            Defina <code className="px-1 rounded bg-black/10">OPENAI_API_KEY</code> (ou <code className="px-1 rounded bg-black/10">GOOGLE_AI_API_KEY</code>/<code className="px-1 rounded bg-black/10">GEMINI_API_KEY</code>) nas variáveis de ambiente do servidor <b>e refaça o deploy</b>.
+            <span className="block mt-1 text-xs opacity-80">Detectado agora: OpenAI {simStatus.keys.openai ? '✓' : '✗'} · Google {simStatus.keys.google ? '✓' : '✗'} · Gemini {simStatus.keys.gemini ? '✓' : '✗'} · provider ativo: <code>{simStatus.activeProviderKey}</code></span>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-500 flex items-start gap-2">
           <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -742,13 +769,51 @@ export function BeautyView() {
               )}
 
               {cutMode === 'suggest' && (
-                <div className="rounded border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
-                  {!visagism && <p className="text-xs text-slate-500">Analisando os traços do rosto e o tom de pele…</p>}
+                <div className="rounded border p-3 space-y-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
+                  {/* Visagismo consolidado (F28): os controles de perfil/subtom/
+                      formato do rosto vivem AQUI, no fluxo guiado — não há mais
+                      card separado. Deixe subtom/rosto em branco pra IA analisar
+                      a foto, ou informe manualmente pra refinar. */}
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div>
+                      <label className="text-[10px] text-slate-500">Perfil</label>
+                      <select className="w-full mt-0.5 p-1.5 rounded border bg-transparent text-xs" style={{ borderColor: 'var(--color-border)' }}
+                        value={vProfile} onChange={(e) => setVProfile(e.target.value)} disabled={busy}>
+                        <option value="feminino">Feminino</option>
+                        <option value="masculino">Masculino</option>
+                        <option value="neutro">Neutro</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Subtom de pele</label>
+                      <select className="w-full mt-0.5 p-1.5 rounded border bg-transparent text-xs" style={{ borderColor: 'var(--color-border)' }}
+                        value={vUndertone} onChange={(e) => setVUndertone(e.target.value)} disabled={busy}>
+                        <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
+                        <option value="quente">Quente</option><option value="frio">Frio</option><option value="neutro">Neutro</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Formato do rosto</label>
+                      <select className="w-full mt-0.5 p-1.5 rounded border bg-transparent text-xs" style={{ borderColor: 'var(--color-border)' }}
+                        value={vFaceShape} onChange={(e) => setVFaceShape(e.target.value)} disabled={busy}>
+                        <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
+                        <option value="oval">Oval</option><option value="redondo">Redondo</option><option value="quadrado">Quadrado</option>
+                        <option value="coracao">Coração</option><option value="alongado">Alongado</option><option value="triangular">Triangular</option>
+                      </select>
+                    </div>
+                    <button onClick={() => runVisagism()} disabled={busy}
+                      className="px-3 py-1.5 rounded bg-pink-500/20 text-pink-500 hover:bg-pink-500/30 disabled:opacity-50 flex items-center gap-1 text-xs">
+                      {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      {visagism ? 'Reanalisar' : 'Analisar'}
+                    </button>
+                  </div>
+
+                  {!visagism && busy && <p className="text-xs text-slate-500">Analisando os traços do rosto e o tom de pele…</p>}
                   {visagism && (
                     <>
-                      <p className="text-xs text-slate-400 italic mb-2">{visagism.narrative}</p>
+                      <p className="text-xs text-slate-400 italic">{visagism.narrative}</p>
                       {Array.isArray(visagism.recommendedCuts) && visagism.recommendedCuts.length > 0 ? (
-                        <>
+                        <div>
                           <p className="text-xs font-medium text-blue-400 mb-1">Cortes sugeridos pra combinar com "{vocabLabel(chosenColor)}" — escolha um:</p>
                           <div className="flex flex-wrap gap-2">
                             {visagism.recommendedCuts.map((c: string) => (
@@ -759,10 +824,10 @@ export function BeautyView() {
                               </button>
                             ))}
                           </div>
-                        </>
+                        </div>
                       ) : (
                         <p className="text-xs text-slate-500">
-                          Sem sugestão automática (formato do rosto não determinado). Informe o formato do rosto na seção Visagismo abaixo, ou escolha o corte manualmente.
+                          Sem sugestão automática — informe o <b>formato do rosto</b> acima e clique em Reanalisar, ou volte e escolha o corte manualmente.
                         </p>
                       )}
                     </>
@@ -782,92 +847,6 @@ export function BeautyView() {
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
               {busy ? 'Gerando o novo visual… (pode levar até 2 min)' : `Gerar novo visual — ${vocabLabel(chosenColor)}${chosenCut ? ' + ' + vocabLabel(chosenCut) : ' (corte atual)'}`}
             </button>
-          )}
-        </section>
-      )}
-
-      {/* VISAGISMO — análise facial técnica → cor + corte (RN-BS-03: sem nota) */}
-      {canSimulate && (
-        <section className="p-4 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-1)' }}>
-          <h2 className="font-semibold mb-1 flex items-center gap-2"><Star className="w-4 h-4" /> Visagismo (cor + corte por análise facial)</h2>
-          <p className="text-xs text-slate-500 mb-3">
-            Recomendação técnica: subtom de pele → cores que harmonizam · formato do rosto → cortes que equilibram a proporção.
-            {visagismAiAvailable
-              ? ' Deixe subtom/rosto em branco pra a IA analisar a foto, ou informe manualmente.'
-              : ' A IA de análise facial não está configurada — informe subtom e formato do rosto manualmente (a profissional avalia).'}
-          </p>
-          <div className="flex flex-wrap gap-3 items-end mb-3">
-            <div>
-              <label className="text-xs text-slate-500">Perfil</label>
-              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
-                value={vProfile} onChange={(e) => setVProfile(e.target.value)} disabled={busy}>
-                <option value="feminino">Feminino</option>
-                <option value="masculino">Masculino</option>
-                <option value="neutro">Neutro</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Subtom de pele</label>
-              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
-                value={vUndertone} onChange={(e) => setVUndertone(e.target.value)} disabled={busy}>
-                <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
-                <option value="quente">Quente</option>
-                <option value="frio">Frio</option>
-                <option value="neutro">Neutro</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Formato do rosto</label>
-              <select className="w-full mt-1 p-2 rounded border bg-transparent" style={{ borderColor: 'var(--color-border)' }}
-                value={vFaceShape} onChange={(e) => setVFaceShape(e.target.value)} disabled={busy}>
-                <option value="">{visagismAiAvailable ? '— IA analisa —' : '— selecione —'}</option>
-                <option value="oval">Oval</option>
-                <option value="redondo">Redondo</option>
-                <option value="quadrado">Quadrado</option>
-                <option value="coracao">Coração</option>
-                <option value="alongado">Alongado</option>
-                <option value="triangular">Triangular</option>
-              </select>
-            </div>
-            <button onClick={runVisagism} disabled={busy}
-              className="px-4 py-2 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-50 flex items-center gap-2">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              Analisar visagismo
-            </button>
-          </div>
-
-          {visagism && (
-            <div className="rounded-lg border p-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-2)' }}>
-              <p className="text-sm text-slate-400 italic mb-2">{visagism.narrative}</p>
-              {Array.isArray(visagism.recommendedColors) && visagism.recommendedColors.length > 0 && (
-                <div className="mb-2">
-                  <p className="text-xs font-medium text-pink-400 mb-1">Cores que harmonizam (clique pra usar no novo visual)</p>
-                  <div className="flex flex-wrap gap-2">
-                    {visagism.recommendedColors.map((c: string) => (
-                      <button key={c} onClick={() => setChosenColor(c)} disabled={busy}
-                        className={`px-3 py-1 rounded-full border text-xs disabled:opacity-50 ${chosenColor === c ? 'bg-pink-500 text-white border-pink-500' : 'hover:bg-pink-500/10'}`}
-                        style={chosenColor === c ? {} : { borderColor: 'var(--color-border)' }}>
-                        {vocabLabel(c)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {Array.isArray(visagism.recommendedCuts) && visagism.recommendedCuts.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-blue-400 mb-1">Cortes que equilibram (clique pra usar no novo visual)</p>
-                  <div className="flex flex-wrap gap-2">
-                    {visagism.recommendedCuts.map((c: string) => (
-                      <button key={c} onClick={() => { setCutMode('choose'); setChosenCut(c); }} disabled={busy}
-                        className={`px-3 py-1 rounded-full border text-xs disabled:opacity-50 ${chosenCut === c ? 'bg-blue-500 text-white border-blue-500' : 'hover:bg-blue-500/10'}`}
-                        style={chosenCut === c ? {} : { borderColor: 'var(--color-border)' }}>
-                        {vocabLabel(c)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
           )}
         </section>
       )}

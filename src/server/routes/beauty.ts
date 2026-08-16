@@ -140,6 +140,16 @@ router.get("/settings", (req: AuthRequest, res): any => {
   });
 });
 
+// F28 — diagnóstico do simulador (owner/admin): diz a VERDADE sobre o que o
+// servidor enxerga (provider ativo, se é REAL ou stub de demonstração, quais
+// chaves de IA existem). Transforma "por que sai um quadrado colorido?" em
+// resposta observável: isReal=false → a chave não chegou ao container.
+router.get("/simulator-status", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json(BeautyHairSimulationService.simulatorStatus(orgId));
+});
+
 router.patch("/settings/hair-simulator", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = requireBeauty(req, res);
   if (!orgId) return;

@@ -310,6 +310,44 @@ export class BeautyHairSimulationService {
   /** Provider ATIVO (útil pra rota `/status` e pra teste). */
   static providerKey(): string { return activeProvider().key; }
 
+  /**
+   * F28 — Diagnóstico do simulador (owner/admin). Diz a VERDADE sobre o que o
+   * PROCESSO do servidor enxerga: qual provider está ativo, se é REAL (gera
+   * imagem de verdade) ou o STUB de demonstração, e QUAIS chaves de IA estão
+   * presentes no ambiente. Nunca expõe o valor da chave — só o booleano de
+   * presença. Serve pra transformar "por que aparece um quadrado colorido?"
+   * numa resposta observável: se `isReal=false`, a chave não chegou ao
+   * container (config do Coolify), não é bug do app.
+   */
+  static simulatorStatus(orgId: string): {
+    activeProviderKey: string;
+    isReal: boolean;
+    explicitOverride: string | null;
+    keys: { openai: boolean; google: boolean; gemini: boolean };
+    lastSimulation: { status: SimulationStatus; providerKey: string; errorMessageSafe: string | null; createdAt: string } | null;
+  } {
+    const provider = activeProvider();
+    const last = db.prepare(
+      `SELECT status, provider_key, error_message_safe, created_at
+         FROM beauty_visual_simulations
+        WHERE organization_id = ?
+        ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get(orgId) as any;
+    return {
+      activeProviderKey: provider.key,
+      isReal: provider.key !== "stub_v1",
+      explicitOverride: process.env.BEAUTY_HAIR_SIMULATION_PROVIDER || null,
+      keys: {
+        openai: !!process.env.OPENAI_API_KEY,
+        google: !!process.env.GOOGLE_AI_API_KEY,
+        gemini: !!process.env.GEMINI_API_KEY,
+      },
+      lastSimulation: last
+        ? { status: last.status, providerKey: last.provider_key, errorMessageSafe: last.error_message_safe, createdAt: last.created_at }
+        : null,
+    };
+  }
+
   /** Vocabulário para UI (rota `/api/beauty/simulation/vocabulary` no F7+). */
   static vocabulary(): { colors: string[]; cuts: string[]; types: readonly string[] } {
     return { colors: [...COLOR_VOCAB], cuts: [...CUT_VOCAB], types: SIMULATION_TYPES };
@@ -382,20 +420,20 @@ export class BeautyHairSimulationService {
     if (!provider.available()) {
       return { ok: false, error: "Simulador temporariamente indisponível — tente mais tarde." };
     }
-    // F27 — STUB HONESTO em produção: o stub gera um quadrado colorido de
-    // demonstração, não um visual. Se ele foi alcançado como ÚLTIMO recurso
-    // (nenhuma chave de IA no ambiente) em produção, recusar com instrução
-    // clara é melhor que "suceder" com um bloco vermelho — o dono descobre
-    // na hora o que falta configurar. CI/dev seguem funcionando: lá o stub
-    // é opt-in explícito via BEAUTY_HAIR_SIMULATION_PROVIDER=stub.
-    if (
-      provider.key === "stub_v1" &&
-      process.env.NODE_ENV === "production" &&
-      process.env.BEAUTY_HAIR_SIMULATION_PROVIDER !== "stub"
-    ) {
+    // F28 — STUB HONESTO (robusto, sem depender de NODE_ENV): o stub gera um
+    // quadrado colorido de DEMONSTRAÇÃO, não um visual. Se ele foi alcançado
+    // como ÚLTIMO RECURSO (nenhuma chave de IA visível pro processo) e NÃO
+    // foi escolhido explicitamente via BEAUTY_HAIR_SIMULATION_PROVIDER=stub,
+    // recusar com instrução clara é melhor que "suceder" com o bloco colorido
+    // — o dono descobre na hora que a chave não chegou ao servidor. CI/dev
+    // seguem funcionando: lá o stub é opt-in EXPLÍCITO (env=stub), então esta
+    // guarda não dispara. (A F27 gateava por NODE_ENV; o container do Coolify
+    // nem sempre reporta 'production', então o gate silenciava — por isso F28
+    // troca pra "stub implícito = recusa".)
+    if (provider.key === "stub_v1" && process.env.BEAUTY_HAIR_SIMULATION_PROVIDER !== "stub") {
       return {
         ok: false,
-        error: "Nenhuma IA de imagem configurada — defina OPENAI_API_KEY ou GOOGLE_AI_API_KEY/GEMINI_API_KEY nas variáveis de ambiente para gerar imagens reais.",
+        error: "Nenhuma IA de imagem configurada no servidor — defina OPENAI_API_KEY ou GOOGLE_AI_API_KEY/GEMINI_API_KEY nas variáveis de ambiente (e redeploy) para gerar imagens reais.",
       };
     }
 

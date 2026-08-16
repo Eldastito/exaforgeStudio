@@ -30,7 +30,7 @@ export type PdvCustomerQuery = {
 };
 
 export class RetailPdvCustomerService {
-  static list(orgId: string, query: PdvCustomerQuery = {}) {
+  static list(orgId: string, query: PdvCustomerQuery = {}, opts: { restrictCodes?: string[] } = {}) {
     const q = String(query.q || "").trim();
     const store = String(query.store || "").trim();
     const bMonth = String(query.birthdayMonth || "").trim().padStart(2, "0");
@@ -46,6 +46,12 @@ export class RetailPdvCustomerService {
     if (/^(0[1-9]|1[0-2])$/.test(bMonth)) { where.push("substr(c.nascimento, 6, 2) = ?"); args.push(bMonth); }
     // CRM-001: filtro por FILIAL (código da loja no ERP).
     if (store) { where.push("c.filial = ?"); args.push(store); }
+    // CRM-002: trava de loja por usuário (imposta no servidor). Vazio = sem loja
+    // permitida com código → não vaza nada.
+    if (opts.restrictCodes) {
+      if (!opts.restrictCodes.length) { where.push("1 = 0"); }
+      else { where.push(`c.filial IN (${opts.restrictCodes.map(() => "?").join(",")})`); args.push(...opts.restrictCodes); }
+    }
     const whereSql = where.join(" AND ");
 
     const total = Number((db.prepare(
@@ -73,12 +79,14 @@ export class RetailPdvCustomerService {
       store_relation_type: "cadastro" as const,
     }));
 
-    // Lojas ativas da org (para o seletor da UI) — limitado à própria org.
-    const stores = db.prepare(
-      `SELECT id, code, name FROM retail_stores
-        WHERE organization_id = ? AND active = 1 AND code IS NOT NULL AND TRIM(code) <> ''
-        ORDER BY name`
-    ).all(orgId) as any[];
+    // Lojas ativas da org (para o seletor da UI) — limitado à org E ao escopo do usuário.
+    const sWhere = ["organization_id = ?", "active = 1", "code IS NOT NULL", "TRIM(code) <> ''"];
+    const sArgs: any[] = [orgId];
+    if (opts.restrictCodes) {
+      if (!opts.restrictCodes.length) sWhere.push("1 = 0");
+      else { sWhere.push(`code IN (${opts.restrictCodes.map(() => "?").join(",")})`); sArgs.push(...opts.restrictCodes); }
+    }
+    const stores = db.prepare(`SELECT id, code, name FROM retail_stores WHERE ${sWhere.join(" AND ")} ORDER BY name`).all(...sArgs) as any[];
 
     return { total, customers, stores };
   }

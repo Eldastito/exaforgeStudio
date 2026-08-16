@@ -9673,6 +9673,24 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_task_reminder_status ON task_reminder_log (status);
     `);
   } catch (e) { /* noop */ }
+
+  // Escopo de LOJA por usuário (PRD Moda/TOULON, CRM-002/AC-04; ADR-173). N:N
+  // usuário↔loja. Regra: owner/admin veem tudo; usuário SEM atribuição vê tudo
+  // (opt-in, retrocompatível); usuário COM atribuição fica restrito às lojas dele.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_stores (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stores_uniq ON user_stores (organization_id, user_id, store_id);
+      CREATE INDEX IF NOT EXISTS idx_user_stores_user ON user_stores (organization_id, user_id);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

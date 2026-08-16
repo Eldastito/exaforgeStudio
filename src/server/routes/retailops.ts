@@ -24,6 +24,7 @@ import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
 import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
 import { RetailStockPolicyService } from "../RetailStockPolicyService.js";
+import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
@@ -458,8 +459,32 @@ const closingUpload = multer({
 router.get("/stores", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json({ stores: RetailStoreService.list(orgId) }); }
+  try {
+    // CRM-002: só as lojas que o usuário pode ver (owner/admin e sem-atribuição → todas).
+    const all = RetailStoreService.list(orgId);
+    res.json({ stores: RetailStoreScopeService.filterStores(orgId, req.user?.userId, req.user?.role, all) });
+  }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ESCOPO DE LOJA POR USUÁRIO (CRM-002/ADR-173). Config = owner/admin.
+router.get("/store-scope/me", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role));
+});
+router.get("/store-scope/:userId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ storeIds: RetailStoreScopeService.forUser(orgId, req.params.userId) });
+});
+router.put("/store-scope/:userId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds : [];
+    res.json({ storeIds: RetailStoreScopeService.setForUser(orgId, req.params.userId, storeIds, req.user?.userId) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.get("/stores/:id", (req: AuthRequest, res): any => {
@@ -633,7 +658,12 @@ router.get("/pdv-customers", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    res.json(RetailPdvCustomerService.list(orgId, req.query as any));
+    const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role);
+    const store = String(req.query.store || "").trim();
+    if (store && !scope.unrestricted && !scope.storeCodes.includes(store)) {
+      return res.status(403).json({ error: "store_out_of_scope" });
+    }
+    res.json(RetailPdvCustomerService.list(orgId, req.query as any, scope.unrestricted ? {} : { restrictCodes: scope.storeCodes }));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1081,9 +1111,11 @@ router.get("/replenishment", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
+    const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role);
     res.json(RetailTransferService.replenishmentSuggestions(orgId, {
       minDonor: req.query.minDonor ? parseInt(String(req.query.minDonor), 10) : undefined,
       limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+      restrictNeedyStoreIds: scope.unrestricted ? undefined : scope.storeIds,
     }));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -1320,11 +1352,17 @@ router.post("/tasks/:id/mark-submitted", (req: AuthRequest, res): any => {
 router.get("/stock/negative", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role);
+  const reqStore = req.query.storeId ? String(req.query.storeId) : undefined;
+  if (reqStore && !scope.unrestricted && !scope.storeIds.includes(reqStore)) {
+    return res.status(403).json({ error: "store_out_of_scope" });
+  }
   const { total, items } = RetailInventoryService.listNegative(orgId, {
-    storeId: req.query.storeId ? String(req.query.storeId) : undefined,
+    storeId: reqStore,
     q: req.query.q ? String(req.query.q) : undefined,
     limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
     offset: req.query.offset ? parseInt(String(req.query.offset), 10) : undefined,
+    restrictStoreIds: scope.unrestricted ? undefined : scope.storeIds,
   });
   res.json({ total, items });
 });

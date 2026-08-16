@@ -78,10 +78,15 @@ export class RetailInventoryService {
    *  `product_variants.sku`; `external_ref` é a referência do ERP; a unidade vem
    *  de `products_services.default_uom`. Tudo aditivo — os campos flat antigos
    *  (store_name, product_name, i.*) continuam iguais para não quebrar a tela. */
-  static listNegative(orgId: string, opts: { storeId?: string; q?: string; limit?: number; offset?: number } = {}): { total: number; items: any[] } {
+  static listNegative(orgId: string, opts: { storeId?: string; q?: string; limit?: number; offset?: number; restrictStoreIds?: string[] } = {}): { total: number; items: any[] } {
     const where: string[] = ["i.organization_id = ?", "i.quantity_available < 0"];
     const args: any[] = [orgId];
     if (opts.storeId) { where.push("i.store_id = ?"); args.push(String(opts.storeId)); }
+    // CRM-002: trava de loja por usuário (servidor).
+    if (opts.restrictStoreIds) {
+      if (!opts.restrictStoreIds.length) where.push("1 = 0");
+      else { where.push(`i.store_id IN (${opts.restrictStoreIds.map(() => "?").join(",")})`); args.push(...opts.restrictStoreIds); }
+    }
     const q = String(opts.q || "").trim();
     // Busca por nome, referência do produto, EAN (sku da variante) ou ref da variante.
     if (q) {

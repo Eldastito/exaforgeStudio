@@ -203,9 +203,12 @@ export class RetailTransferService {
    *  - distância (mais próximas primeiro) e melhor horário da doadora.
    * Determinístico, isolado por organização.
    */
-  static replenishmentSuggestions(orgId: string, opts: { minDonor?: number; limit?: number } = {}): { count: number; suggestions: any[] } {
+  static replenishmentSuggestions(orgId: string, opts: { minDonor?: number; limit?: number; restrictNeedyStoreIds?: string[] } = {}): { count: number; suggestions: any[] } {
     const minDonor = Math.max(1, int(opts.minDonor) || 2);
     const limit = Math.min(500, Math.max(10, int(opts.limit) || 200));
+    // CRM-002: trava de loja por usuário — mostra reposição só das lojas que a
+    // pessoa gere (a loja NECESSITADA). Vazio = nada.
+    const restrict = opts.restrictNeedyStoreIds;
     const rows = db.prepare(`
       WITH carrier AS (
         SELECT rsi.store_id, rsi.product_service_id,
@@ -237,9 +240,10 @@ export class RetailTransferService {
        LIMIT ?
     `).all(orgId, orgId, minDonor, limit) as any[];
 
+    const scoped = restrict ? rows.filter((r) => (restrict as string[]).includes(r.needy_store_id)) : rows;
     const orgHasPolicies = RetailStockPolicyService.hasAny(orgId);
     const timeCache = new Map<string, string>();
-    const suggestions = rows.map((r) => {
+    const suggestions = scoped.map((r) => {
       const dist = haversineKm(r.needy_lat, r.needy_lng, r.donor_lat, r.donor_lng);
       const code = String(r.donor_code || "");
       if (!timeCache.has(code)) timeCache.set(code, this.suggestBestWindow(orgId, code));

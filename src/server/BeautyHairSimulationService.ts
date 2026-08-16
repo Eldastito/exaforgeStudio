@@ -612,11 +612,18 @@ export class BeautyHairSimulationService {
 
   /** Lista simulações de uma consulta (ordena mais recente primeiro). */
   static listForConsultation(orgId: string, consultationId: string): BeautyVisualSimulationRow[] {
+    // F29: com provider REAL ativo, a seção "Resultados" esconde as saídas do
+    // STUB (quadrados coloridos de demonstração que ficaram no acervo de
+    // quando não havia chave de IA). Assim que a IA real entra, some o
+    // entulho e só as imagens de verdade aparecem. Com stub explícito
+    // (CI/demo) tudo continua visível.
+    const activeKey = activeProvider().key;
     const rows = db.prepare(
       `SELECT * FROM beauty_visual_simulations
         WHERE organization_id = ? AND consultation_id = ? AND status != 'DELETED'
+          AND (? = 'stub_v1' OR provider_key != 'stub_v1')
         ORDER BY created_at DESC`,
-    ).all(orgId, consultationId) as any[];
+    ).all(orgId, consultationId, activeKey) as any[];
     return rows.map((r) => {
       const row = rowToSimulation(r);
       if (row.status === "SUCCEEDED" && row.outputStorageKey) {

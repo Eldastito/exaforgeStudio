@@ -383,6 +383,7 @@
     "test:retail-stock-policy": "tsx scripts/test-retail-stock-policy.ts",
     "test:retail-replenishment": "tsx scripts/test-retail-replenishment.ts",
     "test:retail-store-scope": "tsx scripts/test-retail-store-scope.ts",
+    "test:manager-solution": "tsx scripts/test-manager-solution.ts",
     "test:task-recurrence": "tsx scripts/test-task-recurrence.ts",
     "test:task-reminder": "tsx scripts/test-task-reminder.ts",
     "test:task-recurrence-edit": "tsx scripts/test-task-recurrence-edit.ts",

@@ -9884,6 +9884,56 @@ const initDb = () => {
   //     no caminho antigo provado.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_business_date_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_analytics_resolved_products_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
+
+  // AJUDA — base de artigos de ajuda do USUÁRIO (ADR-179 F1). É o Fala Tu
+  // (ZeroTrainingHelpService) respondendo dúvida ATERRADO em conteúdo CURADO —
+  // NÃO nos ADRs crus (RN-HELP-5). GLOBAL (o "como faço" é o mesmo p/ todos os
+  // tenants — SEM organization_id) com recorte OPCIONAL por vertical (vertical
+  // NULL = todas). Cada artigo segue o padrão "O que é · Pra que serve · Como
+  // faço · Erros comuns" e só vai ao ar com reviewed_by (RN-HELP-3 — curadoria
+  // humana; o bootstrap da F2 gera rascunho, humano publica). Aditivo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS help_articles (
+        id TEXT PRIMARY KEY,
+        vertical TEXT,                                 -- NULL = todas as verticais
+        module_key TEXT,                               -- chave do MODULE_META / superfície
+        title TEXT NOT NULL,
+        what TEXT,                                     -- "O que é"
+        purpose TEXT,                                  -- "Pra que serve"
+        steps_json TEXT,                               -- ["passo 1", ...] "Como faço"
+        common_errors_json TEXT,                       -- ["erro comum 1", ...]
+        keywords TEXT,                                 -- termos p/ recuperação determinística
+        reviewed_by TEXT NOT NULL,                     -- QUEM revisou (obrigatório, RN-HELP-3)
+        source_ref TEXT,                               -- ADR/feature de origem do rascunho
+        status TEXT NOT NULL DEFAULT 'published',      -- draft|published|archived
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_help_articles_module ON help_articles (module_key, status);
+      CREATE INDEX IF NOT EXISTS idx_help_articles_vertical ON help_articles (vertical, status);
+    `);
+  } catch (e) { /* noop */ }
+
+  // AJUDA — log de LACUNA (ADR-179 F1). Pergunta que a base ainda não cobre vira
+  // fila de conteúdo (RN-HELP-1: sem cobertura, admite e REGISTRA a lacuna; a base
+  // cresce puxada pela dúvida real). POR-ORG e MINIMIZADO (query normalizada, sem
+  // PII — LGPD RN-HELP-6). Upsert incrementa `hits`. Aditivo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS help_gap_log (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        query_norm TEXT NOT NULL,                      -- pergunta normalizada (sem PII)
+        module_key TEXT,
+        hits INTEGER DEFAULT 1,
+        first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_help_gap_unique ON help_gap_log (organization_id, query_norm, module_key);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

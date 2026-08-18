@@ -23,6 +23,7 @@ import { ModuleService } from "./ModuleService.js";
 import { NavigationManifestService } from "./NavigationManifestService.js";
 import { SmartInboxService } from "./SmartInboxService.js";
 import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
+import { HelpKnowledgeService } from "./HelpKnowledgeService.js";
 
 export type HelpIntent = "teach" | "show" | "do" | "navigate" | "unknown";
 
@@ -45,13 +46,15 @@ const SURFACES: Record<string, { key: string; label: string }> = {
 
 export class ZeroTrainingHelpService {
   /** Classifica a pergunta e compõe a resposta. Determinístico, role-scoped. */
-  static answer(orgId: string, user: any, input: { text: string }): {
+  static answer(orgId: string, user: any, input: { text: string; moduleKey?: string | null }): {
     intent: HelpIntent;
     message: string;
     module: { key: string; label: string; desc: string } | null;
     navTarget: { key: string; label: string; available: boolean } | null;
     evidence: { category: string; count: number } | null;
     governedBy: { actionType: string; policy: string; requiredRole: string | null } | null;
+    article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null;
+    gapLogged: boolean;
     invisibleUxEnabled: boolean;
     source: "falatu_help";
   } {
@@ -92,7 +95,43 @@ export class ZeroTrainingHelpService {
       message = "Posso explicar um recurso, mostrar o que precisa de você, fazer uma ação (com a sua confirmação) ou te levar a uma tela. O que você precisa?";
     }
 
-    return { intent, message, module, navTarget, evidence, governedBy, invisibleUxEnabled: !!(inv && inv.e), source: "falatu_help" };
+    // ── Camada de conteúdo curado (ADR-179 F1) — aterra a resposta num ARTIGO ──
+    // Só entra em dúvidas de "como/o que/onde/faça" (não em "mostre", que é evidência
+    // ao vivo). Grounded: quando há artigo, cita e enriquece com o passo a passo;
+    // sem cobertura E sem resposta substantiva dos engines → HONESTO + registra a
+    // lacuna (RN-HELP-1). 0-regressão: nunca sobrescreve uma resposta de engine.
+    let article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null = null;
+    let gapLogged = false;
+    if (intent !== "show") {
+      const moduleKey = input?.moduleKey || module?.key || null;
+      const kb = HelpKnowledgeService.retrieve(orgId, text, moduleKey);
+      if (kb) {
+        article = { id: kb.id, title: kb.title, moduleKey: kb.module_key, steps: kb.steps, commonErrors: kb.commonErrors, sourceRef: kb.sourceRef };
+        const steps = kb.steps.map((s, i) => `${i + 1}) ${s}`).join(" ");
+        // Enriquece: mantém o texto do engine (quando houver) e acrescenta o passo a passo citado.
+        const grounded = `${kb.what || kb.title}${steps ? ` Passo a passo: ${steps}` : ""} (fonte: ${kb.title})`;
+        message = module ? `${message} ${grounded}` : grounded;
+      } else if (!this.hasSubstance(intent, module, governedBy, navTarget)) {
+        // Nada dos engines E nada na base → admite e registra a lacuna (nunca inventa).
+        HelpKnowledgeService.logGap(orgId, text, moduleKey);
+        gapLogged = true;
+      }
+    }
+
+    return { intent, message, module, navTarget, evidence, governedBy, article, gapLogged, invisibleUxEnabled: !!(inv && inv.e), source: "falatu_help" };
+  }
+
+  /** Houve resposta CONCRETA dos engines determinísticos? (define se a lacuna é real). */
+  private static hasSubstance(
+    intent: HelpIntent,
+    module: { key: string } | null,
+    governedBy: { actionType: string } | null,
+    navTarget: { available: boolean } | null,
+  ): boolean {
+    if (intent === "teach") return !!module;
+    if (intent === "do") return !!governedBy;
+    if (intent === "navigate") return !!navTarget;
+    return false; // unknown → sem substância
   }
 
   // ── classificação (determinística) ──

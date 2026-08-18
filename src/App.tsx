@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { devLog } from '@/src/lib/log';
 import { COOKIE_SESSION } from '@/src/lib/sessionMode';
 import { Sidebar } from '@/src/features/Sidebar';
+import { HelpOrb } from '@/src/features/HelpOrb';
 import { KanbanBoard } from '@/src/features/KanbanBoard';
 import { ChatPanel } from '@/src/features/ChatPanel';
 import { ChannelsPanel } from '@/src/features/ChannelsPanel';
@@ -615,6 +616,9 @@ export default function App() {
           </ErrorBoundary>
         </main>
       </div>
+      {/* ADR-179 F1 — Tutor de Ajuda flutuante. Universal (não exige falatu_enabled);
+          passa a tela atual como contexto soft. */}
+      <HelpOrb moduleKey={viewMode} />
     </div>
   );
 }

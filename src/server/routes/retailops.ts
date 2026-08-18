@@ -18,6 +18,7 @@ import { RetailBoletaService } from "../RetailBoletaService.js";
 import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
+import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -927,6 +928,16 @@ router.put("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: Aut
     const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
     res.json({ stores: RetailSellerDirectoryService.setStores(orgId, req.params.sellerId, storeIds, req.body?.primaryStoreId ?? null, req.user?.userId) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// PERF-001 (Fatia 4) — backfill da resolução de catálogo dos itens do PDV
+// (em lotes idempotentes/interrompíveis). owner/admin.
+router.post("/pdv-catalog/backfill", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Math.max(1, Math.min(5000, parseInt(String(req.body?.limit || "1000"), 10) || 1000));
+  const r = RetailPdvCatalogResolver.backfill(orgId, { limit });
+  res.json({ ...r, pending: RetailPdvCatalogResolver.pendingCount(orgId) });
 });
 
 // POS-002/003 (Fatia 3) — tarifas POS por loja × meio de pagamento (crédito/

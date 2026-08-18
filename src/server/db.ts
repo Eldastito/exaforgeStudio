@@ -9855,6 +9855,19 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_fee_active ON retail_store_pos_fee_rules (organization_id, store_id, payment_type) WHERE effective_to IS NULL;
     `);
   } catch (e) { /* noop */ }
+
+  // PERF-001/002 (PDR TOULON, Fatia 4) — catálogo RESOLVIDO na ingestão. Hoje
+  // "Resultado por loja" e "Mais vendidos" resolvem o código do ERP → catálogo
+  // com LIKE-prefix a CADA consulta. Persistir a resolução (produto/variante +
+  // status do match) permite consultas por índice em vez de scan. Aditivo; a
+  // resolução acontece na ingestão + backfill; itens legados ficam NULL até lá.
+  try { db.exec(`ALTER TABLE retail_pdv_sale_items ADD COLUMN product_service_id TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`ALTER TABLE retail_pdv_sale_items ADD COLUMN variant_id TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`ALTER TABLE retail_pdv_sale_items ADD COLUMN catalog_match_status TEXT`); } catch (e) { /* noop */ } // exact | prefix | unmatched | ambiguous
+  try { db.exec(`ALTER TABLE retail_pdv_sale_items ADD COLUMN catalog_resolved_at DATETIME`); } catch (e) { /* noop */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_product ON retail_pdv_sale_items (organization_id, product_service_id) WHERE product_service_id IS NOT NULL`); } catch (e) { /* noop */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_unresolved ON retail_pdv_sale_items (organization_id) WHERE catalog_resolved_at IS NULL`); } catch (e) { /* noop */ }
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_org_filial_date ON retail_pdv_sale_items (organization_id, filial, sale_date)`); } catch (e) { /* noop */ }
 };
 
 initDb();

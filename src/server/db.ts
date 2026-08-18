@@ -9952,6 +9952,24 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_help_ask_stats_unique ON help_ask_stats (organization_id, module_key);
     `);
   } catch (e) { /* noop */ }
+
+  // AJUDA — feedback 👍/👎 por resposta (ADR-179 F3). AGREGADO por org+artigo+módulo
+  // (up/down), sem texto (LGPD RN-HELP-6). article_id='' quando a resposta NÃO veio
+  // de artigo (ex.: lacuna) — 👎 aí é sinal de que o tema precisa de conteúdo. Upsert.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS help_feedback (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        article_id TEXT NOT NULL DEFAULT '',            -- '' = resposta sem artigo
+        module_key TEXT NOT NULL DEFAULT '',
+        up INTEGER DEFAULT 0,                            -- 👍
+        down INTEGER DEFAULT 0,                          -- 👎
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_help_feedback_unique ON help_feedback (organization_id, article_id, module_key);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

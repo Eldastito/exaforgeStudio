@@ -496,6 +496,7 @@ export class HelpKnowledgeService {
   static metrics(orgId: string): {
     totalAsks: number; answered: number; unanswered: number; answerRatePct: number | null;
     openGaps: number;
+    helpfulVotes: number; notHelpfulVotes: number; helpfulRatePct: number | null;
     byModule: Array<{ moduleKey: string | null; asks: number; answered: number; answerRatePct: number | null; openGaps: number }>;
   } {
     const agg = db.prepare(`SELECT COALESCE(SUM(asks),0) asks, COALESCE(SUM(answered),0) answered FROM help_ask_stats WHERE organization_id = ?`).get(orgId) as any;
@@ -514,10 +515,15 @@ export class HelpKnowledgeService {
         openGaps: gapMap.get(r.module_key || "") || 0,
       };
     });
+    const fb = db.prepare(`SELECT COALESCE(SUM(up),0) up, COALESCE(SUM(down),0) down FROM help_feedback WHERE organization_id = ?`).get(orgId) as any;
+    const up = Number(fb?.up || 0); const down = Number(fb?.down || 0); const votes = up + down;
     return {
       totalAsks, answered, unanswered,
       answerRatePct: totalAsks > 0 ? Math.round((answered / totalAsks) * 100) : null,
-      openGaps, byModule,
+      openGaps,
+      helpfulVotes: up, notHelpfulVotes: down,
+      helpfulRatePct: votes > 0 ? Math.round((up / votes) * 100) : null,
+      byModule,
     };
   }
 
@@ -534,6 +540,44 @@ export class HelpKnowledgeService {
       ORDER BY hits DESC, orgs DESC LIMIT ?
     `).all(limit) as any[];
     return rows.map((r) => ({ query: r.query_norm, moduleKey: r.module_key || null, hits: Number(r.hits), orgs: Number(r.orgs), lastSeenAt: r.last_seen_at }));
+  }
+
+  // ───────────────────── Contextual + feedback (ADR-179 F3) ─────────────────────
+
+  /**
+   * Sugestões da TELA atual: artigos publicados do módulo (+ globais), pra o orb
+   * oferecer "o que dá pra aprender aqui" sem a pessoa precisar perguntar. Respeita
+   * o recorte por vertical (RN-HELP-7). Vazio → orb não empurra nada (honesto).
+   */
+  static suggestions(orgId: string, moduleKey?: string | null, opts?: { limit?: number }): Array<{ id: string; title: string; moduleKey: string | null; what: string | null }> {
+    this.ensureSeeded();
+    const limit = Math.min(Math.max(Number(opts?.limit) || 3, 1), 10);
+    const vertical = this.verticalOf(orgId);
+    const mk = moduleKey || null;
+    // Prioriza o módulo da tela; completa com globais do mesmo recorte de vertical.
+    const rows = db.prepare(`
+      SELECT id, title, module_key, what FROM help_articles
+      WHERE status = 'published' AND (vertical IS NULL OR vertical = ?)
+      ORDER BY (CASE WHEN module_key = ? THEN 0 ELSE 1 END), title
+      LIMIT ?
+    `).all(vertical, mk ?? "", limit) as any[];
+    return rows.map((r) => ({ id: r.id, title: r.title, moduleKey: r.module_key || null, what: r.what ?? null }));
+  }
+
+  /** Registra 👍/👎 de uma resposta (agregado, sem texto — RN-HELP-6). Best-effort. */
+  static recordFeedback(orgId: string, input: { articleId?: string | null; moduleKey?: string | null; helpful: boolean }): { ok: boolean } {
+    const articleId = (input.articleId || "").toString();
+    const mk = input.moduleKey || "";
+    const up = input.helpful ? 1 : 0; const down = input.helpful ? 0 : 1;
+    try {
+      db.prepare(`
+        INSERT INTO help_feedback (id, organization_id, article_id, module_key, up, down, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (organization_id, article_id, module_key)
+        DO UPDATE SET up = up + ?, down = down + ?, updated_at = CURRENT_TIMESTAMP
+      `).run(randomUUID(), orgId, articleId, mk, up, down, up, down);
+      return { ok: true };
+    } catch { return { ok: false }; }
   }
 }
 

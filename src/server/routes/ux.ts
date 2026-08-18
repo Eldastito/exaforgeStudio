@@ -80,7 +80,8 @@ router.get("/contextual-upgrades", (req: AuthRequest, res): any => {
 router.post("/help", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
-  res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || "") }));
+  const moduleKey = req.body?.moduleKey ? String(req.body.moduleKey) : null; // tela atual (contextual, opcional)
+  res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || ""), moduleKey }));
 });
 
 // POST /api/ux/telemetry { eventType, surface?, moduleKey?, sessionId?, ttfvMs? }

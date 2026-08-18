@@ -55,6 +55,7 @@
     "test:inferred-settings": "tsx scripts/test-inferred-settings.ts",
     "test:contextual-upgrades": "tsx scripts/test-contextual-upgrades.ts",
     "test:zero-training-help": "tsx scripts/test-zero-training-help.ts",
+    "test:help-knowledge": "tsx scripts/test-help-knowledge.ts",
     "test:ux-telemetry": "tsx scripts/test-ux-telemetry.ts",
     "test:mobile-readiness": "tsx scripts/test-mobile-readiness.ts",
     "test:legacy-reduction": "tsx scripts/test-legacy-reduction.ts",

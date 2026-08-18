@@ -43,6 +43,29 @@ import { logAuthEvent } from "./auditLog.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
+/** CMV vazio (loja sem venda PDV item-a-item no mês → cai pro estimado). */
+const EMPTY_CMV = (): StoreCmvBreakdown => ({
+  source: "estimate",
+  coverage: 0,
+  cmvReal: 0,
+  revenueCovered: 0,
+  revenueTotalPdv: 0,
+});
+
+/** Custos fixos zerados com as 7 chaves (mesma forma que `list`). */
+const emptyStoreCosts = (): StoreCosts => {
+  const byCategory: Record<string, number> = {};
+  for (const c of FIXED_COST_CATEGORIES) byCategory[c.key] = 0;
+  return { byCategory, total: 0 };
+};
+
+/** Custos variáveis zerados com as chaves (mesma forma que `listVariable`). */
+const emptyStoreVariableCosts = (): StoreVariableCosts => {
+  const byCategory: Record<string, { percent: number; fixedPerSale: number }> = {};
+  for (const c of VARIABLE_COST_CATEGORIES) byCategory[c.key] = { percent: 0, fixedPerSale: 0 };
+  return { byCategory, totalPercent: 0, totalFixedPerSale: 0 };
+};
+
 /** Categorias de custo FIXO suportadas (chave técnica + rótulo pro gestor). */
 export const FIXED_COST_CATEGORIES = [
   { key: "aluguel", label: "Aluguel" },
@@ -415,19 +438,29 @@ export class RetailStoreCostService {
    * cai pro cálculo estimado inteiro.
    */
   static monthlyCogsBreakdown(orgId: string, storeId: string, period: string): StoreCmvBreakdown {
-    const empty: StoreCmvBreakdown = {
-      source: "estimate",
-      coverage: 0,
-      cmvReal: 0,
-      revenueCovered: 0,
-      revenueTotalPdv: 0,
-    };
+    return this.monthlyCogsBreakdownAll(orgId, period, storeId).get(storeId) || EMPTY_CMV();
+  }
+
+  /**
+   * CMV REAL de TODAS as lojas no mês, agregado por `store_id` numa consulta
+   * (PERF-003 — evita o N+1 do `allStoresResult`). Consome as colunas RESOLVIDAS
+   * do item (`product_service_id`/`variant_id`, PERF-001): itens já resolvidos
+   * casam por índice; o join por PREFIXO (`LIKE`) roda SÓ para os itens ainda
+   * não resolvidos (`catalog_resolved_at IS NULL`) — nunca pro histórico inteiro
+   * a cada abertura (PERF-004). Passe `storeId` para restringir a uma loja.
+   */
+  static monthlyCogsBreakdownAll(
+    orgId: string,
+    period: string,
+    storeId?: string
+  ): Map<string, StoreCmvBreakdown> {
+    const out = new Map<string, StoreCmvBreakdown>();
     try {
-      // Mesma resolução do /pdv-top-products (retailops.ts) — tolera EAN 13/12
-      // e código do ERP. LEFT JOIN garante que somamos até os que não casaram.
+      const where = storeId ? "AND st.id = ?" : "";
+      const args: any[] = storeId ? [orgId, period, storeId] : [orgId, period];
       const rows = db
         .prepare(
-          `SELECT
+          `SELECT st.id AS store_id,
              SUM(i.quantidade * COALESCE(inv.avg_cost, 0)) AS cogs,
              SUM(CASE WHEN inv.avg_cost > 0 THEN i.valor ELSE 0 END) AS revenue_covered,
              SUM(i.valor) AS revenue_total
@@ -436,40 +469,148 @@ export class RetailStoreCostService {
              ON st.organization_id = i.organization_id
             AND st.code = i.filial
             AND st.active = 1
-           LEFT JOIN product_variants pv
-             ON pv.organization_id = i.organization_id
-            AND (pv.external_ref = i.produto OR pv.sku = i.produto)
-           LEFT JOIN products_services ps1
-             ON ps1.id = pv.product_service_id
-           LEFT JOIN products_services ps2
-             ON ps2.organization_id = i.organization_id
-            AND (ps2.external_ref = i.produto OR i.produto LIKE ps2.external_ref || '%')
+           -- Fallback (PERF-004): SÓ para itens não resolvidos — tolera EAN 13/12
+           -- e código do ERP como antes; para os resolvidos, essas junções ficam
+           -- inertes (predicado catalog_resolved_at IS NULL) e usamos as colunas.
+           LEFT JOIN product_variants fpv
+             ON i.catalog_resolved_at IS NULL
+            AND fpv.organization_id = i.organization_id
+            AND (fpv.external_ref = i.produto OR fpv.sku = i.produto)
+           LEFT JOIN products_services fps2
+             ON i.catalog_resolved_at IS NULL
+            AND fps2.organization_id = i.organization_id
+            AND (fps2.external_ref = i.produto OR i.produto LIKE fps2.external_ref || '%')
            LEFT JOIN inventory_items inv
              ON inv.organization_id = i.organization_id
-            AND inv.product_service_id = COALESCE(ps1.id, ps2.id)
-            AND (inv.variant_id = pv.id OR inv.variant_id IS NULL)
+            AND inv.product_service_id = COALESCE(i.product_service_id, fpv.product_service_id, fps2.id)
+            AND (inv.variant_id = COALESCE(i.variant_id, fpv.id) OR inv.variant_id IS NULL)
           WHERE i.organization_id = ?
-            AND st.id = ?
-            AND substr(i.sale_date, 1, 7) = ?`
+            AND substr(i.sale_date, 1, 7) = ?
+            ${where}
+          GROUP BY st.id`
         )
-        .get(orgId, storeId, period) as any;
-      const cmvReal = round2(rows?.cogs);
-      const revenueCovered = round2(rows?.revenue_covered);
-      const revenueTotalPdv = round2(rows?.revenue_total);
-      if (revenueTotalPdv <= 0) return empty;
-      const coverage = revenueCovered / revenueTotalPdv;
-      const source: StoreCmvBreakdown["source"] =
-        coverage <= 0 ? "estimate" : coverage >= 0.999 ? "real" : "blended";
-      return {
-        source,
-        coverage: Math.round(coverage * 10000) / 10000,
-        cmvReal,
-        revenueCovered,
-        revenueTotalPdv,
-      };
+        .all(...args) as any[];
+      for (const r of rows) {
+        const revenueTotalPdv = round2(r?.revenue_total);
+        if (revenueTotalPdv <= 0) continue;
+        const revenueCovered = round2(r?.revenue_covered);
+        const coverage = revenueCovered / revenueTotalPdv;
+        const source: StoreCmvBreakdown["source"] =
+          coverage <= 0 ? "estimate" : coverage >= 0.999 ? "real" : "blended";
+        out.set(String(r.store_id), {
+          source,
+          coverage: Math.round(coverage * 10000) / 10000,
+          cmvReal: round2(r?.cogs),
+          revenueCovered,
+          revenueTotalPdv,
+        });
+      }
     } catch {
-      return empty;
+      /* devolve o que tiver (mapa possivelmente vazio) */
     }
+    return out;
+  }
+
+  /** Faturamento do mês de TODAS as lojas, agregado por store_id (PERF-003). */
+  static monthlyRevenueAll(orgId: string, period: string): Map<string, number> {
+    const out = new Map<string, number>();
+    try {
+      const rows = db
+        .prepare(
+          `SELECT store_id, COALESCE(SUM(${VALUE_EXPR}), 0) AS s
+             FROM retail_daily_closings
+            WHERE organization_id = ? AND status != 'rejected'
+              AND strftime('%Y-%m', closing_date) = ?
+            GROUP BY store_id`
+        )
+        .all(orgId, period) as any[];
+      for (const r of rows) out.set(String(r.store_id), round2(r.s));
+    } catch { /* mapa vazio */ }
+    return out;
+  }
+
+  /**
+   * Nº de vendas do mês de TODAS as lojas, agregado por store_id (PERF-003).
+   * Mesma régua do `monthlySalesCount`: prefere o grão de ticket do PDV; cai
+   * pros fechamentos aprovados; ausência das duas → sem entrada no mapa (o
+   * caller trata como `null`, não como 0).
+   */
+  static monthlySalesCountAll(orgId: string, period: string): Map<string, number> {
+    const out = new Map<string, number>();
+    try {
+      const pdv = db
+        .prepare(
+          `SELECT st.id AS store_id, COUNT(*) AS c
+             FROM retail_pdv_sales s
+             JOIN retail_stores st ON st.organization_id = s.organization_id
+                                  AND st.code = s.filial AND st.active = 1
+            WHERE s.organization_id = ? AND substr(s.sale_date, 1, 7) = ?
+            GROUP BY st.id`
+        )
+        .all(orgId, period) as any[];
+      for (const r of pdv) { const c = Number(r.c) || 0; if (c > 0) out.set(String(r.store_id), c); }
+    } catch { /* segue pro fallback */ }
+    try {
+      const closings = db
+        .prepare(
+          `SELECT store_id, COUNT(*) AS c FROM retail_daily_closings
+            WHERE organization_id = ? AND status != 'rejected'
+              AND strftime('%Y-%m', closing_date) = ?
+            GROUP BY store_id`
+        )
+        .all(orgId, period) as any[];
+      for (const r of closings) {
+        const id = String(r.store_id);
+        if (out.has(id)) continue; // PDV tem precedência
+        const c = Number(r.c) || 0;
+        if (c > 0) out.set(id, c);
+      }
+    } catch { /* mapa como está */ }
+    return out;
+  }
+
+  /** Custos FIXOS de TODAS as lojas, por store_id (PERF-003). */
+  static listAll(orgId: string): Map<string, StoreCosts> {
+    const out = new Map<string, StoreCosts>();
+    try {
+      const rows = db
+        .prepare(`SELECT store_id, category, amount FROM retail_store_fixed_costs WHERE organization_id = ?`)
+        .all(orgId) as any[];
+      for (const r of rows) {
+        const id = String(r.store_id);
+        let sc = out.get(id);
+        if (!sc) { sc = emptyStoreCosts(); out.set(id, sc); }
+        const amount = round2(r.amount);
+        if (CATEGORY_KEYS.has(r.category)) sc.byCategory[r.category] = amount;
+        sc.total = round2(sc.total + amount);
+      }
+    } catch { /* mapa vazio */ }
+    return out;
+  }
+
+  /** Custos VARIÁVEIS de TODAS as lojas, por store_id (PERF-003). */
+  static listVariableAll(orgId: string): Map<string, StoreVariableCosts> {
+    const out = new Map<string, StoreVariableCosts>();
+    try {
+      const rows = db
+        .prepare(
+          `SELECT store_id, category, percent, fixed_per_sale
+             FROM retail_store_variable_costs WHERE organization_id = ?`
+        )
+        .all(orgId) as any[];
+      for (const r of rows) {
+        if (!VAR_CATEGORY_KEYS.has(r.category)) continue;
+        const id = String(r.store_id);
+        let vc = out.get(id);
+        if (!vc) { vc = emptyStoreVariableCosts(); out.set(id, vc); }
+        const p = round2(r.percent);
+        const f = round2(r.fixed_per_sale);
+        vc.byCategory[r.category] = { percent: p, fixedPerSale: f };
+        vc.totalPercent = round2(vc.totalPercent + p);
+        vc.totalFixedPerSale = round2(vc.totalFixedPerSale + f);
+      }
+    } catch { /* mapa vazio */ }
+    return out;
   }
 
   /** Resultado gerencial + ponto de equilíbrio da loja no mês. */
@@ -480,10 +621,37 @@ export class RetailStoreCostService {
   ): StoreResult | null {
     const store = RetailStoreService.get(orgId, storeId);
     if (!store) return null;
-    const faturamento = this.monthlyRevenue(orgId, storeId, period);
-    const vendasCount = this.monthlySalesCount(orgId, storeId, period);
-    const custosFixos = this.list(orgId, storeId);
-    const custosVariaveis = this.listVariable(orgId, storeId);
+    // Insumos por-loja (uma consulta cada). O `allStoresResult` (PERF-003)
+    // computa esses mesmos insumos em LOTE (agregados por store_id) e chama
+    // `assembleStoreResult` direto — a montagem abaixo é a MESMA, sem N+1.
+    return this.assembleStoreResult(store, period, {
+      faturamento: this.monthlyRevenue(orgId, storeId, period),
+      vendasCount: this.monthlySalesCount(orgId, storeId, period),
+      custosFixos: this.list(orgId, storeId),
+      custosVariaveis: this.listVariable(orgId, storeId),
+      cmvBd: this.monthlyCogsBreakdown(orgId, storeId, period),
+    });
+  }
+
+  /**
+   * Montagem PURA do resultado gerencial a partir dos insumos já computados
+   * (faturamento, contagem, custos fixos/variáveis, CMV). Sem consulta ao DB —
+   * é o que permite o caminho set-based (allStoresResult) reusar a MESMA regra
+   * de cálculo sem repetir queries por loja (PERF-003).
+   */
+  static assembleStoreResult(
+    store: any,
+    period: string,
+    inputs: {
+      faturamento: number;
+      vendasCount: number | null;
+      custosFixos: StoreCosts;
+      custosVariaveis: StoreVariableCosts;
+      cmvBd: StoreCmvBreakdown;
+    }
+  ): StoreResult {
+    const { faturamento, vendasCount, custosFixos, custosVariaveis, cmvBd } = inputs;
+    const storeId = store.id;
     const marginPct: number | null =
       store.gross_margin_percent === null || store.gross_margin_percent === undefined
         ? null
@@ -511,8 +679,7 @@ export class RetailStoreCostService {
     // avg_cost cadastrado (produto que nunca entrou por NF-e), cai no fallback
     // proporcional pelo `gross_margin_percent`. Sem margem cadastrada, o
     // fallback não roda — se coverage < 100% e não há margem, o CMV real
-    // parcial não vira estimativa (guardrail).
-    const cmvBd = this.monthlyCogsBreakdown(orgId, storeId, period);
+    // parcial não vira estimativa (guardrail). `cmvBd` vem dos insumos.
     let cmvUsado: number | null = null;
     let cmvBreakdown: StoreCmvBreakdown | null = null;
     let cmvWarning: string | null = null;
@@ -598,12 +765,31 @@ export class RetailStoreCostService {
     };
   }
 
-  /** Resultado de TODAS as lojas ativas no mês + totais da rede. */
+  /**
+   * Resultado de TODAS as lojas ativas no mês + totais da rede.
+   *
+   * PERF-003: em vez de chamar `storeResult` por loja (N+1 — ~5 consultas ×
+   * N lojas), computa os insumos (faturamento, contagem, custos fixos/variáveis,
+   * CMV) em LOTE — agregados por store_id numa consulta cada — e monta cada loja
+   * com a MESMA regra (`assembleStoreResult`, pura). Resultado idêntico, sem N+1.
+   */
   static allStoresResult(orgId: string, period = new Date().toISOString().slice(0, 7)) {
     const stores = RetailStoreService.list(orgId).filter((s: any) => s.active === 1 || s.active === true);
-    const perStore = stores
-      .map((s: any) => this.storeResult(orgId, s.id, period))
-      .filter((r): r is StoreResult => r !== null);
+    // Insumos em lote (5 consultas fixas, não 5×N).
+    const revenueAll = this.monthlyRevenueAll(orgId, period);
+    const salesCountAll = this.monthlySalesCountAll(orgId, period);
+    const fixedAll = this.listAll(orgId);
+    const variableAll = this.listVariableAll(orgId);
+    const cmvAll = this.monthlyCogsBreakdownAll(orgId, period);
+    const perStore = stores.map((s: any) =>
+      this.assembleStoreResult(s, period, {
+        faturamento: revenueAll.get(s.id) || 0,
+        vendasCount: salesCountAll.has(s.id) ? (salesCountAll.get(s.id) as number) : null,
+        custosFixos: fixedAll.get(s.id) || emptyStoreCosts(),
+        custosVariaveis: variableAll.get(s.id) || emptyStoreVariableCosts(),
+        cmvBd: cmvAll.get(s.id) || EMPTY_CMV(),
+      })
+    );
     const totals = perStore.reduce(
       (a, r) => {
         a.faturamento += r.faturamento;

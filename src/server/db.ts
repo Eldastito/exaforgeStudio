@@ -9791,6 +9791,13 @@ const initDb = () => {
   // Fatia A / TIME-002). Aditivo; NULL = fallback 'America/Sao_Paulo' no
   // BusinessTimeService. Corrige "boletas somem no reload após 21h" (data UTC).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN timezone TEXT`); } catch (e) { /* noop */ }
+
+  // BOL-002 — idempotência do clique de boleta (PDR TOULON, Fatia 1B). Chave
+  // gerada no dispositivo; double-tap/retry/resposta-perdida retornam o MESMO
+  // evento em vez de consumir outro número. Aditivo: cliques sem chave seguem
+  // como antes. Índice único parcial por (org, loja, chave).
+  try { db.exec(`ALTER TABLE retail_boleta_events ADD COLUMN idempotency_key TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_boleta_events_idem ON retail_boleta_events (organization_id, store_id, idempotency_key) WHERE idempotency_key IS NOT NULL`); } catch (e) { /* noop */ }
 };
 
 initDb();

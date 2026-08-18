@@ -115,6 +115,24 @@ async function main() {
   const has = (t: string) => audit.some((a) => a.event_type === t);
   check("Audit: abertura, clique e cancelamento auditados", has("RETAIL_BOLETA_DAY_OPENED") && has("RETAIL_BOLETA_CLICKED") && has("RETAIL_BOLETA_CANCELLED"), JSON.stringify(audit.map((a) => a.event_type)));
 
+  // ── BOL-002: idempotência do clique (double-tap/retry) ────────────────────
+  const k = "idem-key-abc";
+  const i1 = RetailBoletaService.click(A, loja.id, DAY, { idempotencyKey: k }, "vend");
+  const nextAfterI1 = RetailBoletaService.nextNumber(A, loja.id, DAY);
+  const i2 = RetailBoletaService.click(A, loja.id, DAY, { idempotencyKey: k }, "vend"); // retry mesma chave
+  check("Double-click com mesma chave → mesmo evento (1 número)", i1.id === i2.id && i1.boleta_number === i2.boleta_number && i2.deduped === true, `${i1.boleta_number} vs ${i2.boleta_number}`);
+  check("Idempotência não consome número extra (próximo nº inalterado)", RetailBoletaService.nextNumber(A, loja.id, DAY) === nextAfterI1, `${RetailBoletaService.nextNumber(A, loja.id, DAY)} vs ${nextAfterI1}`);
+  const i3 = RetailBoletaService.click(A, loja.id, DAY, { idempotencyKey: "idem-key-xyz" }, "vend"); // chave diferente
+  check("Chave diferente cria número novo", i3.id !== i1.id && i3.boleta_number !== i1.boleta_number);
+
+  // ── BOL-005: histórico curto ──────────────────────────────────────────────
+  RetailBoletaService.openDay(A, loja.id, "2026-08-01", "000100", "gerente");
+  RetailBoletaService.click(A, loja.id, "2026-08-01", {}, "vend");
+  const hist = RetailBoletaService.history(A, loja.id, 7);
+  check("Histórico traz os dias com boletas (mais recente primeiro)", Array.isArray(hist) && hist.length >= 2 && hist[0].day >= hist[1].day);
+  const h0801 = hist.find((h: any) => h.day === "2026-08-01");
+  check("Histórico por dia: contagem + inicial", h0801 && h0801.count === 1 && h0801.initialNumber === "000100");
+
   // ── Isolamento multi-tenant ───────────────────────────────────────────────
   check("Org B não vê o dia da org A", RetailBoletaService.getDay(B, loja.id, DAY) == null);
   const repB = RetailBoletaService.dayReport(B, loja.id, DAY);

@@ -1,7 +1,6 @@
 # ADR-179 — Tutor de Ajuda & Treinamento (suporte grounded in-app)
 
-**Status:** FECHADO — F0–F4 + F6 em produção (F5 tours/GIFs deferido como
-incremento futuro; o núcleo de suporte está completo). Aditivo/reversível sobre
+**Status:** FECHADO — F0–F6 em produção (completo). Aditivo/reversível sobre
 ADR-163 (Invisible UX / Zero-Training) e ADR-151/160 (Fala Tu). NÃO cria bot
 paralelo, NÃO responde a partir dos ADRs crus. Guardrails RN-HELP-1..8 codificados
 em `test:help-hardening`; runbook em `docs/runbook/ajuda-operacao.md`.
@@ -118,9 +117,15 @@ assistente separado), aterrado numa **base de ajuda curada**:
 - **F3 FECHADA** — contextual (sugestões da tela via `/help/suggestions`) +
   deep-link "Abrir tela →" (mapa module↔viewMode) + 👍/👎 (`/help/feedback`) →
   `helpfulRatePct` nas métricas. `test:help-context` (11).
-- **F5 DEFERIDA** — treinamento além do Q&A: tours contextuais (AdaptiveOnboarding)
-  + GIFs curtos por feature + digest "aprenda 1 coisa" pelo Fala Tu. Incremento
-  futuro; rende mais depois de ver o orb rodando + dados da F4.
+- **F5 FECHADA** — treinamento além do Q&A: **tour contextual** (os passos do
+  artigo publicado da tela viram um walkthrough — DERIVADO do conteúdo curado,
+  não inventa) + **mídia curada opcional** (`media_url` aditivo; GIF/vídeo curto,
+  nunca fabricado — NULL por padrão) + digest **"aprenda 1 coisa"** que publica UMA
+  dica semanal no `business_signals` (conv. nº 12 — sem tabela paralela), de onde
+  flui pro Fala Tu/atenção; determinístico, idempotente por `help_learn:<id>`, gate
+  de 7 dias, sem conteúdo novo → não publica. Rotas `/help/tour`, `/help/learn-one`;
+  passe `passLearningDigest` no Scheduler; orb ganha tour + mídia + tip; painel de
+  curadoria ganha campo de mídia. `test:help-training` (17).
 - **F6 FECHADA** — hardening: `test:help-hardening` (28) codifica os RN-HELP-1..8 +
   fiação de produção (serviços importáveis, rotas montadas, testes wired, runbook
   presente); minimização LGPD extra (descarta telefone/CPF/cartão da normalização).

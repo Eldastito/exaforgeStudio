@@ -843,6 +843,14 @@ export class Scheduler {
       import("./CreativeLearningService.js").then((m) => m.CreativeLearningService.pass())
         .catch((e) => console.error('[Scheduler] aprendizado criativo falhou', e));
     } catch (e) { console.error('[Scheduler] pass de aprendizado criativo falhou', e); }
+    // Tutor de Ajuda — digest "aprenda 1 coisa" (ADR-179 F5): publica UMA dica semanal
+    // (gate de 7 dias no próprio pass) de artigo publicado no `business_signals` (conv.
+    // nº 12 — sem tabela paralela), de onde flui pro Fala Tu/atenção. Só conteúdo curado;
+    // sem novidade → não publica. Best-effort; reusa este tick (§42 — sem 2º Scheduler).
+    try {
+      import("./HelpKnowledgeService.js").then((m) => m.HelpKnowledgeService.passLearningDigest())
+        .catch((e) => console.error('[Scheduler] digest de ajuda falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de digest de ajuda falhou', e); }
     // Beauty — Detector de simulação abandonada (ADR-169 F11): publica `business_signal`
     // pra consultas 'ready' com sim SUCCEEDED sem 'selected' há X horas. Opt-in por org
     // (`beauty_abandoned_detector_enabled=1`); default OFF = 0-regressão. Sem tabela de

@@ -43,6 +43,8 @@ async function main() {
   check("B2 rota POST /help montada", uxPaths.includes("/help"));
   check("B3 rotas F3 montadas (/help/suggestions, /help/feedback)", uxPaths.includes("/help/suggestions") && uxPaths.includes("/help/feedback"));
   check("B4 rotas F4 montadas (/help/gaps, /help/metrics)", uxPaths.includes("/help/gaps") && uxPaths.includes("/help/metrics"));
+  check("B4b rotas F5 montadas (/help/tour, /help/learn-one)", uxPaths.includes("/help/tour") && uxPaths.includes("/help/learn-one"));
+  check("B4c digest de treinamento é passe do Scheduler", typeof (KB as any).passLearningDigest === "function");
   const adminRouter = (await import("../src/server/routes/admin.js")).default as any;
   const adminPaths = routePaths(adminRouter);
   check("B5 rotas de curadoria montadas (/help-articles + bootstrap + publish + archive)",
@@ -96,7 +98,7 @@ async function main() {
   // ═══════════ (B) testes wired + runbook presente ═══════════
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
   const scripts = pkg.scripts || {};
-  for (const t of ["test:help-knowledge", "test:help-curation", "test:help-gaps", "test:help-context", "test:help-hardening"]) {
+  for (const t of ["test:help-knowledge", "test:help-curation", "test:help-gaps", "test:help-context", "test:help-training", "test:help-hardening"]) {
     check(`wired: ${t} no package.json`, typeof scripts[t] === "string");
   }
   check("runbook presente (docs/runbook/ajuda-operacao.md)", fs.existsSync(path.join(repoRoot, "docs/runbook/ajuda-operacao.md")));

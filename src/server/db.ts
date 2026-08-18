@@ -9874,6 +9874,16 @@ const initDb = () => {
   // dá o store_id/data pela árvore (antes só (org, closing_date), forçando ler
   // cada linha pra agrupar por loja). Medido por EXPLAIN QUERY PLAN.
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_retail_closings_store_date ON retail_daily_closings (organization_id, store_id, closing_date)`); } catch (e) { /* noop */ }
+
+  // Fase 6B (PDR TOULON) — KILL-SWITCHES de runtime das duas mudanças de maior
+  // risco, pra reverter no piloto sem deploy. DEFAULT 1 = comportamento NOVO
+  // (0-regressão nas orgs existentes); setar 0 volta pro legado:
+  //   retail_business_date_v1 = 0  → data comercial volta ao UTC (pré-Fatia 1A);
+  //   retail_analytics_resolved_products_v1 = 0 → analíticas voltam a resolver
+  //     produto por LIKE-prefix a cada consulta (pré-Fatia 4B), mais lento porém
+  //     no caminho antigo provado.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_business_date_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_analytics_resolved_products_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
 };
 
 initDb();

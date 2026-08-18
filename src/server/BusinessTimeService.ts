@@ -16,6 +16,7 @@
  *  - RN-TIME-3: o horário do evento (clique) continua sendo timestamp do servidor.
  */
 import db from "./db.js";
+import { RetailFeatureFlagService } from "./RetailFeatureFlagService.js";
 
 const DEFAULT_TZ = "America/Sao_Paulo";
 
@@ -55,8 +56,14 @@ export class BusinessTimeService {
     return DEFAULT_TZ;
   }
 
-  /** Data comercial (YYYY-MM-DD) no fuso da org para o instante dado (default: agora). */
+  /** Data comercial (YYYY-MM-DD) no fuso da org para o instante dado (default: agora).
+   *  Kill-switch Fase 6B: com `retail_business_date_v1 = 0`, volta ao UTC (legado
+   *  pré-Fatia 1A) — usado só se a correção de fuso precisar ser revertida no
+   *  piloto. É o choke point: `writeDay`/`context` derivam daqui. */
   static businessDate(orgId: string, now: Date = new Date()): string {
+    if (!RetailFeatureFlagService.businessDateV1(orgId)) {
+      return now.toISOString().slice(0, 10); // legado: dia UTC (RN-TIME revertida)
+    }
     const tz = this.timezoneFor(orgId);
     // en-CA formata como YYYY-MM-DD; timeZone faz a conversão de fuso.
     return now.toLocaleDateString("en-CA", { timeZone: tz });

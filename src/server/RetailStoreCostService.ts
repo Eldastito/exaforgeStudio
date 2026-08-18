@@ -40,6 +40,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { RetailStoreService } from "./RetailStoreService.js";
 import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
+import { RetailFeatureFlagService } from "./RetailFeatureFlagService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -466,6 +467,11 @@ export class RetailStoreCostService {
       // join, via idx_pdv_items_unresolved) — nunca varre o catálogo por linha.
       // O UNION ALL separa os dois mundos pra o planner não aplicar o LIKE ao
       // histórico inteiro (era O(itens × produtos) e travava a tela).
+      // Kill-switch 6B: com o flag OFF, força TODO item pelo ramo LIKE (legado):
+      // o ramo resolvido some (1=0) e o ramo LIKE deixa de filtrar (1=1).
+      const useResolved = RetailFeatureFlagService.resolvedProductsV1(orgId);
+      const resolvedPred = useResolved ? "i.catalog_resolved_at IS NOT NULL" : "1 = 0";
+      const fallbackPred = useResolved ? "i.catalog_resolved_at IS NULL" : "1 = 1";
       const args: any[] = storeId ? [orgId, period, orgId, period, storeId] : [orgId, period, orgId, period];
       const rows = db
         .prepare(
@@ -478,7 +484,7 @@ export class RetailStoreCostService {
                     i.product_service_id AS psid, i.variant_id AS vid
                FROM retail_pdv_sale_items i
               WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
-                AND i.catalog_resolved_at IS NOT NULL
+                AND ${resolvedPred}
              UNION ALL
              SELECT i.organization_id, i.filial, i.quantidade, i.valor,
                     COALESCE(fpv.product_service_id, fps2.id) AS psid, fpv.id AS vid
@@ -490,7 +496,7 @@ export class RetailStoreCostService {
                  ON fps2.organization_id = i.organization_id
                 AND (fps2.external_ref = i.produto OR i.produto LIKE fps2.external_ref || '%')
               WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
-                AND i.catalog_resolved_at IS NULL
+                AND ${fallbackPred}
            ) x
            JOIN retail_stores st
              ON st.organization_id = x.organization_id

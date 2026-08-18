@@ -459,6 +459,82 @@ export class HelpKnowledgeService {
   private static audit(actorId: string | undefined, event: string, meta: any): void {
     try { logAuthEvent("_platform", actorId || "system", "help", event, meta); } catch { /* noop */ }
   }
+
+  // ───────────────────── Métricas / fila de lacunas (ADR-179 F4) ─────────────────────
+
+  /**
+   * Registra UMA pergunta ao Tutor no agregado por org+módulo (minimizado — sem
+   * texto; o texto da lacuna vive só em help_gap_log). `answered` = respondida por
+   * engine determinístico OU por artigo curado. Best-effort (nunca quebra a resposta).
+   */
+  static recordAsk(orgId: string, moduleKey: string | null | undefined, answered: boolean): void {
+    const mk = moduleKey || "";
+    try {
+      db.prepare(`
+        INSERT INTO help_ask_stats (id, organization_id, module_key, asks, answered, last_ask_at)
+        VALUES (?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (organization_id, module_key)
+        DO UPDATE SET asks = asks + 1, answered = answered + ?, last_ask_at = CURRENT_TIMESTAMP
+      `).run(randomUUID(), orgId, mk, answered ? 1 : 0, answered ? 1 : 0);
+    } catch { /* best-effort */ }
+  }
+
+  /** Fila de conteúdo: lacunas (perguntas sem cobertura) da org, priorizadas por hits. */
+  static gaps(orgId: string, opts?: { limit?: number }): Array<{ query: string; moduleKey: string | null; hits: number; lastSeenAt: string }> {
+    const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 100);
+    const rows = db.prepare(`
+      SELECT query_norm, module_key, hits, last_seen_at FROM help_gap_log
+      WHERE organization_id = ? ORDER BY hits DESC, last_seen_at DESC LIMIT ?
+    `).all(orgId, limit) as any[];
+    return rows.map((r) => ({ query: r.query_norm, moduleKey: r.module_key || null, hits: Number(r.hits), lastSeenAt: r.last_seen_at }));
+  }
+
+  /**
+   * Métricas de ajuda da org (derivadas por query — RN-004). `answerRatePct` é null
+   * sem perguntas (null≠0, não inventa taxa). `byModule` mostra onde as pessoas travam.
+   */
+  static metrics(orgId: string): {
+    totalAsks: number; answered: number; unanswered: number; answerRatePct: number | null;
+    openGaps: number;
+    byModule: Array<{ moduleKey: string | null; asks: number; answered: number; answerRatePct: number | null; openGaps: number }>;
+  } {
+    const agg = db.prepare(`SELECT COALESCE(SUM(asks),0) asks, COALESCE(SUM(answered),0) answered FROM help_ask_stats WHERE organization_id = ?`).get(orgId) as any;
+    const totalAsks = Number(agg?.asks || 0);
+    const answered = Number(agg?.answered || 0);
+    const unanswered = Math.max(0, totalAsks - answered);
+    const openGaps = Number((db.prepare(`SELECT COUNT(*) c FROM help_gap_log WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
+    const rows = db.prepare(`SELECT module_key, asks, answered FROM help_ask_stats WHERE organization_id = ? ORDER BY asks DESC`).all(orgId) as any[];
+    const gapByModule = db.prepare(`SELECT module_key, COUNT(*) c FROM help_gap_log WHERE organization_id = ? GROUP BY module_key`).all(orgId) as any[];
+    const gapMap = new Map<string, number>(gapByModule.map((g) => [g.module_key || "", Number(g.c)]));
+    const byModule = rows.map((r) => {
+      const asks = Number(r.asks); const ans = Number(r.answered);
+      return {
+        moduleKey: r.module_key || null, asks, answered: ans,
+        answerRatePct: asks > 0 ? Math.round((ans / asks) * 100) : null,
+        openGaps: gapMap.get(r.module_key || "") || 0,
+      };
+    });
+    return {
+      totalAsks, answered, unanswered,
+      answerRatePct: totalAsks > 0 ? Math.round((answered / totalAsks) * 100) : null,
+      openGaps, byModule,
+    };
+  }
+
+  /**
+   * Fila GLOBAL de lacunas (cross-org, admin master) — agrega o MESMO texto
+   * normalizado somando hits entre tenants, pra direcionar a curadoria (F2). Sem
+   * dado por-org identificável: só a pergunta normalizada + total + nº de orgs.
+   */
+  static globalGaps(opts?: { limit?: number }): Array<{ query: string; moduleKey: string | null; hits: number; orgs: number; lastSeenAt: string }> {
+    const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 200);
+    const rows = db.prepare(`
+      SELECT query_norm, module_key, SUM(hits) hits, COUNT(DISTINCT organization_id) orgs, MAX(last_seen_at) last_seen_at
+      FROM help_gap_log GROUP BY query_norm, module_key
+      ORDER BY hits DESC, orgs DESC LIMIT ?
+    `).all(limit) as any[];
+    return rows.map((r) => ({ query: r.query_norm, moduleKey: r.module_key || null, hits: Number(r.hits), orgs: Number(r.orgs), lastSeenAt: r.last_seen_at }));
+  }
 }
 
 export default HelpKnowledgeService;

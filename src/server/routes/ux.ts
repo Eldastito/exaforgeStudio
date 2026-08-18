@@ -11,6 +11,7 @@ import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
 import { InferredSettingsService } from "../InferredSettingsService.js";
 import { ContextualUpgradeService } from "../ContextualUpgradeService.js";
 import { ZeroTrainingHelpService } from "../ZeroTrainingHelpService.js";
+import { HelpKnowledgeService } from "../HelpKnowledgeService.js";
 import { UxTelemetryService } from "../UxTelemetryService.js";
 import { MobileReadinessService } from "../MobileReadinessService.js";
 import { LegacyReductionService } from "../LegacyReductionService.js";
@@ -82,6 +83,24 @@ router.post("/help", (req: AuthRequest, res): any => {
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const moduleKey = req.body?.moduleKey ? String(req.body.moduleKey) : null; // tela atual (contextual, opcional)
   res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || ""), moduleKey }));
+});
+
+// GET /api/ux/help/gaps?limit= — fila de conteúdo: dúvidas da org sem cobertura
+// (ADR-179 F4). Gestor: mostra onde as pessoas travam. Minimizado (sem PII).
+router.get("/help/gaps", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Restrito a gestores." });
+  const limit = typeof req.query?.limit === "string" ? Number(req.query.limit) : undefined;
+  res.json({ gaps: HelpKnowledgeService.gaps(orgId, { limit }) });
+});
+
+// GET /api/ux/help/metrics — taxa de resposta + onde travam (ADR-179 F4). Gestor.
+router.get("/help/metrics", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Restrito a gestores." });
+  res.json(HelpKnowledgeService.metrics(orgId));
 });
 
 // POST /api/ux/telemetry { eventType, surface?, moduleKey?, sessionId?, ttfvMs? }

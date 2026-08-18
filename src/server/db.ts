@@ -9934,6 +9934,24 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_help_gap_unique ON help_gap_log (organization_id, query_norm, module_key);
     `);
   } catch (e) { /* noop */ }
+
+  // AJUDA — contador AGREGADO de perguntas (ADR-179 F4). Para a "taxa de resposta"
+  // (respondidas × sem cobertura) e "onde travam" (por módulo) sem guardar o TEXTO
+  // das perguntas respondidas (LGPD RN-HELP-6 — só contadores por org+módulo). O
+  // TEXTO das lacunas segue só em help_gap_log (fila de conteúdo). Upsert incrementa.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS help_ask_stats (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        module_key TEXT NOT NULL,                       -- '' quando sem contexto de tela
+        asks INTEGER DEFAULT 0,                         -- total de perguntas
+        answered INTEGER DEFAULT 0,                     -- respondidas (engine ou artigo)
+        last_ask_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_help_ask_stats_unique ON help_ask_stats (organization_id, module_key);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

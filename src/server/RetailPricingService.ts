@@ -20,6 +20,7 @@
 import db from "./db.js";
 import { suggestSalePrice } from "./pricing.js";
 import { ProductEditHistoryService } from "./ProductEditHistoryService.js";
+import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
 
 export type PricingItem = {
   productId: string;
@@ -218,6 +219,8 @@ export class RetailPricingService {
       }
     });
     tx();
+    // PERF-005: preço aplicado muda o número das telas analíticas.
+    if (applied.length) RetailAnalyticsCache.invalidate(orgId);
     return {
       appliedCount: applied.length,
       skippedCount: skipped.length,

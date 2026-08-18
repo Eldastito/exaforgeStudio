@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailBoletaService } from "./RetailBoletaService.js";
+import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
 
 // ── Cotas ────────────────────────────────────────────────────────────────────
 export class RetailQuotaService {
@@ -116,6 +117,7 @@ export class RetailClosingService {
           .run(randomUUID(), orgId, id, String(it.paymentMethod || "outros"), Number(it.informedAmount || 0));
       }
     }
+    RetailAnalyticsCache.invalidate(orgId); // PERF-005: fechamento mudou o número
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_CLOSING_INFORMED", { informed, quota, variance }); } catch { /* noop */ }
     return this.get(orgId, id);
   }
@@ -125,6 +127,7 @@ export class RetailClosingService {
     if (!c) return null;
     db.prepare(`UPDATE retail_daily_closings SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`)
       .run(status, actorId || null, orgId, id);
+    RetailAnalyticsCache.invalidate(orgId); // PERF-005: aprovação/rejeição muda o filtro
     try { logAuthEvent(orgId, actorId || "system", id, `RETAIL_CLOSING_${status.toUpperCase()}`, {}); } catch { /* noop */ }
     return this.get(orgId, id);
   }

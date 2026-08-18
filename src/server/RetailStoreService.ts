@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
 import { logAuthEvent } from "./auditLog.js";
 
 export type StoreInput = {
@@ -190,6 +191,8 @@ export class RetailStoreService {
     if (!fields.length) return cur;
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     db.prepare(`UPDATE retail_stores SET ${fields.join(", ")} WHERE organization_id = ? AND id = ?`).run(...vals, orgId, id);
+    // PERF-005: margem/código/ativação da loja mexem nos números da rede.
+    RetailAnalyticsCache.invalidate(orgId);
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_UPDATED", { fields: Object.keys(map).filter((k) => map[k] !== undefined) }); } catch { /* noop */ }
     return this.get(orgId, id);
   }

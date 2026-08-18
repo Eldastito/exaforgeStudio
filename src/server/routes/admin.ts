@@ -30,6 +30,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { RuntimePilotService } from "../RuntimePilotService.js";
+import { HelpKnowledgeService } from "../HelpKnowledgeService.js";
 import { eventsEnabled } from "../ContinuityService.js";
 import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { EdgeSyncService } from "../EdgeSyncService.js";
@@ -958,6 +959,44 @@ router.post("/organizations/:id/ai-quota", (req: AuthRequest, res): any => {
     const outcome = AiQuotaSignalService.run(orgId);
     res.json({ ok: true, monthlyLimitCents: value, quota: outcome });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─────────────────── Curadoria da base de ajuda (ADR-179 F2) ───────────────────
+// Master-only (herda requireMasterAdmin). Ciclo draft → published → archived; só
+// `published` com reviewed_by é recuperável pelo Tutor de Ajuda (RN-HELP-3).
+
+// GET /api/admin/help-articles?status=all|draft|published|archived
+router.get("/help-articles", (req: AuthRequest, res): any => {
+  const s = String(req.query?.status || "all");
+  const status = ["draft", "published", "archived", "all"].includes(s) ? s : "all";
+  res.json({ articles: HelpKnowledgeService.adminList(status as any) });
+});
+
+// POST /api/admin/help-articles — cria rascunho ou atualiza (patch). Não publica.
+router.post("/help-articles", (req: AuthRequest, res): any => {
+  try { res.json(HelpKnowledgeService.upsert(req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// POST /api/admin/help-articles/bootstrap — destila um RASCUNHO da doc do módulo.
+router.post("/help-articles/bootstrap", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const b = req.body || {};
+    if (!b.moduleKey) return res.status(400).json({ error: "moduleKey é obrigatório." });
+    res.json(await HelpKnowledgeService.bootstrap(b, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// POST /api/admin/help-articles/:id/publish — publica com reviewedBy (RN-HELP-3).
+router.post("/help-articles/:id/publish", (req: AuthRequest, res): any => {
+  try { res.json(HelpKnowledgeService.publish(String(req.params.id), String(req.body?.reviewedBy || ""), req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// POST /api/admin/help-articles/:id/archive — arquiva (sai da recuperação).
+router.post("/help-articles/:id/archive", (req: AuthRequest, res): any => {
+  try { res.json(HelpKnowledgeService.archive(String(req.params.id), req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

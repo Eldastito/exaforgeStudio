@@ -66,6 +66,7 @@ async function main() {
   const found = P.findOrgs("auto peças");
   check("findOrgs acha a org pelo nome", found.some((o) => o.orgId === A));
   check("findOrgs acha a org também pelo ID", P.findOrgs(A.slice(0, 8)).some((o) => o.orgId === A));
+  check("findOrgs('') LISTA as organizações (busca vazia)", P.findOrgs("").some((o) => o.orgId === A) && P.findOrgs("").some((o) => o.orgId === B));
   check("plan da org B independente (runtime off)", P.plan(B).flags.runtime === false);
 
   console.log("\n=== TEST: Toggle do Execution Runtime (Admin Master) ===\n");

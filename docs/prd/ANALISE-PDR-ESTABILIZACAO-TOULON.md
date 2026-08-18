@@ -30,7 +30,7 @@
 - **Fase 0** — reprodução + testes que falham + baseline (este doc).
 - **Fase 1 (P0) FECHADA** — 1A data comercial ✅ · 1B boletas idempotentes/histórico ✅ · 1C salvamento atômico ✅ · 1D erros honestos ✅ · 1E ranking mobile ✅.
 - **Fase 2 (P1) FECHADA** — 2A diretório + lotação + descoberta por filial ✅ · 2B UI "Vendedores da loja" ✅ · 2C escala por loja ✅ · 2D comissão com fonte + pendência de identidade ✅. (Cota total única migra pra Fase 3.)
-- **Fase 3 (P1)** — 3A `retail_store_pos_fee_rules` (crédito/débito) + custo esperado no resumo POS (precedência detalhada>legada, nunca soma) ✅ · 3B componente único "Cota total da loja".
+- **Fase 3 (P1) FECHADA** — 3A tarifas POS crédito/débito + custo esperado ✅ · 3B componente único "Cota total da loja" (StoreQuotaSummary em corrida + fechamento) ✅.
 - **Fase 4 (P2)** — catálogo resolvido na ingestão + índices medidos + set-based + cache + carga.
 - **Fase 5 (P2)** — estados de conectividade + health probe.
 - **Fase 6** — piloto controlado (rollout por loja).

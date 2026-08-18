@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
-import { apiFetch } from '@/src/lib/api';
+import { apiFetch, currentOrgId } from '@/src/lib/api';
 import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle, Layers, Plus, ArrowRight, Minus } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
@@ -472,7 +472,6 @@ function RuntimePilotPanel() {
   const [withRecovery, setWithRecovery] = useState(false);
 
   const search = async () => {
-    if (!q.trim()) { toast.error('Digite parte do nome (ou o ID) da organização.'); return; }
     setSearching(true); setSearched(false);
     try {
       const r = await apiFetch(`/api/admin/runtime-pilot/search?q=${encodeURIComponent(q.trim())}`);
@@ -517,10 +516,15 @@ function RuntimePilotPanel() {
       <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Activity className="w-5 h-5 text-indigo-400" /> Execution Runtime</h3>
       <p className="text-xs text-zinc-500 mb-4">Liga a trava mestra das abas <strong>Operações</strong> e <strong>Recuperação</strong> do Diretor IA (flag <code className="text-zinc-400">execution_runtime_enabled</code>) e semeia as políticas exigidas pelo executor. Modo padrão é <code className="text-zinc-400">approved_execution</code> — o Runtime propõe/executa ações governadas, humano aprova.</p>
 
-      <div className="flex gap-2 mb-3">
+      <div className="flex gap-2 mb-1 flex-wrap">
         <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
-          placeholder="Buscar organização pelo nome…" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
+          placeholder="Buscar organização pelo nome ou ID (vazio lista todas)…" className="flex-1 min-w-[220px] bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
         <Button onClick={search} disabled={searching} variant="secondary">{searching ? 'Buscando…' : 'Buscar'}</Button>
+      </div>
+      <div className="mb-3">
+        <button onClick={() => { const id = currentOrgId(); if (!id) { toast.error('Não identifiquei sua organização atual.'); return; } loadPlan(id); }}
+          className="text-xs text-indigo-300 hover:text-indigo-200 underline underline-offset-2">Usar minha organização atual</button>
+        <span className="text-[11px] text-zinc-600"> · ou deixe a busca vazia e clique Buscar para listar</span>
       </div>
       {orgs.length > 0 && (
         <div className="mb-3 rounded-lg border border-zinc-800 divide-y divide-zinc-800 overflow-hidden">

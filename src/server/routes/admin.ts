@@ -57,7 +57,9 @@ router.get("/production-readiness", (_req: AuthRequest, res): any => {
 // Todo o router /api/admin herda requireMasterAdmin.
 router.get("/runtime-pilot/search", (req: AuthRequest, res): any => {
   const q = String(req.query.q || "").trim();
-  return res.json({ orgs: q ? RuntimePilotService.findOrgs(q) : [] });
+  // Busca vazia LISTA as organizações (primeiras 20) — o operador nem sempre
+  // sabe o nome exato; assim ele acha na lista em vez de adivinhar.
+  return res.json({ orgs: RuntimePilotService.findOrgs(q) });
 });
 router.get("/runtime-pilot/plan/:orgId", (req: AuthRequest, res): any => {
   try { return res.json(RuntimePilotService.plan(String(req.params.orgId))); }

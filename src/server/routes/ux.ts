@@ -104,6 +104,21 @@ router.post("/help/feedback", (req: AuthRequest, res): any => {
   res.json(HelpKnowledgeService.recordFeedback(orgId, { articleId: b.articleId ?? null, moduleKey: b.moduleKey ?? null, helpful: b.helpful }));
 });
 
+// GET /api/ux/help/tour?module= — tour contextual (passos do artigo da tela) (F5).
+router.get("/help/tour", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const moduleKey = typeof req.query?.module === "string" ? req.query.module : null;
+  res.json({ tour: HelpKnowledgeService.tour(orgId, moduleKey) });
+});
+
+// GET /api/ux/help/learn-one — dica "aprenda 1 coisa" (read-only, não publica) (F5).
+router.get("/help/learn-one", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ tip: HelpKnowledgeService.learnOne(orgId) });
+});
+
 // GET /api/ux/help/gaps?limit= — fila de conteúdo: dúvidas da org sem cobertura
 // (ADR-179 F4). Gestor: mostra onde as pessoas travam. Minimizado (sem PII).
 router.get("/help/gaps", (req: AuthRequest, res): any => {

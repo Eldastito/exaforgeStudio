@@ -18,6 +18,7 @@ interface HelpArticle {
   steps: string[];
   commonErrors: string[];
   sourceRef: string | null;
+  mediaUrl?: string | null;
 }
 interface HelpResponse {
   intent: string;
@@ -28,6 +29,8 @@ interface HelpResponse {
 }
 interface Turn { q: string; a: HelpResponse | null; error?: boolean; vote?: 'up' | 'down' }
 interface Suggestion { id: string; title: string; moduleKey: string | null; what: string | null }
+interface Tour { articleId: string; title: string; steps: string[]; mediaUrl: string | null }
+interface Tip { articleId: string; title: string; moduleKey: string | null; what: string | null; mediaUrl: string | null }
 
 // Tela (viewMode) ↔ módulo da base de ajuda (module_key). Só o necessário p/ dar
 // contexto e navegar; telas fora do mapa simplesmente não empurram sugestão nem botão.
@@ -50,6 +53,9 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
   const [busy, setBusy] = useState(false);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [tour, setTour] = useState<Tour | null>(null);
+  const [tip, setTip] = useState<Tip | null>(null);
+  const [tourStep, setTourStep] = useState<number | null>(null); // null = não está no tour
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const ctxModule = (moduleKey && VIEW_TO_MODULE[moduleKey]) || null; // tela atual → module_key
@@ -58,14 +64,17 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
     if (open && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [turns, open]);
 
-  // Ao abrir (ou trocar de tela com o orb aberto), busca sugestões da tela atual.
+  // Ao abrir (ou trocar de tela): sugestões + tour da tela + dica "aprenda 1 coisa".
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    apiFetch(`/api/ux/help/suggestions${ctxModule ? `?module=${encodeURIComponent(ctxModule)}` : ''}`)
-      .then((r) => (r.ok ? r.json() : { suggestions: [] }))
-      .then((d) => { if (alive) setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []); })
-      .catch(() => { if (alive) setSuggestions([]); });
+    const q = ctxModule ? `?module=${encodeURIComponent(ctxModule)}` : '';
+    apiFetch(`/api/ux/help/suggestions${q}`).then((r) => (r.ok ? r.json() : { suggestions: [] }))
+      .then((d) => { if (alive) setSuggestions(Array.isArray(d?.suggestions) ? d.suggestions : []); }).catch(() => { if (alive) setSuggestions([]); });
+    apiFetch(`/api/ux/help/tour${q}`).then((r) => (r.ok ? r.json() : { tour: null }))
+      .then((d) => { if (alive) setTour(d?.tour || null); }).catch(() => { if (alive) setTour(null); });
+    apiFetch('/api/ux/help/learn-one').then((r) => (r.ok ? r.json() : { tip: null }))
+      .then((d) => { if (alive) setTip(d?.tip || null); }).catch(() => { if (alive) setTip(null); });
     return () => { alive = false; };
   }, [open, ctxModule]);
 
@@ -131,8 +140,42 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
           </div>
 
           <div ref={scrollRef} className="flex-1 max-h-80 overflow-y-auto px-4 py-3 space-y-3">
-            {turns.length === 0 && (
-              <div className="space-y-2">
+            {/* Tour contextual (F5) — passos do artigo da tela como walkthrough */}
+            {tourStep !== null && tour && (
+              <div className="rounded-lg border border-indigo-800/50 bg-indigo-950/20 px-3 py-3">
+                <div className="text-[11px] text-indigo-300 mb-1">Tour · {tour.title} · passo {tourStep + 1}/{tour.steps.length}</div>
+                {tour.mediaUrl && tourStep === 0 && <img src={tour.mediaUrl} alt={tour.title} loading="lazy" className="mb-2 w-full rounded-lg border border-zinc-700" />}
+                <div className="text-sm text-zinc-100">{tour.steps[tourStep]}</div>
+                <div className="mt-3 flex items-center gap-2">
+                  <button onClick={() => setTourStep((s) => (s! > 0 ? s! - 1 : s))} disabled={tourStep === 0}
+                    className="text-[12px] rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-200 px-2.5 py-1">Voltar</button>
+                  {tourStep < tour.steps.length - 1 ? (
+                    <button onClick={() => setTourStep((s) => s! + 1)} className="text-[12px] rounded bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1">Próximo</button>
+                  ) : (
+                    <button onClick={() => setTourStep(null)} className="text-[12px] rounded bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1">Concluir</button>
+                  )}
+                  <button onClick={() => setTourStep(null)} className="ml-auto text-[11px] text-zinc-500 hover:text-zinc-300">Fechar tour</button>
+                </div>
+              </div>
+            )}
+
+            {turns.length === 0 && tourStep === null && (
+              <div className="space-y-2.5">
+                {/* Aprenda 1 coisa (F5) */}
+                {tip && (
+                  <button onClick={() => ask(`o que é ${tip.title}?`)}
+                    className="w-full text-left rounded-lg border border-amber-800/40 bg-amber-950/10 hover:bg-amber-950/20 px-3 py-2">
+                    <div className="text-[11px] text-amber-300">💡 Aprenda 1 coisa</div>
+                    <div className="text-[13px] text-zinc-200">{tip.title}</div>
+                  </button>
+                )}
+                {/* Tour da tela (F5) */}
+                {tour && (
+                  <button onClick={() => setTourStep(0)}
+                    className="w-full text-left rounded-lg border border-indigo-800/40 bg-indigo-950/10 hover:bg-indigo-950/20 px-3 py-2 text-[13px] text-indigo-200">
+                    ▶ Fazer o tour desta tela ({tour.steps.length} passos)
+                  </button>
+                )}
                 {suggestions.length > 0 ? (
                   <>
                     <div className="text-xs text-zinc-500">Sobre esta tela:</div>
@@ -160,6 +203,9 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
                 {t.a && (
                   <div className="rounded-lg bg-zinc-800/70 px-3 py-2">
                     <div className="text-sm text-zinc-100 whitespace-pre-line">{t.a.message}</div>
+                    {t.a.article?.mediaUrl && (
+                      <img src={t.a.article.mediaUrl} alt={t.a.article.title} loading="lazy" className="mt-2 w-full rounded-lg border border-zinc-700" />
+                    )}
                     {t.a.article && t.a.article.commonErrors.length > 0 && (
                       <div className="mt-2 text-xs text-zinc-400">
                         <div className="font-medium text-zinc-300">Erros comuns:</div>

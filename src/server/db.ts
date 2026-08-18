@@ -9970,6 +9970,11 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_help_feedback_unique ON help_feedback (organization_id, article_id, module_key);
     `);
   } catch (e) { /* noop */ }
+
+  // AJUDA — mídia CURADA opcional por artigo (ADR-179 F5). URL de um GIF/vídeo curto
+  // que ILUSTRA a feature. Curada (nunca inventada); NULL por padrão → sem mídia, o
+  // tour/orb só mostra os passos. Aditivo.
+  try { db.exec(`ALTER TABLE help_articles ADD COLUMN media_url TEXT`); } catch (e) { /* noop */ }
 };
 
 initDb();

@@ -25,6 +25,8 @@ de chat nem responde a partir dos ADRs crus. Aditivo/reversível sobre ADR-163
   Base da taxa de resposta.
 - `help_feedback` — **por-org**, agregado `up`/`down` por artigo+módulo (sem texto).
   Base da satisfação. `article_id=''` = resposta sem artigo (sinal de lacuna).
+- `help_articles.media_url` (F5, aditivo) — URL CURADA opcional de GIF/vídeo curto
+  que ilustra a feature. NULL por padrão (sem mídia inventada).
 
 ## Rotas
 
@@ -33,6 +35,8 @@ de chat nem responde a partir dos ADRs crus. Aditivo/reversível sobre ADR-163
   (`article` citado + `gapLogged`).
 - `GET /api/ux/help/suggestions?module=` — artigos relevantes da tela atual.
 - `POST /api/ux/help/feedback { articleId?, moduleKey?, helpful }` — 👍/👎.
+- `GET /api/ux/help/tour?module=` — tour contextual (passos do artigo da tela).
+- `GET /api/ux/help/learn-one` — dica "aprenda 1 coisa" (read-only, não publica).
 
 **Gestor (owner/admin):**
 - `GET /api/ux/help/gaps?limit=` — fila de lacunas da org.
@@ -83,7 +87,21 @@ de chat nem responde a partir dos ADRs crus. Aditivo/reversível sobre ADR-163
 
 `test:help-knowledge` (base + retrieval) · `test:help-curation` (draft→publish→
 archive + bootstrap) · `test:help-gaps` (fila + métricas) · `test:help-context`
-(sugestões + feedback) · `test:help-hardening` (RN-HELP + fiação de produção).
+(sugestões + feedback) · `test:help-training` (tour + mídia + "aprenda 1 coisa")
+· `test:help-hardening` (RN-HELP + fiação de produção).
+
+## Treinamento (F5)
+
+- **Tour da tela:** o orb oferece "Fazer o tour desta tela" quando há artigo
+  publicado do módulo — os passos viram um walkthrough. Derivado do conteúdo
+  curado; sem artigo/passos, não aparece.
+- **Mídia (GIF/vídeo):** no painel de curadoria, cada artigo tem um campo de URL
+  de mídia (opcional). Salvar em branco remove. A mídia aparece no orb/tour. Nunca
+  é inventada — só o que o curador colar.
+- **"Aprenda 1 coisa":** o Scheduler publica UMA dica semanal (`passLearningDigest`,
+  gate de 7 dias) no `business_signals` (`domain='help'`, `signal_type='learn_one'`),
+  que flui pro Fala Tu/atenção. Avança pelo conteúdo publicado; esgotado → não
+  publica (não inventa). O orb também mostra a dica atual no topo.
 
 ## Troubleshooting
 

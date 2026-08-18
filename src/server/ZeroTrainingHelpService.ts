@@ -53,7 +53,7 @@ export class ZeroTrainingHelpService {
     navTarget: { key: string; label: string; available: boolean } | null;
     evidence: { category: string; count: number } | null;
     governedBy: { actionType: string; policy: string; requiredRole: string | null } | null;
-    article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null;
+    article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null; mediaUrl: string | null } | null;
     gapLogged: boolean;
     invisibleUxEnabled: boolean;
     source: "falatu_help";
@@ -100,13 +100,13 @@ export class ZeroTrainingHelpService {
     // ao vivo). Grounded: quando há artigo, cita e enriquece com o passo a passo;
     // sem cobertura E sem resposta substantiva dos engines → HONESTO + registra a
     // lacuna (RN-HELP-1). 0-regressão: nunca sobrescreve uma resposta de engine.
-    let article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null = null;
+    let article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null; mediaUrl: string | null } | null = null;
     let gapLogged = false;
     const moduleKey = input?.moduleKey || module?.key || null;
     if (intent !== "show") {
       const kb = HelpKnowledgeService.retrieve(orgId, text, moduleKey);
       if (kb) {
-        article = { id: kb.id, title: kb.title, moduleKey: kb.module_key, steps: kb.steps, commonErrors: kb.commonErrors, sourceRef: kb.sourceRef };
+        article = { id: kb.id, title: kb.title, moduleKey: kb.module_key, steps: kb.steps, commonErrors: kb.commonErrors, sourceRef: kb.sourceRef, mediaUrl: kb.mediaUrl };
         const steps = kb.steps.map((s, i) => `${i + 1}) ${s}`).join(" ");
         // Enriquece: mantém o texto do engine (quando houver) e acrescenta o passo a passo citado.
         const grounded = `${kb.what || kb.title}${steps ? ` Passo a passo: ${steps}` : ""} (fonte: ${kb.title})`;

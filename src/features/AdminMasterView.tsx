@@ -726,6 +726,7 @@ function HelpCurationPanel() {
   const [bootModule, setBootModule] = useState('central_saude');
   const [busy, setBusy] = useState(false);
   const [reviewers, setReviewers] = useState<Record<string, string>>({});
+  const [media, setMedia] = useState<Record<string, string>>({});
 
   const load = async () => {
     setLoading(true);
@@ -764,6 +765,14 @@ function HelpCurationPanel() {
     try { await apiFetch(`/api/admin/help-articles/${id}/archive`, { method: 'POST' }); load(); }
     catch { toast.error('Erro ao arquivar'); }
   };
+  const saveMedia = async (id: string) => {
+    const mediaUrl = (media[id] ?? '').trim();
+    try {
+      const r = await apiFetch('/api/admin/help-articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, mediaUrl: mediaUrl || null }) });
+      if (!r.ok) throw new Error();
+      toast.success(mediaUrl ? 'Mídia salva.' : 'Mídia removida.'); load();
+    } catch { toast.error('Erro ao salvar mídia'); }
+  };
 
   const drafts = articles.filter((a) => a.status === 'draft');
   const published = articles.filter((a) => a.status === 'published');
@@ -784,6 +793,12 @@ function HelpCurationPanel() {
         </ol>
       )}
       {a.reviewedBy && <div className="mt-2 text-[11px] text-zinc-500">Revisado por: <span className="text-zinc-300">{a.reviewedBy}</span></div>}
+      {/* Mídia curada opcional (GIF/vídeo) — F5. Nunca inventada; salvar em branco remove. */}
+      <div className="mt-2 flex items-center gap-2">
+        <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-[11px] text-zinc-100" placeholder="URL de GIF/vídeo (opcional)"
+          value={media[a.id] ?? a.mediaUrl ?? ''} onChange={(e) => setMedia((m) => ({ ...m, [a.id]: e.target.value }))} />
+        <button onClick={() => saveMedia(a.id)} className="text-[11px] rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1.5">Salvar mídia</button>
+      </div>
       {a.status === 'draft' && (
         <div className="mt-2 flex items-center gap-2">
           <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Revisado por (seu nome)…" value={reviewers[a.id] || ''} onChange={(e) => setReviewers((r) => ({ ...r, [a.id]: e.target.value }))} />

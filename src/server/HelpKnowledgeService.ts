@@ -37,6 +37,7 @@ export interface HelpArticle {
   keywords: string;
   reviewedBy: string;
   sourceRef: string | null;
+  mediaUrl: string | null;
 }
 
 // Termos curtos/comuns que não ajudam a discriminar artigos (não pontuam).
@@ -61,7 +62,7 @@ function tokenize(text: string): string[] {
 // Semente dos módulos mais usados (ADR-179 F1). Conteúdo CURADO/humano (reviewedBy).
 // GLOBAL por padrão (vertical NULL) → serve toda a base; um artigo clínico prova o
 // recorte por vertical. Ids fixos → seed idempotente (INSERT OR IGNORE).
-const SEED: Array<Omit<HelpArticle, "id"> & { id: string; status?: string }> = [
+const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: string }> = [
   {
     id: "help_seed_central_saude",
     vertical: null,
@@ -233,6 +234,7 @@ export class HelpKnowledgeService {
       id: r.id, vertical: r.vertical ?? null, module_key: r.module_key ?? null, title: r.title,
       what: r.what ?? null, purpose: r.purpose ?? null, steps, commonErrors: errors,
       keywords: r.keywords || "", reviewedBy: r.reviewed_by, sourceRef: r.source_ref ?? null,
+      mediaUrl: r.media_url ?? null,
     };
   }
 
@@ -298,7 +300,7 @@ export class HelpKnowledgeService {
    */
   static answer(orgId: string, query: string, moduleKey?: string | null): {
     found: boolean;
-    article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null;
+    article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null; mediaUrl: string | null } | null;
     message: string | null;
   } {
     const art = this.retrieve(orgId, query, moduleKey);
@@ -307,7 +309,7 @@ export class HelpKnowledgeService {
       const msg = `${art.what || art.title}${steps ? ` Passo a passo: ${steps}` : ""} (fonte: ${art.title})`;
       return {
         found: true,
-        article: { id: art.id, title: art.title, moduleKey: art.module_key, steps: art.steps, commonErrors: art.commonErrors, sourceRef: art.sourceRef },
+        article: { id: art.id, title: art.title, moduleKey: art.module_key, steps: art.steps, commonErrors: art.commonErrors, sourceRef: art.sourceRef, mediaUrl: art.mediaUrl },
         message: msg,
       };
     }
@@ -355,7 +357,7 @@ export class HelpKnowledgeService {
   static upsert(input: {
     id?: string; vertical?: string | null; moduleKey?: string | null; title?: string;
     what?: string | null; purpose?: string | null; steps?: string[]; commonErrors?: string[];
-    keywords?: string; sourceRef?: string | null;
+    keywords?: string; sourceRef?: string | null; mediaUrl?: string | null;
   }, actorId?: string): { id: string; status: string } {
     const norm = (s: any, max: number) => (s == null ? null : String(s).slice(0, max));
     if (input.id) {
@@ -371,12 +373,13 @@ export class HelpKnowledgeService {
         errors: input.commonErrors !== undefined ? JSON.stringify(input.commonErrors || []) : cur.common_errors_json,
         keywords: input.keywords !== undefined ? norm(input.keywords, 2000) : cur.keywords,
         source_ref: input.sourceRef !== undefined ? norm(input.sourceRef, 300) : cur.source_ref,
+        media_url: input.mediaUrl !== undefined ? norm(input.mediaUrl, 500) : cur.media_url,
       };
       if (!next.title) throw new Error("title é obrigatório.");
       db.prepare(`
         UPDATE help_articles SET vertical=@vertical, module_key=@module_key, title=@title, what=@what,
           purpose=@purpose, steps_json=@steps, common_errors_json=@errors, keywords=@keywords,
-          source_ref=@source_ref, updated_at=CURRENT_TIMESTAMP WHERE id=@id
+          source_ref=@source_ref, media_url=@media_url, updated_at=CURRENT_TIMESTAMP WHERE id=@id
       `).run({ ...next, id: input.id });
       this.audit(actorId, "HELP_ARTICLE_UPDATE", { id: input.id });
       return { id: input.id, status: cur.status };
@@ -385,12 +388,12 @@ export class HelpKnowledgeService {
     if (!title) throw new Error("title é obrigatório.");
     const id = randomUUID();
     db.prepare(`
-      INSERT INTO help_articles (id, vertical, module_key, title, what, purpose, steps_json, common_errors_json, keywords, reviewed_by, source_ref, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'draft', ?)
+      INSERT INTO help_articles (id, vertical, module_key, title, what, purpose, steps_json, common_errors_json, keywords, reviewed_by, source_ref, media_url, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 'draft', ?)
     `).run(id, input.vertical || null, input.moduleKey || null, title.slice(0, 300),
       norm(input.what, 4000), norm(input.purpose, 4000),
       JSON.stringify(input.steps || []), JSON.stringify(input.commonErrors || []),
-      norm(input.keywords, 2000), norm(input.sourceRef, 300), actorId || null);
+      norm(input.keywords, 2000), norm(input.sourceRef, 300), norm(input.mediaUrl, 500), actorId || null);
     this.audit(actorId, "HELP_ARTICLE_DRAFT", { id, moduleKey: input.moduleKey || null });
     return { id, status: "draft" };
   }
@@ -551,19 +554,19 @@ export class HelpKnowledgeService {
    * oferecer "o que dá pra aprender aqui" sem a pessoa precisar perguntar. Respeita
    * o recorte por vertical (RN-HELP-7). Vazio → orb não empurra nada (honesto).
    */
-  static suggestions(orgId: string, moduleKey?: string | null, opts?: { limit?: number }): Array<{ id: string; title: string; moduleKey: string | null; what: string | null }> {
+  static suggestions(orgId: string, moduleKey?: string | null, opts?: { limit?: number }): Array<{ id: string; title: string; moduleKey: string | null; what: string | null; mediaUrl: string | null }> {
     this.ensureSeeded();
     const limit = Math.min(Math.max(Number(opts?.limit) || 3, 1), 10);
     const vertical = this.verticalOf(orgId);
     const mk = moduleKey || null;
     // Prioriza o módulo da tela; completa com globais do mesmo recorte de vertical.
     const rows = db.prepare(`
-      SELECT id, title, module_key, what FROM help_articles
+      SELECT id, title, module_key, what, media_url FROM help_articles
       WHERE status = 'published' AND (vertical IS NULL OR vertical = ?)
       ORDER BY (CASE WHEN module_key = ? THEN 0 ELSE 1 END), title
       LIMIT ?
     `).all(vertical, mk ?? "", limit) as any[];
-    return rows.map((r) => ({ id: r.id, title: r.title, moduleKey: r.module_key || null, what: r.what ?? null }));
+    return rows.map((r) => ({ id: r.id, title: r.title, moduleKey: r.module_key || null, what: r.what ?? null, mediaUrl: r.media_url ?? null }));
   }
 
   /** Registra 👍/👎 de uma resposta (agregado, sem texto — RN-HELP-6). Best-effort. */
@@ -580,6 +583,80 @@ export class HelpKnowledgeService {
       `).run(randomUUID(), orgId, articleId, mk, up, down, up, down);
       return { ok: true };
     } catch { return { ok: false }; }
+  }
+
+  // ─────────────── Treinamento além do Q&A (ADR-179 F5) ───────────────
+
+  /** Melhor artigo PUBLICADO de um módulo (respeita vertical). Base do tour. */
+  private static articleForModule(orgId: string, moduleKey: string): HelpArticle | null {
+    const vertical = this.verticalOf(orgId);
+    const r = db.prepare(`
+      SELECT * FROM help_articles WHERE status='published' AND module_key = ? AND (vertical IS NULL OR vertical = ?)
+      ORDER BY (CASE WHEN vertical = ? THEN 0 ELSE 1 END), updated_at DESC LIMIT 1
+    `).get(moduleKey, vertical, vertical) as any;
+    return r ? this.mapRow(r) : null;
+  }
+
+  /**
+   * Tour contextual: os passos do artigo publicado do módulo viram um walkthrough
+   * (DERIVADO do conteúdo curado — RN-HELP-5, não inventa). Null sem artigo/sem passos.
+   */
+  static tour(orgId: string, moduleKey?: string | null): { articleId: string; title: string; steps: string[]; mediaUrl: string | null } | null {
+    this.ensureSeeded();
+    if (!moduleKey) return null;
+    const art = this.articleForModule(orgId, moduleKey);
+    if (!art || art.steps.length === 0) return null;
+    return { articleId: art.id, title: art.title, steps: art.steps, mediaUrl: art.mediaUrl };
+  }
+
+  /**
+   * "Aprenda 1 coisa": o PRÓXIMO artigo publicado (recorte por vertical) que a org
+   * ainda NÃO recebeu como dica (dedupe via business_signal `help_learn:<id>`).
+   * Determinístico; null quando não há conteúdo novo (não inventa).
+   */
+  static learnOne(orgId: string): { articleId: string; title: string; moduleKey: string | null; what: string | null; mediaUrl: string | null } | null {
+    this.ensureSeeded();
+    const vertical = this.verticalOf(orgId);
+    const rows = db.prepare(`
+      SELECT * FROM help_articles WHERE status='published' AND (vertical IS NULL OR vertical = ?)
+      ORDER BY updated_at ASC, id ASC
+    `).all(vertical) as any[];
+    for (const r of rows) {
+      const seen = db.prepare(`SELECT 1 FROM business_signals WHERE organization_id = ? AND dedupe_key = ? LIMIT 1`).get(orgId, `help_learn:${r.id}`);
+      if (!seen) { const a = this.mapRow(r); return { articleId: a.id, title: a.title, moduleKey: a.module_key, what: a.what, mediaUrl: a.mediaUrl }; }
+    }
+    return null;
+  }
+
+  /**
+   * Publica a dica "aprenda 1 coisa" no ledger `business_signals` (convenção nº 12 —
+   * nunca tabela de alerta paralela), de onde ela flui pro Fala Tu/atenção. Cadência
+   * semanal (gate 7 dias, `force` p/ teste); idempotente por dedupe. Sem conteúdo
+   * novo → não publica (não inventa).
+   */
+  static async publishLearnOne(orgId: string, opts?: { force?: boolean }): Promise<{ published: boolean; articleId?: string; reason?: string }> {
+    if (!opts?.force) {
+      const recent = db.prepare(`SELECT 1 FROM business_signals WHERE organization_id = ? AND domain='help' AND signal_type='learn_one' AND detected_at > datetime('now','-7 days') LIMIT 1`).get(orgId);
+      if (recent) return { published: false, reason: "not_due" };
+    }
+    const tip = this.learnOne(orgId);
+    if (!tip) return { published: false, reason: "no_content" };
+    try {
+      const { BusinessSignalService } = await import("./BusinessSignalService.js");
+      BusinessSignalService.publish(orgId, {
+        domain: "help", signalType: "learn_one", severity: "info", basis: "fact", confidence: 1,
+        sourceService: "HelpKnowledgeService", sourceEntityType: "help_article", sourceEntityId: tip.articleId,
+        evidence: { title: tip.title, moduleKey: tip.moduleKey, tip: tip.what, note: `Aprenda 1 coisa: ${tip.title}` },
+        dedupeKey: `help_learn:${tip.articleId}`,
+      });
+      return { published: true, articleId: tip.articleId };
+    } catch { return { published: false, reason: "publish_failed" }; }
+  }
+
+  /** Passe do Scheduler: dica semanal "aprenda 1 coisa" por org ativa (best-effort). */
+  static async passLearningDigest(): Promise<void> {
+    const orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE status = 'active'`).all() as any[];
+    for (const o of orgs) { try { await this.publishLearnOne(o.organization_id); } catch { /* best-effort */ } }
   }
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, CreditCard, KeyRound, Copy, Check } from 'lucide-react';
+import { X, CreditCard, KeyRound, Copy, Check, Landmark, ChevronDown, ChevronUp, Clock, Loader2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -176,11 +176,129 @@ export function PaymentSettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {/* Cobrança bancária Sicredi (ADR-177) — scaffold, aguardando homologação */}
+        <SicrediCobrancaSection />
+
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>Fechar</Button>
           <Button onClick={save} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">{saving ? 'Salvando...' : 'Salvar'}</Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- Cobrança bancária Sicredi (ADR-177) ----
+// Scaffold honesto: configura credenciais (cifradas no servidor) e mostra o
+// estado REAL. Enquanto a homologação bancária não fecha, fica "aguardando
+// homologação" e NÃO emite cobrança (o backend recusa). Só owner/admin.
+type SicrediStatus = {
+  configured: boolean; enabled: boolean; state: string; stateDetail: string | null;
+  hasCredentials: boolean;
+  account: { cooperativa: string | null; posto: string | null; conta: string | null; beneficiarioNome: string | null; environment: string | null };
+  capabilities: { capability: string; available: boolean; reason: string | null }[];
+};
+const SICREDI_STATE_LABEL: Record<string, { label: string; cls: string }> = {
+  not_configured: { label: 'Não configurado', cls: 'text-zinc-400 border-zinc-700' },
+  awaiting_homologation: { label: 'Aguardando homologação', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' },
+  disabled: { label: 'Desligado', cls: 'text-zinc-400 border-zinc-700' },
+  connected: { label: 'Conectado', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' },
+};
+const CAP_LABEL: Record<string, string> = {
+  issue_pix: 'Emitir PIX', issue_boleto: 'Emitir boleto', query_charge: 'Consultar cobrança', webhook_settlement: 'Baixa por webhook',
+};
+
+function SicrediCobrancaSection() {
+  const [open, setOpen] = useState(false);
+  const [st, setSt] = useState<SicrediStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>({});
+
+  const load = () => apiFetch('/api/fin/sicredi/cobranca/status').then(r => r.ok ? r.json() : null).then(setSt).catch(() => setSt(null));
+  useEffect(() => { if (open && !st) { setLoading(true); load().finally(() => setLoading(false)); } }, [open]);
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const save = async (enabled?: boolean) => {
+    setSaving(true);
+    try {
+      const body: any = { ...form };
+      if (enabled != null) body.enabled = enabled;
+      const r = await apiFetch('/api/fin/sicredi/cobranca/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      setForm({}); setSt(await r.json()); toast.success('Configuração salva.');
+    } catch (e: any) { toast.error(e.message || 'Erro ao salvar'); }
+    finally { setSaving(false); }
+  };
+  const disconnect = async () => {
+    setSaving(true);
+    try { const r = await apiFetch('/api/fin/sicredi/cobranca/disconnect', { method: 'POST' }); setSt(await r.json()); setForm({}); toast.success('Conexão removida.'); }
+    catch { toast.error('Erro ao remover'); }
+    finally { setSaving(false); }
+  };
+
+  const badge = st ? (SICREDI_STATE_LABEL[st.state] || SICREDI_STATE_LABEL.not_configured) : null;
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 mb-4">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2">
+        <Landmark className="w-4 h-4 text-sky-400 shrink-0" />
+        <span className="text-sm text-zinc-200 flex-1 text-left">Cobrança bancária — Sicredi</span>
+        {badge && <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>}
+        {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+      </button>
+
+      {open && (
+        <div className="mt-3">
+          {loading && <div className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+          {st && (
+            <>
+              {/* Banner honesto de estado */}
+              {st.state !== 'connected' && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] text-amber-200/90 mb-3">
+                  <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>{st.stateDetail || 'Aguardando homologação bancária da Sicredi. Enquanto isso, a emissão de PIX/boleto por este canal fica indisponível — nada é cobrado por aqui ainda.'}</span>
+                </div>
+              )}
+
+              {/* Dados da conta (públicos) */}
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder={st.account.cooperativa ? `Cooperativa: ${st.account.cooperativa}` : 'Cooperativa'} value={form.cooperativa ?? ''} onChange={e => set('cooperativa', e.target.value)} />
+                <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder={st.account.posto ? `Posto: ${st.account.posto}` : 'Posto'} value={form.posto ?? ''} onChange={e => set('posto', e.target.value)} />
+                <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder={st.account.conta ? `Conta: ${st.account.conta}` : 'Conta'} value={form.conta ?? ''} onChange={e => set('conta', e.target.value)} />
+                <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={form.environment ?? st.account.environment ?? 'homolog'} onChange={e => set('environment', e.target.value)}>
+                  <option value="homolog">Ambiente: homologação</option>
+                  <option value="producao">Ambiente: produção</option>
+                </select>
+                <input className="col-span-2 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder={st.account.beneficiarioNome ? `Beneficiário: ${st.account.beneficiarioNome}` : 'Nome do beneficiário'} value={form.beneficiarioNome ?? ''} onChange={e => set('beneficiarioNome', e.target.value)} />
+              </div>
+
+              {/* Credenciais (segredos — nunca exibidos de volta) */}
+              <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 mb-2" placeholder="Client ID (API Sicredi)" value={form.clientId ?? ''} onChange={e => set('clientId', e.target.value)} />
+              <input type="password" className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 mb-2"
+                placeholder={st.hasCredentials ? '•••••••• (segredo já configurado — preencha para substituir)' : 'Client Secret'} value={form.clientSecret ?? ''} onChange={e => set('clientSecret', e.target.value)} />
+              <p className="text-[11px] text-zinc-500 mb-3">O certificado mTLS exigido pela homologação é adicionado com o time técnico. Os segredos ficam cifrados no servidor e nunca voltam para a tela.</p>
+
+              {/* Capacidades — honestas */}
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 mb-3">
+                <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1.5">Capacidades</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {st.capabilities.map(c => (
+                    <span key={c.capability} className={`rounded-full border px-2 py-0.5 text-[10px] ${c.available ? 'text-emerald-300 border-emerald-500/40' : 'text-zinc-500 border-zinc-700'}`}>
+                      {CAP_LABEL[c.capability] || c.capability} · {c.available ? 'disponível' : 'aguardando homologação'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button onClick={() => save(true)} disabled={saving} className="bg-sky-600 hover:bg-sky-700 text-white text-xs px-3 py-1.5 h-auto">{saving ? 'Salvando…' : (st.enabled ? 'Salvar' : 'Salvar e ativar')}</Button>
+                {st.configured && st.enabled && <Button variant="ghost" onClick={() => save(false)} disabled={saving} className="text-xs px-3 py-1.5 h-auto">Desativar</Button>}
+                {st.configured && <button onClick={disconnect} disabled={saving} className="ml-auto text-[11px] text-red-300 hover:text-red-200">Remover conexão</button>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

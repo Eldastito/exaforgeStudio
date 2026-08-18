@@ -2158,7 +2158,18 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       if (x.debitoBandeiras) setDebito(Object.fromEntries(Object.entries(x.debitoBandeiras).map(([k, v]) => [k, String(v)])));
       else if (x.debito != null && brands?.debito?.length) setDebito({ [brands.debito[0]]: String(x.debito) });
       if (Array.isArray(x.despesas) && x.despesas.length) setDespesas(x.despesas.map((dd: any) => ({ descricao: String(dd.descricao || ''), valor: dd.valor ? String(dd.valor) : '' })));
-      if (Array.isArray(x.ranking) && x.ranking.length) setRanking(x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' })));
+      // CLOSE-003: a foto ENRIQUECE o ranking — NÃO apaga linhas já digitadas pelo
+      // gerente. Mantém as linhas com dado e acrescenta só os vendedores da foto
+      // que ainda não estão na lista (match por nome).
+      if (Array.isArray(x.ranking) && x.ranking.length) {
+        const photoRows: RankRow[] = x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' }));
+        setRanking(prev => {
+          const typed = prev.filter(r => r.sellerName.trim() || r.valor || r.at || r.pecas);
+          if (!typed.length) return photoRows;
+          const have = new Set(typed.map(r => r.sellerName.trim().toLowerCase()).filter(Boolean));
+          return [...typed, ...photoRows.filter(pr => !have.has(pr.sellerName.trim().toLowerCase()))];
+        });
+      }
       if (x.cadastros != null) setCadastros(String(x.cadastros));
       if (x.boletaInicial) setBoletaInicial(String(x.boletaInicial));
       if (x.boletaFinal) setBoletaFinal(String(x.boletaFinal));
@@ -2288,16 +2299,25 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
             <button onClick={() => setRanking(p => [...p, { sellerName: '', valor: '', at: '', pecas: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
           </div>
           <p className="mb-2 text-[10px] text-zinc-600">Na aprovação, essas linhas viram as vendas por vendedor da comissão/corrida (AT = atendimentos, o denominador do P.A).{escalados.length ? ' Pré-preenchido pela escala do dia.' : ''}</p>
-          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-zinc-500">
+          {/* CLOSE-001: cabeçalho só no desktop; no mobile cada vendedor vira cartão */}
+          <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-zinc-500">
             <span>Vendedor</span><span className="w-24 text-right">Valor</span><span className="w-12 text-right">AT</span><span className="w-12 text-right">Peças</span><span className="w-5"></span>
           </div>
           {ranking.map((r, i) => (
-            <div key={i} className="mt-1 grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 items-center">
-              <input value={r.sellerName} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: e.target.value } : x))} placeholder="Nome" className={inp} />
-              <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-24 text-right`} />
-              <input inputMode="numeric" value={r.at} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, at: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-12 text-right`} />
-              <input inputMode="numeric" value={r.pecas} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, pecas: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-12 text-right`} />
-              <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+            <div key={i} className="mt-1.5 sm:mt-1 rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto] sm:gap-1.5 sm:items-center">
+              <div className="flex items-center gap-1.5">
+                <input value={r.sellerName} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: e.target.value } : x))} placeholder="Nome do vendedor" className={`${inp} flex-1`} />
+                <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="shrink-0 text-zinc-600 hover:text-red-300 sm:hidden"><Trash2 className="w-4 h-4" /></button>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:mt-0 sm:contents">
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Valor</span>
+                  <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-full text-right sm:w-24`} /></label>
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">AT</span>
+                  <input inputMode="numeric" value={r.at} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, at: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Peças</span>
+                  <input inputMode="numeric" value={r.pecas} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, pecas: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
+              </div>
+              <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="hidden sm:block text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
           ))}
           {rankingGap != null && Math.abs(rankingGap) > 0.01 && (
@@ -2456,16 +2476,25 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
         </div>
 
         <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 text-[11px] uppercase tracking-wider text-zinc-500">
+          {/* CLOSE-001: tabela no desktop, cartão por vendedor no mobile */}
+          <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 px-1 text-[11px] uppercase tracking-wider text-zinc-500">
             <span>Vendedor</span><span className="w-24 text-right">Valor (R$)</span><span className="w-14 text-right">Peças</span><span className="w-14 text-right" title="Atendimentos — o AT da folha, denominador do P.A">AT</span><span className="w-6"></span>
           </div>
           {rows.map((r, i) => (
-            <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center">
-              <input value={r.sellerName} onChange={e => setRow(i, { sellerName: e.target.value })} placeholder="Nome do vendedor" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
-              <input inputMode="decimal" value={r.valor} onChange={e => setRow(i, { valor: e.target.value.replace(',', '.') })} placeholder="0,00" className="w-24 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
-              <input inputMode="numeric" value={r.pecas} onChange={e => setRow(i, { pecas: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
-              <input inputMode="numeric" value={r.atendimentos} onChange={e => setRow(i, { atendimentos: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" title="Atendimentos (AT da folha)" className="w-14 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100" />
-              <button onClick={() => removeRow(i)} title="Remover linha" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
+            <div key={i} className="rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto] sm:gap-2 sm:items-center">
+              <div className="flex items-center gap-1.5">
+                <input value={r.sellerName} onChange={e => setRow(i, { sellerName: e.target.value })} placeholder="Nome do vendedor" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+                <button onClick={() => removeRow(i)} title="Remover linha" className="shrink-0 text-zinc-600 hover:text-red-300 sm:hidden"><Trash2 className="w-4 h-4" /></button>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:mt-0 sm:contents">
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Valor</span>
+                  <input inputMode="decimal" value={r.valor} onChange={e => setRow(i, { valor: e.target.value.replace(',', '.') })} placeholder="0,00" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100 sm:w-24" /></label>
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Peças</span>
+                  <input inputMode="numeric" value={r.pecas} onChange={e => setRow(i, { pecas: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100 sm:w-14" /></label>
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">AT</span>
+                  <input inputMode="numeric" value={r.atendimentos} onChange={e => setRow(i, { atendimentos: e.target.value.replace(/[^0-9]/g, '') })} placeholder="0" title="Atendimentos (AT da folha)" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-right text-zinc-100 sm:w-14" /></label>
+              </div>
+              <button onClick={() => removeRow(i)} title="Remover linha" className="hidden sm:block text-zinc-600 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
             </div>
           ))}
           <button onClick={addRow} className="inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-200"><Plus className="w-3.5 h-3.5" /> Adicionar vendedor</button>

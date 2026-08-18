@@ -654,7 +654,7 @@ function PatternSolutions({ patternId, refreshKey }: { patternId: string; refres
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
@@ -669,6 +669,7 @@ const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'estoque', label: 'Estoque negativo', icon: AlertTriangle },
   { key: 'reposicao', label: 'Reposição (grade)', icon: Boxes },
   { key: 'transferencias', label: 'Transferências', icon: ArrowLeftRight },
+  { key: 'vendedores', label: 'Vendedores da loja', icon: Users },
   { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
   { key: 'padroes', label: 'Padrões (IA)', icon: Sparkles },
   { key: 'lojavirtual', label: 'Loja virtual → PDV', icon: Globe },
@@ -837,6 +838,7 @@ export function RetailOpsView() {
       {tab === 'estoque' && <NegativeStockTab />}
       {tab === 'reposicao' && <ReplenishmentTab />}
       {tab === 'transferencias' && <TransfersTab />}
+      {tab === 'vendedores' && <SellersDirectoryTab />}
       {tab === 'equipe' && <ResponsiblesTab />}
       {tab === 'padroes' && <PatternsTab />}
       {tab === 'lojavirtual' && <OnlineReserveTab />}
@@ -5007,6 +5009,148 @@ function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => v
           <button onClick={submit} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-600/20 px-3 py-1.5 text-sm text-emerald-200 hover:bg-emerald-600/30 disabled:opacity-50">
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Salvar meta
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Vendedores da loja (PDR TOULON, Fatia 2B / SELL-004..008) --------------
+// Cobertura por loja: lotados + matrículas sem nome (pendência acionável) +
+// suspeitos de código compartilhado. Dar nome inline cria a identidade; atribuir
+// lojas define a lotação. Substitui o antigo prompt de nomear vendedor.
+function SellersDirectoryTab() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [cov, setCov] = useState<any>(null);
+  const [status, setStatus] = useState<AnalyticsStatus>('idle');
+  const [assignFor, setAssignFor] = useState<any>(null);
+
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!storeId && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
+  const load = async () => {
+    if (!storeId) return;
+    setStatus('loading');
+    const res = await fetchAnalytics(`/api/retailops/seller-coverage?storeId=${storeId}`);
+    setCov(res.status === 'ok' ? res.data : null); setStatus(res.status);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId]);
+
+  const nameCode = async (codigo: string) => {
+    const nome = window.prompt(`Nome do vendedor da matrícula ${codigo}:`, '');
+    if (nome == null || !nome.trim()) return;
+    try {
+      const r = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(codigo)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome.trim() }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success('Nome atribuído.'); load();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-zinc-300">Vendedores da loja</span>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Matrícula sem nome é <strong>pendência</strong> — dê o nome para a comissão sair certa. Código único com muito volume pode ser <strong>caixa compartilhado</strong> (não é uma pessoa): use lançamento manual/foto nessa loja.</p>
+
+      {status !== 'ok' && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} />}
+      {status === 'loading' && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+      {status === 'ok' && cov && (
+        <div className="space-y-4">
+          {/* Lotados */}
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">Lotados nesta loja ({cov.counts.lotados})</div>
+            {cov.lotados.length === 0 ? <p className="text-[13px] text-zinc-500">Nenhum vendedor lotado. Confirme os nomes abaixo e depois atribua as lojas.</p> : (
+              <div className="flex flex-wrap gap-1.5">
+                {cov.lotados.map((s: any) => (
+                  <button key={s.seller_id} onClick={() => setAssignFor(s)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1 text-[13px] text-zinc-200 hover:bg-zinc-800">
+                    {s.is_primary ? <Store className="w-3 h-3 text-emerald-400" /> : null}{s.name || `Matrícula ${s.matricula}`} <Pencil className="w-3 h-3 text-zinc-500" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* Pendências de nome */}
+          {cov.pendingName.length > 0 && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-amber-300/80 mb-1.5">Matrículas sem nome — pendência ({cov.counts.pendingName})</div>
+              <div className="space-y-1.5">
+                {cov.pendingName.map((p: any) => (
+                  <div key={p.codigo} className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5">
+                    <span className="font-mono text-[13px] text-zinc-200">Matrícula {p.codigo}</span>
+                    <span className="text-[11px] text-zinc-500">{p.sales} venda(s){p.lastSale ? ` · última ${p.lastSale}` : ''}</span>
+                    <button onClick={() => nameCode(p.codigo)} className="ml-auto rounded-md border border-indigo-500/30 px-2 py-0.5 text-[12px] text-indigo-300 hover:bg-indigo-500/10">Dar nome</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Suspeitos de código compartilhado */}
+          {cov.sharedCodeSuspects.length > 0 && (
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-red-300/80 mb-1.5">Suspeita de código compartilhado ({cov.counts.sharedCodeSuspects})</div>
+              <div className="space-y-1.5">
+                {cov.sharedCodeSuspects.map((p: any) => (
+                  <div key={p.codigo} className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-1.5 text-[12px] text-red-200/90">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-mono">Código {p.codigo}</span>
+                    <span className="text-[11px]">{p.sales} vendas num único código — provável caixa/login compartilhado. Não atribua a uma pessoa; use lançamento manual/foto ou o Atendimento de Loja.</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {assignFor && <SellerStoresModal seller={assignFor} stores={stores} onClose={() => setAssignFor(null)} onSaved={() => { setAssignFor(null); load(); }} />}
+    </div>
+  );
+}
+
+// Modal de lotação: em quais lojas o vendedor atua + qual é a principal.
+function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; stores: any[]; onClose: () => void; onSaved: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [primary, setPrimary] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    apiFetch(`/api/retailops/sellers/${seller.seller_id}/stores`).then(r => r.json()).then(d => {
+      const arr = Array.isArray(d?.stores) ? d.stores : [];
+      setSelected(new Set(arr.map((s: any) => s.store_id)));
+      setPrimary(arr.find((s: any) => s.is_primary)?.store_id || null);
+    }).catch(() => {});
+  }, [seller.seller_id]);
+  const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const save = async () => {
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/retailops/sellers/${seller.seller_id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [...selected], primaryStoreId: primary && selected.has(primary) ? primary : null }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success('Lotação atualizada.'); onSaved();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">Lojas de {seller.name || `Matrícula ${seller.matricula}`}</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Marque as lojas onde este vendedor atua. A principal é onde ele fica lotado; as demais são de apoio.</p>
+        <div className="space-y-1.5 max-h-[50vh] overflow-auto">
+          {stores.map((s: any) => (
+            <div key={s.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-1.5">
+              <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+              <span className="text-[13px] text-zinc-200 flex-1">{s.name}</span>
+              {selected.has(s.id) && (
+                <button onClick={() => setPrimary(s.id)} className={`text-[11px] rounded px-1.5 py-0.5 border ${primary === s.id ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10' : 'border-zinc-700 text-zinc-400'}`}>{primary === s.id ? 'Principal' : 'Tornar principal'}</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar lotação'}</button>
         </div>
       </div>
     </div>

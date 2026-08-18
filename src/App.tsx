@@ -59,37 +59,13 @@ import { useStore } from '@/src/store/useStore';
 import { Bell, X, Menu, Wifi, WifiOff, Radio, RefreshCw, Server, Activity } from 'lucide-react';
 import io from 'socket.io-client';
 import { apiFetch } from '@/src/lib/api';
+import { deriveConnectivity, classifyApi, CONNECTIVITY_META, type Connectivity, type ProbeInfo } from '@/src/lib/connectivity';
 
 // ============================================================================
 // PDR TOULON, Fatia 5 (CONN-001/002/003/004) — estados de conectividade HONESTOS.
-// O chip "Instável" antigo confundia queda do Socket.IO (só o TEMPO REAL) com
-// API/servidor pesado, fazendo o usuário achar que "a plataforma caiu". Agora
-// separamos quatro estados e cada um tem texto e ação próprios.
+// A lógica PURA (estados + texto) vive em `@/src/lib/connectivity` (testável);
+// aqui fica só o que tem efeito: o probe HTTP e o painel de diagnóstico.
 // ============================================================================
-type Connectivity = 'online' | 'realtime_degraded' | 'api_degraded' | 'offline';
-type ApiState = 'ok' | 'slow' | 'down' | 'unknown';
-type ProbeInfo = { state: ApiState; latencyMs: number | null; dbMs: number | null; lastOkAt: number | null };
-
-const API_SLOW_MS = 2500; // round-trip do probe acima disso = API degradada (latência alta)
-
-// Deriva o estado a partir de DOIS sinais independentes: a saúde da API (probe
-// autenticado /api/health/ping, CONN-003) e o tempo real (Socket.IO). Sem rede
-// no navegador vence tudo (offline).
-function deriveConnectivity(online: boolean, socketUp: boolean, api: ApiState): Connectivity {
-  if (!online) return 'offline';
-  if (api === 'down') return 'api_degraded';   // navegador online mas a API não responde
-  if (api === 'slow') return 'api_degraded';   // latência alta (CONN-001)
-  if (!socketUp) return 'realtime_degraded';   // API saudável, só o tempo real reconectando
-  return 'online';
-}
-
-// CONN-002: texto HONESTO por estado — nunca só "Instável".
-const CONNECTIVITY_META: Record<Connectivity, { label: string; text: string; dot: string; cls: string }> = {
-  online: { label: 'Online', text: 'Tudo normal — API e tempo real conectados.', dot: 'bg-emerald-400', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
-  realtime_degraded: { label: 'Tempo real reconectando', text: 'Tempo real reconectando — consultas e salvamentos continuam disponíveis.', dot: 'bg-amber-400 animate-pulse', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
-  api_degraded: { label: 'Servidor instável', text: 'A API está lenta ou com falhas. Consultas podem demorar; salvamentos podem exigir nova tentativa.', dot: 'bg-orange-400 animate-pulse', cls: 'text-orange-300 bg-orange-500/10 border-orange-500/30' },
-  offline: { label: 'Offline', text: 'Sem conexão com a internet. As ações ficam pendentes até a rede voltar.', dot: 'bg-red-400', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
-};
 
 // Probe LEVE e autenticado (CONN-003): mede a latência de round-trip pra separar
 // API saudável × lenta × caindo. Teto de 8 s pra não pendurar.
@@ -103,8 +79,7 @@ async function probeApi(): Promise<ProbeInfo> {
     const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);
     if (!r.ok) return { state: 'down', latencyMs, dbMs: null, lastOkAt: null };
     const d = await r.json().catch(() => ({} as any));
-    const state: ApiState = latencyMs > API_SLOW_MS ? 'slow' : 'ok';
-    return { state, latencyMs, dbMs: typeof d?.dbMs === 'number' ? d.dbMs : null, lastOkAt: Date.now() };
+    return { state: classifyApi(true, latencyMs), latencyMs, dbMs: typeof d?.dbMs === 'number' ? d.dbMs : null, lastOkAt: Date.now() };
   } catch {
     return { state: 'down', latencyMs: null, dbMs: null, lastOkAt: null };
   }

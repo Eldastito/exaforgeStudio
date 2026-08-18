@@ -39,6 +39,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { RetailStoreService } from "./RetailStoreService.js";
+import { logAuthEvent } from "./auditLog.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -237,6 +238,99 @@ export class RetailStoreCostService {
     });
     tx();
     return this.listVariable(orgId, storeId);
+  }
+
+  /**
+   * SAVE-001/003 (PDR TOULON, Fatia 1C) — configuração financeira COMPOSTA da
+   * loja (margem + custos fixos + custos variáveis) num só lugar, com versão
+   * otimista. Leitura para a UI nova.
+   */
+  static financialSettings(orgId: string, storeId: string): any {
+    const store = db.prepare(`SELECT gross_margin_percent, financial_settings_version, updated_at FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    return {
+      grossMarginPercent: store.gross_margin_percent != null ? Number(store.gross_margin_percent) : null,
+      fixedCosts: this.list(orgId, storeId),
+      variableCosts: this.listVariable(orgId, storeId),
+      version: Number(store.financial_settings_version || 0),
+      updatedAt: store.updated_at || null,
+    };
+  }
+
+  /**
+   * SAVE-001/002/003 — grava margem + custos fixos + custos variáveis numa ÚNICA
+   * transação (all-or-nothing). Valida TUDO antes de persistir; se `expectedVersion`
+   * não bater com a versão atual, lança conflito (o route devolve 409). Incrementa
+   * a versão dentro da mesma transação. Nunca persistência parcial (SAVE fim do
+   * `.catch(()=>{})`).
+   */
+  static saveFinancialSettings(
+    orgId: string, storeId: string,
+    payload: { grossMarginPercent?: number | null; fixedCosts?: Record<string, any>; variableCosts?: Record<string, any>; expectedVersion?: number | null },
+    actorId?: string
+  ): any {
+    const store = db.prepare(`SELECT gross_margin_percent, financial_settings_version FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const currentVersion = Number(store.financial_settings_version || 0);
+
+    // Conflito otimista (SAVE-003): outro usuário salvou entre a leitura e este PUT.
+    if (payload.expectedVersion != null && Number(payload.expectedVersion) !== currentVersion) {
+      const err: any = new Error("version_conflict");
+      err.code = "VERSION_CONFLICT";
+      err.currentVersion = currentVersion;
+      throw err;
+    }
+
+    // Validação ANTES de qualquer escrita (SAVE-001) — margem 0..100 ou null.
+    let margin: number | null | undefined = undefined;
+    if (payload.grossMarginPercent !== undefined) {
+      const v: any = payload.grossMarginPercent;
+      if (v === null || v === "") margin = null;
+      else {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error("Margem bruta inválida (0 a 100).");
+        margin = round2(n);
+      }
+    }
+    const fixed = payload.fixedCosts || null;
+    const variable = payload.variableCosts || null;
+
+    const fixedUpsert = db.prepare(
+      `INSERT INTO retail_store_fixed_costs (id, organization_id, store_id, category, amount)
+         VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(organization_id, store_id, category) DO UPDATE SET amount = excluded.amount, updated_at = CURRENT_TIMESTAMP`
+    );
+    const varUpsert = db.prepare(
+      `INSERT INTO retail_store_variable_costs (id, organization_id, store_id, category, percent, fixed_per_sale)
+         VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(organization_id, store_id, category) DO UPDATE SET percent = excluded.percent, fixed_per_sale = excluded.fixed_per_sale, updated_at = CURRENT_TIMESTAMP`
+    );
+
+    const tx = db.transaction(() => {
+      if (margin !== undefined) {
+        db.prepare(`UPDATE retail_stores SET gross_margin_percent = ? WHERE organization_id = ? AND id = ?`).run(margin, orgId, storeId);
+      }
+      if (fixed) {
+        for (const c of FIXED_COST_CATEGORIES) {
+          if (!(c.key in fixed)) continue;
+          const raw = Number(fixed[c.key]);
+          fixedUpsert.run(randomUUID(), orgId, storeId, c.key, Number.isFinite(raw) && raw > 0 ? round2(raw) : 0);
+        }
+      }
+      if (variable) {
+        for (const c of VARIABLE_COST_CATEGORIES) {
+          if (!(c.key in variable)) continue;
+          const raw = variable[c.key] || {};
+          const p = Number(raw.percent), f = Number(raw.fixedPerSale);
+          varUpsert.run(randomUUID(), orgId, storeId, c.key, Number.isFinite(p) && p > 0 ? round2(Math.min(p, 100)) : 0, Number.isFinite(f) && f > 0 ? round2(f) : 0);
+        }
+      }
+      // Incrementa a versão DENTRO da mesma transação (SAVE-003 / §7.6).
+      db.prepare(`UPDATE retail_stores SET financial_settings_version = COALESCE(financial_settings_version, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, storeId);
+    });
+    tx();
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_FINANCIAL_SETTINGS_SAVED", { fromVersion: currentVersion }); } catch { /* noop */ }
+    return this.financialSettings(orgId, storeId);
   }
 
   /** Total mensal de custo fixo da loja (soma das categorias). */

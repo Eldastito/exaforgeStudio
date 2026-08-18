@@ -9798,6 +9798,11 @@ const initDb = () => {
   // como antes. Índice único parcial por (org, loja, chave).
   try { db.exec(`ALTER TABLE retail_boleta_events ADD COLUMN idempotency_key TEXT`); } catch (e) { /* noop */ }
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_retail_boleta_events_idem ON retail_boleta_events (organization_id, store_id, idempotency_key) WHERE idempotency_key IS NOT NULL`); } catch (e) { /* noop */ }
+
+  // SAVE-003 (§7.6) — versão otimista da config financeira da loja (PDR TOULON,
+  // Fatia 1C). O endpoint composto incrementa dentro da mesma transação; edição
+  // concorrente com versão antiga recebe 409. Aditivo (default 0).
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN financial_settings_version INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
 };
 
 initDb();

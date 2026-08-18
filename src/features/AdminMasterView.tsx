@@ -448,9 +448,115 @@ export function AdminMasterView() {
 
       <BlueprintsPanel />
 
+      <RuntimePilotPanel />
+
       <LaborLawCurationPanel />
 
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+// ADR-152 — Habilitação do Execution Runtime por organização (Master Admin).
+// É a trava mestra das abas Operações/Recuperação do Diretor IA. Reusa o piloto
+// do CLI (RuntimePilotService) via /api/admin/runtime-pilot. Ligar semeia as
+// policies exigidas pelo executor; só o master chega aqui.
+function RuntimePilotPanel() {
+  const [q, setQ] = useState('');
+  const [orgs, setOrgs] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [orgId, setOrgId] = useState('');
+  const [plan, setPlan] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [withRecovery, setWithRecovery] = useState(false);
+
+  const search = async () => {
+    if (!q.trim()) { setOrgs([]); return; }
+    setSearching(true);
+    try {
+      const r = await apiFetch(`/api/admin/runtime-pilot/search?q=${encodeURIComponent(q.trim())}`);
+      const d = await r.json().catch(() => ({}));
+      setOrgs(Array.isArray(d?.orgs) ? d.orgs : []);
+    } catch { setOrgs([]); } finally { setSearching(false); }
+  };
+  const loadPlan = async (id: string) => {
+    setOrgId(id); setPlan(null);
+    try {
+      const r = await apiFetch(`/api/admin/runtime-pilot/plan/${encodeURIComponent(id)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Falha ao carregar o diagnóstico.'); return; }
+      setPlan(d); setWithRecovery(!!d?.flags?.salesRecovery);
+    } catch { toast.error('Falha ao carregar o diagnóstico.'); }
+  };
+  const act = async (enabled: boolean) => {
+    if (!orgId) return;
+    if (!enabled && !(await confirmDialog('Desligar o Execution Runtime desta organização? As abas Operações/Recuperação voltam a ficar bloqueadas.'))) return;
+    setBusy(true);
+    try {
+      const body: any = { orgId, enabled };
+      if (enabled && withRecovery) body.salesRecovery = true;
+      const r = await apiFetch('/api/admin/runtime-pilot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Falha ao aplicar.'); return; }
+      setPlan(d);
+      toast.success(enabled ? 'Execution Runtime ligado.' : 'Execution Runtime desligado.');
+    } catch (e: any) { toast.error(e?.message || 'Falha ao aplicar.'); } finally { setBusy(false); }
+  };
+
+  const flags = plan?.flags || {};
+  const badge = (on: boolean) => on
+    ? <span className="inline-flex items-center gap-1 text-emerald-300 text-xs"><CheckCircle2 className="w-3.5 h-3.5" /> ligado</span>
+    : <span className="inline-flex items-center gap-1 text-zinc-500 text-xs"><XCircle className="w-3.5 h-3.5" /> desligado</span>;
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Activity className="w-5 h-5 text-indigo-400" /> Execution Runtime</h3>
+      <p className="text-xs text-zinc-500 mb-4">Liga a trava mestra das abas <strong>Operações</strong> e <strong>Recuperação</strong> do Diretor IA (flag <code className="text-zinc-400">execution_runtime_enabled</code>) e semeia as políticas exigidas pelo executor. Modo padrão é <code className="text-zinc-400">approved_execution</code> — o Runtime propõe/executa ações governadas, humano aprova.</p>
+
+      <div className="flex gap-2 mb-3">
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+          placeholder="Buscar organização pelo nome…" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
+        <Button onClick={search} disabled={searching} variant="secondary">{searching ? 'Buscando…' : 'Buscar'}</Button>
+      </div>
+      {orgs.length > 0 && (
+        <div className="mb-3 rounded-lg border border-zinc-800 divide-y divide-zinc-800 overflow-hidden">
+          {orgs.map((o) => (
+            <button key={o.orgId} onClick={() => loadPlan(o.orgId)} className={`w-full text-left px-3 py-2 text-sm hover:bg-zinc-800/60 flex items-center justify-between ${orgId === o.orgId ? 'bg-zinc-800/60' : ''}`}>
+              <span className="text-zinc-200">{o.name}</span>
+              <span className="text-[11px] text-zinc-500">{o.vertical || '—'} · {o.status}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {plan && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-medium text-zinc-100">{plan.org?.name || orgId}</div>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full border ${plan.readiness === 'PRONTO' ? 'text-emerald-300 border-emerald-500/40' : plan.readiness === 'BLOQUEADO' ? 'text-red-300 border-red-500/40' : 'text-amber-300 border-amber-500/40'}`}>{plan.readiness}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm mb-3">
+            <div className="flex items-center justify-between"><span className="text-zinc-400">Execution Runtime</span>{badge(!!flags.runtime)}</div>
+            <div className="flex items-center justify-between"><span className="text-zinc-400">Recuperação de vendas</span>{badge(!!flags.salesRecovery)}</div>
+            <div className="flex items-center justify-between"><span className="text-zinc-400">Policies (recuperação)</span>{badge(!!plan.prereqs?.policiesReady?.salesRecovery)}</div>
+            <div className="flex items-center justify-between"><span className="text-zinc-400">Canais conectados</span><span className="text-zinc-300 text-xs tabular-nums">{plan.prereqs?.channelsConnected ?? 0}</span></div>
+          </div>
+          {Array.isArray(plan.blockers) && plan.blockers.length > 0 && (
+            <div className="mb-2 text-[12px] text-red-300/90">{plan.blockers.map((b: string, i: number) => <div key={i} className="flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {b}</div>)}</div>
+          )}
+          {Array.isArray(plan.warnings) && plan.warnings.length > 0 && (
+            <div className="mb-2 text-[12px] text-amber-300/80">{plan.warnings.map((w: string, i: number) => <div key={i} className="flex gap-1.5"><Clock className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {w}</div>)}</div>
+          )}
+          <label className="flex items-center gap-2 text-xs text-zinc-400 mb-3">
+            <input type="checkbox" checked={withRecovery} onChange={(e) => setWithRecovery(e.target.checked)} className="accent-indigo-500" />
+            Também ligar a <strong className="text-zinc-300">Recuperação de vendas</strong> (aba Recuperação)
+          </label>
+          <div className="flex gap-2">
+            <Button onClick={() => act(true)} disabled={busy}>{flags.runtime ? 'Reaplicar / atualizar policies' : 'Ligar Execution Runtime'}</Button>
+            {flags.runtime && <Button onClick={() => act(false)} disabled={busy} variant="secondary">Desligar</Button>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

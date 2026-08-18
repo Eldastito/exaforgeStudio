@@ -105,6 +105,17 @@ async function main() {
   // ---- 6. Isolamento ----
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);
+  // ---- SELL-007: matrícula sem nome = pendência de identidade no relatório ----
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, vendedor, vendedor_codigo, valor, pecas) VALUES (?, ?, 'X', '1', '2026-07-10', 'op', '7777', 300, 2)`).run(randomUUID(), A);
+  db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name, active) VALUES (?, ?, '8888', 'Bia', 1)`).run(randomUUID(), A);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, vendedor, vendedor_codigo, valor, pecas) VALUES (?, ?, 'X', '2', '2026-07-10', 'op', '8888', 400, 1)`).run(randomUUID(), A);
+  const rep = RetailCommissionService.report(A, START, END);
+  const pend = (rep.bySeller || []).find((s: any) => s.matricula === '7777');
+  const named = (rep.bySeller || []).find((s: any) => s.sellerName === 'Bia');
+  check("matrícula 7777 sem nome → pendingIdentity + source pdv", !!pend && pend.pendingIdentity === true && String(pend.source).includes('pdv'));
+  check("matrícula 8888 com nome (Bia) → não é pendência", !!named && named.pendingIdentity === false);
+  check("relatório conta as pendências de identidade", rep.pendingIdentityCount >= 1);
+
   check("Isolamento: B não vê regras/runs de A", RetailCommissionService.listRules(B).length === 0 && RetailCommissionService.listRuns(B).length === 0);
 
   console.log("\n=== Retail Ops — Fase G: premiação/comissão (ADR-083) ===");

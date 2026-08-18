@@ -3878,7 +3878,10 @@ function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; cl
 function ScheduleTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
-  const [sellers, setSellers] = useState<any[]>([]);
+  const [allSellers, setAllSellers] = useState<any[]>([]);   // todos mapeados (fallback + adicionar)
+  const [roster, setRoster] = useState<any[]>([]);           // lotados na loja (Fatia 2A)
+  const [orgUsesAssignments, setOrgUsesAssignments] = useState(false);
+  const [extra, setExtra] = useState<Record<string, string[]>>({}); // por loja: matrículas add "de outra loja"
   // Semana exibida na grade (domingo → sábado).
   const sundayOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); return x.toISOString().slice(0, 10); };
   const [weekStart, setWeekStart] = useState(() => sundayOf(new Date()));
@@ -3905,12 +3908,36 @@ function ScheduleTab() {
       const ss = Array.isArray(st?.stores) ? st.stores : [];
       setStores(ss);
       if (ss.length && !storeId) setStoreId(ss[0].id);
-      setSellers(Array.isArray(se?.sellers) ? se.sellers.filter((x: any) => x.active !== 0) : []);
+      setAllSellers(Array.isArray(se?.sellers) ? se.sellers.filter((x: any) => x.active !== 0) : []);
     })();
     // eslint-disable-next-line
   }, []);
 
+  // SELL-006: roster da loja (lotação da Fatia 2A). A escala mostra os LOTADOS
+  // (+ os add "de outra loja"); só cai em "todos mapeados" quando a org ainda
+  // não usa lotação (0-regressão).
+  useEffect(() => {
+    if (!storeId) return;
+    apiFetch(`/api/retailops/seller-coverage?storeId=${storeId}`).then(r => r.ok ? r.json() : null).then(d => {
+      setRoster(Array.isArray(d?.lotados) ? d.lotados : []);
+      setOrgUsesAssignments(!!d?.orgUsesAssignments);
+    }).catch(() => { setRoster([]); setOrgUsesAssignments(false); });
+  }, [storeId]);
+
   const keyOf = (s: any) => `mat:${s.matricula}`;
+
+  // Lista efetiva de vendedores da escala desta loja.
+  const sellers = useMemo(() => {
+    const byMat = new Map(allSellers.map((s: any) => [String(s.matricula), s]));
+    const extraMats = extra[storeId] || [];
+    const base: any[] = roster.length > 0
+      ? roster.map((r: any) => ({ matricula: r.matricula, name: r.name, is_primary: r.is_primary }))
+      : (orgUsesAssignments ? [] : allSellers); // sem lotação na org → legado
+    const seen = new Set(base.map((s: any) => String(s.matricula)));
+    const extras = extraMats.filter(m => !seen.has(m)).map(m => { const src: any = byMat.get(m) || { matricula: m, name: null }; return { ...src, _temp: true }; });
+    return [...base, ...extras];
+  }, [roster, allSellers, orgUsesAssignments, extra, storeId]);
+  const addFromOther = (matricula: string) => { if (!matricula) return; setExtra(p => ({ ...p, [storeId]: [...(p[storeId] || []), matricula] })); };
 
   const loadWeek = async () => {
     if (!storeId) return;
@@ -3999,6 +4026,11 @@ function ScheduleTab() {
         <span className="text-xs text-zinc-400">{days[0].slice(8)}/{days[0].slice(5, 7)} → {days[6].slice(8)}/{days[6].slice(5, 7)}</span>
         <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">semana →</button>
         <div className="ml-auto flex items-center gap-2">
+          {/* SELL-006: escalar temporariamente alguém de outra loja */}
+          <select value="" onChange={e => { addFromOther(e.target.value); e.currentTarget.value = ''; }} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300" title="Escalar um vendedor de outra loja nesta semana">
+            <option value="">+ de outra loja…</option>
+            {allSellers.filter((s: any) => !sellers.some((x: any) => String(x.matricula) === String(s.matricula))).map((s: any) => <option key={s.matricula} value={s.matricula}>{s.name || `Matrícula ${s.matricula}`}</option>)}
+          </select>
           <button onClick={copyPrevious} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Copiar semana anterior</button>
           <button onClick={saveWeek} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar escala</button>
         </div>
@@ -4006,7 +4038,11 @@ function ScheduleTab() {
       <p className="mb-3 text-[11px] text-zinc-500">Clique na célula pra alternar: <span className="text-emerald-300">trabalha</span> → <span className="text-red-300">folga</span> → vazio. A cota individual derivada usa a cota diária da loja ÷ nº de escalados do dia (o “COTA ÷ 4” da folha de fechamento) quando não há cota semanal cadastrada abaixo.</p>
 
       {sellers.length === 0 ? (
-        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum vendedor cadastrado. Associe as matrículas em <strong>Comissão › Vendas por vendedor (PDV)</strong> ou cadastre a equipe no módulo Atendimento de Loja.</p>
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
+          {orgUsesAssignments
+            ? <>Nenhum vendedor <strong>lotado nesta loja</strong>. Defina a lotação em <strong>Vendedores da loja</strong>, ou use <strong>“+ de outra loja”</strong> acima para escalar alguém temporariamente.</>
+            : <>Nenhum vendedor cadastrado. Associe as matrículas em <strong>Vendedores da loja</strong> (dar nome às matrículas) ou cadastre a equipe no módulo Atendimento de Loja.</>}
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
           <table className="w-full text-xs">
@@ -4021,7 +4057,11 @@ function ScheduleTab() {
                 const sk = keyOf(s);
                 return (
                   <tr key={sk} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-1.5 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                    <td className="px-3 py-1.5 text-zinc-200">
+                      {s.name || <span className="text-amber-300/90">Matrícula {s.matricula}</span>}
+                      {s.is_primary ? <Store className="inline w-3 h-3 ml-1 text-emerald-400" /> : null}
+                      {s._temp ? <span className="ml-1.5 rounded bg-zinc-800 px-1 py-0.5 text-[9px] text-zinc-400">de outra loja</span> : null}
+                    </td>
                     {days.map(d => {
                       const st = grid[d]?.[sk];
                       return (

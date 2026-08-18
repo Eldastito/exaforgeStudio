@@ -90,20 +90,39 @@ export class RetailBoletaService {
    * número sai do COUNT dentro da tx; o unique parcial segura corrida.
    * O timestamp é do servidor (CURRENT_TIMESTAMP do INSERT).
    */
-  static click(orgId: string, storeId: string, day: string, opts: { sellerName?: string | null } = {}, actorId?: string): any {
+  static click(orgId: string, storeId: string, day: string, opts: { sellerName?: string | null; idempotencyKey?: string | null } = {}, actorId?: string): any {
     const d = this.getDay(orgId, storeId, day);
     if (!d) throw new Error("Abra o dia primeiro: informe o número inicial do talão de boletas.");
     const parsed = parseNumber(d.initial_number)!;
+    const idemKey = opts.idempotencyKey ? String(opts.idempotencyKey).trim().slice(0, 100) : null;
+
+    // BOL-002: idempotência. Se já houve um clique com esta chave (double-tap/
+    // retry/resposta perdida), devolve o MESMO evento — não consome outro número.
+    if (idemKey) {
+      const existing = db.prepare(`SELECT * FROM retail_boleta_events WHERE organization_id = ? AND store_id = ? AND idempotency_key = ?`).get(orgId, storeId, idemKey) as any;
+      if (existing) return { ...existing, deduped: true };
+    }
+
     const id = randomUUID();
-    const tx = db.transaction(() => {
-      const seq = this.activeCount(orgId, storeId, day) + 1;
-      const number = formatNumber(parsed.n + seq - 1, parsed.width);
-      db.prepare(
-        `INSERT INTO retail_boleta_events (id, organization_id, store_id, day, boleta_number, seq, seller_name, clicked_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, orgId, storeId, day, number, seq, opts.sellerName ? String(opts.sellerName).trim() : null, actorId || null);
-    });
-    tx();
+    try {
+      const tx = db.transaction(() => {
+        const seq = this.activeCount(orgId, storeId, day) + 1;
+        const number = formatNumber(parsed.n + seq - 1, parsed.width);
+        db.prepare(
+          `INSERT INTO retail_boleta_events (id, organization_id, store_id, day, boleta_number, seq, seller_name, clicked_by, idempotency_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(id, orgId, storeId, day, number, seq, opts.sellerName ? String(opts.sellerName).trim() : null, actorId || null, idemKey);
+      });
+      tx();
+    } catch (e: any) {
+      // Corrida: dois cliques simultâneos com a MESMA chave — o índice único
+      // barra o segundo; devolve o vencedor (idempotente, sem número extra).
+      if (idemKey && String(e?.code || "").includes("SQLITE_CONSTRAINT")) {
+        const winner = db.prepare(`SELECT * FROM retail_boleta_events WHERE organization_id = ? AND store_id = ? AND idempotency_key = ?`).get(orgId, storeId, idemKey) as any;
+        if (winner) return { ...winner, deduped: true };
+      }
+      throw e;
+    }
     const ev = db.prepare(`SELECT * FROM retail_boleta_events WHERE id = ?`).get(id) as any;
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_BOLETA_CLICKED", { storeId, day, number: ev.boleta_number }); } catch { /* noop */ }
     return ev;
@@ -181,6 +200,37 @@ export class RetailBoletaService {
       pdvMatch: { matched: matched.length, unmatched: active.length - matched.length, valorTotal: round2(matched.reduce((a, c) => a + (c.pdv!.valor || 0), 0)) },
       byHourUtc: Array.from(byHour.entries()).sort().map(([hour, v]) => ({ hour, ...v })),
     };
+  }
+
+  /**
+   * BOL-005 — histórico curto (leitura): os últimos N dias com boletas da loja,
+   * pra o gestor confirmar num relance que a contagem NÃO foi apagada. Derivado
+   * por query (RN-004). Retorna, por dia, aberto/inicial/primeira/última/ativas/
+   * canceladas.
+   */
+  static history(orgId: string, storeId: string, limit = 7): any[] {
+    const n = Math.max(1, Math.min(31, Math.trunc(Number(limit) || 7)));
+    const days = db.prepare(
+      `SELECT DISTINCT day FROM retail_boleta_events WHERE organization_id = ? AND store_id = ? ORDER BY day DESC LIMIT ?`
+    ).all(orgId, storeId, n) as any[];
+    return days.map((row) => {
+      const day = row.day;
+      const d = this.getDay(orgId, storeId, day);
+      const agg = db.prepare(
+        `SELECT SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                MIN(CASE WHEN status='active' THEN seq END) AS min_seq,
+                MAX(CASE WHEN status='active' THEN seq END) AS max_seq
+           FROM retail_boleta_events WHERE organization_id = ? AND store_id = ? AND day = ?`
+      ).get(orgId, storeId, day) as any;
+      const firstNum = agg?.min_seq != null ? (db.prepare(`SELECT boleta_number FROM retail_boleta_events WHERE organization_id=? AND store_id=? AND day=? AND status='active' AND seq=?`).get(orgId, storeId, day, agg.min_seq) as any)?.boleta_number : null;
+      const lastNum = agg?.max_seq != null ? (db.prepare(`SELECT boleta_number FROM retail_boleta_events WHERE organization_id=? AND store_id=? AND day=? AND status='active' AND seq=?`).get(orgId, storeId, day, agg.max_seq) as any)?.boleta_number : null;
+      return {
+        day, initialNumber: d?.initial_number || null,
+        firstNumber: firstNum || null, lastNumber: lastNum || null,
+        count: Number(agg?.active || 0), cancelledCount: Number(agg?.cancelled || 0),
+      };
+    });
   }
 
   /**

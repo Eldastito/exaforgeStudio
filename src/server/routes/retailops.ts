@@ -1292,13 +1292,26 @@ router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthReques
 router.post("/boletas/click", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { storeId, sellerName } = req.body || {};
+  const { storeId, sellerName, idempotencyKey } = req.body || {};
   if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   // TIME-003: dia comercial autoritativo do servidor; a hora do clique é do servidor.
   const day = BusinessTimeService.writeDay(orgId);
-  try { res.status(201).json(RetailBoletaService.click(orgId, String(storeId), day, { sellerName }, req.user?.userId)); }
+  // BOL-002: idempotencyKey (gerada no dispositivo) faz retry/double-click
+  // devolverem o mesmo evento em vez de consumir outro número.
+  try { res.status(201).json(RetailBoletaService.click(orgId, String(storeId), day, { sellerName, idempotencyKey }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// BOL-005: histórico curto (leitura) — últimos N dias com boletas da loja.
+router.get("/boletas/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  const limit = Math.max(1, Math.min(31, parseInt(String(req.query.limit || "7"), 10) || 7));
+  res.json({ history: RetailBoletaService.history(orgId, storeId, limit) });
 });
 
 // Desfaz o ÚLTIMO clique (misclick) — gestão.

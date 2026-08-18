@@ -1457,13 +1457,20 @@ function BoletaPanel({ stores }: { stores: any[] }) {
   };
   const click = async () => {
     setClicking(true);
+    // BOL-002: chave gerada no dispositivo — retry/resposta perdida devolvem o
+    // MESMO evento (não duplica boleta). BOL-003: só confirma com a resposta.
+    const idempotencyKey = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`);
     try {
-      const res = await apiFetch('/api/retailops/boletas/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId }) });
+      const res = await apiFetch('/api/retailops/boletas/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, idempotencyKey }) });
       const d = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(`Venda registrada — boleta Nº ${d.boleta_number} · ${new Date(d.clicked_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`); load(); }
-      else toast.error(d.error || 'Falha ao registrar.');
-    } finally { setClicking(false); }
+      if (res.ok) { toast.success(`${d.deduped ? 'Já registrada' : 'Venda registrada'} — boleta Nº ${d.boleta_number} · ${new Date(d.clicked_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`); load(); }
+      else toast.error(d.error || 'Falha ao registrar — tente de novo (nada foi contado).');
+    } catch { toast.error('Sem resposta do servidor — tente de novo (nada foi contado).'); }
+    finally { setClicking(false); }
   };
+  const [history, setHistory] = useState<any[] | null>(null);
+  const loadHistory = () => { if (!storeId) return; apiFetch(`/api/retailops/boletas/history?storeId=${storeId}&limit=7`).then(r => r.json()).then(d => setHistory(Array.isArray(d?.history) ? d.history : [])).catch(() => setHistory([])); };
+  useEffect(() => { if (open && storeId) loadHistory(); /* eslint-disable-next-line */ }, [open, storeId]);
   const undo = async () => {
     const last = report?.clicks?.[report.clicks.length - 1];
     if (!last) return;
@@ -1526,6 +1533,21 @@ function BoletaPanel({ stores }: { stores: any[] }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* BOL-005: últimos 7 dias (leitura) — confirma que a contagem não some */}
+      {open && history && history.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Últimos dias</div>
+          <div className="flex flex-wrap gap-1.5">
+            {history.map((h: any) => (
+              <span key={h.day} title={`${h.firstNumber || '—'} → ${h.lastNumber || '—'}${h.cancelledCount ? ` · ${h.cancelledCount} cancelada(s)` : ''}`}
+                className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-2 py-1 text-[11px] text-zinc-300">
+                {new Date(h.day + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · <strong className="text-zinc-100">{h.count}</strong>
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>

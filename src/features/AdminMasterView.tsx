@@ -451,6 +451,7 @@ export function AdminMasterView() {
       <RuntimePilotPanel />
 
       <LaborLawCurationPanel />
+      <HelpCurationPanel />
 
       <AuditLogsPanel />
     </div>
@@ -688,6 +689,137 @@ function LaborLawCurationPanel() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ADR-179 F2 — módulos oferecidos no bootstrap de ajuda (rótulos amigáveis).
+const HELP_MODULE_OPTIONS: { key: string; label: string }[] = [
+  { key: 'central_saude', label: 'Central de Saúde' },
+  { key: 'diretor', label: 'Diretor Executivo IA' },
+  { key: 'vendas', label: 'Vendas' },
+  { key: 'retail_floor', label: 'Atendimento de Loja' },
+  { key: 'compras', label: 'Estoque / Compras' },
+  { key: 'agenda', label: 'Agenda' },
+  { key: 'catalogo', label: 'Catálogo' },
+  { key: 'campanhas', label: 'Campanhas' },
+  { key: 'clinica', label: 'Clínica' },
+  { key: 'estudio', label: 'Estúdio de Criação' },
+];
+const HELP_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  draft: { label: 'rascunho', cls: 'border-amber-700/60 text-amber-300' },
+  published: { label: 'publicado', cls: 'border-emerald-700/60 text-emerald-300' },
+  archived: { label: 'arquivado', cls: 'border-zinc-700 text-zinc-500' },
+};
+
+/**
+ * ADR-179 F2 — Curadoria da base de ajuda do USUÁRIO. O Tutor de Ajuda só
+ * responde ancorado em artigo PUBLICADO com "revisado por" (RN-HELP-3). Aqui o
+ * master gera um RASCUNHO (bootstrap destila da doc do módulo), revisa e publica.
+ */
+function HelpCurationPanel() {
+  const [articles, setArticles] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [bootModule, setBootModule] = useState('central_saude');
+  const [busy, setBusy] = useState(false);
+  const [reviewers, setReviewers] = useState<Record<string, string>>({});
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch('/api/admin/help-articles?status=all').then((x) => (x.ok ? x.json() : { articles: [] }));
+      setArticles(Array.isArray(r?.articles) ? r.articles : []);
+    } catch { /* noop */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const bootstrap = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/admin/help-articles/bootstrap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moduleKey: bootModule }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha no bootstrap');
+      toast.success('Rascunho gerado — revise e publique.');
+      load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+  const publish = async (id: string) => {
+    const reviewedBy = (reviewers[id] || '').trim();
+    if (!reviewedBy) { toast.error('Informe quem revisou antes de publicar.'); return; }
+    try {
+      const r = await apiFetch(`/api/admin/help-articles/${id}/publish`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewedBy }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao publicar');
+      toast.success('Artigo publicado.'); load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+  };
+  const archive = async (id: string) => {
+    try { await apiFetch(`/api/admin/help-articles/${id}/archive`, { method: 'POST' }); load(); }
+    catch { toast.error('Erro ao arquivar'); }
+  };
+
+  const drafts = articles.filter((a) => a.status === 'draft');
+  const published = articles.filter((a) => a.status === 'published');
+
+  const card = (a: any) => (
+    <div key={a.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`rounded-full border bg-zinc-900/50 px-2 py-0.5 text-[10px] ${HELP_STATUS_BADGE[a.status]?.cls || 'text-zinc-400'}`}>{HELP_STATUS_BADGE[a.status]?.label || a.status}</span>
+        {a.module_key && <span className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">{a.module_key}</span>}
+        {a.vertical && <span className="text-[10px] text-zinc-500">vertical: {a.vertical}</span>}
+        <span className="text-sm font-medium text-zinc-100">{a.title}</span>
+        {a.status !== 'archived' && <button onClick={() => archive(a.id)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200"><Trash2 className="w-3 h-3" /> Arquivar</button>}
+      </div>
+      {a.what && <p className="mt-1 text-[13px] text-zinc-300 whitespace-pre-line">{a.what}</p>}
+      {a.steps?.length > 0 && (
+        <ol className="mt-1 list-decimal list-inside text-[12px] text-zinc-400 space-y-0.5">
+          {a.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}
+        </ol>
+      )}
+      {a.reviewedBy && <div className="mt-2 text-[11px] text-zinc-500">Revisado por: <span className="text-zinc-300">{a.reviewedBy}</span></div>}
+      {a.status === 'draft' && (
+        <div className="mt-2 flex items-center gap-2">
+          <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Revisado por (seu nome)…" value={reviewers[a.id] || ''} onChange={(e) => setReviewers((r) => ({ ...r, [a.id]: e.target.value }))} />
+          <button onClick={() => publish(a.id)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"><CheckCircle2 className="w-3.5 h-3.5" /> Publicar</button>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><Layers className="w-5 h-5 text-indigo-400" /> Curadoria da base de ajuda</h3>
+      <p className="text-xs text-zinc-500 mb-4">
+        A base que o <strong className="text-zinc-300">Tutor de Ajuda</strong> (orb) usa para responder o lojista. Gere um rascunho a partir de um módulo, revise o texto e publique com <strong className="text-zinc-300">quem revisou</strong> — sem isso, o artigo não vai ao ar (RN-HELP-3).
+      </p>
+
+      {/* Bootstrap */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 mb-4 flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-zinc-300">Gerar rascunho de:</span>
+        <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={bootModule} onChange={(e) => setBootModule(e.target.value)}>
+          {HELP_MODULE_OPTIONS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+        </select>
+        <button onClick={bootstrap} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          <Plus className="w-4 h-4" /> {busy ? 'Gerando…' : 'Gerar rascunho'}
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-zinc-500">Carregando…</p>
+      ) : (
+        <div className="space-y-4">
+          {drafts.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-amber-300 mb-2">Rascunhos ({drafts.length}) — aguardando revisão</div>
+              <div className="space-y-2">{drafts.map(card)}</div>
+            </div>
+          )}
+          <div>
+            <div className="text-xs font-medium text-emerald-300 mb-2">Publicados ({published.length})</div>
+            {published.length === 0 ? <p className="text-sm text-zinc-500">Nenhum artigo publicado ainda.</p> : <div className="space-y-2">{published.map(card)}</div>}
+          </div>
         </div>
       )}
     </div>

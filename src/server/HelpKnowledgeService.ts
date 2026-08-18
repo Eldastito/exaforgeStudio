@@ -22,6 +22,8 @@
  */
 import { randomUUID } from "crypto";
 import db from "./db.js";
+import { ModuleService } from "./ModuleService.js";
+import { logAuthEvent } from "./auditLog.js";
 
 export interface HelpArticle {
   id: string;
@@ -317,6 +319,145 @@ export class HelpKnowledgeService {
     const status = opts?.status || "published";
     const rows = db.prepare(`SELECT * FROM help_articles WHERE status = ? ORDER BY module_key, title`).all(status) as any[];
     return rows.map((r) => this.mapRow(r));
+  }
+
+  // ─────────────────────────── Curadoria (ADR-179 F2) ───────────────────────────
+  // Ciclo draft → published → archived, todo master-only (a rota impõe
+  // requireMasterAdmin). O bootstrap DESTILA um RASCUNHO da doc; o humano revisa e
+  // PUBLICA com reviewed_by (RN-HELP-3 — nada vai ao ar sem revisão). Só `published`
+  // é recuperável pelo Tutor (o `retrieve` já filtra status='published').
+
+  private static mapAdminRow(r: any): HelpArticle & { status: string; updatedAt: string | null } {
+    return { ...this.mapRow(r), status: r.status || "draft", updatedAt: r.updated_at ?? null };
+  }
+
+  /** Lista pro painel master (inclui rascunhos/arquivados). status='all' traz tudo. */
+  static adminList(status: "draft" | "published" | "archived" | "all" = "all"): Array<HelpArticle & { status: string; updatedAt: string | null }> {
+    this.ensureSeeded();
+    const rows = status === "all"
+      ? db.prepare(`SELECT * FROM help_articles ORDER BY status, module_key, title`).all() as any[]
+      : db.prepare(`SELECT * FROM help_articles WHERE status = ? ORDER BY module_key, title`).all(status) as any[];
+    return rows.map((r) => this.mapAdminRow(r));
+  }
+
+  static getById(id: string): (HelpArticle & { status: string; updatedAt: string | null }) | null {
+    const r = db.prepare(`SELECT * FROM help_articles WHERE id = ?`).get(id) as any;
+    return r ? this.mapAdminRow(r) : null;
+  }
+
+  /**
+   * Cria (rascunho) ou atualiza um artigo. Só grava os campos passados (patch);
+   * NÃO muda o status aqui (isso é publish/archive). Rascunho novo nasce
+   * status='draft' e reviewed_by='' — invisível ao Tutor até publicar (RN-HELP-3).
+   */
+  static upsert(input: {
+    id?: string; vertical?: string | null; moduleKey?: string | null; title?: string;
+    what?: string | null; purpose?: string | null; steps?: string[]; commonErrors?: string[];
+    keywords?: string; sourceRef?: string | null;
+  }, actorId?: string): { id: string; status: string } {
+    const norm = (s: any, max: number) => (s == null ? null : String(s).slice(0, max));
+    if (input.id) {
+      const cur = db.prepare(`SELECT * FROM help_articles WHERE id = ?`).get(input.id) as any;
+      if (!cur) throw new Error("artigo não encontrado.");
+      const next = {
+        vertical: input.vertical !== undefined ? (input.vertical || null) : cur.vertical,
+        module_key: input.moduleKey !== undefined ? (input.moduleKey || null) : cur.module_key,
+        title: input.title !== undefined ? String(input.title).trim().slice(0, 300) : cur.title,
+        what: input.what !== undefined ? norm(input.what, 4000) : cur.what,
+        purpose: input.purpose !== undefined ? norm(input.purpose, 4000) : cur.purpose,
+        steps: input.steps !== undefined ? JSON.stringify(input.steps || []) : cur.steps_json,
+        errors: input.commonErrors !== undefined ? JSON.stringify(input.commonErrors || []) : cur.common_errors_json,
+        keywords: input.keywords !== undefined ? norm(input.keywords, 2000) : cur.keywords,
+        source_ref: input.sourceRef !== undefined ? norm(input.sourceRef, 300) : cur.source_ref,
+      };
+      if (!next.title) throw new Error("title é obrigatório.");
+      db.prepare(`
+        UPDATE help_articles SET vertical=@vertical, module_key=@module_key, title=@title, what=@what,
+          purpose=@purpose, steps_json=@steps, common_errors_json=@errors, keywords=@keywords,
+          source_ref=@source_ref, updated_at=CURRENT_TIMESTAMP WHERE id=@id
+      `).run({ ...next, id: input.id });
+      this.audit(actorId, "HELP_ARTICLE_UPDATE", { id: input.id });
+      return { id: input.id, status: cur.status };
+    }
+    const title = String(input.title || "").trim();
+    if (!title) throw new Error("title é obrigatório.");
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO help_articles (id, vertical, module_key, title, what, purpose, steps_json, common_errors_json, keywords, reviewed_by, source_ref, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'draft', ?)
+    `).run(id, input.vertical || null, input.moduleKey || null, title.slice(0, 300),
+      norm(input.what, 4000), norm(input.purpose, 4000),
+      JSON.stringify(input.steps || []), JSON.stringify(input.commonErrors || []),
+      norm(input.keywords, 2000), norm(input.sourceRef, 300), actorId || null);
+    this.audit(actorId, "HELP_ARTICLE_DRAFT", { id, moduleKey: input.moduleKey || null });
+    return { id, status: "draft" };
+  }
+
+  /**
+   * Bootstrap semi-automático: DESTILA um RASCUNHO da documentação do módulo.
+   * Determinístico por padrão (esqueleto do MODULE_META — roda em CI sem IA);
+   * quando a IA está configurada E veio `sourceText`, enriquece o rascunho a
+   * partir da doc (RN-HELP-5: doc é FONTE do rascunho, não o que o usuário lê;
+   * RN-HELP-8: fallback determinístico se a IA falhar). NUNCA publica (RN-HELP-3).
+   */
+  static async bootstrap(input: { moduleKey: string; vertical?: string | null; sourceRef?: string | null; sourceText?: string; useLlm?: boolean }, actorId?: string): Promise<{ id: string; status: string; via: "llm" | "deterministic" }> {
+    const meta = (ModuleService.MODULE_META as Record<string, { label: string; desc: string }>)[input.moduleKey];
+    const label = meta?.label || input.moduleKey;
+    const desc = meta?.desc || "";
+    let draft: { what: string; purpose: string; steps: string[]; commonErrors: string[]; keywords: string } = {
+      what: desc, purpose: "", steps: [], commonErrors: [],
+      keywords: tokenize(`${label} ${desc}`).join(" "),
+    };
+    let via: "llm" | "deterministic" = "deterministic";
+    if (input.useLlm && input.sourceText) {
+      try {
+        const llm = await import("./llm.js");
+        if (llm.isAIConfigured()) {
+          const system = `Você destila documentação técnica interna num artigo de AJUDA para o LOJISTA (linguagem simples, sem jargão). Responda SOMENTE JSON {"what":string,"purpose":string,"steps":string[],"commonErrors":string[],"keywords":string}. Baseie-se APENAS no texto fornecido; não invente passos.`;
+          const raw = await llm.chat(`Módulo: ${label}. Documentação:\n${String(input.sourceText).slice(0, 12000)}`, { json: true, temperature: 0.2, system });
+          const p = JSON.parse(raw || "{}");
+          draft = {
+            what: String(p.what || desc).slice(0, 4000),
+            purpose: String(p.purpose || "").slice(0, 4000),
+            steps: Array.isArray(p.steps) ? p.steps.slice(0, 12).map((s: any) => String(s).slice(0, 400)) : [],
+            commonErrors: Array.isArray(p.commonErrors) ? p.commonErrors.slice(0, 8).map((s: any) => String(s).slice(0, 400)) : [],
+            keywords: String(p.keywords || draft.keywords).slice(0, 2000),
+          };
+          via = "llm";
+        }
+      } catch { /* fallback determinístico (RN-HELP-8) */ }
+    }
+    const { id } = this.upsert({
+      moduleKey: input.moduleKey, vertical: input.vertical ?? null, title: label,
+      what: draft.what, purpose: draft.purpose, steps: draft.steps, commonErrors: draft.commonErrors,
+      keywords: draft.keywords, sourceRef: input.sourceRef ?? null,
+    }, actorId);
+    this.audit(actorId, "HELP_ARTICLE_BOOTSTRAP", { id, moduleKey: input.moduleKey, via });
+    return { id, status: "draft", via };
+  }
+
+  /** Publica um rascunho (RN-HELP-3: exige reviewedBy — o humano que revisou). */
+  static publish(id: string, reviewedBy: string, actorId?: string): { id: string; status: string } {
+    const cur = db.prepare(`SELECT id FROM help_articles WHERE id = ?`).get(id) as any;
+    if (!cur) throw new Error("artigo não encontrado.");
+    const rb = String(reviewedBy || "").trim();
+    if (!rb) throw new Error("reviewedBy é obrigatório — nenhum artigo vai ao ar sem revisão humana (RN-HELP-3).");
+    db.prepare(`UPDATE help_articles SET status='published', reviewed_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(rb.slice(0, 200), id);
+    this.audit(actorId, "HELP_ARTICLE_PUBLISH", { id, reviewedBy: rb });
+    return { id, status: "published" };
+  }
+
+  /** Arquiva um artigo (sai da recuperação; não apaga — histórico preservado). */
+  static archive(id: string, actorId?: string): { id: string; status: string } {
+    const cur = db.prepare(`SELECT id FROM help_articles WHERE id = ?`).get(id) as any;
+    if (!cur) throw new Error("artigo não encontrado.");
+    db.prepare(`UPDATE help_articles SET status='archived', updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(id);
+    this.audit(actorId, "HELP_ARTICLE_ARCHIVE", { id });
+    return { id, status: "archived" };
+  }
+
+  private static audit(actorId: string | undefined, event: string, meta: any): void {
+    try { logAuthEvent("_platform", actorId || "system", "help", event, meta); } catch { /* noop */ }
   }
 }
 

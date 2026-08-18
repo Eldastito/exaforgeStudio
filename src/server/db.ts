@@ -9786,6 +9786,11 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_labor_law_entries_topic ON labor_law_entries (topic, status);
     `);
   } catch (e) { /* noop */ }
+
+  // TIME — fuso da organização para a DATA COMERCIAL (PDR Estabilização TOULON,
+  // Fatia A / TIME-002). Aditivo; NULL = fallback 'America/Sao_Paulo' no
+  // BusinessTimeService. Corrige "boletas somem no reload após 21h" (data UTC).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN timezone TEXT`); } catch (e) { /* noop */ }
 };
 
 initDb();

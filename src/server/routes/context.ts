@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { ContextEngineService } from "../ContextEngineService.js";
+import { BusinessTimeService } from "../BusinessTimeService.js";
 import type { ContextRequest } from "../contextModel.js";
 
 /**
@@ -10,6 +11,15 @@ import type { ContextRequest } from "../contextModel.js";
  * Leitura pra qualquer papel autenticado (o pacote cru por papel é da F9).
  */
 const router = Router();
+
+// GET /api/context/business-time — data COMERCIAL no fuso da org (PDR TOULON,
+// Fatia A / TIME-001). A UI usa isto em vez do "hoje" em UTC — evita que boletas
+// pareçam sumir no reload após 21h no Rio. Leitura, qualquer papel autenticado.
+router.get("/business-time", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(BusinessTimeService.context(orgId));
+});
 
 // GET /api/context/quality?intent=&focus=&domains=a,b&profile= — o relatório rico
 // de qualidade do contexto pra um intent/escopo.

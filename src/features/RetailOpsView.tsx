@@ -1433,8 +1433,10 @@ function OnlineReserveTab() {
 // (lançado à noite) casa valor/vendedor com cada boleta pelo número.
 function BoletaPanel({ stores }: { stores: any[] }) {
   const [storeId, setStoreId] = useState('');
-  const [day] = useState(todayStr());
+  // BOL-001/TIME-003: o DIA vem do servidor (data comercial no fuso da org), nunca
+  // do "hoje" UTC do navegador — por isso não guardamos mais `todayStr()` aqui.
   const [report, setReport] = useState<any | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [initial, setInitial] = useState('');
   const [clicking, setClicking] = useState(false);
   const [open, setOpen] = useState(false);
@@ -1442,13 +1444,13 @@ function BoletaPanel({ stores }: { stores: any[] }) {
   useEffect(() => { if (stores.length && !storeId) setStoreId(stores.find((s: any) => s.active)?.id || stores[0].id); /* eslint-disable-next-line */ }, [stores]);
   const load = async () => {
     if (!storeId) return;
-    const d = await apiFetch(`/api/retailops/boletas/day?storeId=${storeId}&day=${day}`).then(r => r.json()).catch(() => null);
-    if (d && !d.error) setReport(d);
+    const d = await apiFetch(`/api/retailops/boletas/day?storeId=${storeId}`).then(r => r.json()).catch(() => null);
+    if (d && !d.error) { setReport(d); setLastLoadedAt(d.serverTimestamp || new Date().toISOString()); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId]);
 
   const openDay = async () => {
-    const res = await apiFetch('/api/retailops/boletas/day/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, day, initialNumber: initial }) });
+    const res = await apiFetch('/api/retailops/boletas/day/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, initialNumber: initial }) });
     const d = await res.json().catch(() => ({}));
     if (res.ok) { toast.success(`Dia aberto — 1ª boleta Nº ${d.initial_number}.`); setInitial(''); load(); }
     else toast.error(d.error || 'Falha ao abrir o dia.');
@@ -1456,7 +1458,7 @@ function BoletaPanel({ stores }: { stores: any[] }) {
   const click = async () => {
     setClicking(true);
     try {
-      const res = await apiFetch('/api/retailops/boletas/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, day }) });
+      const res = await apiFetch('/api/retailops/boletas/click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok) { toast.success(`Venda registrada — boleta Nº ${d.boleta_number} · ${new Date(d.clicked_at + 'Z').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`); load(); }
       else toast.error(d.error || 'Falha ao registrar.');
@@ -1478,9 +1480,11 @@ function BoletaPanel({ stores }: { stores: any[] }) {
     <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><CalendarDays className="w-4 h-4 text-amber-400" /> Boletas de hoje (hora real da venda)</div>
+        {report?.businessDate && <span className="text-[11px] text-amber-300/80">dia {new Date(report.businessDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</span>}
         <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+        {lastLoadedAt && <button onClick={load} title="Recarregar" className="text-[10px] text-zinc-500 hover:text-zinc-300">↻ {new Date(lastLoadedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</button>}
         {report?.initialNumber && (
           <span className="text-[11px] text-zinc-400">1ª boleta <strong className="text-zinc-200">{report.initialNumber}</strong> · registradas <strong className="text-zinc-200">{report.count}</strong>{report.lastNumber ? <> · última <strong className="text-zinc-200">{report.lastNumber}</strong></> : null}</span>
         )}

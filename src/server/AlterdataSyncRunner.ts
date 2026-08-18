@@ -297,7 +297,10 @@ export class AlterdataSyncRunner {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(organization_id, filial, boleta, sale_date, item_seq) DO UPDATE SET
            produto = excluded.produto, quantidade = excluded.quantidade, valor = excluded.valor,
-           comissao = excluded.comissao, vendedor = excluded.vendedor`
+           comissao = excluded.comissao, vendedor = excluded.vendedor,
+           -- PERF-001: se o código do produto mudou, invalida a resolução (o
+           -- backfill re-resolve). Item novo entra com resolved_at NULL.
+           catalog_resolved_at = CASE WHEN retail_pdv_sale_items.produto <> excluded.produto THEN NULL ELSE retail_pdv_sale_items.catalog_resolved_at END`
       );
       // Parcelas de cartão (parcelasCartao): recebíveis com líquido/taxa/vencimento.
       const insCard = db.prepare(

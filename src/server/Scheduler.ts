@@ -121,6 +121,18 @@ export class Scheduler {
     // Retail Floor (ADR-150, Fatia 3): auto-encerra atendimento esquecido além
     // de auto_close_minutes. Sensível a minutos → passe rápido.
     try { this.retailFloorAutoClosePass(); } catch (e: any) { console.error('[Scheduler] auto-encerramento Retail Floor falhou', e?.message); }
+    // PERF-001 (Fatia 4): resolve o catálogo dos itens do PDV em lotes (uma vez),
+    // pra as analíticas consultarem por índice em vez de LIKE-prefix a cada abertura.
+    try { this.retailCatalogBackfillPass(); } catch (e: any) { console.error('[Scheduler] backfill de catálogo PDV falhou', e?.message); }
+  }
+
+  /** Resolve o catálogo dos itens do PDV ainda pendentes, 1 lote por org/passe. */
+  static retailCatalogBackfillPass() {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT DISTINCT organization_id FROM retail_pdv_sale_items WHERE catalog_resolved_at IS NULL LIMIT 200`).all() as any[]; } catch { return; }
+    for (const o of orgs) {
+      try { import("./RetailPdvCatalogResolver.js").then(m => m.RetailPdvCatalogResolver.backfill(o.organization_id, { limit: 2000 })); } catch { /* best-effort */ }
+    }
   }
 
   /**

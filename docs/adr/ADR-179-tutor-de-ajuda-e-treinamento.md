@@ -1,8 +1,10 @@
 # ADR-179 — Tutor de Ajuda & Treinamento (suporte grounded in-app)
 
-**Status:** PROPOSTO — plano F0–F6. Aditivo/reversível sobre ADR-163 (Invisible UX /
-Zero-Training) e ADR-151/160 (Fala Tu). NÃO cria bot paralelo, NÃO responde a
-partir dos ADRs crus.
+**Status:** FECHADO — F0–F4 + F6 em produção (F5 tours/GIFs deferido como
+incremento futuro; o núcleo de suporte está completo). Aditivo/reversível sobre
+ADR-163 (Invisible UX / Zero-Training) e ADR-151/160 (Fala Tu). NÃO cria bot
+paralelo, NÃO responde a partir dos ADRs crus. Guardrails RN-HELP-1..8 codificados
+em `test:help-hardening`; runbook em `docs/runbook/ajuda-operacao.md`.
 
 ## 1. Contexto & problema
 
@@ -97,21 +99,32 @@ assistente separado), aterrado numa **base de ajuda curada**:
 
 ## 7. Plano por fatias (fatia = 1 PR)
 
-- **F0** — este ADR (doc-only).
-- **F1 (Fase 1 do pedido)** — `HelpKnowledgeService` + tabela `help_articles` +
-  retrieval grounded no `ZeroTrainingHelpService.answer` (artigo citado; sem cobertura
-  → honesto + `help_gap_log`) + **orb no app** consumindo `/api/ux/help` + base curada
+- **F0 FECHADA** — este ADR (doc-only).
+- **F1 FECHADA** — `HelpKnowledgeService` + tabela `help_articles` + retrieval
+  grounded no `ZeroTrainingHelpService.answer` (artigo citado; sem cobertura →
+  honesto + `help_gap_log`) + **orb no app** consumindo `/api/ux/help` + base curada
   semente dos ~5 módulos mais usados (Central de Saúde, Diretor IA, Vendas,
-  Atendimento, Estoque). `test:help-knowledge`.
-- **F2** — bootstrap semi-automático (destila ADR→rascunho de artigo) + painel de
-  curadoria no Admin Master (publicar com `reviewed_by`).
-- **F3** — contextual (tela→artigos) + deep-link "me mostra onde" + 👍/👎 por resposta.
-- **F4** — guiado por lacuna: `help_gap_log` vira fila de conteúdo + métricas (o que
-  perguntam, onde travam, taxa de resposta).
-- **F5** — treinamento além do Q&A: tours contextuais (AdaptiveOnboarding) + GIFs
-  curtos por feature + digest "aprenda 1 coisa" pelo Fala Tu.
-- **F6** — hardening: `test:help-hardening` codifica os RN-HELP; runbook
-  `docs/runbook/ajuda-operacao.md`.
+  Atendimento, Estoque) + 1 exemplo por-vertical (clínica). Recuperação
+  determinística (roda em CI sem IA), casamento por palavra com tolerância a plural.
+  `test:help-knowledge` (20).
+- **F2 FECHADA** — bootstrap semi-automático (destila doc do módulo → rascunho;
+  determinístico, LLM opcional) + painel de curadoria no Admin Master (draft →
+  published com `reviewed_by` → archived). Rotas `/api/admin/help-articles*`.
+  `test:help-curation` (18).
+- **F4 FECHADA** — guiado por lacuna: `help_gap_log` vira fila de conteúdo +
+  `help_ask_stats` (taxa de resposta) + métricas por módulo + `globalGaps`
+  cross-org que puxa a curadoria. Rotas `/help/gaps`, `/help/metrics` (gestor),
+  `/api/admin/help-gaps` (master). `test:help-gaps` (13).
+- **F3 FECHADA** — contextual (sugestões da tela via `/help/suggestions`) +
+  deep-link "Abrir tela →" (mapa module↔viewMode) + 👍/👎 (`/help/feedback`) →
+  `helpfulRatePct` nas métricas. `test:help-context` (11).
+- **F5 DEFERIDA** — treinamento além do Q&A: tours contextuais (AdaptiveOnboarding)
+  + GIFs curtos por feature + digest "aprenda 1 coisa" pelo Fala Tu. Incremento
+  futuro; rende mais depois de ver o orb rodando + dados da F4.
+- **F6 FECHADA** — hardening: `test:help-hardening` (28) codifica os RN-HELP-1..8 +
+  fiação de produção (serviços importáveis, rotas montadas, testes wired, runbook
+  presente); minimização LGPD extra (descarta telefone/CPF/cartão da normalização).
+  Runbook `docs/runbook/ajuda-operacao.md`. **Fecha o ADR-179.**
 
 ## 8. Fora de escopo (§42)
 

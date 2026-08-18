@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { apiFetch } from '@/src/lib/api';
 import { ShieldCheck, Lock, Unlock, Trash2, Bell, AlertTriangle, Activity, Building2, Bot, Users as UsersIcon, DollarSign, UserPlus, Copy, Send, Gift, SlidersHorizontal, TrendingUp, CheckCircle2, Clock, XCircle, Layers, Plus, ArrowRight, Minus } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
@@ -447,7 +448,129 @@ export function AdminMasterView() {
 
       <BlueprintsPanel />
 
+      <LaborLawCurationPanel />
+
       <AuditLogsPanel />
+    </div>
+  );
+}
+
+// ADR-178 — Curadoria trabalhista (master). A base `labor_law_entries` é GLOBAL
+// e só o master publica entradas REVISADAS (reviewedBy obrigatório). O advisor
+// (aba Trabalhista da Consultora) só orienta ancorado no que está aqui — sem
+// curadoria, ele diz "aguardando validação jurídica" e nunca inventa CLT.
+const LABOR_TOPIC_OPTIONS: { key: string; label: string }[] = [
+  { key: 'admissao', label: 'Admissão e contrato' },
+  { key: 'jornada', label: 'Jornada e controle de ponto' },
+  { key: 'ferias', label: 'Férias' },
+  { key: 'decimo_terceiro', label: '13º salário' },
+  { key: 'aviso_previo', label: 'Aviso prévio' },
+  { key: 'rescisao', label: 'Rescisão e verbas rescisórias' },
+  { key: 'fgts', label: 'FGTS' },
+  { key: 'afastamento', label: 'Afastamentos e licenças' },
+  { key: 'estagio_aprendiz', label: 'Estágio e jovem aprendiz' },
+  { key: 'seguranca', label: 'Segurança e saúde no trabalho' },
+];
+const LABOR_TOPIC_LABEL: Record<string, string> = Object.fromEntries(LABOR_TOPIC_OPTIONS.map((t) => [t.key, t.label]));
+
+function LaborLawCurationPanel() {
+  const [entries, setEntries] = useState<any[]>([]);
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ topic: 'rescisao', title: '', guidance: '', reviewedBy: '', citations: '', terms: '', source: '' });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [e, s] = await Promise.all([
+        apiFetch('/api/legal/labor/entries').then((r) => (r.ok ? r.json() : { entries: [] })),
+        apiFetch('/api/legal/labor/status').then((r) => (r.ok ? r.json() : null)),
+      ]);
+      setEntries(Array.isArray(e?.entries) ? e.entries : []);
+      setStatus(s);
+    } catch { /* noop */ }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const publish = async () => {
+    if (!form.title.trim() || !form.guidance.trim() || !form.reviewedBy.trim()) { toast.error('Título, orientação e "revisado por" são obrigatórios.'); return; }
+    setSaving(true);
+    try {
+      const body: any = {
+        topic: form.topic, title: form.title.trim(), guidance: form.guidance.trim(), reviewedBy: form.reviewedBy.trim(),
+        terms: form.terms.split(',').map((t) => t.trim()).filter(Boolean),
+        citations: form.citations.split('\n').map((c) => c.trim()).filter(Boolean).map((norma) => ({ norma })),
+        source: form.source.trim() || undefined,
+      };
+      const r = await apiFetch('/api/legal/labor/curate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao publicar');
+      toast.success('Entrada publicada.');
+      setForm({ topic: form.topic, title: '', guidance: '', reviewedBy: form.reviewedBy, citations: '', terms: '', source: '' });
+      load();
+    } catch (e: any) { toast.error(e.message || 'Erro ao publicar'); }
+    finally { setSaving(false); }
+  };
+  const archive = async (id: string) => {
+    try { await apiFetch(`/api/legal/labor/entries/${id}/archive`, { method: 'POST' }); load(); }
+    catch { toast.error('Erro ao arquivar'); }
+  };
+
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><ShieldCheck className="w-5 h-5 text-indigo-400" /> Curadoria trabalhista</h3>
+      <p className="text-xs text-zinc-500 mb-4">
+        Base GLOBAL da Consultora Trabalhista (ADR-178). Cada entrada exige <strong className="text-zinc-300">quem revisou juridicamente</strong> — sem curadoria, o advisor diz "aguardando validação jurídica" e nunca inventa CLT.
+        {status && <span className="ml-1">{status.entriesCount > 0 ? `${status.entriesCount} entrada(s) publicada(s).` : 'Base vazia.'}</span>}
+      </p>
+
+      {/* Formulário de publicação */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 mb-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={form.topic} onChange={(e) => set('topic', e.target.value)}>
+            {LABOR_TOPIC_OPTIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Revisado por (ex.: Dra. Ana — OAB/MG 123456)" value={form.reviewedBy} onChange={(e) => set('reviewedBy', e.target.value)} />
+        </div>
+        <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Título (ex.: Verbas na demissão sem justa causa)" value={form.title} onChange={(e) => set('title', e.target.value)} />
+        <textarea className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none" placeholder="Orientação revisada (o texto que o lojista verá)…" value={form.guidance} onChange={(e) => set('guidance', e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Termos de busca, separados por vírgula" value={form.terms} onChange={(e) => set('terms', e.target.value)} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Fonte da curadoria (opcional)" value={form.source} onChange={(e) => set('source', e.target.value)} />
+        </div>
+        <textarea className="w-full h-16 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 resize-none" placeholder="Citações — uma por linha (ex.: CLT art. 477)" value={form.citations} onChange={(e) => set('citations', e.target.value)} />
+        <div className="flex justify-end">
+          <button onClick={publish} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+            <Plus className="w-4 h-4" /> {saving ? 'Publicando…' : 'Publicar entrada revisada'}
+          </button>
+        </div>
+      </div>
+
+      {/* Entradas publicadas */}
+      {loading ? (
+        <p className="text-sm text-zinc-500">Carregando…</p>
+      ) : entries.length === 0 ? (
+        <p className="text-sm text-zinc-500">Nenhuma entrada publicada — a base está aguardando curadoria.</p>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((e) => (
+            <div key={e.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300">{LABOR_TOPIC_LABEL[e.topic] || e.topic}</span>
+                <span className="text-sm font-medium text-zinc-100">{e.title}</span>
+                <button onClick={() => archive(e.id)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200"><Trash2 className="w-3 h-3" /> Arquivar</button>
+              </div>
+              <p className="mt-1 text-[13px] text-zinc-300 whitespace-pre-line">{e.guidance}</p>
+              <div className="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-zinc-500">
+                <span>Revisado por: <span className="text-zinc-300">{e.reviewedBy}</span></span>
+                {e.citations?.length > 0 && <span>· {e.citations.map((c: any) => c.norma || c.ref || JSON.stringify(c)).join(', ')}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

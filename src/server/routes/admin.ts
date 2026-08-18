@@ -29,6 +29,7 @@ import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
+import { RuntimePilotService } from "../RuntimePilotService.js";
 import { eventsEnabled } from "../ContinuityService.js";
 import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { EdgeSyncService } from "../EdgeSyncService.js";
@@ -44,6 +45,46 @@ router.get("/production-readiness", (_req: AuthRequest, res): any => {
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
+});
+
+// Execution Runtime — habilitação por organização (Master Admin). É a trava
+// mestra das abas Operações/Recuperação do Diretor IA (flag
+// execution_runtime_enabled). Reusa o piloto do CLI (RuntimePilotService):
+//   - /search: acha a org pelo nome (sem chutar id);
+//   - /plan/:orgId: diagnóstico SEM escrita (o que está ligado, o que falta);
+//   - POST /: liga (runtime + policies; opcional recuperação de vendas) ou
+//     desliga (kill-switch execution_runtime_enabled=0). Auditado.
+// Todo o router /api/admin herda requireMasterAdmin.
+router.get("/runtime-pilot/search", (req: AuthRequest, res): any => {
+  const q = String(req.query.q || "").trim();
+  return res.json({ orgs: q ? RuntimePilotService.findOrgs(q) : [] });
+});
+router.get("/runtime-pilot/plan/:orgId", (req: AuthRequest, res): any => {
+  try { return res.json(RuntimePilotService.plan(String(req.params.orgId))); }
+  catch (e: any) { return res.status(404).json({ error: e.message }); }
+});
+router.post("/runtime-pilot", (req: AuthRequest, res): any => {
+  const orgId = String(req.body?.orgId || "").trim();
+  if (!orgId) return res.status(400).json({ error: "orgId é obrigatório." });
+  const actor = req.user?.email || "master";
+  try {
+    if (req.body?.enabled === false) {
+      // Kill-switch: nunca apaga policies (ficam inertes); só fecha a trava.
+      db.prepare(`UPDATE organization_settings SET execution_runtime_enabled = 0 WHERE organization_id = ?`).run(orgId);
+      try { logAuthEvent(orgId, actor, null, "RUNTIME_PILOT_DISABLE", {}); } catch { /* audit best-effort */ }
+      return res.json(RuntimePilotService.plan(orgId));
+    }
+    // Liga a trava e semeia as policies exigidas pelo executor. `salesRecovery`
+    // (e follow-up/atribuição) ligam a aba Recuperação; sem eles, só Operações.
+    const plan = RuntimePilotService.apply(orgId, {
+      runtime: true,
+      salesRecovery: req.body?.salesRecovery === true,
+      followup: req.body?.followup === true,
+      attribution: req.body?.attribution === true,
+      seedPolicies: true,
+    });
+    return res.json(plan);
+  } catch (e: any) { return res.status(400).json({ error: e.message }); }
 });
 
 // SEC-F2 — validação da configuração de segredos no boot (redigida: presença/tamanho/códigos,

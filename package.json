@@ -265,6 +265,7 @@
     "test:retail-analytics-cache": "tsx scripts/test-retail-analytics-cache.ts",
     "test:health-probe": "tsx scripts/test-health-probe.ts",
     "test:connectivity": "tsx scripts/test-connectivity.ts",
+    "test:admin-runtime-toggle": "tsx scripts/test-admin-runtime-toggle.ts",
     "test:retail-feature-flags": "tsx scripts/test-retail-feature-flags.ts",
     "test:retail-store-cmv-real": "tsx scripts/test-retail-store-cmv-real.ts",
     "test:retail-pricing": "tsx scripts/test-retail-pricing.ts",

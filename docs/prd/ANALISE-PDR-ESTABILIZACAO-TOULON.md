@@ -29,7 +29,7 @@
 
 - **Fase 0** — reprodução + testes que falham + baseline (este doc).
 - **Fase 1 (P0) FECHADA** — 1A data comercial ✅ · 1B boletas idempotentes/histórico ✅ · 1C salvamento atômico ✅ · 1D erros honestos ✅ · 1E ranking mobile ✅.
-- **Fase 2 (P1)** — diretório de vendedores + `retail_seller_store_assignments` + pendências + escala por loja + cota total única.
+- **Fase 2 (P1)** — 2A diretório + lotação + descoberta por filial ✅ · 2B UI "Vendedores da loja" + escala por loja + comissão com fonte/pendência · cota total única.
 - **Fase 3 (P1)** — `retail_store_pos_fee_rules` (crédito/débito) + resumo POS com custo esperado.
 - **Fase 4 (P2)** — catálogo resolvido na ingestão + índices medidos + set-based + cache + carga.
 - **Fase 5 (P2)** — estados de conectividade + health probe.

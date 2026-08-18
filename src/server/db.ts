@@ -9803,6 +9803,35 @@ const initDb = () => {
   // Fatia 1C). O endpoint composto incrementa dentro da mesma transação; edição
   // concorrente com versão antiga recebe 409. Aditivo (default 0).
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN financial_settings_version INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+
+  // SELL-001/002 (PDR TOULON, Fatia 2) — diretório de vendedores + LOTAÇÃO por
+  // loja. `retail_sellers` é a IDENTIDADE canônica (matrícula ERP), sem store_id
+  // de propósito. Metadados aditivos + a lotação numa tabela SEPARADA (um vendedor
+  // pode atuar em várias lojas sem duplicar a identidade).
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN source TEXT`); } catch (e) { /* noop */ }            // erp | user | manual
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN identity_status TEXT`); } catch (e) { /* noop */ }   // pending | confirmed | conflict
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN erp_last_seen_at DATETIME`); } catch (e) { /* noop */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_seller_store_assignments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,               -- retail_sellers.id (identidade canônica)
+        store_id TEXT NOT NULL,                -- retail_stores.id
+        is_primary INTEGER DEFAULT 0,          -- loja principal (opcional)
+        active INTEGER DEFAULT 1,              -- vínculo vigente
+        effective_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+        effective_to DATETIME,                 -- histórico de movimentação
+        source TEXT,                           -- manual | erp | escala | atendimento
+        confirmed_by TEXT,
+        confirmed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_seller_store_active ON retail_seller_store_assignments (organization_id, seller_id, store_id) WHERE active = 1;
+      CREATE INDEX IF NOT EXISTS idx_seller_store_by_store ON retail_seller_store_assignments (organization_id, store_id, active);
+      CREATE INDEX IF NOT EXISTS idx_seller_store_by_seller ON retail_seller_store_assignments (organization_id, seller_id, active);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

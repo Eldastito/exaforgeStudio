@@ -53,7 +53,9 @@ function tokenize(text: string): string[] {
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 3 && !STOP.has(w));
+    // len>=3, sem stopword, e SEM sequência longa de dígitos (telefone/CPF/cartão) —
+    // minimização LGPD RN-HELP-6: a fila de lacunas nunca retém esse tipo de dado.
+    .filter((w) => w.length >= 3 && !STOP.has(w) && !/^\d{5,}$/.test(w));
 }
 
 // Semente dos módulos mais usados (ADR-179 F1). Conteúdo CURADO/humano (reviewedBy).

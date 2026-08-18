@@ -17,6 +17,7 @@ import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResp
 import { RetailBoletaService } from "../RetailBoletaService.js";
 import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
+import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -926,6 +927,30 @@ router.put("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: Aut
     const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
     res.json({ stores: RetailSellerDirectoryService.setStores(orgId, req.params.sellerId, storeIds, req.body?.primaryStoreId ?? null, req.user?.userId) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POS-002/003 (Fatia 3) — tarifas POS por loja × meio de pagamento (crédito/
+// débito) + custo esperado a partir do resumo do POS.
+router.get("/stores/:id/pos-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailPosFeeService.rules(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.put("/stores/:id/pos-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailPosFeeService.set(orgId, req.params.id, req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/stores/:id/pos-fees/expected", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const q = req.query;
+  try { res.json(RetailPosFeeService.expectedCost(orgId, req.params.id, { creditValue: Number(q.creditValue), creditQty: Number(q.creditQty), debitValue: Number(q.debitValue), debitQty: Number(q.debitQty) })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // SELL-003/005/006 — cobertura de vendedores da loja: lotados + pendências de

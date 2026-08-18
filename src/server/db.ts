@@ -9832,6 +9832,29 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_seller_store_by_seller ON retail_seller_store_assignments (organization_id, seller_id, active);
     `);
   } catch (e) { /* noop */ }
+
+  // POS-002 (§7.5) — tarifas POS por loja × meio de pagamento (PDR TOULON, Fatia
+  // 3). Detalha crédito/débito (percent + fixo por transação). Quando existe regra
+  // detalhada, ela SUBSTITUI a tarifa agregada legada (card_fee) no cálculo —
+  // NUNCA somar as duas (evita dupla contabilização). Aditivo; opt-in.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_store_pos_fee_rules (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        payment_type TEXT NOT NULL,            -- credit | debit
+        percent REAL DEFAULT 0,                -- % sobre o valor
+        fixed_per_transaction REAL DEFAULT 0,  -- R$ por transação
+        provider TEXT,                         -- adquirente (ex.: Sicredi), se confirmado
+        effective_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+        effective_to DATETIME,                 -- NULL = vigente
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_fee_active ON retail_store_pos_fee_rules (organization_id, store_id, payment_type) WHERE effective_to IS NULL;
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

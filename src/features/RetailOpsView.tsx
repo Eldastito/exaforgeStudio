@@ -887,6 +887,7 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
   const [varCosts, setVarCosts] = useState<Record<string, { percent: string; fixed: string }>>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [version, setVersion] = useState<number>(0);
   useEffect(() => {
     if (!open) return;
     apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
@@ -900,27 +901,23 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
   useEffect(() => {
     if (!open || !storeId) return;
     setLoading(true);
-    Promise.all([
-      apiFetch(`/api/retailops/stores/${storeId}/costs`).then(r => r.json()).catch(() => ({})),
-      apiFetch(`/api/retailops/stores/${storeId}/variable-costs`).then(r => r.json()).catch(() => ({})),
-    ]).then(([f, v]) => {
-      const byF = f?.costs?.byCategory || {};
+    // SAVE-001: leitura COMPOSTA (margem + fixos + variáveis + versão) num só GET.
+    apiFetch(`/api/retailops/stores/${storeId}/financial-settings`).then(r => r.ok ? r.json() : null).then((fs) => {
+      if (!fs) return;
+      const byF = fs.fixedCosts?.byCategory || {};
       const nextF: Record<string, string> = {};
       for (const c of STORE_COST_CATEGORIES) nextF[c.key] = byF[c.key] > 0 ? String(byF[c.key]) : '';
       setCosts(nextF);
-      const byV = v?.costs?.byCategory || {};
+      const byV = fs.variableCosts?.byCategory || {};
       const nextV: Record<string, { percent: string; fixed: string }> = {};
       for (const c of STORE_VARIABLE_COST_CATEGORIES) {
         const e = byV[c.key] || { percent: 0, fixedPerSale: 0 };
-        nextV[c.key] = {
-          percent: e.percent > 0 ? String(e.percent) : '',
-          fixed: e.fixedPerSale > 0 ? String(e.fixedPerSale) : '',
-        };
+        nextV[c.key] = { percent: e.percent > 0 ? String(e.percent) : '', fixed: e.fixedPerSale > 0 ? String(e.fixedPerSale) : '' };
       }
       setVarCosts(nextV);
-      const st = stores.find(s => s.id === storeId);
-      setMargin(st?.gross_margin_percent != null ? String(st.gross_margin_percent) : '');
-    }).finally(() => setLoading(false));
+      setMargin(fs.grossMarginPercent != null ? String(fs.grossMarginPercent) : '');
+      setVersion(Number(fs.version || 0));
+    }).catch(() => {}).finally(() => setLoading(false));
     // eslint-disable-next-line
   }, [open, storeId]);
   const costsTotal = useMemo(
@@ -940,31 +937,27 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
     if (!storeId) return;
     setSaving(true);
     try {
-      const marginN = margin.trim() === '' ? null : Number(margin.replace(',', '.'));
-      await apiFetch(`/api/retailops/stores/${storeId}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grossMarginPercent: marginN }),
-      }).catch(() => {});
+      // SAVE-001/002/003: PUT ATÔMICO (margem + fixos + variáveis) com versão.
       const costsPayload: Record<string, number> = {};
       for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
-      await apiFetch(`/api/retailops/stores/${storeId}/costs`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ costs: costsPayload }),
-      }).catch(() => {});
       const varPayload: Record<string, { percent: number; fixedPerSale: number }> = {};
       for (const c of STORE_VARIABLE_COST_CATEGORIES) {
         const e = varCosts[c.key] || { percent: '', fixed: '' };
-        varPayload[c.key] = {
-          percent: Number(String(e.percent || '').replace(',', '.')) || 0,
-          fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0,
-        };
+        varPayload[c.key] = { percent: Number(String(e.percent || '').replace(',', '.')) || 0, fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0 };
       }
-      await apiFetch(`/api/retailops/stores/${storeId}/variable-costs`, {
+      const res = await apiFetch(`/api/retailops/stores/${storeId}/financial-settings`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ costs: varPayload }),
-      }).catch(() => {});
+        body: JSON.stringify({ grossMarginPercent: margin.trim() === '' ? null : Number(margin.replace(',', '.')), fixedCosts: costsPayload, variableCosts: varPayload, expectedVersion: version }),
+      });
+      const d = await res.json().catch(() => ({}));
+      // SAVE-002/004: sucesso só com resposta OK; conflito 409 e erros acionáveis.
+      if (res.status === 409) { setVersion(Number(d.currentVersion ?? version)); toast.error('Outra pessoa alterou esta loja. Recarregue e revise antes de salvar.'); return; }
+      if (res.status === 403) { toast.error('Você não tem permissão para alterar os custos desta loja.'); return; }
+      if (!res.ok) { toast.error(d.error === 'Margem bruta inválida (0 a 100).' ? d.error : 'Não foi possível salvar — nada foi alterado. Tente de novo.'); return; }
+      setVersion(Number(d.version ?? version + 1)); // releitura da versão salva
       toast.success('Custos da loja atualizados.');
-    } finally { setSaving(false); }
+    } catch { toast.error('Sem resposta do servidor — nada foi salvo. Tente de novo.'); }
+    finally { setSaving(false); }
   };
   if (!open) {
     return (
@@ -1823,21 +1816,18 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
       if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar a loja.'); return; }
       const saved = await res.json().catch(() => ({}));
       const storeId = editing ? store.id : saved?.id;
-      // Persiste os custos fixos (mesmo na criação, agora que temos o id).
+      // SAVE-001/006: custos fixos + variáveis num PUT ATÔMICO (fim do save
+      // fragmentado com .catch(()=>{})). A margem já foi na loja acima.
       if (storeId) {
         const costsPayload: Record<string, number> = {};
         for (const c of STORE_COST_CATEGORIES) costsPayload[c.key] = Number(String(costs[c.key] || '').replace(',', '.')) || 0;
-        await apiFetch(`/api/retailops/stores/${storeId}/costs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: costsPayload }) }).catch(() => {});
-        // Custos variáveis (ADR-083 E5): percent e fixedPerSale por categoria.
         const varPayload: Record<string, { percent: number; fixedPerSale: number }> = {};
         for (const c of STORE_VARIABLE_COST_CATEGORIES) {
           const e = varCosts[c.key] || { percent: '', fixed: '' };
-          varPayload[c.key] = {
-            percent: Number(String(e.percent || '').replace(',', '.')) || 0,
-            fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0,
-          };
+          varPayload[c.key] = { percent: Number(String(e.percent || '').replace(',', '.')) || 0, fixedPerSale: Number(String(e.fixed || '').replace(',', '.')) || 0 };
         }
-        await apiFetch(`/api/retailops/stores/${storeId}/variable-costs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ costs: varPayload }) }).catch(() => {});
+        const cRes = await apiFetch(`/api/retailops/stores/${storeId}/financial-settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fixedCosts: costsPayload, variableCosts: varPayload }) });
+        if (!cRes.ok) { toast.error('A loja foi salva, mas os custos não — reabra e tente salvar os custos de novo.'); onSaved(); return; }
       }
       toast.success(editing ? 'Loja atualizada.' : 'Loja cadastrada.');
       onSaved();

@@ -570,6 +570,27 @@ router.put("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: Au
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// SAVE-001/003 (PDR TOULON, Fatia 1C) — config financeira COMPOSTA (margem +
+// custos fixos + variáveis) num só GET/PUT atômico com versão otimista. A UI nova
+// usa isto; os endpoints acima seguem para compatibilidade.
+router.get("/stores/:id/financial-settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailStoreCostService.financialSettings(orgId, req.params.id)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+router.put("/stores/:id/financial-settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(RetailStoreCostService.saveFinancialSettings(orgId, req.params.id, req.body || {}, req.user?.userId));
+  } catch (e: any) {
+    if (e?.code === "VERSION_CONFLICT") return res.status(409).json({ error: "version_conflict", currentVersion: e.currentVersion });
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Resultado gerencial + ponto de equilíbrio de UMA loja no mês (?period=YYYY-MM).
 // SEC-F13: lucro/margem absolutos são owner/admin (§73).
 router.get("/stores/:id/result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

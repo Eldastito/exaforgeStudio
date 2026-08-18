@@ -383,6 +383,7 @@
     "test:retail-commission-race": "tsx scripts/test-retail-commission-race.ts",
     "test:retail-closing-detailed": "tsx scripts/test-retail-closing-detailed.ts",
     "test:retail-boletas": "tsx scripts/test-retail-boletas.ts",
+    "test:business-time": "tsx scripts/test-business-time.ts",
     "test:retail-schedule-template": "tsx scripts/test-retail-schedule-template.ts",
     "test:retail-card-acquirer": "tsx scripts/test-retail-card-acquirer.ts",
     "test:retail-pdv-customers-by-store": "tsx scripts/test-retail-pdv-customers-by-store.ts",

@@ -15,6 +15,7 @@ import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailBoletaService } from "../RetailBoletaService.js";
+import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -1263,20 +1264,26 @@ router.get("/boletas/day", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const storeId = String(req.query.storeId || "");
-  const day = String(req.query.day || "").slice(0, 10);
-  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  // TIME-003/BOL-001: se o cliente não pedir um dia histórico específico, o
+  // servidor usa a DATA COMERCIAL do fuso da org (não o "hoje" UTC do navegador).
+  const rawDay = String(req.query.day || "").slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : BusinessTimeService.businessDate(orgId);
   if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
-  res.json(RetailBoletaService.dayReport(orgId, storeId, day));
+  const report = RetailBoletaService.dayReport(orgId, storeId, day) as any;
+  res.json({ ...report, businessDate: BusinessTimeService.businessDate(orgId), timezone: BusinessTimeService.timezoneFor(orgId), serverTimestamp: new Date().toISOString() });
 });
 
 // Abre o dia com o nº inicial do talão (gestão).
 router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { storeId, day, initialNumber } = req.body || {};
-  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  const { storeId, initialNumber } = req.body || {};
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
-  try { res.json(RetailBoletaService.openDay(orgId, String(storeId), String(day), String(initialNumber || ""), req.user?.userId)); }
+  // TIME-003: o servidor determina o dia comercial; o cliente não abre outro dia.
+  const day = BusinessTimeService.writeDay(orgId);
+  try { res.json(RetailBoletaService.openDay(orgId, String(storeId), day, String(initialNumber || ""), req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1285,10 +1292,12 @@ router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthReques
 router.post("/boletas/click", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { storeId, day, sellerName } = req.body || {};
-  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(day || ""))) return res.status(400).json({ error: "storeId e day (YYYY-MM-DD) obrigatórios" });
+  const { storeId, sellerName } = req.body || {};
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
-  try { res.status(201).json(RetailBoletaService.click(orgId, String(storeId), String(day), { sellerName }, req.user?.userId)); }
+  // TIME-003: dia comercial autoritativo do servidor; a hora do clique é do servidor.
+  const day = BusinessTimeService.writeDay(orgId);
+  try { res.status(201).json(RetailBoletaService.click(orgId, String(storeId), day, { sellerName }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

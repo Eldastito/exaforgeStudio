@@ -116,6 +116,23 @@ export class LaborLawAdvisorService {
     };
   }
 
+  /** Lista as entradas curadas (para o painel master de curadoria). */
+  static list(): any[] {
+    const rows = db.prepare(`SELECT * FROM labor_law_entries WHERE status = 'published' ORDER BY topic, created_at DESC`).all() as any[];
+    return rows.map((r) => ({
+      id: r.id, topic: r.topic, title: r.title, guidance: r.guidance,
+      citations: safeParse(r.citations_json) || [], terms: safeParse(r.terms_json) || [],
+      source: r.source || null, reviewedBy: r.reviewed_by, createdAt: r.created_at,
+    }));
+  }
+
+  /** Arquiva uma entrada (master-only) — some da recuperação; nunca DELETE. */
+  static archive(id: string, actorId?: string): { archived: boolean } {
+    const r = db.prepare(`UPDATE labor_law_entries SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'published'`).run(String(id || ""));
+    if (r.changes) { try { logAuthEvent("_platform", actorId || "system", "labor", "LABOR_LAW_ARCHIVED", { id }); } catch { /* noop */ } }
+    return { archived: !!r.changes };
+  }
+
   /**
    * Publica uma entrada CURADA (master-only). EXIGE `reviewedBy` (RN-178-003) —
    * quem revisou juridicamente. Sem isso, nada entra na base.

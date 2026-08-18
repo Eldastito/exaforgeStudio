@@ -79,6 +79,16 @@ async function main() {
   const a2 = LaborLawAdvisorService.advise("posso vender bebida alcoólica para menor?", { orgId: org });
   check("pergunta fora do tema → não força a entrada (honesto)", a2.grounded === false && Array.isArray(a2.citations) && a2.citations.length === 0);
 
+  // ===== 6. painel master: list + archive =====
+  const list = LaborLawAdvisorService.list();
+  check("list traz a entrada curada (com reviewedBy)", list.length === 1 && list[0].id === cur.id && list[0].reviewedBy.includes("OAB"));
+
+  const arch = LaborLawAdvisorService.archive(cur.id, "master");
+  check("archive remove a entrada", arch.archived === true);
+  check("após archive: base volta a awaitingCuration", LaborLawAdvisorService.status().awaitingCuration === true && LaborLawAdvisorService.list().length === 0);
+  check("após archive: advise volta ao honesto (nunca inventa)", LaborLawAdvisorService.advise("verbas rescisórias?", { orgId: org }).grounded === false);
+  check("archive de id inexistente → archived false", LaborLawAdvisorService.archive("nao-existe", "master").archived === false);
+
   console.log("\n=== TEST: LEGAL — orientação trabalhista (scaffold honesto, ADR-178) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

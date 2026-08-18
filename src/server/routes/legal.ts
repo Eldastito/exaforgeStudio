@@ -67,6 +67,11 @@ router.get("/labor/advise", (req: AuthRequest, res): any => {
   res.json(LaborLawAdvisorService.advise(q, { orgId, actorId: req.user?.userId }));
 });
 
+// GET /api/legal/labor/entries — lista as entradas curadas (painel master).
+router.get("/labor/entries", requireMasterAdmin, (_req: AuthRequest, res): any => {
+  res.json({ entries: LaborLawAdvisorService.list() });
+});
+
 // POST /api/legal/labor/curate — publica entrada CURADA (master-only; exige
 // reviewedBy — o jurista que revisou). Curadoria de plataforma (RN-178-004).
 router.post("/labor/curate", requireMasterAdmin, (req: AuthRequest, res): any => {
@@ -75,6 +80,11 @@ router.post("/labor/curate", requireMasterAdmin, (req: AuthRequest, res): any =>
   } catch (e: any) {
     res.status(400).json({ error: e?.message || "erro" });
   }
+});
+
+// POST /api/legal/labor/entries/:id/archive — arquiva uma entrada (master-only).
+router.post("/labor/entries/:id/archive", requireMasterAdmin, (req: AuthRequest, res): any => {
+  res.json(LaborLawAdvisorService.archive(String(req.params.id), req.user?.userId));
 });
 
 export default router;

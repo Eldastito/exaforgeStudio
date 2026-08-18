@@ -54,13 +54,21 @@ base para todos, escrita master-only).
 - Aditivo/retrocompatível; base global isolada da lógica por-tenant; sem motor
   paralelo (reusa o padrão do CDC advisor).
 
+## UI (implementada)
+
+- **Consultora trabalhista** — aba "Trabalhista" na `LegalAdvisorView` (chips de
+  temas + banner de curadoria + Q&A GROUNDED com citações/revisor).
+- **Painel master de curadoria** — `LaborLawCurationPanel` no `AdminMasterView`:
+  form de publicação (tópico/título/orientação/revisor/termos/citações) →
+  `curate`, lista das entradas publicadas com **arquivar** (`archive` — nunca
+  DELETE), e o estado da base. Reusa `GET /labor/entries` + `POST
+  /labor/entries/:id/archive` (master-only).
+
 ## Fora desta fatia (pendente de terceiro)
 
 - **Conteúdo curado** por advogado/contador (as entradas revisadas) — o produto
-  só orienta trabalhista quando isso existir.
+  só orienta trabalhista quando isso existir. O painel master já permite publicar.
 - Redação por LLM a partir das entradas recuperadas (como o CDC faz) — opcional,
   sempre GROUNDED na base curada.
-- UI de "Consultora trabalhista" e o painel master de curadoria (o backend já
-  responde).
 
-Teste: `scripts/test-labor-law-advisor.ts` (14 checks).
+Teste: `scripts/test-labor-law-advisor.ts` (19 checks — inclui list/archive).

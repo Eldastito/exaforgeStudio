@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -13,24 +13,62 @@ import { useAuth } from '@/src/contexts/AuthContext';
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-// PDR TOULON, Fatia 1D — estados HONESTOS das telas analíticas. Nunca mascarar
-// 403/timeout/500 como "sem dados": cada um tem mensagem e ação próprias.
-type AnalyticsStatus = 'idle' | 'loading' | 'ok' | 'forbidden' | 'timeout' | 'error';
-async function fetchAnalytics(url: string): Promise<{ status: Exclude<AnalyticsStatus, 'idle' | 'loading'>; data: any; correlationId?: string }> {
+// PDR TOULON, Fatia 1D/4D — estados HONESTOS das telas analíticas. Nunca
+// mascarar 403/timeout/500/rede como "sem dados": cada um tem mensagem e ação
+// próprias. 'unavailable' = servidor inalcançável (rede caiu); 'aborted' = a
+// requisição foi cancelada por outra mais nova (troca de filtro) e o resultado
+// deve ser IGNORADO (PERF-006), nunca sobrescrever a tela.
+type AnalyticsStatus = 'idle' | 'loading' | 'ok' | 'forbidden' | 'timeout' | 'error' | 'unavailable' | 'aborted';
+async function fetchAnalytics(url: string, signal?: AbortSignal): Promise<{ status: Exclude<AnalyticsStatus, 'idle' | 'loading'>; data: any; correlationId?: string }> {
   try {
-    const r = await apiFetch(url);
+    const r = await apiFetch(url, signal ? { signal } : {});
     if (r.status === 403) return { status: 'forbidden', data: null };
     if (r.status === 408 || r.status === 504) return { status: 'timeout', data: null };
     if (!r.ok) { const d = await r.json().catch(() => ({})); return { status: (d?.error === 'analytics_timeout' ? 'timeout' : 'error'), data: null, correlationId: d?.correlationId }; }
     const data = await r.json().catch(() => null);
     return { status: 'ok', data };
-  } catch { return { status: 'timeout', data: null }; } // rede/abort: tentativa não confirmada
+  } catch (e: any) {
+    if (e?.name === 'AbortError' || signal?.aborted) return { status: 'aborted', data: null }; // cancelada
+    return { status: 'unavailable', data: null }; // rede caiu: tentativa não confirmada
+  }
 }
+
+/**
+ * Hook das telas analíticas (PERF-006/007): cancela a requisição anterior ao
+ * recarregar (nada de resposta obsoleta sobrescrevendo a atual) e, quando um
+ * refresh falha, MANTÉM o último snapshot na tela em vez de apagá-lo
+ * ("dados desatualizados"). `urlFactory` é lido no momento do fetch (fecha
+ * sobre o estado mais recente); `deps` dispara o auto-reload.
+ */
+function useAnalytics(urlFactory: () => string, deps: any[]) {
+  const [data, setData] = useState<any>(null);
+  const [status, setStatus] = useState<AnalyticsStatus>('idle');
+  const [corr, setCorr] = useState<string | undefined>(undefined);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  const ctrl = useRef<AbortController | null>(null);
+  const factoryRef = useRef(urlFactory); factoryRef.current = urlFactory;
+  const reload = useCallback(async () => {
+    const url = factoryRef.current();
+    if (!url) { ctrl.current?.abort(); setStatus('idle'); return; } // sem alvo → não busca
+    ctrl.current?.abort();                        // PERF-006: cancela a anterior
+    const ac = new AbortController(); ctrl.current = ac;
+    setStatus('loading');
+    const res = await fetchAnalytics(url, ac.signal);
+    if (res.status === 'aborted' || ac.signal.aborted) return; // obsoleta → ignora
+    if (res.status === 'ok') { setData(res.data); setLoadedAt(Date.now()); setCorr(undefined); setStatus('ok'); }
+    else { setCorr(res.correlationId); setStatus(res.status); } // mantém `data` → snapshot
+  }, []);
+  useEffect(() => { reload(); return () => ctrl.current?.abort(); }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  const isStale = data != null && status !== 'ok' && status !== 'loading' && status !== 'idle';
+  return { data, status, corr, loading: status === 'loading', isStale, loadedAt, reload };
+}
+
 function AnalyticsBanner({ status, onRetry, correlationId }: { status: AnalyticsStatus; onRetry?: () => void; correlationId?: string }) {
-  if (status === 'ok' || status === 'idle' || status === 'loading') return null;
+  if (status === 'ok' || status === 'idle' || status === 'loading' || status === 'aborted') return null;
   const map: Record<string, { text: string; cls: string; retry: boolean }> = {
     forbidden: { text: 'Você não tem permissão para ver estes dados.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: false },
-    timeout: { text: 'A consulta demorou demais (ou a conexão falhou) — não foi possível carregar. Tente de novo.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: true },
+    timeout: { text: 'A consulta demorou demais — não foi possível carregar. Tente de novo.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: true },
+    unavailable: { text: 'Sem conexão com o servidor. Verifique a internet e tente de novo.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: true },
     error: { text: `Erro no servidor ao carregar${correlationId ? ` (ref: ${correlationId})` : ''}. Tente de novo em instantes.`, cls: 'border-red-500/30 bg-red-500/5 text-red-200', retry: true },
   };
   const m = map[status]; if (!m) return null;
@@ -39,6 +77,23 @@ function AnalyticsBanner({ status, onRetry, correlationId }: { status: Analytics
       <AlertTriangle className="w-4 h-4 shrink-0" />
       <span className="flex-1">{m.text}</span>
       {m.retry && onRetry && <button onClick={onRetry} className="inline-flex items-center gap-1 rounded-md border border-current/30 px-2 py-0.5 text-[12px] hover:bg-white/5"><RefreshCw className="w-3.5 h-3.5" /> Tentar de novo</button>}
+    </div>
+  );
+}
+
+/**
+ * Faixa "dados desatualizados" (PERF-007): a tela segue mostrando o ÚLTIMO
+ * snapshot bom; esta faixa avisa que a atualização mais recente falhou e
+ * oferece nova tentativa — nunca deixa o número velho passar por atual.
+ */
+function StaleNotice({ status, onRetry, loadedAt, correlationId }: { status: AnalyticsStatus; onRetry?: () => void; loadedAt?: number | null; correlationId?: string }) {
+  const when = loadedAt ? new Date(loadedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null;
+  const why = status === 'unavailable' ? 'sem conexão' : status === 'error' ? `erro no servidor${correlationId ? ` (ref: ${correlationId})` : ''}` : 'a consulta demorou demais';
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
+      <AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">Mostrando a última leitura{when ? ` (${when})` : ''} — não foi possível atualizar agora ({why}).</span>
+      {onRetry && <button onClick={onRetry} className="inline-flex items-center gap-1 rounded-md border border-current/30 px-2 py-0.5 hover:bg-white/5"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>}
     </div>
   );
 }
@@ -719,18 +774,9 @@ function StoreQuotaSummary({ quota, realized, individualQuotaTotal, compact }: {
 // ---- Resultado / lucro por loja (custos fixos + margem) ---------------------
 function StoreResultTab() {
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<AnalyticsStatus>('idle');
-  const [corr, setCorr] = useState<string | undefined>(undefined);
-
-  const load = async () => {
-    setLoading(true); setStatus('loading');
-    const res = await fetchAnalytics(`/api/retailops/stores-result?period=${period}`);
-    setData(res.status === 'ok' ? res.data : null); setStatus(res.status); setCorr(res.correlationId);
-    setLoading(false);
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [period]);
+  const { data, status, corr, loading, isStale, loadedAt, reload: load } =
+    useAnalytics(() => `/api/retailops/stores-result?period=${period}`, [period]);
+  const showData = status === 'ok' || isStale; // último snapshot enquanto o refresh falha
 
   const perStore: any[] = Array.isArray(data?.perStore) ? data.perStore : [];
   const totals = data?.totals || { faturamento: 0, custosFixos: 0, custosVariaveis: 0, resultado: 0 };
@@ -750,15 +796,16 @@ function StoreResultTab() {
         </div>
       </div>
 
-      {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+      {loading && !isStale && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
 
-      {!loading && status !== 'ok' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+      {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
+      {!showData && !loading && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
 
-      {!loading && status === 'ok' && perStore.length === 0 && (
+      {showData && perStore.length === 0 && (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhuma loja ativa com dados no mês. Cadastre custos fixos e a margem bruta em <strong>Editar loja</strong> para ver o lucro por loja.</p>
       )}
 
-      {!loading && status === 'ok' && perStore.length > 0 && (
+      {showData && perStore.length > 0 && (
         <>
           {semMargem > 0 && (
             <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
@@ -1163,25 +1210,16 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
 
 // ---- Precificar (ADR-083 E7): revisar/simular markup e aplicar em lote -----
 function PricingTab() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<AnalyticsStatus>('idle');
-  const [corr, setCorr] = useState<string | undefined>(undefined);
   const [markup, setMarkup] = useState<string>('');
   const [filter, setFilter] = useState<'all' | 'risk' | 'no_cost'>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showCosts, setShowCosts] = useState(false);
-
-  const load = async () => {
-    setLoading(true); setStatus('loading');
-    const qs = markup ? `?markup=${encodeURIComponent(markup)}` : '';
-    const res = await fetchAnalytics(`/api/retailops/pricing/products${qs}`);
-    setData(res.status === 'ok' ? res.data : null); setStatus(res.status); setCorr(res.correlationId);
-    setLoading(false);
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  // markup é aplicado pelo botão (não auto-reload) — urlFactory lê o valor atual.
+  const { data, status, corr, loading, isStale, loadedAt, reload: load } =
+    useAnalytics(() => `/api/retailops/pricing/products${markup ? `?markup=${encodeURIComponent(markup)}` : ''}`, []);
+  const showData = status === 'ok' || isStale;
 
   const items: any[] = Array.isArray(data?.items) ? data.items : [];
   const filtered = items.filter((it) => {
@@ -1275,15 +1313,16 @@ function PricingTab() {
         </p>
       )}
 
-      {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+      {loading && !isStale && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
 
-      {!loading && status !== 'ok' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+      {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
+      {!showData && !loading && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
 
-      {!loading && status === 'ok' && filtered.length === 0 && (
+      {showData && filtered.length === 0 && (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum produto no filtro atual.</p>
       )}
 
-      {!loading && status === 'ok' && filtered.length > 0 && (
+      {showData && filtered.length > 0 && (
         <>
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-sm">
@@ -3336,18 +3375,12 @@ function TopProductsTab() {
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr());
-  const [rows, setRows] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<AnalyticsStatus>('idle');
-  const [corr, setCorr] = useState<string | undefined>(undefined);
-  const load = async () => {
-    setLoading(true); setStatus('loading');
-    const res = await fetchAnalytics(`/api/retailops/pdv-top-products?start=${start}&end=${end}`);
-    setRows(res.status === 'ok' && Array.isArray(res.data?.products) ? res.data.products : []);
-    setStatus(res.status); setCorr(res.correlationId); setLoading(false);
-  };
+  // start/end aplicam pelo botão "Gerar" (não auto-reload) — urlFactory lê os atuais.
+  const { data, status, corr, loading, isStale, loadedAt, reload: load } =
+    useAnalytics(() => `/api/retailops/pdv-top-products?start=${start}&end=${end}`, []);
+  const rows: any[] = Array.isArray(data?.products) ? data.products : [];
+  const showData = status === 'ok' || isStale;
   const [q, setQ] = useState('');
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
   const maxPecas = rows.reduce((m, r) => Math.max(m, Number(r.pecas || 0)), 0) || 1;
   const shown = rows.map((r, i) => ({ ...r, _rank: i + 1 }))
     .filter(r => {
@@ -3368,9 +3401,10 @@ function TopProductsTab() {
       </div>
       {rows.length >= 100 && <p className="mb-2 text-[11px] text-amber-300/80">Mostrando os 100 produtos mais vendidos do período. Use o filtro para encontrar um item específico.</p>}
       {unmatched > 0 && <p className="mb-2 text-[11px] text-amber-300/80">{unmatched} item(ns) sem match no catálogo — aparecem em âmbar com só o código do ERP; cadastre a variante em Estoque pra o nome/SKU/barras baterem.</p>}
-      {loading ? (
+      {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
+      {loading && !isStale ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
-      ) : (status !== 'ok') ? (
+      ) : !showData ? (
         <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum item de venda do PDV no período ainda. As vendas entram pela sincronização (Integrações → Alterdata) — o histórico completa aos poucos.</div>
@@ -5179,18 +5213,12 @@ function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => v
 function SellersDirectoryTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
-  const [cov, setCov] = useState<any>(null);
-  const [status, setStatus] = useState<AnalyticsStatus>('idle');
   const [assignFor, setAssignFor] = useState<any>(null);
 
   useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!storeId && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
-  const load = async () => {
-    if (!storeId) return;
-    setStatus('loading');
-    const res = await fetchAnalytics(`/api/retailops/seller-coverage?storeId=${storeId}`);
-    setCov(res.status === 'ok' ? res.data : null); setStatus(res.status);
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId]);
+  const { data: cov, status, corr, isStale, loadedAt, reload: load } =
+    useAnalytics(() => storeId ? `/api/retailops/seller-coverage?storeId=${storeId}` : '', [storeId]);
+  const showData = status === 'ok' || isStale;
 
   const nameCode = async (codigo: string) => {
     const nome = window.prompt(`Nome do vendedor da matrícula ${codigo}:`, '');
@@ -5213,10 +5241,11 @@ function SellersDirectoryTab() {
       </div>
       <p className="mb-3 text-[11px] text-zinc-500">Matrícula sem nome é <strong>pendência</strong> — dê o nome para a comissão sair certa. Código único com muito volume pode ser <strong>caixa compartilhado</strong> (não é uma pessoa): use lançamento manual/foto nessa loja.</p>
 
-      {status !== 'ok' && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} />}
-      {status === 'loading' && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+      {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
+      {!showData && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+      {status === 'loading' && !isStale && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
 
-      {status === 'ok' && cov && (
+      {showData && cov && (
         <div className="space-y-4">
           {/* Lotados */}
           <div>

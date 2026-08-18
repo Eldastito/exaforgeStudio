@@ -414,8 +414,11 @@ function TutorWhatsAppCard() {
     setBusy(true);
     try {
       const r = await apiFetch('/api/health-center/tutor/test', { method: 'POST' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || 'Falha');
+      // Resposta pode não ser JSON (ex.: erro do servidor devolvendo HTML) —
+      // não estourar "Unexpected token '<'": lê texto e tenta parsear.
+      const raw = await r.text();
+      let d: any = {}; try { d = raw ? JSON.parse(raw) : {}; } catch { /* resposta não-JSON */ }
+      if (!r.ok) throw new Error(d?.error || `Falha ao enviar (HTTP ${r.status}).`);
       toast.success('Resumo enviado no WhatsApp. 📲');
     } catch (e: any) { toast.error(e.message || 'Não consegui enviar.'); } finally { setBusy(false); }
   };

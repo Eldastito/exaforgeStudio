@@ -46,15 +46,28 @@ export class BusinessTutorService {
     return { dateSP: `${get("year")}-${get("month")}-${get("day")}`, hourSP: Number(get("hour")) };
   }
 
+  /**
+   * Garante o DDI 55 (Brasil) quando o número foi digitado só com DDD + número
+   * (10 ou 11 dígitos). O provedor (Evolution/WhatsApp) espera o número COM DDI,
+   * como chega de todo contato de entrada — sem isso o envio de teste falhava.
+   * Número que já tem 55 (12–13 dígitos) ou formato incomum é mantido.
+   */
+  private static withBrDdi(d: string): string {
+    if (!d) return d;
+    if (d.length >= 12 && d.startsWith("55")) return d; // já tem DDI
+    if (d.length === 10 || d.length === 11) return "55" + d; // DDD + número → prefixa 55
+    return d;
+  }
+
   /** Número do dono para o tutor: o configurado; senão o telefone do usuário dono/admin. */
   static ownerPhone(orgId: string): string {
     const s = db.prepare("SELECT tutor_wa_phone FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const configured = onlyDigits(s?.tutor_wa_phone);
-    if (configured) return configured;
+    if (configured) return this.withBrDdi(configured);
     const u = db.prepare(
       "SELECT phone FROM users WHERE organization_id = ? AND phone IS NOT NULL AND phone <> '' ORDER BY (role='owner') DESC, (role='admin') DESC, created_at ASC LIMIT 1"
     ).get(orgId) as any;
-    return onlyDigits(u?.phone);
+    return this.withBrDdi(onlyDigits(u?.phone));
   }
 
   /** Texto do resumo da manhã — determinístico a partir da Central de Saúde. */

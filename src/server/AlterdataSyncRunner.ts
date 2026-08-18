@@ -477,6 +477,9 @@ export class AlterdataSyncRunner {
     // resultado em GET /alterdata/last-sync).
     AlterdataConnectorService.setCursor(orgId, "_meta", "lastRun", "", String(Date.now()));
     try { AlterdataConnectorService.setCursor(orgId, "_meta", "lastSummary", "", JSON.stringify(summary)); } catch { /* noop */ }
+    // PERF-005: a sincronização reescreveu vendas/preços/saldos → invalida o
+    // cache das telas analíticas pra elas recomputarem com o dado fresco.
+    try { const { RetailAnalyticsCache } = await import("./RetailAnalyticsCache.js"); RetailAnalyticsCache.invalidate(orgId); } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "alterdata", "ALTERDATA_SYNC_RUN", summary as any); } catch { /* noop */ }
     return summary;
   }

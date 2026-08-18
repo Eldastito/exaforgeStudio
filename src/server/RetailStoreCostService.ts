@@ -39,6 +39,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { RetailStoreService } from "./RetailStoreService.js";
+import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
 import { logAuthEvent } from "./auditLog.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -199,6 +200,7 @@ export class RetailStoreCostService {
       }
     });
     tx();
+    RetailAnalyticsCache.invalidate(orgId); // PERF-005: custo mudou → recomputa
     return this.list(orgId, storeId);
   }
 
@@ -260,6 +262,7 @@ export class RetailStoreCostService {
       }
     });
     tx();
+    RetailAnalyticsCache.invalidate(orgId); // PERF-005: custo variável mudou
     return this.listVariable(orgId, storeId);
   }
 
@@ -352,6 +355,7 @@ export class RetailStoreCostService {
       db.prepare(`UPDATE retail_stores SET financial_settings_version = COALESCE(financial_settings_version, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, storeId);
     });
     tx();
+    RetailAnalyticsCache.invalidate(orgId); // PERF-005: margem/custos mudaram
     try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_FINANCIAL_SETTINGS_SAVED", { fromVersion: currentVersion }); } catch { /* noop */ }
     return this.financialSettings(orgId, storeId);
   }

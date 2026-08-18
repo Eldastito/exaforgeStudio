@@ -19,6 +19,7 @@ import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
+import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -57,6 +58,52 @@ const router = Router();
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+
+/**
+ * Envelope de erro das telas analíticas (PDR TOULON, Fatia 4C / PERF-006/007).
+ * A tela precisa DISTINGUIR timeout (retryável) de erro do servidor de "lista
+ * vazia" — nunca traduzir falha HTTP em "nenhuma loja com dados" (AC-13/14).
+ * `SQLITE_BUSY`/`SQLITE_LOCKED` (contenção além do busy_timeout) é o timeout
+ * REAL de uma consulta síncrona → 503 `analytics_timeout` retryável; qualquer
+ * outra exceção → 500 `analytics_error` não-retryável. Sempre com correlationId.
+ */
+function analyticsError(res: any, err: any): any {
+  const correlationId = randomUUID();
+  const code = String(err?.code || "");
+  const isBusy = code === "SQLITE_BUSY" || code === "SQLITE_LOCKED" || code.startsWith("SQLITE_BUSY");
+  if (isBusy) {
+    return res.status(503).json({
+      error: "analytics_timeout",
+      message: "A consulta excedeu o tempo esperado.",
+      correlationId,
+      retryable: true,
+    });
+  }
+  // Loga o detalhe no servidor (correlacionável); NÃO vaza a mensagem crua.
+  try { console.error(`[retail-analytics] ${correlationId}`, err?.message || err); } catch { /* noop */ }
+  return res.status(500).json({
+    error: "analytics_error",
+    message: "Não foi possível calcular agora. Tente novamente.",
+    correlationId,
+    retryable: false,
+  });
+}
+
+/**
+ * Serve uma leitura analítica com cache curto por (org, chave) — PERF-005.
+ * Miss → computa, guarda e devolve; erro → envelope distinto (PERF-006/007).
+ */
+function analyticsCached(res: any, orgId: string, key: string, compute: () => any): any {
+  const cached = RetailAnalyticsCache.get(orgId, key);
+  if (cached !== undefined) return res.json(cached);
+  try {
+    const value = compute();
+    RetailAnalyticsCache.set(orgId, key, value);
+    return res.json(value);
+  } catch (e: any) {
+    return analyticsError(res, e);
+  }
+}
 
 // --- Ponte Fechamento → Faturamento (opt-in): estado + liga/desliga ---
 // Quando ligada, os fechamentos de loja aprovados/conciliados viram entrada de
@@ -600,9 +647,15 @@ router.get("/stores/:id/result", requireRole("owner", "admin"), (req: AuthReques
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
-  const result = RetailStoreCostService.storeResult(orgId, req.params.id, period);
-  if (!result) return res.status(404).json({ error: "store_not_found" });
-  res.json(result);
+  const key = `store-result:${req.params.id}:${period || "current"}`;
+  const cached = RetailAnalyticsCache.get(orgId, key);
+  if (cached !== undefined) return res.json(cached);
+  try {
+    const result = RetailStoreCostService.storeResult(orgId, req.params.id, period);
+    if (!result) return res.status(404).json({ error: "store_not_found" });
+    RetailAnalyticsCache.set(orgId, key, result);
+    res.json(result);
+  } catch (e: any) { return analyticsError(res, e); }
 });
 
 // Resultado de TODAS as lojas + totais da rede (?period=YYYY-MM). Hífen no path
@@ -612,8 +665,8 @@ router.get("/stores-result", requireRole("owner", "admin"), (req: AuthRequest, r
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
-  try { res.json(RetailStoreCostService.allStoresResult(orgId, period)); }
-  catch (e: any) { res.status(500).json({ error: e.message }); }
+  return analyticsCached(res, orgId, `stores-result:${period || "current"}`,
+    () => RetailStoreCostService.allStoresResult(orgId, period));
 });
 
 // MAIS VENDIDOS por produto (PDV — itens das vendas): quantidade e valor por
@@ -628,6 +681,9 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
   const args: any[] = [orgId, start, end];
   let filialClause = "";
   if (filial) { filialClause = "AND i.filial = ?"; args.push(filial); }
+  const cacheKey = `top-products:${start}:${end}:${filial || "*"}`;
+  const cachedTop = RetailAnalyticsCache.get(orgId, cacheKey);
+  if (cachedTop !== undefined) return res.json(cachedTop);
   try {
     // Casa o produto do ERP (13 díg.) com a variante/produto do catálogo p/ o
     // nome; o dígito extra do saldo (13 vs 12) é tolerado com o prefixo.
@@ -661,7 +717,7 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
     ).all(...args) as any[];
     // Detecção de "sem match no catálogo": não achou variante nem produto —
     // a UI marca essas linhas em cor de alerta pra você cadastrar/corrigir.
-    res.json({
+    const payload = {
       start, end,
       products: rows.map((r) => {
         const catalogHit = !!(r.nome_produto || r.nome_variante);
@@ -679,8 +735,10 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
           valor: Math.round(Number(r.valor || 0) * 100) / 100,
         };
       }),
-    });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    };
+    RetailAnalyticsCache.set(orgId, cacheKey, payload);
+    res.json(payload);
+  } catch (e: any) { return analyticsError(res, e); }
 });
 
 // CLIENTES DO PDV (Fase 3, opt-in): busca por nome/CPF/celular + aniversariantes

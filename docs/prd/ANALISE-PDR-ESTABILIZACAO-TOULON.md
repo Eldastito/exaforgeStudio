@@ -28,7 +28,7 @@
 ## Plano por fases (fatia = 1 PR draft, com flag/teste/rollback)
 
 - **Fase 0** — reprodução + testes que falham + baseline (este doc).
-- **Fase 1 (P0)** — 1A data comercial ✅ · 1B boletas idempotentes/histórico ✅ · 1C salvamento atômico ✅ · 1D erros honestos ✅ · 1E ranking mobile.
+- **Fase 1 (P0) FECHADA** — 1A data comercial ✅ · 1B boletas idempotentes/histórico ✅ · 1C salvamento atômico ✅ · 1D erros honestos ✅ · 1E ranking mobile ✅.
 - **Fase 2 (P1)** — diretório de vendedores + `retail_seller_store_assignments` + pendências + escala por loja + cota total única.
 - **Fase 3 (P1)** — `retail_store_pos_fee_rules` (crédito/débito) + resumo POS com custo esperado.
 - **Fase 4 (P2)** — catálogo resolvido na ingestão + índices medidos + set-based + cache + carga.

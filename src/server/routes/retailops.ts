@@ -16,6 +16,7 @@ import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
 import { RetailBoletaService } from "../RetailBoletaService.js";
 import { BusinessTimeService } from "../BusinessTimeService.js";
+import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -908,6 +909,34 @@ router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthReque
        active = excluded.active, updated_at = CURRENT_TIMESTAMP`
   ).run(randomUUID(), orgId, matricula, name, req.body?.userId || null, req.body?.active === false ? 0 : 1);
   res.json(db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
+});
+
+// SELL-002 — lotação do vendedor por loja (owner/admin). sellerId = retail_sellers.id.
+router.get("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ stores: RetailSellerDirectoryService.storesForSeller(orgId, req.params.sellerId) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.put("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
+    res.json({ stores: RetailSellerDirectoryService.setStores(orgId, req.params.sellerId, storeIds, req.body?.primaryStoreId ?? null, req.user?.userId) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// SELL-003/005/006 — cobertura de vendedores da loja: lotados + pendências de
+// nome + suspeitos de código compartilhado (diagnóstico, nunca cria vendedor).
+router.get("/seller-coverage", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  try { res.json(RetailSellerDirectoryService.coverage(orgId, storeId)); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
 // VENDAS POR VENDEDOR do PDV (Fase 4 / Homologação Toulon ADR-105): agregado do

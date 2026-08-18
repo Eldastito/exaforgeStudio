@@ -31,7 +31,7 @@
 - **Fase 1 (P0) FECHADA** — 1A data comercial ✅ · 1B boletas idempotentes/histórico ✅ · 1C salvamento atômico ✅ · 1D erros honestos ✅ · 1E ranking mobile ✅.
 - **Fase 2 (P1) FECHADA** — 2A diretório + lotação + descoberta por filial ✅ · 2B UI "Vendedores da loja" ✅ · 2C escala por loja ✅ · 2D comissão com fonte + pendência de identidade ✅. (Cota total única migra pra Fase 3.)
 - **Fase 3 (P1) FECHADA** — 3A tarifas POS crédito/débito + custo esperado ✅ · 3B componente único "Cota total da loja" (StoreQuotaSummary em corrida + fechamento) ✅.
-- **Fase 4 (P2) — em andamento** — 4A catálogo resolvido na ingestão (PERF-001) ✅ · 4B set-based + colunas resolvidas + índices medidos (PERF-002/003/004) · 4C cache + timeout + erro correlacionado (PERF-005/006/007) · 4D precificação em lote atômica (PERF-008) + carga.
+- **Fase 4 (P2) — em andamento** — 4A catálogo resolvido na ingestão (PERF-001) ✅ · 4B Resultado da Rede set-based + consumo das colunas resolvidas + índice medido (PERF-002/003/004) ✅ · 4C cache + timeout + erro correlacionado (PERF-005/006/007) · 4D precificação em lote atômica (PERF-008) + carga.
 - **Fase 5 (P2)** — estados de conectividade + health probe.
 - **Fase 6** — piloto controlado (rollout por loja).
 

@@ -635,19 +635,25 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
     // produto pai), e o próprio código do ERP (13 díg.) — pra bater etiqueta
     // no caixa/estoque quando o dono suspeitar que "esse mais-vendido não é
     // o produto certo".
+    // PERF-001/004: itens já resolvidos casam pelos ids persistidos
+    // (`variant_id`/`product_service_id`, junções `rpv`/`rprod`, por índice);
+    // o prefixo LIKE (junções `pv`/`ps`/`pp`/`p2`) roda SÓ para os itens ainda
+    // não resolvidos (`catalog_resolved_at IS NULL`) — nunca pro histórico todo.
     const rows = db.prepare(
       `SELECT i.produto,
-              COALESCE(pv.name, ps.name, p2.name) AS nome_variante,
-              COALESCE(pp.name, p2.name) AS nome_produto,
-              pv.sku AS sku,
-              COALESCE(pp.ean, ps.ean, p2.ean) AS ean_produto,
-              pv.external_ref AS ean_variante,
+              COALESCE(rpv.name, rprod.name, pv.name, ps.name, p2.name) AS nome_variante,
+              COALESCE(rprod.name, pp.name, p2.name) AS nome_produto,
+              COALESCE(rpv.sku, pv.sku) AS sku,
+              COALESCE(rprod.ean, pp.ean, ps.ean, p2.ean) AS ean_produto,
+              COALESCE(rpv.external_ref, pv.external_ref) AS ean_variante,
               SUM(i.quantidade) AS pecas, SUM(i.valor) AS valor, COUNT(*) AS linhas
          FROM retail_pdv_sale_items i
-         LEFT JOIN product_variants pv ON pv.organization_id = i.organization_id AND (pv.external_ref = i.produto OR pv.sku = i.produto)
+         LEFT JOIN product_variants rpv ON i.catalog_resolved_at IS NOT NULL AND rpv.organization_id = i.organization_id AND rpv.id = i.variant_id
+         LEFT JOIN products_services rprod ON i.catalog_resolved_at IS NOT NULL AND rprod.organization_id = i.organization_id AND rprod.id = i.product_service_id
+         LEFT JOIN product_variants pv ON i.catalog_resolved_at IS NULL AND pv.organization_id = i.organization_id AND (pv.external_ref = i.produto OR pv.sku = i.produto)
          LEFT JOIN products_services pp ON pp.id = pv.product_service_id
-         LEFT JOIN products_services ps ON ps.organization_id = i.organization_id AND ps.external_ref = i.produto
-         LEFT JOIN products_services p2 ON p2.organization_id = i.organization_id AND i.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
+         LEFT JOIN products_services ps ON i.catalog_resolved_at IS NULL AND ps.organization_id = i.organization_id AND ps.external_ref = i.produto
+         LEFT JOIN products_services p2 ON i.catalog_resolved_at IS NULL AND p2.organization_id = i.organization_id AND i.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
         WHERE i.organization_id = ? AND i.sale_date BETWEEN ? AND ? AND COALESCE(i.produto,'') <> '' ${filialClause}
         GROUP BY i.produto
         ORDER BY pecas DESC, valor DESC

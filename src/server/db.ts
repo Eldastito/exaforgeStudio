@@ -9868,6 +9868,12 @@ const initDb = () => {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_product ON retail_pdv_sale_items (organization_id, product_service_id) WHERE product_service_id IS NOT NULL`); } catch (e) { /* noop */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_unresolved ON retail_pdv_sale_items (organization_id) WHERE catalog_resolved_at IS NULL`); } catch (e) { /* noop */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_pdv_items_org_filial_date ON retail_pdv_sale_items (organization_id, filial, sale_date)`); } catch (e) { /* noop */ }
+
+  // PERF-002 (PDR TOULON, Fatia 4B) — Resultado da Rede set-based agrega
+  // faturamento/contagem por store_id. O índice (org, store_id, closing_date)
+  // dá o store_id/data pela árvore (antes só (org, closing_date), forçando ler
+  // cada linha pra agrupar por loja). Medido por EXPLAIN QUERY PLAN.
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_retail_closings_store_date ON retail_daily_closings (organization_id, store_id, closing_date)`); } catch (e) { /* noop */ }
 };
 
 initDb();

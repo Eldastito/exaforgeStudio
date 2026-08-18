@@ -682,6 +682,40 @@ const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
   refuted: { label: 'Refutado', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
 };
 
+// QUOTA-001 (Fatia 3B): resumo ÚNICO da cota total da loja — cota, realizado,
+// diferença R$, atingimento %, status; e (opcional) a soma das cotas individuais
+// e a divergência vs a cota da loja (QUOTA-002, exibida, nunca ajustada sozinha).
+function StoreQuotaSummary({ quota, realized, individualQuotaTotal, compact }: { quota: number; realized: number; individualQuotaTotal?: number | null; compact?: boolean }) {
+  const q = Number(quota) || 0, r = Number(realized) || 0;
+  const diff = Math.round((r - q) * 100) / 100;
+  const pct = q > 0 ? Math.round((r / q) * 1000) / 10 : null;
+  const status = q <= 0 ? 'sem_cota' : r >= q ? (r === q ? 'atingida' : 'superada') : 'abaixo';
+  const cls = status === 'superada' || status === 'atingida' ? 'text-emerald-300' : status === 'abaixo' ? 'text-amber-300' : 'text-zinc-500';
+  const label = status === 'sem_cota' ? 'sem cota' : status === 'abaixo' ? 'abaixo' : status === 'atingida' ? 'atingida' : 'superada';
+  const indDiv = individualQuotaTotal != null && q > 0 ? Math.round((individualQuotaTotal - q) * 100) / 100 : null;
+  if (compact) {
+    return (
+      <span className="text-[11px] text-zinc-500">
+        loja {brl(r)} / cota {brl(q)}{pct != null && <> · <span className={cls}>{pct}%</span> ({diff >= 0 ? '+' : ''}{brl(diff)})</>}
+      </span>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
+        <span className="text-zinc-400">Cota da loja <strong className="text-zinc-200">{brl(q)}</strong></span>
+        <span className="text-zinc-400">Realizado <strong className="text-zinc-200">{brl(r)}</strong></span>
+        <span className={cls}>Diferença <strong>{diff >= 0 ? '+' : ''}{brl(diff)}</strong></span>
+        {pct != null && <span className={cls}>Atingimento <strong>{pct}%</strong></span>}
+        <span className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${cls} border-current/30`}>{label}</span>
+      </div>
+      {individualQuotaTotal != null && (
+        <p className="mt-1 text-[10px] text-zinc-500">Soma das cotas individuais: <strong className="text-zinc-300">{brl(individualQuotaTotal)}</strong>{indDiv != null && Math.abs(indDiv) > 0.01 && <> · diverge da cota da loja em <span className="text-amber-300">{indDiv >= 0 ? '+' : ''}{brl(indDiv)}</span> (exibido, não ajustado)</>}</p>
+      )}
+    </div>
+  );
+}
+
 // ---- Resultado / lucro por loja (custos fixos + margem) ---------------------
 function StoreResultTab() {
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2449,9 +2483,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         </div>
 
         <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/60 px-3 py-2">
-          <span className="text-sm text-zinc-400">Total do dia {quota > 0 && <span className="text-zinc-600">· cota {brl(quota)} ({totalVendas >= quota ? '+' : ''}{quota > 0 ? Math.round(((totalVendas / quota) - 1) * 1000) / 10 : 0}%)</span>}</span>
+          <span className="text-sm text-zinc-400">Total do dia</span>
           <span className={`text-sm font-semibold ${quota > 0 && totalVendas >= quota ? 'text-emerald-300' : 'text-zinc-100'}`}>{brl(totalVendas)}</span>
         </div>
+        {/* QUOTA-001: resumo único da cota da loja (mesmo componente da corrida) */}
+        {quota > 0 && <div className="mt-2"><StoreQuotaSummary quota={quota} realized={totalVendas} /></div>}
 
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
@@ -3584,7 +3620,7 @@ function RaceSection({ stores }: { stores: any[] }) {
         <div key={sr.storeId} className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-zinc-100">{sr.storeName}</span>
-            <span className="text-[11px] text-zinc-500">loja: {brl(sr.store.sales)} / cota {brl(sr.store.quota)}{sr.store.deviation != null ? ` (${sr.store.deviation > 0 ? '+' : ''}${sr.store.deviation}%)` : ''}</span>
+            <StoreQuotaSummary quota={sr.store.quota} realized={sr.store.sales} compact />
             <span className="ml-auto text-[11px] text-zinc-400">vendedores <strong className="text-emerald-300">{brl(sr.totals.sellers)}</strong>{sr.manager ? <> · gerente <strong className="text-emerald-300">{brl(sr.totals.manager)}</strong></> : null}</span>
           </div>
           <div className="mt-2 overflow-x-auto">

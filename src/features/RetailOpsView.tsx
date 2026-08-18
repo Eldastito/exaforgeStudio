@@ -12,6 +12,36 @@ import { useAuth } from '@/src/contexts/AuthContext';
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// PDR TOULON, Fatia 1D — estados HONESTOS das telas analíticas. Nunca mascarar
+// 403/timeout/500 como "sem dados": cada um tem mensagem e ação próprias.
+type AnalyticsStatus = 'idle' | 'loading' | 'ok' | 'forbidden' | 'timeout' | 'error';
+async function fetchAnalytics(url: string): Promise<{ status: Exclude<AnalyticsStatus, 'idle' | 'loading'>; data: any; correlationId?: string }> {
+  try {
+    const r = await apiFetch(url);
+    if (r.status === 403) return { status: 'forbidden', data: null };
+    if (r.status === 408 || r.status === 504) return { status: 'timeout', data: null };
+    if (!r.ok) { const d = await r.json().catch(() => ({})); return { status: (d?.error === 'analytics_timeout' ? 'timeout' : 'error'), data: null, correlationId: d?.correlationId }; }
+    const data = await r.json().catch(() => null);
+    return { status: 'ok', data };
+  } catch { return { status: 'timeout', data: null }; } // rede/abort: tentativa não confirmada
+}
+function AnalyticsBanner({ status, onRetry, correlationId }: { status: AnalyticsStatus; onRetry?: () => void; correlationId?: string }) {
+  if (status === 'ok' || status === 'idle' || status === 'loading') return null;
+  const map: Record<string, { text: string; cls: string; retry: boolean }> = {
+    forbidden: { text: 'Você não tem permissão para ver estes dados.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: false },
+    timeout: { text: 'A consulta demorou demais (ou a conexão falhou) — não foi possível carregar. Tente de novo.', cls: 'border-amber-500/30 bg-amber-500/5 text-amber-200', retry: true },
+    error: { text: `Erro no servidor ao carregar${correlationId ? ` (ref: ${correlationId})` : ''}. Tente de novo em instantes.`, cls: 'border-red-500/30 bg-red-500/5 text-red-200', retry: true },
+  };
+  const m = map[status]; if (!m) return null;
+  return (
+    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${m.cls}`}>
+      <AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">{m.text}</span>
+      {m.retry && onRetry && <button onClick={onRetry} className="inline-flex items-center gap-1 rounded-md border border-current/30 px-2 py-0.5 text-[12px] hover:bg-white/5"><RefreshCw className="w-3.5 h-3.5" /> Tentar de novo</button>}
+    </div>
+  );
+}
 const CLOSING_STATUS: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Pendente', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30' },
   received: { label: 'Informado', cls: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
@@ -656,13 +686,14 @@ function StoreResultTab() {
   const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<AnalyticsStatus>('idle');
+  const [corr, setCorr] = useState<string | undefined>(undefined);
 
   const load = async () => {
-    setLoading(true);
-    try {
-      const r = await apiFetch(`/api/retailops/stores-result?period=${period}`);
-      setData(r.ok ? await r.json() : null);
-    } catch { setData(null); } finally { setLoading(false); }
+    setLoading(true); setStatus('loading');
+    const res = await fetchAnalytics(`/api/retailops/stores-result?period=${period}`);
+    setData(res.status === 'ok' ? res.data : null); setStatus(res.status); setCorr(res.correlationId);
+    setLoading(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [period]);
 
@@ -686,11 +717,13 @@ function StoreResultTab() {
 
       {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
 
-      {!loading && perStore.length === 0 && (
+      {!loading && status !== 'ok' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+
+      {!loading && status === 'ok' && perStore.length === 0 && (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhuma loja ativa com dados no mês. Cadastre custos fixos e a margem bruta em <strong>Editar loja</strong> para ver o lucro por loja.</p>
       )}
 
-      {!loading && perStore.length > 0 && (
+      {!loading && status === 'ok' && perStore.length > 0 && (
         <>
           {semMargem > 0 && (
             <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
@@ -1047,6 +1080,8 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
 function PricingTab() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<AnalyticsStatus>('idle');
+  const [corr, setCorr] = useState<string | undefined>(undefined);
   const [markup, setMarkup] = useState<string>('');
   const [filter, setFilter] = useState<'all' | 'risk' | 'no_cost'>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1055,12 +1090,11 @@ function PricingTab() {
   const [showCosts, setShowCosts] = useState(false);
 
   const load = async () => {
-    setLoading(true);
-    try {
-      const qs = markup ? `?markup=${encodeURIComponent(markup)}` : '';
-      const r = await apiFetch(`/api/retailops/pricing/products${qs}`);
-      setData(r.ok ? await r.json() : null);
-    } catch { setData(null); } finally { setLoading(false); }
+    setLoading(true); setStatus('loading');
+    const qs = markup ? `?markup=${encodeURIComponent(markup)}` : '';
+    const res = await fetchAnalytics(`/api/retailops/pricing/products${qs}`);
+    setData(res.status === 'ok' ? res.data : null); setStatus(res.status); setCorr(res.correlationId);
+    setLoading(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
@@ -1158,11 +1192,13 @@ function PricingTab() {
 
       {loading && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
 
-      {!loading && filtered.length === 0 && (
+      {!loading && status !== 'ok' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+
+      {!loading && status === 'ok' && filtered.length === 0 && (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum produto no filtro atual.</p>
       )}
 
-      {!loading && filtered.length > 0 && (
+      {!loading && status === 'ok' && filtered.length > 0 && (
         <>
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-sm">
@@ -3160,13 +3196,13 @@ function TopProductsTab() {
   const [end, setEnd] = useState(todayStr());
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const load = () => {
-    setLoading(true);
-    apiFetch(`/api/retailops/pdv-top-products?start=${start}&end=${end}`)
-      .then(r => r.json())
-      .then(d => setRows(Array.isArray(d?.products) ? d.products : []))
-      .catch(() => toast.error('Falha ao carregar os mais vendidos.'))
-      .finally(() => setLoading(false));
+  const [status, setStatus] = useState<AnalyticsStatus>('idle');
+  const [corr, setCorr] = useState<string | undefined>(undefined);
+  const load = async () => {
+    setLoading(true); setStatus('loading');
+    const res = await fetchAnalytics(`/api/retailops/pdv-top-products?start=${start}&end=${end}`);
+    setRows(res.status === 'ok' && Array.isArray(res.data?.products) ? res.data.products : []);
+    setStatus(res.status); setCorr(res.correlationId); setLoading(false);
   };
   const [q, setQ] = useState('');
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -3192,6 +3228,8 @@ function TopProductsTab() {
       {unmatched > 0 && <p className="mb-2 text-[11px] text-amber-300/80">{unmatched} item(ns) sem match no catálogo — aparecem em âmbar com só o código do ERP; cadastre a variante em Estoque pra o nome/SKU/barras baterem.</p>}
       {loading ? (
         <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+      ) : (status !== 'ok') ? (
+        <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />
       ) : rows.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum item de venda do PDV no período ainda. As vendas entram pela sincronização (Integrações → Alterdata) — o histórico completa aos poucos.</div>
       ) : (

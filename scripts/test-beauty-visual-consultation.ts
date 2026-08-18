@@ -240,8 +240,11 @@ async function main() {
   const resolved = BeautyVisualConsultationService.resolveSignedFile(storageKey, exp, sig);
   check("resolveSignedFile devolve caminho válido", !!resolved && fs.existsSync(resolved));
 
-  // Sig errada → nega
-  const resolvedBadSig = BeautyVisualConsultationService.resolveSignedFile(storageKey, exp, sig.slice(0, -1) + "0");
+  // Sig errada → nega. Troca o ÚLTIMO caractere por um garantidamente diferente
+  // (antes concatenava "0" fixo — quando a sig já terminava em "0" a "alterada"
+  // era idêntica à original e o teste falhava ~1/16 das vezes: flake).
+  const badSig = sig.slice(0, -1) + (sig.slice(-1) === "0" ? "1" : "0");
+  const resolvedBadSig = BeautyVisualConsultationService.resolveSignedFile(storageKey, exp, badSig);
   check("resolveSignedFile com sig alterada → null", resolvedBadSig === null);
   // Exp no passado → nega
   const resolvedExpired = BeautyVisualConsultationService.resolveSignedFile(storageKey, String(Date.now() - 60_000), sig);

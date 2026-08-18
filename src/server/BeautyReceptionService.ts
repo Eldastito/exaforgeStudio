@@ -258,6 +258,124 @@ export class BeautyReceptionService {
     };
   }
 
+  // ── Equipe do salão (profissionais) ─────────────────────────────────────
+  /**
+   * Profissionais ATIVOS do salão (roster `clinic_professionals` reusado desde
+   * a F4). Lista independente de data — pra o cadastro/seleção da equipe. O
+   * cadastro em si (criar profissional) reusa `ClinicAgendaService`
+   * (§42 — a Beleza esconde a "Agenda Clínica" mas usa o mesmo roster).
+   */
+  static team(orgId: string): Array<{ id: string; name: string; specialty: string | null; color: string | null }> {
+    const rows = db.prepare(
+      `SELECT id, name, specialty, color FROM clinic_professionals
+        WHERE organization_id = ? AND active = 1 ORDER BY name COLLATE NOCASE ASC`,
+    ).all(orgId) as any[];
+    return rows.map((r) => ({ id: r.id, name: r.name, specialty: r.specialty || null, color: r.color || null }));
+  }
+
+  // ── Catálogo de serviços do salão (pro dropdown de agendamento) ─────────
+  /**
+   * Serviços ATIVOS do catálogo (`products_services` type='service'). O
+   * agendamento da recepção usa isso pra saber a duração (e o título) do
+   * atendimento. Serviço é OPCIONAL no book — sem serviço, cai no slot padrão
+   * da agenda; mas quando existe, respeitamos a duração cadastrada (F4).
+   */
+  static services(orgId: string): Array<{ id: string; name: string; durationMinutes: number | null }> {
+    const rows = db.prepare(
+      `SELECT id, name, duration_minutes FROM products_services
+        WHERE organization_id = ? AND type = 'service' AND active = 1
+        ORDER BY name COLLATE NOCASE ASC`,
+    ).all(orgId) as any[];
+    return rows.map((r) => ({ id: r.id, name: r.name, durationMinutes: r.duration_minutes != null ? Number(r.duration_minutes) : null }));
+  }
+
+  // ── Escrita: agendar (criar a fila) ─────────────────────────────────────
+  /**
+   * Agenda um atendimento DIRETO pela recepção: cliente + profissional +
+   * (opcional) serviço + horário. É o que POVOA a fila (F34/F37) — sem isso
+   * não há o que gerenciar. Diferente do F10 (`BeautyLookToAppointmentService`,
+   * amarrado a uma consulta visual `selected`), aqui a recepção decide direto
+   * (humano, não IA — RN-BS-03/11 não se aplicam: quem escolhe o profissional
+   * é a atendente, não um modelo).
+   *
+   * Reusa a PORTA CANÔNICA `AppointmentService.create` (§42 — sem duplicar
+   * criação) + amarra profissional + snapshot do nome (preserva se renomear).
+   * Duração: do serviço quando houver (F4), senão o slot da agenda. Cria como
+   * `confirmed` (a recepção confirmou o horário). Guarda contra conflito do
+   * mesmo profissional (a porta canônica não conhece conflito por-profissional).
+   *
+   * RN-BS-07 (isolamento): contato/profissional de outra org → rejeita.
+   */
+  static book(
+    orgId: string,
+    input: { contactId: string; professionalId: string; serviceId?: string | null; startISO: string; title?: string | null },
+    actorId?: string | null,
+  ): { ok: true; appointmentId: string; startTime: string | null; professionalName: string; title: string } | { ok: false; error: string } {
+    const contactId = String(input?.contactId || "").trim();
+    const professionalId = String(input?.professionalId || "").trim();
+    const serviceId = String(input?.serviceId || "").trim();
+    const startISO = String(input?.startISO || "").trim();
+    if (!contactId || !professionalId || !startISO) return { ok: false, error: "Informe cliente, profissional e horário." };
+
+    const startMs = AppointmentService.ms(startISO);
+    if (startMs == null) return { ok: false, error: "Horário inválido." };
+    if (startMs < Date.now() - 60_000) return { ok: false, error: "Não dá pra agendar no passado." };
+
+    const contact = db.prepare(`SELECT id FROM contacts WHERE id = ? AND organization_id = ?`).get(contactId, orgId);
+    if (!contact) return { ok: false, error: "Cliente não encontrada nesta organização." };
+
+    const prof = db.prepare(
+      `SELECT id, name FROM clinic_professionals WHERE id = ? AND organization_id = ? AND active = 1`,
+    ).get(professionalId, orgId) as { id: string; name: string } | undefined;
+    if (!prof) return { ok: false, error: "Profissional não encontrado ou inativo." };
+
+    // Serviço é OPCIONAL. Quando existe, define duração + título.
+    let durationMin = AppointmentService.config(orgId).slotMin;
+    let svcName: string | null = null;
+    if (serviceId) {
+      const svc = db.prepare(
+        `SELECT id, name, duration_minutes FROM products_services
+          WHERE id = ? AND organization_id = ? AND type = 'service' AND active = 1`,
+      ).get(serviceId, orgId) as { id: string; name: string; duration_minutes: number | null } | undefined;
+      if (!svc) return { ok: false, error: "Serviço não encontrado no catálogo." };
+      svcName = svc.name;
+      const d = Number(svc.duration_minutes || 0);
+      if (Number.isFinite(d) && d >= 5) durationMin = d;
+    }
+    const title = String(input?.title || "").trim() || svcName || "Atendimento";
+    const endMs = startMs + durationMin * 60000;
+
+    // Conflito do MESMO profissional nesse intervalo (a porta canônica não sabe disso).
+    const clash = db.prepare(
+      `SELECT id FROM appointments
+        WHERE organization_id = ? AND professional_id = ?
+          AND status NOT IN ('cancelled','no_show')
+          AND scheduled_start < ? AND scheduled_end > ?
+        LIMIT 1`,
+    ).get(orgId, professionalId, new Date(endMs).toISOString(), new Date(startMs).toISOString());
+    if (clash) return { ok: false, error: "Este profissional já tem atendimento nesse horário." };
+
+    const appt = AppointmentService.create(
+      orgId,
+      {
+        contactId,
+        title,
+        scheduledStart: new Date(startMs).toISOString(),
+        scheduledEnd: new Date(endMs).toISOString(),
+        productServiceId: serviceId || null,
+      },
+      actorId || null,
+    ) as { id: string };
+
+    db.prepare(
+      `UPDATE appointments
+          SET professional_id = ?, professional_name_snapshot = ?, status = 'confirmed'
+        WHERE id = ? AND organization_id = ?`,
+    ).run(professionalId, prof.name, appt.id, orgId);
+
+    return { ok: true, appointmentId: appt.id, startTime: this.hhmm(startMs), professionalName: prof.name, title };
+  }
+
   // ── Escrita: mover o atendimento pelo funil (tempo real) ────────────────
   /**
    * Recepção marca o estágio do atendimento (chegou/confirmado → em

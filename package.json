@@ -228,6 +228,7 @@
     "test:beauty-visagism": "tsx scripts/test-beauty-visagism.ts",
     "test:beauty-reception": "tsx scripts/test-beauty-reception.ts",
     "test:beauty-queue": "tsx scripts/test-beauty-queue.ts",
+    "test:beauty-booking": "tsx scripts/test-beauty-booking.ts",
     "test:beauty-simulation-reuse": "tsx scripts/test-beauty-simulation-reuse.ts",
     "test:rbac-granular": "tsx scripts/test-rbac-granular.ts",
     "test:rbac-profiles-api": "tsx scripts/test-rbac-profiles-api.ts",

@@ -39,6 +39,7 @@ import { BeautyClientService } from "../BeautyClientService.js";
 import { BeautyVisagismService } from "../BeautyVisagismService.js";
 import { BeautyReceptionService } from "../BeautyReceptionService.js";
 import { BeautyQueueService } from "../BeautyQueueService.js";
+import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import QRCode from "qrcode";
 // Registra `beauty_review_invite` no MESMO registry canônico do CommandExecutor
 // (§37 do PRD — sem runtime paralelo). Side-effect import: garante que quando
@@ -243,6 +244,56 @@ router.get("/reception/professional/:id", (req: AuthRequest, res): any => {
   if (!orgId) return;
   const r = BeautyReceptionService.professionalDay(orgId, req.params.id, req.query.date ? String(req.query.date) : undefined);
   if (!r.professional) return res.status(404).json({ error: "Profissional não encontrado ou inativo." });
+  res.json(r);
+});
+
+// F38 — equipe do salão (profissionais). Listar é operacional (qualquer staff);
+// cadastrar é do dono/admin (mesmo racional das rotas de settings). Reusa o
+// roster canônico `clinic_professionals` via ClinicAgendaService (§42 — a
+// Beleza esconde a "Agenda Clínica" mas compartilha o mesmo cadastro).
+router.get("/reception/team", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ team: BeautyReceptionService.team(orgId) });
+});
+
+router.post("/reception/professionals", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Dê um nome ao profissional." });
+  try {
+    const pro = ClinicAgendaService.createProfessional(orgId, {
+      name,
+      specialty: req.body?.specialty ? String(req.body.specialty) : undefined,
+      color: req.body?.color ? String(req.body.color) : undefined,
+    }, req.user?.userId || undefined);
+    res.json({ ok: true, professional: { id: pro.id, name: pro.name, specialty: pro.specialty || null } });
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Não foi possível cadastrar o profissional." });
+  }
+});
+
+// F38 — catálogo de serviços do salão (dropdown do agendamento).
+router.get("/reception/services", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  res.json({ services: BeautyReceptionService.services(orgId) });
+});
+
+// F38 — AGENDAR direto pela recepção (povoa a fila): cliente + profissional +
+// (opcional) serviço + horário. Decisão humana da recepção (não IA).
+router.post("/reception/appointments", (req: AuthRequest, res): any => {
+  const orgId = requireBeauty(req, res);
+  if (!orgId) return;
+  const r = BeautyReceptionService.book(orgId, {
+    contactId: String(req.body?.contactId || ""),
+    professionalId: String(req.body?.professionalId || ""),
+    serviceId: req.body?.serviceId ? String(req.body.serviceId) : null,
+    startISO: String(req.body?.startISO || ""),
+    title: req.body?.title ? String(req.body.title) : null,
+  }, req.user?.userId || null);
+  if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
 

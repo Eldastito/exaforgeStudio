@@ -58,6 +58,7 @@
     "test:help-knowledge": "tsx scripts/test-help-knowledge.ts",
     "test:help-curation": "tsx scripts/test-help-curation.ts",
     "test:help-gaps": "tsx scripts/test-help-gaps.ts",
+    "test:help-context": "tsx scripts/test-help-context.ts",
     "test:ux-telemetry": "tsx scripts/test-ux-telemetry.ts",
     "test:mobile-readiness": "tsx scripts/test-mobile-readiness.ts",
     "test:legacy-reduction": "tsx scripts/test-legacy-reduction.ts",

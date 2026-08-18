@@ -616,9 +616,9 @@ export default function App() {
           </ErrorBoundary>
         </main>
       </div>
-      {/* ADR-179 F1 — Tutor de Ajuda flutuante. Universal (não exige falatu_enabled);
-          passa a tela atual como contexto soft. */}
-      <HelpOrb moduleKey={viewMode} />
+      {/* ADR-179 F1/F3 — Tutor de Ajuda flutuante. Universal (não exige falatu_enabled);
+          passa a tela atual como contexto e navega por deep-link ("me mostra onde"). */}
+      <HelpOrb moduleKey={viewMode} onNavigate={(v) => setViewMode(v as any)} />
     </div>
   );
 }

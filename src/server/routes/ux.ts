@@ -85,6 +85,25 @@ router.post("/help", (req: AuthRequest, res): any => {
   res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || ""), moduleKey }));
 });
 
+// GET /api/ux/help/suggestions?module= — artigos relevantes da tela atual (ADR-179
+// F3). Universal (ajuda pra todos); vazio quando não há cobertura (honesto).
+router.get("/help/suggestions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const moduleKey = typeof req.query?.module === "string" ? req.query.module : null;
+  const limit = typeof req.query?.limit === "string" ? Number(req.query.limit) : undefined;
+  res.json({ suggestions: HelpKnowledgeService.suggestions(orgId, moduleKey, { limit }) });
+});
+
+// POST /api/ux/help/feedback { articleId?, moduleKey?, helpful } — 👍/👎 (ADR-179 F3).
+router.post("/help/feedback", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (typeof b.helpful !== "boolean") return res.status(400).json({ error: "helpful (boolean) é obrigatório." });
+  res.json(HelpKnowledgeService.recordFeedback(orgId, { articleId: b.articleId ?? null, moduleKey: b.moduleKey ?? null, helpful: b.helpful }));
+});
+
 // GET /api/ux/help/gaps?limit= — fila de conteúdo: dúvidas da org sem cobertura
 // (ADR-179 F4). Gestor: mostra onde as pessoas travam. Minimizado (sem PII).
 router.get("/help/gaps", (req: AuthRequest, res): any => {

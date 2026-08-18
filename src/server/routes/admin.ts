@@ -999,4 +999,11 @@ router.post("/help-articles/:id/archive", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
+// GET /api/admin/help-gaps?limit= — fila GLOBAL de lacunas (cross-org) que puxa a
+// curadoria (ADR-179 F4). Só a pergunta normalizada + total de hits + nº de orgs.
+router.get("/help-gaps", (req: AuthRequest, res): any => {
+  const limit = typeof req.query?.limit === "string" ? Number(req.query.limit) : undefined;
+  res.json({ gaps: HelpKnowledgeService.globalGaps({ limit }) });
+});
+
 export default router;

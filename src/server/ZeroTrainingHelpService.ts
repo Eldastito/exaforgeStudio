@@ -102,8 +102,8 @@ export class ZeroTrainingHelpService {
     // lacuna (RN-HELP-1). 0-regressão: nunca sobrescreve uma resposta de engine.
     let article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null } | null = null;
     let gapLogged = false;
+    const moduleKey = input?.moduleKey || module?.key || null;
     if (intent !== "show") {
-      const moduleKey = input?.moduleKey || module?.key || null;
       const kb = HelpKnowledgeService.retrieve(orgId, text, moduleKey);
       if (kb) {
         article = { id: kb.id, title: kb.title, moduleKey: kb.module_key, steps: kb.steps, commonErrors: kb.commonErrors, sourceRef: kb.sourceRef };
@@ -117,6 +117,11 @@ export class ZeroTrainingHelpService {
         gapLogged = true;
       }
     }
+
+    // Métrica F4: toda pergunta conta; "respondida" = artigo OU engine determinístico
+    // (show sempre entrega evidência). O contrário é exatamente a lacuna registrada.
+    const answered = intent === "show" ? true : (!!article || this.hasSubstance(intent, module, governedBy, navTarget));
+    if (text) HelpKnowledgeService.recordAsk(orgId, moduleKey, answered);
 
     return { intent, message, module, navTarget, evidence, governedBy, article, gapLogged, invisibleUxEnabled: !!(inv && inv.e), source: "falatu_help" };
   }

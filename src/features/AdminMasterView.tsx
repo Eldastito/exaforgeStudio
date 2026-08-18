@@ -721,6 +721,7 @@ const HELP_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
  */
 function HelpCurationPanel() {
   const [articles, setArticles] = useState<any[]>([]);
+  const [gaps, setGaps] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [bootModule, setBootModule] = useState('central_saude');
   const [busy, setBusy] = useState(false);
@@ -729,8 +730,12 @@ function HelpCurationPanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const r = await apiFetch('/api/admin/help-articles?status=all').then((x) => (x.ok ? x.json() : { articles: [] }));
-      setArticles(Array.isArray(r?.articles) ? r.articles : []);
+      const [a, g] = await Promise.all([
+        apiFetch('/api/admin/help-articles?status=all').then((x) => (x.ok ? x.json() : { articles: [] })),
+        apiFetch('/api/admin/help-gaps?limit=15').then((x) => (x.ok ? x.json() : { gaps: [] })),
+      ]);
+      setArticles(Array.isArray(a?.articles) ? a.articles : []);
+      setGaps(Array.isArray(g?.gaps) ? g.gaps : []);
     } catch { /* noop */ }
     finally { setLoading(false); }
   };
@@ -794,6 +799,23 @@ function HelpCurationPanel() {
       <p className="text-xs text-zinc-500 mb-4">
         A base que o <strong className="text-zinc-300">Tutor de Ajuda</strong> (orb) usa para responder o lojista. Gere um rascunho a partir de um módulo, revise o texto e publique com <strong className="text-zinc-300">quem revisou</strong> — sem isso, o artigo não vai ao ar (RN-HELP-3).
       </p>
+
+      {/* Fila de lacunas (F4) — dúvidas reais sem cobertura, cross-org, que puxam a curadoria */}
+      {gaps.length > 0 && (
+        <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 p-4 mb-4">
+          <div className="text-xs font-medium text-amber-300 mb-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Dúvidas sem resposta ({gaps.length}) — o que o pessoal pergunta e a base não cobre</div>
+          <div className="space-y-1">
+            {gaps.map((g, i) => (
+              <div key={i} className="flex items-center gap-2 text-[12px] text-zinc-300">
+                <span className="rounded bg-amber-900/40 text-amber-200 px-1.5 py-0.5 text-[10px] tabular-nums">{g.hits}×</span>
+                {g.moduleKey && <span className="text-[10px] text-zinc-500">{g.moduleKey}</span>}
+                <span className="truncate">{g.query}</span>
+                {g.orgs > 1 && <span className="ml-auto text-[10px] text-zinc-500">{g.orgs} orgs</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bootstrap */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 mb-4 flex items-center gap-3 flex-wrap">

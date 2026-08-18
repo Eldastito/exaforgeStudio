@@ -51,6 +51,7 @@ import legalRoutes from "./src/server/routes/legal.js";
 import cashRoutes from "./src/server/routes/cash.js";
 import healthCenterRoutes from "./src/server/routes/health.js";
 import { ProductionReadinessService } from "./src/server/ProductionReadinessService.js";
+import { HealthProbeService } from "./src/server/HealthProbeService.js";
 import dreRoutes from "./src/server/routes/dre.js";
 import ownerRoutes from "./src/server/routes/owner.js";
 import aiGovernanceRoutes from "./src/server/routes/aiGovernance.js";
@@ -444,6 +445,12 @@ async function startServer() {
     const ok = ProductionReadinessService.blockersOk();
     return res.status(ok ? 200 : 503).json({ status: ok ? "ready" : "blocked" });
   });
+  //   /api/health/ping  → probe LEVE e AUTENTICADO (CONN-003, PDR TOULON): o
+  //     cliente usa a latência de round-trip pra distinguir "API saudável, só o
+  //     tempo real caiu" (realtime_degraded) de "API lenta/caindo" (api_degraded).
+  //     requireAuth exercita o caminho real de auth; o probe não toca negócio.
+  app.get("/api/health/ping", requireAuth, (_req, res): any =>
+    res.status(200).json(HealthProbeService.ping()));
 
   // Financial Block Middleware (for API routes)
   app.use("/api", (req, res, next) => {

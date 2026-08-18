@@ -50,8 +50,14 @@ export type BulkApplyInput = { productId: string; newPrice: number };
 export type BulkApplyOutput = {
   appliedCount: number;
   skippedCount: number;
+  failedCount: number;
   applied: { productId: string; oldPrice: number; newPrice: number }[];
+  // Rejeições DETERMINÍSTICAS (não adianta repetir): invalid_price, not_found,
+  // unchanged, missing_id.
   skipped: { productId: string; reason: string }[];
+  // Falhas TRANSITÓRIAS (a UI oferece retry): erro de escrita ou a linha sumiu
+  // entre ler e gravar (no_rows).
+  failed: { productId: string; reason: string; message?: string }[];
 };
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
@@ -83,10 +89,11 @@ export class RetailPricingService {
     const period = String(opts.period || new Date().toISOString().slice(0, 7)).slice(0, 7);
     const limit = Math.max(1, Math.min(500, Number(opts.limit) || 200));
 
-    // Mesma resolução produto→catálogo do /pdv-top-products (variant.external_ref
-    // → variant.sku → product.external_ref → LIKE-prefix), pra tolerar EAN 13/12
-    // e código do ERP. Ver RetailStoreCostService.monthlyCogsBreakdown pra a
-    // versão irmã que soma CMV (usa o mesmo padrão).
+    // Venda do mês por produto, resolvendo ERP→catálogo. PERF-004 (escala): os
+    // itens RESOLVIDOS (4A) agrupam pela coluna `product_service_id` (índice); o
+    // prefixo LIKE roda SÓ no subconjunto NÃO resolvido (filtrado antes do join)
+    // — nunca varre o catálogo por linha de venda. Ver a versão irmã do CMV em
+    // RetailStoreCostService.monthlyCogsBreakdownAll.
     const rows = db
       .prepare(
         `SELECT
@@ -104,27 +111,32 @@ export class RetailPricingService {
            ON inv.organization_id = ps.organization_id
           AND inv.product_service_id = ps.id
          LEFT JOIN (
-           SELECT
-             COALESCE(ps1.id, ps2.id) AS product_id,
-             SUM(i.quantidade) AS units,
-             SUM(i.valor) AS revenue
-           FROM retail_pdv_sale_items i
-           LEFT JOIN product_variants pv
-             ON pv.organization_id = i.organization_id
-            AND (pv.external_ref = i.produto OR pv.sku = i.produto)
-           LEFT JOIN products_services ps1 ON ps1.id = pv.product_service_id
-           LEFT JOIN products_services ps2
-             ON ps2.organization_id = i.organization_id
-            AND (ps2.external_ref = i.produto OR i.produto LIKE ps2.external_ref || '%')
-           WHERE i.organization_id = ?
-             AND substr(i.sale_date, 1, 7) = ?
-           GROUP BY COALESCE(ps1.id, ps2.id)
+           SELECT product_id, SUM(units) AS units, SUM(revenue) AS revenue FROM (
+             SELECT i.product_service_id AS product_id, i.quantidade AS units, i.valor AS revenue
+               FROM retail_pdv_sale_items i
+              WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
+                AND i.catalog_resolved_at IS NOT NULL AND i.product_service_id IS NOT NULL
+             UNION ALL
+             SELECT COALESCE(ps1.id, ps2.id) AS product_id, i.quantidade AS units, i.valor AS revenue
+               FROM retail_pdv_sale_items i
+               LEFT JOIN product_variants pv
+                 ON pv.organization_id = i.organization_id
+                AND (pv.external_ref = i.produto OR pv.sku = i.produto)
+               LEFT JOIN products_services ps1 ON ps1.id = pv.product_service_id
+               LEFT JOIN products_services ps2
+                 ON ps2.organization_id = i.organization_id
+                AND (ps2.external_ref = i.produto OR i.produto LIKE ps2.external_ref || '%')
+              WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
+                AND i.catalog_resolved_at IS NULL
+           )
+           WHERE product_id IS NOT NULL
+           GROUP BY product_id
          ) sales ON sales.product_id = ps.id
          WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
          ORDER BY revenue_month DESC, ps.name ASC
          LIMIT ?`
       )
-      .all(orgId, period, orgId, limit) as any[];
+      .all(orgId, period, orgId, period, orgId, limit) as any[];
 
     const items: PricingItem[] = rows.map((r) => {
       const cost = Number(r.avg_cost) || 0;
@@ -181,8 +193,9 @@ export class RetailPricingService {
   ): BulkApplyOutput {
     const applied: BulkApplyOutput["applied"] = [];
     const skipped: BulkApplyOutput["skipped"] = [];
+    const failed: BulkApplyOutput["failed"] = [];
     if (!Array.isArray(items) || items.length === 0) {
-      return { appliedCount: 0, skippedCount: 0, applied, skipped };
+      return { appliedCount: 0, skippedCount: 0, failedCount: 0, applied, skipped, failed };
     }
     const upd = db.prepare(
       `UPDATE products_services SET price = ? WHERE id = ? AND organization_id = ?`
@@ -191,41 +204,51 @@ export class RetailPricingService {
       `SELECT * FROM products_services WHERE id = ? AND organization_id = ?`
     );
 
-    const tx = db.transaction(() => {
-      for (const it of items) {
-        const productId = String((it as any)?.productId || "");
-        const newPrice = Number((it as any)?.newPrice);
-        if (!productId) { skipped.push({ productId, reason: "missing_id" }); continue; }
-        if (!(newPrice > 0) || !Number.isFinite(newPrice)) {
-          skipped.push({ productId, reason: "invalid_price" }); continue;
-        }
+    // PERF-008: aplicação em lote com resultado DETALHADO por item. Cada linha é
+    // isolada (UPDATE é atômico por si) — uma linha que falhe NÃO aborta as
+    // outras (sem tx de tudo-ou-nada). Rejeições determinísticas vão pra
+    // `skipped`; falhas transitórias (erro de escrita / linha sumiu entre ler e
+    // gravar) vão pra `failed`, que a UI oferece para RETRY. A UI só declara
+    // sucesso pelos `applied`.
+    for (const it of items) {
+      const productId = String((it as any)?.productId || "");
+      const newPrice = Number((it as any)?.newPrice);
+      if (!productId) { skipped.push({ productId, reason: "missing_id" }); continue; }
+      if (!(newPrice > 0) || !Number.isFinite(newPrice)) {
+        skipped.push({ productId, reason: "invalid_price" }); continue;
+      }
+      try {
         const before = sel.get(productId, orgId) as any;
         if (!before) { skipped.push({ productId, reason: "not_found" }); continue; }
         const oldPrice = Number(before.price) || 0;
         if (Math.abs(newPrice - oldPrice) < 0.005) {
           skipped.push({ productId, reason: "unchanged" }); continue;
         }
-        upd.run(round2(newPrice), productId, orgId);
+        const info = upd.run(round2(newPrice), productId, orgId);
+        if (!info.changes) { failed.push({ productId, reason: "no_rows" }); continue; } // sumiu entre ler e gravar → retryable
         try {
           ProductEditHistoryService.record(orgId, productId, userId, before, {
             price: round2(newPrice),
           });
-        } catch { /* histórico é secundário; não derruba o batch */ }
+        } catch { /* histórico é secundário; não derruba o item */ }
         applied.push({
           productId,
           oldPrice: round2(oldPrice),
           newPrice: round2(newPrice),
         });
+      } catch (e: any) {
+        failed.push({ productId, reason: "write_error", message: String(e?.message || e).slice(0, 200) });
       }
-    });
-    tx();
+    }
     // PERF-005: preço aplicado muda o número das telas analíticas.
     if (applied.length) RetailAnalyticsCache.invalidate(orgId);
     return {
       appliedCount: applied.length,
       skippedCount: skipped.length,
+      failedCount: failed.length,
       applied,
       skipped,
+      failed,
     };
   }
 }

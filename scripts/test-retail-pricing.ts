@@ -157,6 +157,10 @@ async function main() {
   check("skipped: not_found presente", reasons.has("not_found"));
   check("skipped: unchanged presente", reasons.has("unchanged"));
   check("skipped: missing_id presente", reasons.has("missing_id"));
+  // PERF-008: resultado detalhado por item + sucesso PARCIAL (uma linha ruim não
+  // aborta as boas) + rejeição determinística NÃO é falha transitória.
+  check("applyBulk: failedCount = 0 (rejeições determinísticas ≠ falha)", out.failedCount === 0 && Array.isArray(out.failed) && out.failed.length === 0, String(out.failedCount));
+  check("applyBulk: sucesso parcial — p1 e p4 aplicados apesar das linhas ruins", out.applied.some((a) => a.productId === p1) && out.applied.some((a) => a.productId === p4));
 
   // Confere no BD.
   const bermPrice = (db.prepare("SELECT price FROM products_services WHERE id = ?").get(p1) as any)?.price;

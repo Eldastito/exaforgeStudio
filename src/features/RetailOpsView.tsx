@@ -1216,6 +1216,7 @@ function PricingTab() {
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showCosts, setShowCosts] = useState(false);
+  const [applyResult, setApplyResult] = useState<any>(null); // PERF-008: resultado detalhado do último lote
   // markup é aplicado pelo botão (não auto-reload) — urlFactory lê o valor atual.
   const { data, status, corr, loading, isStale, loadedAt, reload: load } =
     useAnalytics(() => `/api/retailops/pricing/products${markup ? `?markup=${encodeURIComponent(markup)}` : ''}`, []);
@@ -1239,20 +1240,40 @@ function PricingTab() {
     if (next.has(id)) next.delete(id); else next.add(id);
     setSelected(next);
   };
-  const applySuggested = async () => {
-    const chosen = withCost.filter((it) => selected.has(it.productId) && Math.abs(it.suggestedPrice - it.currentPrice) >= 0.01);
+  // PERF-008: a aplicação em lote só declara SUCESSO pelos itens confirmados
+  // (`applied`) e mantém os que FALHARAM (`failed`, transitórios) selecionados
+  // para nova tentativa. Rejeições determinísticas (`skipped`: sem mudança,
+  // inválido, não encontrado) saem da seleção — repetir não muda o resultado.
+  const doApply = async (chosen: any[]) => {
     if (chosen.length === 0) { toast.error('Nenhum produto selecionado com sugestão diferente do preço atual.'); return; }
-    if (!window.confirm(`Aplicar o preço sugerido em ${chosen.length} ${chosen.length === 1 ? 'produto' : 'produtos'}? Isso muda o preço no catálogo — os pedidos abertos não são refeitos.`)) return;
     setSaving(true);
     try {
       const body = JSON.stringify({ items: chosen.map((it) => ({ productId: it.productId, newPrice: it.suggestedPrice })) });
       const res = await apiFetch('/api/retailops/pricing/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) { toast.error(out?.error || 'Falha ao aplicar preços.'); return; }
-      toast.success(`${out.appliedCount} aplicado(s)${out.skippedCount ? ` · ${out.skippedCount} pulado(s)` : ''}.`);
-      setSelected(new Set());
+      setApplyResult(out);
+      // Só o que FALHOU segue selecionado (para retry); confirmados e rejeições
+      // determinísticas saem da seleção.
+      const failedIds = new Set((out.failed || []).map((f: any) => f.productId));
+      setSelected(new Set(chosen.map((it) => it.productId).filter((id) => failedIds.has(id))));
+      if (out.appliedCount > 0) toast.success(`${out.appliedCount} preço(s) aplicado(s).`);
+      if (out.failedCount > 0) toast.error(`${out.failedCount} não aplicado(s) por falha temporária — dá pra tentar de novo.`);
+      else if (out.appliedCount === 0) toast.error('Nada aplicado (itens sem mudança ou inválidos).');
       load();
     } finally { setSaving(false); }
+  };
+  const applySuggested = async () => {
+    const chosen = withCost.filter((it) => selected.has(it.productId) && Math.abs(it.suggestedPrice - it.currentPrice) >= 0.01);
+    if (chosen.length === 0) { toast.error('Nenhum produto selecionado com sugestão diferente do preço atual.'); return; }
+    if (!window.confirm(`Aplicar o preço sugerido em ${chosen.length} ${chosen.length === 1 ? 'produto' : 'produtos'}? Isso muda o preço no catálogo — os pedidos abertos não são refeitos.`)) return;
+    await doApply(chosen);
+  };
+  const retryFailed = async () => {
+    const failedIds = new Set((applyResult?.failed || []).map((f: any) => f.productId));
+    const chosen = withCost.filter((it) => failedIds.has(it.productId) && Math.abs(it.suggestedPrice - it.currentPrice) >= 0.01);
+    if (chosen.length === 0) { toast.error('Nada para tentar de novo.'); return; }
+    await doApply(chosen);
   };
 
   const nLoss = items.filter((it) => it.riskLevel === 'loss').length;
@@ -1382,6 +1403,23 @@ function PricingTab() {
               </tbody>
             </table>
           </div>
+
+          {applyResult && (() => {
+            const reasons: Record<string, string> = { unchanged: 'sem mudança', not_found: 'não encontrado', invalid_price: 'preço inválido', missing_id: 'sem identificação' };
+            const byReason = (applyResult.skipped || []).reduce((m: Record<string, number>, s: any) => { m[s.reason] = (m[s.reason] || 0) + 1; return m; }, {});
+            const skipText = Object.entries(byReason).map(([r, n]) => `${n} ${reasons[r] || r}`).join(' · ');
+            const hasFailed = (applyResult.failedCount || 0) > 0;
+            return (
+              <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-[12px] ${hasFailed ? 'border-red-500/30 bg-red-500/5 text-red-200' : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'}`}>
+                {hasFailed ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
+                <span className="flex-1">
+                  <strong>{applyResult.appliedCount}</strong> aplicado(s){applyResult.skippedCount ? ` · ${skipText} (não repetir)` : ''}{hasFailed ? ` · ${applyResult.failedCount} falharam por erro temporário` : ''}.
+                </span>
+                {hasFailed && <button onClick={retryFailed} disabled={saving} className="inline-flex items-center gap-1 rounded-md border border-current/30 px-2 py-0.5 hover:bg-white/5 disabled:opacity-50"><RefreshCw className="w-3.5 h-3.5" /> Tentar de novo ({applyResult.failedCount})</button>}
+                <button onClick={() => setApplyResult(null)} className="text-current/70 hover:text-current"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            );
+          })()}
 
           <div className="mt-3 flex items-center justify-between">
             <p className="text-[11px] text-zinc-500">

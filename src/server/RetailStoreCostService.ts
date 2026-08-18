@@ -461,36 +461,46 @@ export class RetailStoreCostService {
     const out = new Map<string, StoreCmvBreakdown>();
     try {
       const where = storeId ? "AND st.id = ?" : "";
-      const args: any[] = storeId ? [orgId, period, storeId] : [orgId, period];
+      // PERF-004 (escala): os itens RESOLVIDOS agregam pela coluna (índice); o
+      // prefixo LIKE roda SÓ no subconjunto NÃO resolvido (filtrado ANTES do
+      // join, via idx_pdv_items_unresolved) — nunca varre o catálogo por linha.
+      // O UNION ALL separa os dois mundos pra o planner não aplicar o LIKE ao
+      // histórico inteiro (era O(itens × produtos) e travava a tela).
+      const args: any[] = storeId ? [orgId, period, orgId, period, storeId] : [orgId, period, orgId, period];
       const rows = db
         .prepare(
           `SELECT st.id AS store_id,
-             SUM(i.quantidade * COALESCE(inv.avg_cost, 0)) AS cogs,
-             SUM(CASE WHEN inv.avg_cost > 0 THEN i.valor ELSE 0 END) AS revenue_covered,
-             SUM(i.valor) AS revenue_total
-           FROM retail_pdv_sale_items i
+             SUM(x.quantidade * COALESCE(inv.avg_cost, 0)) AS cogs,
+             SUM(CASE WHEN inv.avg_cost > 0 THEN x.valor ELSE 0 END) AS revenue_covered,
+             SUM(x.valor) AS revenue_total
+           FROM (
+             SELECT i.organization_id, i.filial, i.quantidade, i.valor,
+                    i.product_service_id AS psid, i.variant_id AS vid
+               FROM retail_pdv_sale_items i
+              WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
+                AND i.catalog_resolved_at IS NOT NULL
+             UNION ALL
+             SELECT i.organization_id, i.filial, i.quantidade, i.valor,
+                    COALESCE(fpv.product_service_id, fps2.id) AS psid, fpv.id AS vid
+               FROM retail_pdv_sale_items i
+               LEFT JOIN product_variants fpv
+                 ON fpv.organization_id = i.organization_id
+                AND (fpv.external_ref = i.produto OR fpv.sku = i.produto)
+               LEFT JOIN products_services fps2
+                 ON fps2.organization_id = i.organization_id
+                AND (fps2.external_ref = i.produto OR i.produto LIKE fps2.external_ref || '%')
+              WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
+                AND i.catalog_resolved_at IS NULL
+           ) x
            JOIN retail_stores st
-             ON st.organization_id = i.organization_id
-            AND st.code = i.filial
+             ON st.organization_id = x.organization_id
+            AND st.code = x.filial
             AND st.active = 1
-           -- Fallback (PERF-004): SÓ para itens não resolvidos — tolera EAN 13/12
-           -- e código do ERP como antes; para os resolvidos, essas junções ficam
-           -- inertes (predicado catalog_resolved_at IS NULL) e usamos as colunas.
-           LEFT JOIN product_variants fpv
-             ON i.catalog_resolved_at IS NULL
-            AND fpv.organization_id = i.organization_id
-            AND (fpv.external_ref = i.produto OR fpv.sku = i.produto)
-           LEFT JOIN products_services fps2
-             ON i.catalog_resolved_at IS NULL
-            AND fps2.organization_id = i.organization_id
-            AND (fps2.external_ref = i.produto OR i.produto LIKE fps2.external_ref || '%')
            LEFT JOIN inventory_items inv
-             ON inv.organization_id = i.organization_id
-            AND inv.product_service_id = COALESCE(i.product_service_id, fpv.product_service_id, fps2.id)
-            AND (inv.variant_id = COALESCE(i.variant_id, fpv.id) OR inv.variant_id IS NULL)
-          WHERE i.organization_id = ?
-            AND substr(i.sale_date, 1, 7) = ?
-            ${where}
+             ON inv.organization_id = x.organization_id
+            AND inv.product_service_id = x.psid
+            AND (inv.variant_id = x.vid OR inv.variant_id IS NULL)
+          WHERE 1 = 1 ${where}
           GROUP BY st.id`
         )
         .all(...args) as any[];

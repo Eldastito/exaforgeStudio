@@ -77,6 +77,7 @@
     "test:platform-alerts": "tsx scripts/test-platform-alerts.ts",
     "test:capacity-envelope": "tsx scripts/test-capacity-envelope.ts",
     "loadtest:capacity": "tsx scripts/loadtest-capacity.ts",
+    "loadtest:retail-analytics": "tsx scripts/loadtest-retail-analytics.ts",
     "test:platform-hardening": "tsx scripts/test-platform-hardening.ts",
     "test:outcome-assurance": "tsx scripts/test-outcome-assurance.ts",
     "test:process-outcome-contract": "tsx scripts/test-process-outcome-contract.ts",

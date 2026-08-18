@@ -691,28 +691,37 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
     // produto pai), e o próprio código do ERP (13 díg.) — pra bater etiqueta
     // no caixa/estoque quando o dono suspeitar que "esse mais-vendido não é
     // o produto certo".
-    // PERF-001/004: itens já resolvidos casam pelos ids persistidos
-    // (`variant_id`/`product_service_id`, junções `rpv`/`rprod`, por índice);
-    // o prefixo LIKE (junções `pv`/`ps`/`pp`/`p2`) roda SÓ para os itens ainda
-    // não resolvidos (`catalog_resolved_at IS NULL`) — nunca pro histórico todo.
+    // PERF-002/004 (escala): agrega PRIMEIRO por `produto` (colapsa milhares de
+    // itens em poucos códigos distintos) e SÓ ENTÃO resolve o nome — assim o
+    // prefixo LIKE roda no máximo uma vez por código, nunca por item. Itens já
+    // resolvidos (4A) casam pelos ids persistidos (`rprod`/`rpv`, por índice); o
+    // prefixo (`pv`/`ps`/`pp`/`p2`) só toca os códigos ainda não resolvidos.
+    args.push(orgId, orgId, orgId, orgId, orgId); // um orgId por junção de catálogo
     const rows = db.prepare(
-      `SELECT i.produto,
+      `SELECT g.produto,
               COALESCE(rpv.name, rprod.name, pv.name, ps.name, p2.name) AS nome_variante,
               COALESCE(rprod.name, pp.name, p2.name) AS nome_produto,
               COALESCE(rpv.sku, pv.sku) AS sku,
               COALESCE(rprod.ean, pp.ean, ps.ean, p2.ean) AS ean_produto,
               COALESCE(rpv.external_ref, pv.external_ref) AS ean_variante,
-              SUM(i.quantidade) AS pecas, SUM(i.valor) AS valor, COUNT(*) AS linhas
-         FROM retail_pdv_sale_items i
-         LEFT JOIN product_variants rpv ON i.catalog_resolved_at IS NOT NULL AND rpv.organization_id = i.organization_id AND rpv.id = i.variant_id
-         LEFT JOIN products_services rprod ON i.catalog_resolved_at IS NOT NULL AND rprod.organization_id = i.organization_id AND rprod.id = i.product_service_id
-         LEFT JOIN product_variants pv ON i.catalog_resolved_at IS NULL AND pv.organization_id = i.organization_id AND (pv.external_ref = i.produto OR pv.sku = i.produto)
+              g.pecas AS pecas, g.valor AS valor
+         FROM (
+           SELECT i.produto,
+                  MAX(i.product_service_id) AS psid,
+                  MAX(i.variant_id) AS vid,
+                  MAX(i.catalog_resolved_at) AS resolved_at,
+                  SUM(i.quantidade) AS pecas, SUM(i.valor) AS valor
+             FROM retail_pdv_sale_items i
+            WHERE i.organization_id = ? AND i.sale_date BETWEEN ? AND ? AND COALESCE(i.produto,'') <> '' ${filialClause}
+            GROUP BY i.produto
+         ) g
+         LEFT JOIN product_variants rpv ON g.resolved_at IS NOT NULL AND rpv.organization_id = ? AND rpv.id = g.vid
+         LEFT JOIN products_services rprod ON g.resolved_at IS NOT NULL AND rprod.organization_id = ? AND rprod.id = g.psid
+         LEFT JOIN product_variants pv ON g.resolved_at IS NULL AND pv.organization_id = ? AND (pv.external_ref = g.produto OR pv.sku = g.produto)
          LEFT JOIN products_services pp ON pp.id = pv.product_service_id
-         LEFT JOIN products_services ps ON i.catalog_resolved_at IS NULL AND ps.organization_id = i.organization_id AND ps.external_ref = i.produto
-         LEFT JOIN products_services p2 ON i.catalog_resolved_at IS NULL AND p2.organization_id = i.organization_id AND i.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
-        WHERE i.organization_id = ? AND i.sale_date BETWEEN ? AND ? AND COALESCE(i.produto,'') <> '' ${filialClause}
-        GROUP BY i.produto
-        ORDER BY pecas DESC, valor DESC
+         LEFT JOIN products_services ps ON g.resolved_at IS NULL AND ps.organization_id = ? AND ps.external_ref = g.produto
+         LEFT JOIN products_services p2 ON g.resolved_at IS NULL AND p2.organization_id = ? AND g.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
+        ORDER BY g.pecas DESC, g.valor DESC
         LIMIT 100`
     ).all(...args) as any[];
     // Detecção de "sem match no catálogo": não achou variante nem produto —

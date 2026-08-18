@@ -56,8 +56,118 @@ import { GlobalSearch } from '@/src/features/GlobalSearch';
 import { ErrorBoundary } from '@/src/features/ErrorBoundary';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useStore } from '@/src/store/useStore';
-import { Bell, X, Menu } from 'lucide-react';
+import { Bell, X, Menu, Wifi, WifiOff, Radio, RefreshCw, Server, Activity } from 'lucide-react';
 import io from 'socket.io-client';
+import { apiFetch } from '@/src/lib/api';
+
+// ============================================================================
+// PDR TOULON, Fatia 5 (CONN-001/002/003/004) — estados de conectividade HONESTOS.
+// O chip "Instável" antigo confundia queda do Socket.IO (só o TEMPO REAL) com
+// API/servidor pesado, fazendo o usuário achar que "a plataforma caiu". Agora
+// separamos quatro estados e cada um tem texto e ação próprios.
+// ============================================================================
+type Connectivity = 'online' | 'realtime_degraded' | 'api_degraded' | 'offline';
+type ApiState = 'ok' | 'slow' | 'down' | 'unknown';
+type ProbeInfo = { state: ApiState; latencyMs: number | null; dbMs: number | null; lastOkAt: number | null };
+
+const API_SLOW_MS = 2500; // round-trip do probe acima disso = API degradada (latência alta)
+
+// Deriva o estado a partir de DOIS sinais independentes: a saúde da API (probe
+// autenticado /api/health/ping, CONN-003) e o tempo real (Socket.IO). Sem rede
+// no navegador vence tudo (offline).
+function deriveConnectivity(online: boolean, socketUp: boolean, api: ApiState): Connectivity {
+  if (!online) return 'offline';
+  if (api === 'down') return 'api_degraded';   // navegador online mas a API não responde
+  if (api === 'slow') return 'api_degraded';   // latência alta (CONN-001)
+  if (!socketUp) return 'realtime_degraded';   // API saudável, só o tempo real reconectando
+  return 'online';
+}
+
+// CONN-002: texto HONESTO por estado — nunca só "Instável".
+const CONNECTIVITY_META: Record<Connectivity, { label: string; text: string; dot: string; cls: string }> = {
+  online: { label: 'Online', text: 'Tudo normal — API e tempo real conectados.', dot: 'bg-emerald-400', cls: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' },
+  realtime_degraded: { label: 'Tempo real reconectando', text: 'Tempo real reconectando — consultas e salvamentos continuam disponíveis.', dot: 'bg-amber-400 animate-pulse', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+  api_degraded: { label: 'Servidor instável', text: 'A API está lenta ou com falhas. Consultas podem demorar; salvamentos podem exigir nova tentativa.', dot: 'bg-orange-400 animate-pulse', cls: 'text-orange-300 bg-orange-500/10 border-orange-500/30' },
+  offline: { label: 'Offline', text: 'Sem conexão com a internet. As ações ficam pendentes até a rede voltar.', dot: 'bg-red-400', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
+};
+
+// Probe LEVE e autenticado (CONN-003): mede a latência de round-trip pra separar
+// API saudável × lenta × caindo. Teto de 8 s pra não pendurar.
+async function probeApi(): Promise<ProbeInfo> {
+  const start = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 8000);
+    const r = await apiFetch('/api/health/ping', { signal: ctrl.signal });
+    clearTimeout(to);
+    const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);
+    if (!r.ok) return { state: 'down', latencyMs, dbMs: null, lastOkAt: null };
+    const d = await r.json().catch(() => ({} as any));
+    const state: ApiState = latencyMs > API_SLOW_MS ? 'slow' : 'ok';
+    return { state, latencyMs, dbMs: typeof d?.dbMs === 'number' ? d.dbMs : null, lastOkAt: Date.now() };
+  } catch {
+    return { state: 'down', latencyMs: null, dbMs: null, lastOkAt: null };
+  }
+}
+
+const fmtTime = (ms: number | null | undefined) =>
+  ms ? new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+
+// CONN-004: diagnóstico expandido ao clicar no chip. Mostra os sinais que
+// permitem ao usuário (ou ao suporte) entender O QUE está degradado sem chutar.
+function ConnectivityDiagnostic({ connectivity, online, socketUp, probe, onRetry, onClose }: {
+  connectivity: Connectivity; online: boolean; socketUp: boolean; probe: ProbeInfo;
+  onRetry: () => void; onClose: () => void;
+}) {
+  const [alterdata, setAlterdata] = useState<{ loading: boolean; lastRun: number | null; found: boolean }>({ loading: true, lastRun: null, found: false });
+  const [pending, setPending] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    // Alterdata: última sincronização (best-effort — só faz sentido no varejo).
+    apiFetch('/api/integrations/alterdata/last-sync').then(r => r.ok ? r.json() : null).then(d => {
+      if (!alive) return;
+      const ranAt = d?.summary?.ranAt;
+      const ts = ranAt ? Date.parse(ranAt) : NaN;
+      setAlterdata({ loading: false, lastRun: Number.isFinite(ts) ? ts : null, found: !!d?.summary });
+    }).catch(() => { if (alive) setAlterdata({ loading: false, lastRun: null, found: false }); });
+    // Fila de comandos pendentes no outbox durável (ADR-082).
+    import('@/src/lib/continuity/sync').then(({ getOutbox }) => getOutbox().pending())
+      .then(list => { if (alive) setPending(Array.isArray(list) ? list.length : 0); })
+      .catch(() => { if (alive) setPending(null); });
+    return () => { alive = false; };
+  }, []);
+
+  const Row = ({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone?: string }) => (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="inline-flex items-center gap-1.5 text-zinc-400">{icon}{label}</span>
+      <span className={`text-right ${tone || 'text-zinc-200'}`}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="absolute right-0 top-full mt-2 w-72 z-50 rounded-xl border border-zinc-700 bg-zinc-900 shadow-xl p-3 text-[12px]">
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-medium text-zinc-100">Diagnóstico de conexão</span>
+        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-3.5 h-3.5" /></button>
+      </div>
+      <p className="mb-2 text-zinc-400">{CONNECTIVITY_META[connectivity].text}</p>
+      <div className="divide-y divide-zinc-800">
+        <Row icon={online ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />} label="Internet" value={online ? 'Conectada' : 'Sem rede'} tone={online ? 'text-emerald-300' : 'text-red-300'} />
+        <Row icon={<Server className="w-3.5 h-3.5" />} label="API"
+          value={probe.state === 'ok' ? `Online · ${probe.latencyMs ?? '—'} ms` : probe.state === 'slow' ? `Lenta · ${probe.latencyMs ?? '—'} ms` : probe.state === 'down' ? 'Sem resposta' : 'Verificando…'}
+          tone={probe.state === 'ok' ? 'text-emerald-300' : probe.state === 'down' ? 'text-red-300' : 'text-amber-300'} />
+        <Row icon={<Activity className="w-3.5 h-3.5" />} label="Último sucesso da API" value={fmtTime(probe.lastOkAt)} />
+        <Row icon={<Radio className="w-3.5 h-3.5" />} label="Tempo real" value={socketUp ? 'Conectado' : 'Reconectando'} tone={socketUp ? 'text-emerald-300' : 'text-amber-300'} />
+        <Row icon={<RefreshCw className="w-3.5 h-3.5" />} label="Última sync Alterdata" value={alterdata.loading ? '…' : alterdata.lastRun ? fmtTime(alterdata.lastRun) : (alterdata.found ? 'Nunca' : '—')} />
+        <Row icon={<Server className="w-3.5 h-3.5" />} label="Comandos pendentes" value={pending == null ? '—' : String(pending)} tone={pending && pending > 0 ? 'text-amber-300' : 'text-zinc-200'} />
+      </div>
+      <button onClick={onRetry} className="mt-2 w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-800">
+        <RefreshCw className="w-3.5 h-3.5" /> Testar agora
+      </button>
+    </div>
+  );
+}
 
 export default function App() {
   const { receiveMessage, viewMode, updateStageByContactId, hydrate, setSidebarOpen, activeTicketId, loadOrgConfig, loadPermissions, isModuleEnabled, canAccessModule, setViewMode, enabledModules } = useStore();
@@ -77,19 +187,42 @@ export default function App() {
   // silêncio (o LoginView só roda pra deslogados) e o usuário ficaria sem
   // saber pra onde ir.
   const [soloConflict, setSoloConflict] = useState<string | null>(null);
-  // Continuity Layer (ADR-082, Fase 0): estado de conectividade real do cliente.
-  // 'online' (rede + socket ok), 'unstable' (rede ok, socket caiu), 'offline'.
-  const [connectivity, setConnectivity] = useState<'online' | 'unstable' | 'offline'>(
-    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'online'
-  );
+  // Conectividade (ADR-082 Fase 0 + PDR TOULON Fatia 5): derivada de DOIS sinais
+  // independentes — rede do navegador, saúde da API (probe /api/health/ping) e
+  // tempo real (Socket.IO) — pra distinguir "só o tempo real caiu" de "API/
+  // servidor com problema" (CONN-001). Nunca mais um "Instável" genérico.
+  const [online, setOnline] = useState(typeof navigator === 'undefined' || navigator.onLine !== false);
+  const [socketUp, setSocketUp] = useState(true);
+  const [probe, setProbe] = useState<ProbeInfo>({ state: 'unknown', latencyMs: null, dbMs: null, lastOkAt: null });
+  const [showDiag, setShowDiag] = useState(false);
+  const connectivity = deriveConnectivity(online, socketUp, probe.state);
 
   useEffect(() => {
-    const onOnline = () => setConnectivity(c => (c === 'offline' ? 'unstable' : c));
-    const onOffline = () => setConnectivity('offline');
+    const onOnline = () => setOnline(true);
+    const onOffline = () => setOnline(false);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
+
+  // Probe de saúde da API (CONN-003): confirma se a API está saudável mesmo com o
+  // Socket.IO caído. Definido aqui; o polling (que depende de `authed`) roda mais
+  // abaixo, depois que `authed` existe.
+  const runProbe = React.useCallback(async () => {
+    const info = await probeApi();
+    setProbe(prev => ({ ...info, lastOkAt: info.lastOkAt ?? prev.lastOkAt }));
+  }, []);
+  // Polling do probe: a cada 30 s normalmente; a cada 8 s quando o tempo real
+  // está caído, pra classificar rápido (realtime_degraded × api_degraded).
+  // Roda imediatamente ao montar e sempre que `socketUp` muda.
+  useEffect(() => {
+    if (!authed) return;
+    let cancelled = false;
+    const tick = async () => { if (!cancelled) await runProbe(); };
+    tick();
+    const id = setInterval(tick, socketUp ? 30000 : 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [authed, socketUp, runProbe]);
 
   // Outbox durável (ADR-082, Fase 1b): reenvia comandos enfileirados offline e
   // reflete o resultado no balão da mensagem (id do comando = id local da msg).
@@ -186,7 +319,7 @@ export default function App() {
       devLog("Conectado ao servidor via WebSocket", socket.id);
       // O servidor decide a organização a partir do token; não enviamos o id.
       socket.emit("join_org");
-      setConnectivity('online');
+      setSocketUp(true); // só o TEMPO REAL — a saúde da API vem do probe
       // ADR-082 (Fase 0): ao RECONECTAR, re-hidrata para recuperar tickets/
       // mensagens que chegaram durante a queda (antes, só entrava na sala e os
       // eventos perdidos ficavam faltando até um refresh manual). Paliativo até
@@ -194,8 +327,9 @@ export default function App() {
       if (hadDisconnect) { hadDisconnect = false; hydrate(); }
     });
 
-    socket.on("disconnect", () => { hadDisconnect = true; setConnectivity(c => (c === 'offline' ? 'offline' : 'unstable')); });
-    socket.on("connect_error", () => setConnectivity(c => (c === 'offline' ? 'offline' : 'unstable')));
+    // Queda do Socket.IO afeta APENAS o tempo real — a API REST segue via probe.
+    socket.on("disconnect", () => { hadDisconnect = true; setSocketUp(false); });
+    socket.on("connect_error", () => setSocketUp(false));
 
     socket.on("new_message", (data: { contactId: string, contactName?: string, contactNumber?: string, contactAvatar?: string, provider: string, text: string, sender: string, mediaUrl?: string }) => {
       devLog("Recebido novo evento via WebSocket:", data);
@@ -382,17 +516,22 @@ export default function App() {
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
               {connectivity !== 'online' && (
-                <span
-                  title={connectivity === 'offline' ? 'Sem conexão com a internet' : 'Conexão instável — reconectando'}
-                  className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${
-                    connectivity === 'offline'
-                      ? 'text-red-300 bg-red-500/10 border-red-500/30'
-                      : 'text-amber-300 bg-amber-500/10 border-amber-500/30'
-                  }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${connectivity === 'offline' ? 'bg-red-400' : 'bg-amber-400 animate-pulse'}`}></span>
-                  {connectivity === 'offline' ? 'Offline' : 'Instável'}
-                </span>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowDiag(v => !v)}
+                    title={CONNECTIVITY_META[connectivity].text}
+                    className={`hidden sm:inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border hover:brightness-110 ${CONNECTIVITY_META[connectivity].cls}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${CONNECTIVITY_META[connectivity].dot}`}></span>
+                    {CONNECTIVITY_META[connectivity].label}
+                  </button>
+                  {showDiag && (
+                    <ConnectivityDiagnostic
+                      connectivity={connectivity} online={online} socketUp={socketUp} probe={probe}
+                      onRetry={runProbe} onClose={() => setShowDiag(false)}
+                    />
+                  )}
+                </div>
               )}
               <GlobalSearch />
               <button

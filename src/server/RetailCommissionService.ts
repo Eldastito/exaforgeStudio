@@ -132,21 +132,22 @@ export class RetailCommissionService {
    * para conferir divergência contra a nossa apuração. `source` lista as fontes
    * que contribuíram (ex.: zappflow+manual, erp, manual+erp).
    */
-  static combinedSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; erpCommission: number; source: string }> {
+  static combinedSalesBySeller(orgId: string, start: string, end: string): Array<{ sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; erpCommission: number; source: string; pendingIdentity: boolean }> {
     const norm = (name: string) => String(name || "").trim().toLowerCase();
-    const map = new Map<string, { sellerUserId: string | null; sellerName: string; sales: number; pecas: number; orders: number; erpCommission: number; sources: Set<string> }>();
+    const map = new Map<string, { sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; erpCommission: number; sources: Set<string> }>();
     // name normalizado → chave, p/ reconciliar lançamentos manuais/ERP (que
     // trazem só o nome) com o vendedor do ZappFlow (que tem userId) de mesmo nome.
     const nameToKey = new Map<string, string>();
-    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string, erpCommission = 0) => {
+    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string, erpCommission = 0, matricula: string | null = null) => {
       const n = norm(name);
       const k = (userId && `user:${userId}`) || nameToKey.get(n) || `nom:${n}`;
-      const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, sales: 0, pecas: 0, orders: 0, erpCommission: 0, sources: new Set<string>() };
+      const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, matricula: null, sales: 0, pecas: 0, orders: 0, erpCommission: 0, sources: new Set<string>() };
       cur.sales = round2(cur.sales + (Number(sales) || 0));
       cur.pecas += Number(pecas) || 0;
       cur.orders += Number(orders) || 0;
       cur.erpCommission = round2(cur.erpCommission + (Number(erpCommission) || 0));
       if (userId && !cur.sellerUserId) cur.sellerUserId = userId;
+      if (matricula && !cur.matricula) cur.matricula = matricula;
       cur.sources.add(source);
       map.set(k, cur);
       if (n && !nameToKey.has(n)) nameToKey.set(n, k);
@@ -158,9 +159,16 @@ export class RetailCommissionService {
     // PDV físico por VENDEDOR (VendaMalote → CAI_USUARIO/`vendedor_codigo`): é a
     // base real da comissão por vendedor da rede. Entra por último; casa por
     // userId/nome com as demais fontes quando for a mesma pessoa.
-    for (const s of this.pdvSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "pdv");
+    for (const s of this.pdvSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "pdv", 0, s.matricula);
     return Array.from(map.values())
-      .map((v) => ({ sellerUserId: v.sellerUserId, sellerName: v.sellerName, sales: v.sales, pecas: v.pecas, orders: v.orders, erpCommission: v.erpCommission, source: Array.from(v.sources).sort().join("+") }))
+      .map((v) => ({
+        sellerUserId: v.sellerUserId, sellerName: v.sellerName, matricula: v.matricula,
+        sales: v.sales, pecas: v.pecas, orders: v.orders, erpCommission: v.erpCommission,
+        source: Array.from(v.sources).sort().join("+"),
+        // SELL-007: matrícula sem nome (e sem usuário ZappFlow) = pendência
+        // acionável — não é resultado final silencioso.
+        pendingIdentity: !v.sellerUserId && /^Matrícula\s/.test(String(v.sellerName || "")),
+      }))
       .sort((a, b) => b.sales - a.sales);
   }
 
@@ -237,6 +245,9 @@ export class RetailCommissionService {
     return {
       period: { start, end },
       bySeller, byProduct, byStore, globalCommission,
+      // SELL-007: quantos vendedores estão como "Matrícula X" (identidade
+      // pendente) — o gestor resolve antes de confiar na apuração.
+      pendingIdentityCount: bySeller.filter((s: any) => s.pendingIdentity).length,
       totals: { sellerCommission, productCommission, storeCommission, totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },
       hasRules: { seller: sellerRules.length > 0, product: productRules.length > 0, store: storeRules.length > 0, global: globalRules.length > 0 },
       // "store_fallback_mixed": há lojas com % PRÓPRIO diferente da rede — não dá

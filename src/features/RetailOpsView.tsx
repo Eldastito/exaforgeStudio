@@ -914,6 +914,52 @@ function PricingHelpModal({ onClose }: { onClose: () => void }) {
 // margem bruta) direto na aba Precificar, sem abrir o cadastro da loja.
 // Reusa as MESMAS categorias (`STORE_COST_CATEGORIES`, `STORE_VARIABLE_COST_CATEGORIES`)
 // e endpoints do StoreFormModal — nada duplicado no cliente nem no servidor.
+// POS-002 (Fatia 3): configura a tarifa detalhada crédito/débito da loja.
+function PosFeesConfig({ storeId }: { storeId: string }) {
+  const [open, setOpen] = useState(false);
+  const [credit, setCredit] = useState({ percent: '', fixed: '' });
+  const [debit, setDebit] = useState({ percent: '', fixed: '' });
+  const [has, setHas] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const load = () => { if (!storeId) return; apiFetch(`/api/retailops/stores/${storeId}/pos-fees`).then(r => r.ok ? r.json() : null).then(d => { if (!d) return; setHas(!!d.hasDetailed); setCredit({ percent: d.credit?.percent ? String(d.credit.percent) : '', fixed: d.credit?.fixedPerTransaction ? String(d.credit.fixedPerTransaction) : '' }); setDebit({ percent: d.debit?.percent ? String(d.debit.percent) : '', fixed: d.debit?.fixedPerTransaction ? String(d.debit.fixedPerTransaction) : '' }); }).catch(() => {}); };
+  useEffect(() => { if (open && storeId) load(); /* eslint-disable-next-line */ }, [open, storeId]);
+  const num = (s: string) => Number(String(s || '').replace(',', '.')) || 0;
+  const save = async () => {
+    setSaving(true);
+    try {
+      const body: any = {};
+      body.credit = (credit.percent || credit.fixed) ? { percent: num(credit.percent), fixedPerTransaction: num(credit.fixed) } : null;
+      body.debit = (debit.percent || debit.fixed) ? { percent: num(debit.percent), fixedPerTransaction: num(debit.fixed) } : null;
+      const r = await apiFetch(`/api/retailops/stores/${storeId}/pos-fees`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success('Tarifas do POS salvas.'); load();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  const row = (label: string, v: { percent: string; fixed: string }, set: (x: any) => void) => (
+    <div className="grid grid-cols-[1fr_auto_auto] items-center gap-1">
+      <span className="text-[10px] text-zinc-500">{label}</span>
+      <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-16"><input inputMode="decimal" value={v.percent} onChange={e => set({ ...v, percent: e.target.value })} placeholder="0" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" /><span className="text-[10px] text-zinc-600">%</span></div>
+      <div className="flex items-center rounded bg-zinc-950 border border-zinc-800 px-1.5 w-20"><span className="text-[10px] text-zinc-600">R$</span><input inputMode="decimal" value={v.fixed} onChange={e => set({ ...v, fixed: e.target.value })} placeholder="0,00" className="w-full bg-transparent px-0.5 py-1 text-xs text-right text-zinc-100 outline-none" /></div>
+    </div>
+  );
+  return (
+    <div className="mt-2 border-t border-zinc-800/60 pt-2">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-1.5 text-[10px] uppercase tracking-wide text-zinc-400 hover:text-zinc-200">
+        <CreditCard className="w-3 h-3" /> Tarifas do POS (crédito/débito) {has && <span className="rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1 text-[9px] normal-case">detalhado</span>}
+        {open ? <ChevronDown className="w-3 h-3 ml-auto" /> : <ChevronRight className="w-3 h-3 ml-auto" />}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1.5">
+          {row('Crédito', credit, setCredit)}
+          {row('Débito', debit, setDebit)}
+          <p className="text-[9px] text-zinc-600">Quando preenchidas, substituem a “Taxa de cartão” agregada no custo esperado do fechamento — nunca somam as duas. Deixe em branco para voltar à agregada.</p>
+          <button onClick={save} disabled={saving} className="rounded border border-indigo-500/30 px-2 py-0.5 text-[11px] text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar tarifas'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState<string>('');
@@ -1062,6 +1108,9 @@ function StoreCostsInlinePanel({ open, onToggle }: { open: boolean; onToggle: ()
                 </div>
               ))}
             </div>
+            {/* POS-002 (Fatia 3): tarifas detalhadas crédito/débito (substituem a
+                taxa agregada acima no custo esperado — nunca somam) */}
+            <PosFeesConfig storeId={storeId} />
           </div>
           {/* Margem + resumo */}
           <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
@@ -2031,6 +2080,30 @@ function AddBrandRow({ onAdd }: { onAdd: (name: string) => void | Promise<void> 
 // malote e conferência com o resumo do POS. Foto da folha pré-preenche (IA).
 type RankRow = { sellerName: string; valor: string; at: string; pecas: string };
 type DespesaRow = { descricao: string; valor: string };
+// POS-003/004 (Fatia 3): custo esperado das tarifas do POS a partir do resumo.
+// Usa a regra detalhada (crédito/débito) quando existe, senão a taxa agregada.
+function PosExpectedCost({ storeId, creditValue, creditQty, debitValue, debitQty }: { storeId: string; creditValue: number; creditQty: number; debitValue: number; debitQty: number }) {
+  const [exp, setExp] = useState<any>(null);
+  useEffect(() => {
+    if (!storeId || (creditValue <= 0 && debitValue <= 0)) { setExp(null); return; }
+    const t = setTimeout(() => {
+      const qs = `creditValue=${creditValue}&creditQty=${creditQty}&debitValue=${debitValue}&debitQty=${debitQty}`;
+      apiFetch(`/api/retailops/stores/${storeId}/pos-fees/expected?${qs}`).then(r => r.ok ? r.json() : null).then(setExp).catch(() => setExp(null));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [storeId, creditValue, creditQty, debitValue, debitQty]);
+  if (!exp || exp.basis === 'none') return null;
+  return (
+    <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-300">
+      <span className="text-zinc-500">Custo esperado das tarifas:</span> <strong className="text-amber-300">{brl(exp.total)}</strong>
+      {exp.basis === 'detailed'
+        ? <span className="text-zinc-500"> · crédito {brl(exp.credit?.cost || 0)} ({exp.credit?.percent || 0}% + {brl(exp.credit?.fixed || 0)}/transação) · débito {brl(exp.debit?.cost || 0)} ({exp.debit?.percent || 0}% + {brl(exp.debit?.fixed || 0)}/transação)</span>
+        : <span className="text-zinc-500"> · taxa de cartão agregada ({exp.legacy?.percent || 0}% + {brl(exp.legacy?.fixedPerSale || 0)}/venda) — configure crédito/débito nas tarifas da loja para separar</span>}
+      {exp.note && <span className="block mt-0.5 text-amber-300/70">{exp.note}</span>}
+    </div>
+  );
+}
+
 function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () => void; onSaved: () => void }) {
   const date = closing.closing_date;
   const storeId = closing.store_id;
@@ -2292,6 +2365,8 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                 : `Diferença vs POS — crédito ${brl(posGapCred || 0)} · débito ${brl(posGapDeb || 0)}. Confira antes de salvar.`}
             </p>
           )}
+          {/* POS-003/004: custo esperado das tarifas (regra detalhada > legada) */}
+          <PosExpectedCost storeId={storeId} creditValue={n(posCred)} creditQty={n(posCredQtd)} debitValue={n(posDeb)} debitQty={n(posDebQtd)} />
         </div>
 
         {/* Ranking por vendedor (alimenta a comissão na aprovação) */}

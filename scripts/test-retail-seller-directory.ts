@@ -68,9 +68,11 @@ async function main() {
   const dBR = Dir.discoverByStore(A, barra);
   check("descoberta BR: código único + volume alto = suspeito compartilhado", dBR.sharedCodeSuspects.some((c: any) => c.codigo === "9999") && dBR.pendingName.length === 0 && dBR.confirmed.length === 0);
 
-  // ===== 3. cobertura =====
+  // ===== 3. cobertura + flag de uso de lotação =====
   const cov = Dir.coverage(A, avBrasil);
   check("cobertura AV: lotados=1, pendências=1", cov.counts.lotados === 1 && cov.counts.pendingName === 1);
+  check("orgUsesAssignments true quando há lotação", cov.orgUsesAssignments === true);
+  check("org B (sem lotação) → orgUsesAssignments false", Dir.orgUsesAssignments(B) === false);
 
   // ===== 4. isolamento =====
   let iso = false;

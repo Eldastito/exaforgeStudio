@@ -134,6 +134,9 @@ export class RetailSellerDirectoryService {
       lotados: roster,
       pendingName: discovery.pendingName,
       sharedCodeSuspects: discovery.sharedCodeSuspects,
+      // SELL-006: a org já usa lotação? (se não, a escala cai no comportamento
+      // legado de listar todos os vendedores mapeados — 0-regressão).
+      orgUsesAssignments: this.orgUsesAssignments(orgId),
       counts: {
         lotados: roster.length,
         pendingName: discovery.pendingName.length,
@@ -141,6 +144,12 @@ export class RetailSellerDirectoryService {
         confirmedInErp: discovery.confirmed.length,
       },
     };
+  }
+
+  /** A org tem QUALQUER lotação ativa cadastrada? (decide o fallback da escala.) */
+  static orgUsesAssignments(orgId: string): boolean {
+    const r = db.prepare(`SELECT 1 FROM retail_seller_store_assignments WHERE organization_id = ? AND active = 1 LIMIT 1`).get(orgId);
+    return !!r;
   }
 }
 

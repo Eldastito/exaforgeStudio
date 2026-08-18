@@ -117,12 +117,16 @@ function policyReady(orgId: string, list: ReadonlyArray<{ domain: string; action
 }
 
 export class RuntimePilotService {
-  /** Busca orgs candidatas por substring do nome (dono usa pra achar sem chutar id). */
+  /** Busca orgs candidatas por substring do NOME ou do ID (dono usa pra achar
+   *  sem chutar o id; casa também pelo organization_id caso ele cole o id). */
   static findOrgs(term: string): Array<{ orgId: string; name: string; vertical: string | null; status: string }> {
+    const like = `%${String(term || "").toLowerCase()}%`;
     return (db.prepare(
       `SELECT organization_id, business_name, vertical, status FROM organization_settings
-        WHERE deleted_at IS NULL AND LOWER(COALESCE(business_name, '')) LIKE ? ORDER BY business_name LIMIT 20`,
-    ).all(`%${String(term || "").toLowerCase()}%`) as any[])
+        WHERE deleted_at IS NULL
+          AND (LOWER(COALESCE(business_name, '')) LIKE ? OR LOWER(organization_id) LIKE ?)
+        ORDER BY business_name LIMIT 20`,
+    ).all(like, like) as any[])
       .map((r) => ({ orgId: r.organization_id, name: r.business_name || r.organization_id, vertical: r.vertical || null, status: r.status }));
   }
 

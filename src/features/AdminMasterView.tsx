@@ -465,19 +465,23 @@ function RuntimePilotPanel() {
   const [q, setQ] = useState('');
   const [orgs, setOrgs] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [orgId, setOrgId] = useState('');
   const [plan, setPlan] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [withRecovery, setWithRecovery] = useState(false);
 
   const search = async () => {
-    if (!q.trim()) { setOrgs([]); return; }
-    setSearching(true);
+    if (!q.trim()) { toast.error('Digite parte do nome (ou o ID) da organização.'); return; }
+    setSearching(true); setSearched(false);
     try {
       const r = await apiFetch(`/api/admin/runtime-pilot/search?q=${encodeURIComponent(q.trim())}`);
-      const d = await r.json().catch(() => ({}));
+      const raw = await r.text();
+      let d: any = {}; try { d = raw ? JSON.parse(raw) : {}; } catch { /* resposta não-JSON */ }
+      if (!r.ok) { toast.error(d?.error || `Falha na busca (HTTP ${r.status}).`); setOrgs([]); return; }
       setOrgs(Array.isArray(d?.orgs) ? d.orgs : []);
-    } catch { setOrgs([]); } finally { setSearching(false); }
+      setSearched(true);
+    } catch { toast.error('Falha ao buscar (sem resposta do servidor).'); setOrgs([]); } finally { setSearching(false); }
   };
   const loadPlan = async (id: string) => {
     setOrgId(id); setPlan(null);
@@ -526,6 +530,11 @@ function RuntimePilotPanel() {
               <span className="text-[11px] text-zinc-500">{o.vertical || '—'} · {o.status}</span>
             </button>
           ))}
+        </div>
+      )}
+      {searched && orgs.length === 0 && (
+        <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
+          Nenhuma organização encontrada com <strong>“{q.trim()}”</strong>. A busca é pelo <strong>nome cadastrado da empresa</strong> (ou pelo ID) — tente uma parte do nome real do tenant.
         </div>
       )}
 

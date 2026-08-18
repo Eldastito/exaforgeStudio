@@ -21,6 +21,7 @@ import db from "./db.js";
 import { suggestSalePrice } from "./pricing.js";
 import { ProductEditHistoryService } from "./ProductEditHistoryService.js";
 import { RetailAnalyticsCache } from "./RetailAnalyticsCache.js";
+import { RetailFeatureFlagService } from "./RetailFeatureFlagService.js";
 
 export type PricingItem = {
   productId: string;
@@ -94,6 +95,10 @@ export class RetailPricingService {
     // prefixo LIKE roda SÓ no subconjunto NÃO resolvido (filtrado antes do join)
     // — nunca varre o catálogo por linha de venda. Ver a versão irmã do CMV em
     // RetailStoreCostService.monthlyCogsBreakdownAll.
+    // Kill-switch 6B: flag OFF força TODO item pelo ramo LIKE (legado).
+    const useResolved = RetailFeatureFlagService.resolvedProductsV1(orgId);
+    const resolvedPred = useResolved ? "i.catalog_resolved_at IS NOT NULL AND i.product_service_id IS NOT NULL" : "1 = 0";
+    const fallbackPred = useResolved ? "i.catalog_resolved_at IS NULL" : "1 = 1";
     const rows = db
       .prepare(
         `SELECT
@@ -115,7 +120,7 @@ export class RetailPricingService {
              SELECT i.product_service_id AS product_id, i.quantidade AS units, i.valor AS revenue
                FROM retail_pdv_sale_items i
               WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
-                AND i.catalog_resolved_at IS NOT NULL AND i.product_service_id IS NOT NULL
+                AND ${resolvedPred}
              UNION ALL
              SELECT COALESCE(ps1.id, ps2.id) AS product_id, i.quantidade AS units, i.valor AS revenue
                FROM retail_pdv_sale_items i
@@ -127,7 +132,7 @@ export class RetailPricingService {
                  ON ps2.organization_id = i.organization_id
                 AND (ps2.external_ref = i.produto OR i.produto LIKE ps2.external_ref || '%')
               WHERE i.organization_id = ? AND substr(i.sale_date, 1, 7) = ?
-                AND i.catalog_resolved_at IS NULL
+                AND ${fallbackPred}
            )
            WHERE product_id IS NOT NULL
            GROUP BY product_id

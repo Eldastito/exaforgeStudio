@@ -20,6 +20,7 @@ import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
+import { RetailFeatureFlagService, type RetailFlagKey } from "../RetailFeatureFlagService.js";
 import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
@@ -697,6 +698,10 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
     // resolvidos (4A) casam pelos ids persistidos (`rprod`/`rpv`, por índice); o
     // prefixo (`pv`/`ps`/`pp`/`p2`) só toca os códigos ainda não resolvidos.
     args.push(orgId, orgId, orgId, orgId, orgId); // um orgId por junção de catálogo
+    // Kill-switch 6B: flag OFF força a resolução do nome pelo ramo LIKE (legado).
+    const useResolvedTP = RetailFeatureFlagService.resolvedProductsV1(orgId);
+    const rP = useResolvedTP ? "g.resolved_at IS NOT NULL" : "1 = 0";
+    const fP = useResolvedTP ? "g.resolved_at IS NULL" : "1 = 1";
     const rows = db.prepare(
       `SELECT g.produto,
               COALESCE(rpv.name, rprod.name, pv.name, ps.name, p2.name) AS nome_variante,
@@ -715,12 +720,12 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
             WHERE i.organization_id = ? AND i.sale_date BETWEEN ? AND ? AND COALESCE(i.produto,'') <> '' ${filialClause}
             GROUP BY i.produto
          ) g
-         LEFT JOIN product_variants rpv ON g.resolved_at IS NOT NULL AND rpv.organization_id = ? AND rpv.id = g.vid
-         LEFT JOIN products_services rprod ON g.resolved_at IS NOT NULL AND rprod.organization_id = ? AND rprod.id = g.psid
-         LEFT JOIN product_variants pv ON g.resolved_at IS NULL AND pv.organization_id = ? AND (pv.external_ref = g.produto OR pv.sku = g.produto)
+         LEFT JOIN product_variants rpv ON ${rP} AND rpv.organization_id = ? AND rpv.id = g.vid
+         LEFT JOIN products_services rprod ON ${rP} AND rprod.organization_id = ? AND rprod.id = g.psid
+         LEFT JOIN product_variants pv ON ${fP} AND pv.organization_id = ? AND (pv.external_ref = g.produto OR pv.sku = g.produto)
          LEFT JOIN products_services pp ON pp.id = pv.product_service_id
-         LEFT JOIN products_services ps ON g.resolved_at IS NULL AND ps.organization_id = ? AND ps.external_ref = g.produto
-         LEFT JOIN products_services p2 ON g.resolved_at IS NULL AND p2.organization_id = ? AND g.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
+         LEFT JOIN products_services ps ON ${fP} AND ps.organization_id = ? AND ps.external_ref = g.produto
+         LEFT JOIN products_services p2 ON ${fP} AND p2.organization_id = ? AND g.produto LIKE p2.external_ref || '%' AND length(p2.external_ref) >= 4
         ORDER BY g.pecas DESC, g.valor DESC
         LIMIT 100`
     ).all(...args) as any[];
@@ -1011,6 +1016,24 @@ router.post("/pdv-catalog/backfill", requireRole("owner", "admin"), (req: AuthRe
   const limit = Math.max(1, Math.min(5000, parseInt(String(req.body?.limit || "1000"), 10) || 1000));
   const r = RetailPdvCatalogResolver.backfill(orgId, { limit });
   res.json({ ...r, pending: RetailPdvCatalogResolver.pendingCount(orgId) });
+});
+
+// Fase 6B — kill-switches de runtime (data comercial · analíticas resolvidas).
+// Reverter no piloto sem deploy. owner/admin. GET lê; PUT liga/desliga um flag.
+router.get("/feature-flags", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ flags: RetailFeatureFlagService.status(orgId) });
+});
+router.put("/feature-flags/:key", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const key = String(req.params.key || "") as RetailFlagKey;
+  if (key !== "business_date" && key !== "resolved_products") return res.status(400).json({ error: "flag desconhecida (business_date | resolved_products)." });
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) é obrigatório." });
+  const flags = RetailFeatureFlagService.set(orgId, key, req.body.enabled);
+  RetailAnalyticsCache.invalidate(orgId); // trocar o caminho de query muda os números em cache
+  res.json({ flags });
 });
 
 // POS-002/003 (Fatia 3) — tarifas POS por loja × meio de pagamento (crédito/

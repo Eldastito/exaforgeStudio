@@ -49,10 +49,25 @@ código não perde dado nem quebra o legado.
 Exceção de configuração: a data comercial usa `organization_settings.timezone`
 (default `America/Sao_Paulo`) — não é liga/desliga, é o fuso da org.
 
-> **Se a TOULON quiser kill-switches de runtime** para as mudanças de maior risco
-> (data comercial e o caminho de query resolvida das analíticas), isso é um
-> follow-up pequeno e localizado — peça e eu adiciono os flags antes de expandir.
-> Para o piloto, o rollback por PR já cobre "voltar atrás rápido".
+### Kill-switches de runtime (Fase 6B) — as duas mudanças de maior risco
+
+Para reverter no piloto **sem deploy**, por organização, as duas mudanças de
+maior risco têm flag de runtime (DEFAULT LIGADO = comportamento novo; setar 0
+volta pro legado). `RetailFeatureFlagService`:
+
+| Flag (coluna em `organization_settings`) | Ligado (default) | Desligado (0) |
+| --- | --- | --- |
+| `retail_business_date_v1` | data comercial no fuso da org (Fatia 1A) | volta ao **dia UTC** (bug original) |
+| `retail_analytics_resolved_products_v1` | analíticas consomem a coluna resolvida (4A/4B) | volta ao **LIKE-prefix por consulta** (lento, porém caminho antigo provado) |
+
+Rotas (owner/admin): `GET /api/retailops/feature-flags` (estado) ·
+`PUT /api/retailops/feature-flags/:key` com `{ "enabled": true|false }`
+(`key` = `business_date` | `resolved_products`). Desligar invalida o cache
+analítico da org. Equivalência numérica ligado × desligado provada em
+`test:retail-feature-flags`.
+
+> As demais fatias seguem no modelo de rollback por PR (§10) — são UI/bugfix que
+> revertem limpo. Se a TOULON quiser kill-switch para alguma outra, é só pedir.
 
 ---
 

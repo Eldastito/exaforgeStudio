@@ -101,14 +101,22 @@ router.put("/tutor", (req: AuthRequest, res): any => {
 });
 
 // POST /api/health-center/tutor/test — envia o resumo agora (ignora janela/dedupe).
+// try/catch obrigatório: o envio pelo provider (Evolution/WhatsApp) pode LANÇAR
+// (canal fora do ar, número recusado). Sem o catch, a exceção subia pro handler
+// de erro e voltava HTML — o front fazia `r.json()` e explodia com
+// "Unexpected token '<'". Aqui a falha SEMPRE volta como JSON legível.
 router.post("/tutor/test", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
-  if (!channel) return res.status(400).json({ error: "Conecte um canal de WhatsApp primeiro." });
-  const out = await BusinessTutorService.sendNow(orgId, { send: (target, message) => MessageProviderService.sendMessage(channel.id, target, message) });
-  if (!out.ok) return res.status(400).json({ error: out.error });
-  res.json({ ok: true, phone: out.phone });
+  try {
+    const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    if (!channel) return res.status(400).json({ error: "Conecte um canal de WhatsApp primeiro." });
+    const out = await BusinessTutorService.sendNow(orgId, { send: (target, message) => MessageProviderService.sendMessage(channel.id, target, message) });
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    res.json({ ok: true, phone: out.phone });
+  } catch (e: any) {
+    return res.status(502).json({ error: `Não foi possível enviar pelo WhatsApp agora: ${String(e?.message || e).slice(0, 180)}` });
+  }
 });
 
 // GET /api/health-center/ai-runs — observabilidade OPERACIONAL das AI Runs do tenant

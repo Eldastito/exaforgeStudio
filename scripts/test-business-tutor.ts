@@ -50,6 +50,14 @@ async function main() {
   db.prepare(`INSERT INTO users (id, organization_id, name, email, phone, role) VALUES (?, ?, 'Dono', ?, '5511911112222', 'owner')`).run(randomUUID(), orgB, `dono_${orgB}@x.com`);
   db.prepare(`INSERT INTO users (id, organization_id, name, email, phone, role) VALUES (?, ?, 'Atendente', ?, '5511900000000', 'agent')`).run(randomUUID(), orgB, `at_${orgB}@x.com`);
   check("sem número configurado, cai no telefone do DONO (não do agente)", T.ownerPhone(orgB) === "5511911112222");
+  // Número digitado só com DDD + número (sem DDI 55) é normalizado com o 55 —
+  // o provedor espera o número COM DDI; sem isso o "Enviar teste" falhava.
+  const orgDdd = seedOrg(1, "21999947477"); // 11 díg., como o dono digita
+  check("número sem 55 (DDD+número) ganha o DDI 55 no envio", T.ownerPhone(orgDdd) === "5521999947477");
+  const orgFixo = seedOrg(1, "2133334444"); // 10 díg. (fixo) também
+  check("número de 10 dígitos ganha o 55", T.ownerPhone(orgFixo) === "552133334444");
+  const orgJa = seedOrg(1, "5521999887766");
+  check("número que já tem 55 não é duplicado", T.ownerPhone(orgJa) === "5521999887766");
 
   // ===== 4. Passe da manhã: envia 1x, deduplica no dia =====
   const r1 = await T.runMorningPass(orgA, { now: MORNING, send });

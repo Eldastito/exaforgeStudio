@@ -45,6 +45,12 @@ async function main() {
   check("B4 rotas F4 montadas (/help/gaps, /help/metrics)", uxPaths.includes("/help/gaps") && uxPaths.includes("/help/metrics"));
   check("B4b rotas F5 montadas (/help/tour, /help/learn-one)", uxPaths.includes("/help/tour") && uxPaths.includes("/help/learn-one"));
   check("B4c digest de treinamento é passe do Scheduler", typeof (KB as any).passLearningDigest === "function");
+  check("B4d camada LLM (F7) exposta: answerAsync + aiAvailable", typeof (HELP as any).answerAsync === "function" && typeof (KB as any).aiAvailable === "function");
+  // RN-HELP-8: SEM IA, answerAsync mantém o determinístico — sem cobertura ainda registra a lacuna.
+  const gapsBefore = Number((db.prepare(`SELECT COUNT(*) c FROM help_gap_log WHERE organization_id=?`).get(A) as any).c);
+  const noAi = await (HELP as any).answerAsync(A, { userId: "u", role: "owner", organizationId: A }, { text: "pergunta sem cobertura zzz obscura qqq" });
+  const gapsAfter = Number((db.prepare(`SELECT COUNT(*) c FROM help_gap_log WHERE organization_id=?`).get(A) as any).c);
+  check("RN-HELP-8 sem IA: answerAsync = determinístico (lacuna registrada, sem inventar)", noAi.llmUsed === false && noAi.article === null && gapsAfter === gapsBefore + 1);
   const adminRouter = (await import("../src/server/routes/admin.js")).default as any;
   const adminPaths = routePaths(adminRouter);
   check("B5 rotas de curadoria montadas (/help-articles + bootstrap + publish + archive)",
@@ -98,7 +104,7 @@ async function main() {
   // ═══════════ (B) testes wired + runbook presente ═══════════
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
   const scripts = pkg.scripts || {};
-  for (const t of ["test:help-knowledge", "test:help-curation", "test:help-gaps", "test:help-context", "test:help-training", "test:help-hardening"]) {
+  for (const t of ["test:help-knowledge", "test:help-curation", "test:help-gaps", "test:help-context", "test:help-training", "test:help-llm", "test:help-hardening"]) {
     check(`wired: ${t} no package.json`, typeof scripts[t] === "string");
   }
   check("runbook presente (docs/runbook/ajuda-operacao.md)", fs.existsSync(path.join(repoRoot, "docs/runbook/ajuda-operacao.md")));

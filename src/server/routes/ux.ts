@@ -78,11 +78,18 @@ router.get("/contextual-upgrades", (req: AuthRequest, res): any => {
 
 // POST /api/ux/help { text } — ajuda zero-training do Fala Tu (ensine/mostre/faça/onde).
 // Camada determinística (§91-92); é o Fala Tu respondendo, não assistente paralelo (RN-UX-1).
-router.post("/help", (req: AuthRequest, res): any => {
+router.post("/help", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const moduleKey = req.body?.moduleKey ? String(req.body.moduleKey) : null; // tela atual (contextual, opcional)
-  res.json(ZeroTrainingHelpService.answer(orgId, req.user, { text: String(req.body?.text || ""), moduleKey }));
+  const input = { text: String(req.body?.text || ""), moduleKey };
+  try {
+    // F7: camada LLM grounded (rerank semântico + resposta natural). Determinístico
+    // primeiro; sem IA → idêntico ao determinístico (RN-HELP-8).
+    res.json(await ZeroTrainingHelpService.answerAsync(orgId, req.user, input));
+  } catch {
+    res.json(ZeroTrainingHelpService.answer(orgId, req.user, input)); // fallback determinístico
+  }
 });
 
 // GET /api/ux/help/suggestions?module= — artigos relevantes da tela atual (ADR-179

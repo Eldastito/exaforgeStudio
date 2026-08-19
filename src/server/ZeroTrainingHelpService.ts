@@ -46,7 +46,7 @@ const SURFACES: Record<string, { key: string; label: string }> = {
 
 export class ZeroTrainingHelpService {
   /** Classifica a pergunta e compõe a resposta. Determinístico, role-scoped. */
-  static answer(orgId: string, user: any, input: { text: string; moduleKey?: string | null }): {
+  static answer(orgId: string, user: any, input: { text: string; moduleKey?: string | null }, opts?: { deferSideEffects?: boolean }): {
     intent: HelpIntent;
     message: string;
     module: { key: string; label: string; desc: string } | null;
@@ -55,6 +55,7 @@ export class ZeroTrainingHelpService {
     governedBy: { actionType: string; policy: string; requiredRole: string | null } | null;
     article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null; mediaUrl: string | null } | null;
     gapLogged: boolean;
+    noCoverage: boolean;
     invisibleUxEnabled: boolean;
     source: "falatu_help";
   } {
@@ -102,6 +103,7 @@ export class ZeroTrainingHelpService {
     // lacuna (RN-HELP-1). 0-regressão: nunca sobrescreve uma resposta de engine.
     let article: { id: string; title: string; moduleKey: string | null; steps: string[]; commonErrors: string[]; sourceRef: string | null; mediaUrl: string | null } | null = null;
     let gapLogged = false;
+    let noCoverage = false;
     const moduleKey = input?.moduleKey || module?.key || null;
     if (intent !== "show") {
       const kb = HelpKnowledgeService.retrieve(orgId, text, moduleKey);
@@ -112,18 +114,81 @@ export class ZeroTrainingHelpService {
         const grounded = `${kb.what || kb.title}${steps ? ` Passo a passo: ${steps}` : ""} (fonte: ${kb.title})`;
         message = module ? `${message} ${grounded}` : grounded;
       } else if (!this.hasSubstance(intent, module, governedBy, navTarget)) {
-        // Nada dos engines E nada na base → admite e registra a lacuna (nunca inventa).
-        HelpKnowledgeService.logGap(orgId, text, moduleKey);
-        gapLogged = true;
+        // Nada dos engines E nada na base (determinístico). É AQUI que a camada LLM
+        // (F7, no answerAsync) tenta reranquear/responder antes de admitir a lacuna.
+        noCoverage = true;
+        // `deferSideEffects`: o answerAsync adia gap+métrica pra decidir DEPOIS da LLM.
+        if (!opts?.deferSideEffects) { HelpKnowledgeService.logGap(orgId, text, moduleKey); gapLogged = true; }
       }
     }
 
     // Métrica F4: toda pergunta conta; "respondida" = artigo OU engine determinístico
     // (show sempre entrega evidência). O contrário é exatamente a lacuna registrada.
     const answered = intent === "show" ? true : (!!article || this.hasSubstance(intent, module, governedBy, navTarget));
+    if (text && !opts?.deferSideEffects) HelpKnowledgeService.recordAsk(orgId, moduleKey, answered);
+
+    return { intent, message, module, navTarget, evidence, governedBy, article, gapLogged, noCoverage, invisibleUxEnabled: !!(inv && inv.e), source: "falatu_help" };
+  }
+
+  /**
+   * Versão com camada LLM GROUNDED (ADR-179 F7). Roda o determinístico primeiro
+   * (RN-HELP-8) e, SÓ quando a IA está disponível:
+   *   - se achou artigo → REESCREVE como resposta natural à pergunta (grounded);
+   *   - se NÃO achou por palavra → RERANQUEIA semanticamente entre os artigos reais
+   *     (fecha o gap de frase, ex.: "cadastrar vendedores") e responde grounded.
+   * A LLM nunca inventa: sem artigo que responda, admite e registra a lacuna. Sem IA
+   * → idêntico ao determinístico (0-regressão). Os efeitos (gap + métrica) acontecem
+   * UMA vez, aqui, após a decisão final.
+   */
+  static async answerAsync(orgId: string, user: any, input: { text: string; moduleKey?: string | null }, deps?: import("./HelpKnowledgeService.js").HelpLlmDeps): Promise<any> {
+    const base = this.answer(orgId, user, input, { deferSideEffects: true });
+    const text = String(input?.text || "").trim();
+    const moduleKey = input?.moduleKey || base.module?.key || null;
+    let { article, message } = base as any;
+    let noCoverage = base.noCoverage;
+    let llmUsed = false;
+
+    // Camada LLM só entra se houver IA (senão fica idêntico ao determinístico — RN-HELP-8).
+    const ai = (text && base.intent !== "show") ? await HelpKnowledgeService.aiAvailable(deps) : false;
+    if (ai) {
+      try {
+        let resolved = false;
+        const cited = (a: any, g: string | null) => {
+          const steps = a.steps.map((s: string, i: number) => `${i + 1}) ${s}`).join(" ");
+          const templated = `${a.what || a.title}${steps ? ` Passo a passo: ${steps}` : ""} (fonte: ${a.title})`;
+          return g ? `${g} (fonte: ${a.title})` : templated;
+        };
+        // 1) Se o determinístico achou um artigo, a LLM tenta responder DELE. Se ela
+        //    julgar que o artigo NÃO responde (NAO_COBERTO), DESCARTA e vai reranquear
+        //    — é o que corrige "keyword achou um artigo plausível, porém errado".
+        if (article) {
+          const full = HelpKnowledgeService.getById(article.id);
+          const g = full ? await HelpKnowledgeService.groundedAnswer(text, full, deps) : null;
+          if (g && full) { message = `${g} (fonte: ${full.title})`; llmUsed = true; resolved = true; }
+          else { article = null; } // artigo do keyword não responde → tenta outro
+        }
+        // 2) Rerank semântico entre os artigos REAIS (fecha o gap de frase).
+        if (!resolved) {
+          const picked = await HelpKnowledgeService.semanticPick(orgId, text, moduleKey, deps);
+          if (picked) {
+            const g = await HelpKnowledgeService.groundedAnswer(text, picked, deps);
+            message = cited(picked, g);
+            article = { id: picked.id, title: picked.title, moduleKey: picked.module_key, steps: picked.steps, commonErrors: picked.commonErrors, sourceRef: picked.sourceRef, mediaUrl: picked.mediaUrl };
+            noCoverage = false; llmUsed = true; resolved = true;
+          } else {
+            noCoverage = true; // nenhum artigo real responde → é lacuna honesta
+          }
+        }
+      } catch { article = base.article; message = base.message; noCoverage = base.noCoverage; /* fallback determinístico */ }
+    }
+
+    // Efeitos colaterais UMA vez (após a LLM): lacuna só se seguir sem cobertura.
+    let gapLogged = false;
+    if (text && base.intent !== "show" && noCoverage) { HelpKnowledgeService.logGap(orgId, text, moduleKey); gapLogged = true; }
+    const answered = base.intent === "show" ? true : (!!article || this.hasSubstance(base.intent, base.module, base.governedBy, base.navTarget));
     if (text) HelpKnowledgeService.recordAsk(orgId, moduleKey, answered);
 
-    return { intent, message, module, navTarget, evidence, governedBy, article, gapLogged, invisibleUxEnabled: !!(inv && inv.e), source: "falatu_help" };
+    return { ...base, article, message, gapLogged, noCoverage, llmUsed };
   }
 
   /** Houve resposta CONCRETA dos engines determinísticos? (define se a lacuna é real). */

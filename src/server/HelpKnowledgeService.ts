@@ -169,6 +169,30 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
     sourceRef: "ADR-170",
   },
   {
+    // Navegação CONFIRMADA pelo lojista: Configurações da loja → Equipe. Passos
+    // mantidos no nível confirmado (sem inventar rótulos exatos de botão).
+    id: "help_seed_vendedores",
+    vertical: null,
+    module_key: "retail_floor",
+    title: "Cadastrar vendedores (Equipe da loja)",
+    what: "Onde você registra e gerencia os vendedores que atendem na sua loja.",
+    purpose: "Ter cada vendedor cadastrado para ele aparecer na lista de atendimento e para medir as vendas por vendedor.",
+    steps: [
+      "Abra as Configurações da loja.",
+      "Vá na seção Equipe.",
+      "Adicione um novo vendedor e preencha os dados dele.",
+      "Salve — o vendedor passa a aparecer na lista de atendimento da loja.",
+      "Para desligar alguém, edite o vendedor e marque como inativo (o histórico é preservado).",
+    ],
+    commonErrors: [
+      "Vendedor não aparece na lista da vez: confirme que ele está cadastrado e ativo em Configurações da loja → Equipe.",
+      "Cadastrar o mesmo vendedor duas vezes: procure antes de adicionar para não duplicar.",
+    ],
+    keywords: "vendedor vendedora vendedores cadastrar cadastro registrar equipe time loja configuracoes adicionar atendente colaborador funcionario",
+    reviewedBy: "equipe_zapflow (navegação confirmada pelo lojista)",
+    sourceRef: "Configurações da loja → Equipe",
+  },
+  {
     // Exemplo de recorte POR VERTICAL (saúde) — não deve aparecer p/ varejo.
     id: "help_seed_clinica",
     vertical: "saude",

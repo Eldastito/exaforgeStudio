@@ -126,15 +126,18 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Precisa de ajuda?"
-        className="fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg flex items-center justify-center text-xl transition-transform hover:scale-105"
+        className="fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full bg-indigo-600/90 hover:bg-indigo-600 backdrop-blur-sm text-white shadow-lg flex items-center justify-center text-xl transition-all hover:scale-105"
         title="Precisa de ajuda?"
       >
         {open ? '×' : '?'}
       </button>
 
       {open && (
-        <div className="fixed bottom-20 right-5 z-40 w-[22rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl flex flex-col overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-800">
+        // Translúcido + desfoque do fundo: não cobre por completo os campos atrás,
+        // mas continua legível. `pointer-events-auto` só no painel (o resto da tela
+        // segue clicável — o orb flutua, não bloqueia).
+        <div className="fixed bottom-20 right-5 z-40 w-[22rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-zinc-700/50 bg-zinc-900/80 backdrop-blur-md shadow-2xl flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-zinc-700/40">
             <div className="text-sm font-semibold text-zinc-100">Precisa de ajuda?</div>
             <div className="text-xs text-zinc-500">Pergunte como fazer algo — respondo com base na documentação.</div>
           </div>

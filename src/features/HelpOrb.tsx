@@ -8,7 +8,7 @@
  * ("Abrir tela" faz deep-link quando a resposta aponta um módulo/superfície) e
  * feedback 👍/👎 por resposta (/help/feedback). Funciona SEM `falatu_enabled`.
  */
-import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useState, useRef, useEffect, type FormEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { apiFetch } from '@/src/lib/api';
 
 interface HelpArticle {
@@ -56,9 +56,47 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
   const [tour, setTour] = useState<Tour | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const [tourStep, setTourStep] = useState<number | null>(null); // null = não está no tour
+  const [hidden, setHidden] = useState(false);          // orb dispensado (some o balão)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // canto do balão (px)
   const scrollRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ dx: number; dy: number; startX: number; startY: number; moved: boolean } | null>(null);
+  const posRef = useRef<{ x: number; y: number } | null>(null);
+  posRef.current = pos; // sempre a posição atual (o pointerup lê daqui, sem stale closure)
+  const BTN = 48; const MARGIN = 20;
 
   const ctxModule = (moduleKey && VIEW_TO_MODULE[moduleKey]) || null; // tela atual → module_key
+
+  // Posição inicial (canto inferior direito) + restaura a última posição escolhida.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('zf_help_orb_pos');
+      if (saved) { const p = JSON.parse(saved); if (typeof p?.x === 'number' && typeof p?.y === 'number') { setPos(clampPos(p.x, p.y)); return; } }
+    } catch { /* noop */ }
+    setPos({ x: window.innerWidth - BTN - MARGIN, y: window.innerHeight - BTN - MARGIN });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function clampPos(x: number, y: number) {
+    const maxX = (typeof window !== 'undefined' ? window.innerWidth : 1200) - BTN - 8;
+    const maxY = (typeof window !== 'undefined' ? window.innerHeight : 800) - BTN - 8;
+    return { x: Math.max(8, Math.min(x, maxX)), y: Math.max(8, Math.min(y, maxY)) };
+  }
+  function onOrbPointerDown(e: ReactPointerEvent) {
+    if (!pos) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    drag.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y, startX: e.clientX, startY: e.clientY, moved: false };
+  }
+  function onOrbPointerMove(e: ReactPointerEvent) {
+    const d = drag.current; if (!d) return;
+    if (Math.abs(e.clientX - d.startX) > 4 || Math.abs(e.clientY - d.startY) > 4) d.moved = true;
+    setPos(clampPos(e.clientX - d.dx, e.clientY - d.dy));
+  }
+  function onOrbPointerUp() {
+    const moved = drag.current?.moved;
+    drag.current = null;
+    if (moved) { try { if (posRef.current) localStorage.setItem('zf_help_orb_pos', JSON.stringify(posRef.current)); } catch { /* noop */ } }
+    else setOpen((v) => !v); // clique sem arrastar = abre/fecha
+  }
 
   useEffect(() => {
     if (open && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -121,25 +159,56 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
     } catch { /* silencioso — voto é best-effort */ }
   }
 
+  if (pos === null) return null; // aguarda posicionamento inicial (evita flash em 0,0)
+
+  // Orb dispensado → deixa uma aba mínima pra reabrir (nunca some de vez).
+  if (hidden) {
+    return (
+      <button onClick={() => setHidden(false)} title="Mostrar ajuda"
+        className="fixed bottom-3 right-3 z-40 text-[11px] px-2.5 py-1 rounded-full bg-zinc-800/70 backdrop-blur-sm text-zinc-300 hover:bg-zinc-700 shadow">
+        ? Ajuda
+      </button>
+    );
+  }
+
+  // Painel abre no lado com mais espaço (acima/abaixo, esquerda/direita do balão),
+  // acompanhando o orb pra onde ele for arrastado.
+  const winW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const openUp = pos.y > winH / 2;
+  const alignRight = pos.x > winW / 2;
+  const panelStyle: CSSProperties = {
+    ...(alignRight ? { right: winW - (pos.x + BTN) } : { left: pos.x }),
+    ...(openUp ? { bottom: winH - pos.y + 8 } : { top: pos.y + BTN + 8 }),
+  };
+
   return (
     <>
       <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Precisa de ajuda?"
-        className="fixed bottom-5 right-5 z-40 h-12 w-12 rounded-full bg-indigo-600/90 hover:bg-indigo-600 backdrop-blur-sm text-white shadow-lg flex items-center justify-center text-xl transition-all hover:scale-105"
-        title="Precisa de ajuda?"
+        onPointerDown={onOrbPointerDown}
+        onPointerMove={onOrbPointerMove}
+        onPointerUp={onOrbPointerUp}
+        style={{ left: pos.x, top: pos.y, touchAction: 'none' }}
+        aria-label="Precisa de ajuda? (arraste para mover)"
+        className="fixed z-40 h-12 w-12 rounded-full bg-indigo-600/70 hover:bg-indigo-600/90 backdrop-blur-sm text-white shadow-lg flex items-center justify-center text-xl transition-colors cursor-grab active:cursor-grabbing select-none"
+        title="Precisa de ajuda? (arraste para mover)"
       >
         {open ? '×' : '?'}
       </button>
 
       {open && (
-        // Translúcido + desfoque do fundo: não cobre por completo os campos atrás,
-        // mas continua legível. `pointer-events-auto` só no painel (o resto da tela
-        // segue clicável — o orb flutua, não bloqueia).
-        <div className="fixed bottom-20 right-5 z-40 w-[22rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-zinc-700/50 bg-zinc-900/80 backdrop-blur-md shadow-2xl flex flex-col overflow-hidden">
-          <div className="px-4 py-3 border-b border-zinc-700/40">
-            <div className="text-sm font-semibold text-zinc-100">Precisa de ajuda?</div>
-            <div className="text-xs text-zinc-500">Pergunte como fazer algo — respondo com base na documentação.</div>
+        // 70% cor / 30% transparência + desfoque: não cobre por completo os campos
+        // atrás. Posicionado junto ao balão (segue quando arrastado).
+        <div style={panelStyle} className="fixed z-40 w-[22rem] max-w-[calc(100vw-2.5rem)] rounded-2xl border border-zinc-700/50 bg-zinc-900/70 backdrop-blur-md shadow-2xl flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-zinc-700/40 flex items-start justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-zinc-100">Precisa de ajuda?</div>
+              <div className="text-xs text-zinc-500">Pergunte como fazer algo — respondo com base na documentação.</div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button onClick={() => setOpen(false)} title="Fechar" className="text-zinc-400 hover:text-zinc-100 text-lg leading-none px-1">×</button>
+              <button onClick={() => { setOpen(false); setHidden(true); }} title="Ocultar ajuda" className="text-[10px] text-zinc-500 hover:text-zinc-300">ocultar</button>
+            </div>
           </div>
 
           <div ref={scrollRef} className="flex-1 max-h-80 overflow-y-auto px-4 py-3 space-y-3">

@@ -81,7 +81,25 @@ de chat nem responde a partir dos ADRs crus. Aditivo/reversível sobre ADR-163
   descartados); `ask_stats`/`feedback` sem texto.
 - **RN-HELP-7** RBAC/plano/vertical: recorte por vertical; gaps/metrics só gestor.
 - **RN-HELP-8** determinístico antes de LLM: recuperação e bootstrap rodam sem
-  chave de IA; LLM só reescreve o recuperado, nunca cria fato novo.
+  chave de IA; a LLM (F7) só **reescreve** o recuperado e **reranqueia** entre
+  artigos reais, nunca cria fato novo. Sem IA → idêntico ao determinístico.
+
+## Camada LLM grounded (F7)
+
+`POST /api/ux/help` → `ZeroTrainingHelpService.answerAsync`. Fluxo: determinístico
+primeiro; **se houver IA** (`HelpKnowledgeService.aiAvailable`):
+1. Achou artigo por palavra → `groundedAnswer` reescreve a resposta natural **só do
+   artigo** (mantém a citação). Se a IA julgar que o artigo não responde → `NAO_COBERTO`.
+2. Palavra falhou, ou o artigo do passo 1 deu `NAO_COBERTO` → `semanticPick`
+   reranqueia entre os artigos **publicados reais** (retorna só id da lista — nunca
+   inventa) e responde grounded.
+3. Nenhum artigo responde → admite e registra a lacuna (não força resposta errada).
+
+Sem chave de IA (`OPENAI_API_KEY`) o comportamento é idêntico ao determinístico
+(0-regressão). Custo: 1–2 chamadas curtas de chat por dúvida quando a IA está ligada.
+A LLM recebe só a pergunta + o texto do artigo curado (conteúdo GLOBAL, não-PII).
+Se a base não cobre o tema (ex.: "cadastrar vendedores" sem artigo), a resposta certa
+é **curar um artigo** — a fila de lacunas captura exatamente isso.
 
 ## Testes
 

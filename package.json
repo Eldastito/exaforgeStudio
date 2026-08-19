@@ -61,6 +61,7 @@
     "test:help-context": "tsx scripts/test-help-context.ts",
     "test:help-hardening": "tsx scripts/test-help-hardening.ts",
     "test:help-training": "tsx scripts/test-help-training.ts",
+    "test:help-llm": "tsx scripts/test-help-llm.ts",
     "test:ux-telemetry": "tsx scripts/test-ux-telemetry.ts",
     "test:mobile-readiness": "tsx scripts/test-mobile-readiness.ts",
     "test:legacy-reduction": "tsx scripts/test-legacy-reduction.ts",

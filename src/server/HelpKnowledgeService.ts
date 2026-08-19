@@ -658,6 +658,73 @@ export class HelpKnowledgeService {
     const orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE status = 'active'`).all() as any[];
     for (const o of orgs) { try { await this.publishLearnOne(o.organization_id); } catch { /* best-effort */ } }
   }
+
+  // ─────────── Camada LLM GROUNDED (ADR-179 F7) ───────────
+  // RN-HELP-8: determinístico PRIMEIRO; a LLM só (a) RERANQUEIA entre artigos REAIS
+  // quando o casamento por palavra falha, e (b) REESCREVE o artigo recuperado como
+  // resposta natural. NUNCA cria fato novo (RN-HELP-1). Sem IA → null (fallback
+  // determinístico, roda em CI). Chat injetável p/ teste sem chave.
+
+  private static async resolveChat(deps?: HelpLlmDeps): Promise<HelpChatFn | null> {
+    if (deps?.chatFn) return deps.chatFn;
+    try {
+      const llm = await import("./llm.js");
+      if (deps?.aiConfigured ?? llm.isAIConfigured()) return llm.chat as HelpChatFn;
+    } catch { /* noop */ }
+    return null;
+  }
+
+  /** Há LLM disponível? (define se a camada F7 entra ou se fica só no determinístico). */
+  static async aiAvailable(deps?: HelpLlmDeps): Promise<boolean> {
+    return (await this.resolveChat(deps)) !== null;
+  }
+
+  /**
+   * Reranqueia semanticamente: dado o texto do usuário, escolhe o artigo PUBLICADO
+   * que responde — mas SÓ da lista real (nunca inventa id). Fecha o gap do casamento
+   * por palavra ("cadastrar vendedores" acha o artigo certo mesmo sem os termos exatos).
+   */
+  static async semanticPick(orgId: string, question: string, moduleKey?: string | null, deps?: HelpLlmDeps): Promise<HelpArticle | null> {
+    const chat = await this.resolveChat(deps);
+    if (!chat || !question.trim()) return null;
+    const vertical = this.verticalOf(orgId);
+    const rows = db.prepare(`
+      SELECT id, title, what, module_key FROM help_articles
+      WHERE status='published' AND (vertical IS NULL OR vertical = ?)
+      ORDER BY (CASE WHEN module_key = ? THEN 0 ELSE 1 END), title LIMIT 40
+    `).all(vertical, moduleKey ?? "") as any[];
+    if (rows.length === 0) return null;
+    const list = rows.map((r) => `[${r.id}] ${r.title} — ${(r.what || "").slice(0, 160)}`).join("\n");
+    const system = `Você associa a PERGUNTA do usuário ao artigo de ajuda que a responde. Responda SOMENTE JSON {"id":"<id>"} escolhendo da lista, ou {"id":null} se NENHUM artigo responder. NUNCA invente um id fora da lista.`;
+    let raw: string;
+    try { raw = await chat(`Pergunta: ${question}\n\nArtigos:\n${list}`, { json: true, temperature: 0 }); } catch { return null; }
+    let id: any = null; try { id = JSON.parse(raw || "{}")?.id; } catch { return null; }
+    if (!id || !rows.some((r) => r.id === id)) return null; // grounded: só id da lista
+    const full = db.prepare(`SELECT * FROM help_articles WHERE id = ? AND status='published'`).get(id) as any;
+    return full ? this.mapRow(full) : null;
+  }
+
+  /**
+   * Reescreve o artigo recuperado como resposta natural À PERGUNTA, usando SOMENTE o
+   * conteúdo do artigo. Se o artigo não responde → null (o chamador admite a lacuna).
+   */
+  static async groundedAnswer(question: string, article: HelpArticle, deps?: HelpLlmDeps): Promise<string | null> {
+    const chat = await this.resolveChat(deps);
+    if (!chat || !question.trim()) return null;
+    const steps = article.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
+    const doc = `Título: ${article.title}\nO que é: ${article.what || ""}\nPra que serve: ${article.purpose || ""}\nComo faço:\n${steps}\nErros comuns: ${article.commonErrors.join("; ")}`;
+    const system = `Você é o tutor de ajuda do app, falando com o dono/operador (linguagem simples). Responda à pergunta USANDO SOMENTE o conteúdo do ARTIGO abaixo. Se o artigo NÃO contém a resposta, responda EXATAMENTE "NAO_COBERTO". NUNCA invente telas, botões, passos ou recursos fora do artigo. Seja direto (no máximo ~5 frases/passos).`;
+    let raw: string;
+    try { raw = await chat(`Pergunta: ${question}\n\nArtigo:\n${doc}`, { temperature: 0.2, system }); } catch { return null; }
+    const t = (raw || "").trim();
+    if (!t || /^NAO_COBERTO/i.test(t)) return null;
+    return t;
+  }
 }
+
+// Chat injetável (fachada mínima sobre `llm.chat`) — permite testar a camada LLM
+// sem chave de IA e mantém o determinístico como fallback (RN-HELP-8).
+export type HelpChatFn = (prompt: string, opts?: { temperature?: number; json?: boolean; system?: string }) => Promise<string>;
+export interface HelpLlmDeps { chatFn?: HelpChatFn; aiConfigured?: boolean; }
 
 export default HelpKnowledgeService;

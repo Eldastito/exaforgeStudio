@@ -1,9 +1,9 @@
 # ADR-179 — Tutor de Ajuda & Treinamento (suporte grounded in-app)
 
-**Status:** FECHADO — F0–F6 em produção (completo). Aditivo/reversível sobre
-ADR-163 (Invisible UX / Zero-Training) e ADR-151/160 (Fala Tu). NÃO cria bot
-paralelo, NÃO responde a partir dos ADRs crus. Guardrails RN-HELP-1..8 codificados
-em `test:help-hardening`; runbook em `docs/runbook/ajuda-operacao.md`.
+**Status:** FECHADO — F0–F7 em produção. Aditivo/reversível sobre ADR-163
+(Invisible UX / Zero-Training) e ADR-151/160 (Fala Tu). NÃO cria bot paralelo, NÃO
+responde a partir dos ADRs crus. Guardrails RN-HELP-1..8 codificados em
+`test:help-hardening`; runbook em `docs/runbook/ajuda-operacao.md`.
 
 ## 1. Contexto & problema
 
@@ -126,7 +126,18 @@ assistente separado), aterrado numa **base de ajuda curada**:
   de 7 dias, sem conteúdo novo → não publica. Rotas `/help/tour`, `/help/learn-one`;
   passe `passLearningDigest` no Scheduler; orb ganha tour + mídia + tip; painel de
   curadoria ganha campo de mídia. `test:help-training` (17).
-- **F6 FECHADA** — hardening: `test:help-hardening` (28) codifica os RN-HELP-1..8 +
+- **F7 FECHADA** — camada LLM GROUNDED (RN-HELP-8: determinístico PRIMEIRO, LLM
+  quando disponível). Fecha o gap "sem LLM entendendo a intenção": (1) quando o
+  determinístico acha um artigo, a LLM REESCREVE a resposta natural à pergunta
+  (grounded no artigo, mantém citação); (2) quando o casamento por palavra falha OU
+  acha um artigo PLAUSÍVEL-PORÉM-ERRADO (a LLM julga `NAO_COBERTO`), RERANQUEIA
+  semanticamente entre os artigos REAIS (`semanticPick` — só id da lista, nunca
+  inventa) e responde grounded; sem artigo que responda → admite e registra a lacuna.
+  `ZeroTrainingHelpService.answerAsync` (rota `POST /api/ux/help` passou a async) +
+  `HelpKnowledgeService.semanticPick`/`groundedAnswer`/`aiAvailable` (chat INJETÁVEL
+  p/ teste sem chave). SEM IA → idêntico ao determinístico (0-regressão, roda em CI).
+  `test:help-llm` (13).
+- **F6 FECHADA** — hardening: `test:help-hardening` (34) codifica os RN-HELP-1..8 +
   fiação de produção (serviços importáveis, rotas montadas, testes wired, runbook
   presente); minimização LGPD extra (descarta telefone/CPF/cartão da normalização).
   Runbook `docs/runbook/ajuda-operacao.md`. **Fecha o ADR-179.**

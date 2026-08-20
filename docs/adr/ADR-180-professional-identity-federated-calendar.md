@@ -4,10 +4,10 @@
   relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
   F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
-  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Continua nas diferidas: F8.1 (finanças — split
-  derivado, MERGED PR #1237) · F8.2 (direção do split aberta + imposto retido + previsão a
-  receber, EM PR).** Como F1–F3, cada backend fecha primeiro com teste como contrato e a UI
-  vem como fatia fina.
+  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO: F8.1 (split derivado,
+  MERGED PR #1237) · F8.2 (direção do split aberta + imposto retido + previsão, MERGED PR
+  #1238) · F8b (UI do financeiro na aba "Rede", EM PR).** Como F1–F3, cada backend fecha
+  primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -172,7 +172,7 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     `professionalAmount=null` (nunca assume 0/100%). Dinheiro role-gated (§73 — só
     owner/admin). Rotas `/professional-network/relationships/:id/finance/statement` e
     `/appointments/:appointmentId/finance`. `test:professional-finance` (24).
-  - **F8.2 — Direção do split ABERTA + imposto retido + previsão (EM PR).** O dono decidiu
+  - **F8.2 — Direção do split ABERTA + imposto retido + previsão (MERGED PR #1238).** O dono decidiu
     *"cada parte define o seu percentual combinado"* → o % do vínculo é de UM lado
     (`commission_beneficiary` = `professional` (default, 0-regressão) | `clinic`) e o outro
     fica com o RESTO; o financeiro sempre mostra os DOIS. Imposto RETIDO na fonte sobre o
@@ -184,8 +184,15 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     em `clinic_professional_relationships`. Rota `/professional-network/finance/forecast`.
     `test:professional-finance-forecast` (23); regressão `test:professional-finance` 24/24 e
     `test:professional-network` 23/23.
-  - **F8b — UI do financeiro** na aba "Rede" (extrato + previsão + config de split/imposto,
-    role-gated). *(a fazer)*
+  - **F8b — UI do financeiro (EM PR).** Seção **"Financeiro"** no detalhe do vínculo
+    (`ProfessionalNetworkPanel`): configurar o acordo (direção do split
+    profissional/clínica + comissão % + imposto retido %) → `PUT .../permissions`; extrato
+    **realizado × previsto** em dois cards (bruto/profissional/clínica/imposto/líquido) +
+    lista de atendimentos (atendido/agendado). E um card **"Previsão a receber"**
+    (`ForecastPanel`, visível quando nenhum profissional está selecionado) com o líquido
+    previsto por profissional + o "quando" (1º atendimento) + total. BRL honesto (null →
+    "—", nunca R$ 0,00 inventado). UI-only sobre endpoints já testados (F8.1/F8.2); tsc +
+    build (vite) verdes. **Fecha o F8.** As demais diferidas (F5/F6/F7/F9/F10) seguem abertas.
 - **F9** — Inteligência (padrões de demanda por especialidade, sugestão de nova clínica).
 - **F10** — Rede/marketplace (profissional descobre clínicas, clínica descobre especialistas).
 

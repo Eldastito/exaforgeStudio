@@ -10209,6 +10209,40 @@ const initDb = () => {
         ON clinic_professional_windows (organization_id, relationship_id, day_of_week);
     `);
   } catch (e) { console.error('[DB] Falha ao criar offerings / windows (ADR-180 F2)', e); }
+
+  // ── ADR-180 F3 — Availability Engine + Hold atômico ──
+  // clinic_slot_holds: reserva TEMPORÁRIA de uma vaga do profissional numa clínica
+  // (RN-PN-5: confirmação ≠ agendamento). Impede corrida entre "sugerir" e "confirmar":
+  // duas reservas na mesma vaga → só uma vence (guarda atômica SELECT-COUNT-in-tx,
+  // padrão AC-012). status: active (segurando, com TTL) | confirmed (vaga travada) |
+  // released (solto) | expired (TTL estourou). Isolado por org (RN-PN-2).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_slot_holds (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        relationship_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        service_id TEXT,
+        scheduled_start TEXT NOT NULL,           -- ISO
+        scheduled_end TEXT NOT NULL,             -- ISO
+        status TEXT NOT NULL DEFAULT 'active',   -- active | confirmed | released | expired
+        hold_token TEXT NOT NULL,
+        expires_at TEXT,                         -- ISO; NULL quando confirmed
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_slot_holds_rel
+        ON clinic_slot_holds (organization_id, relationship_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_slot_holds_slot
+        ON clinic_slot_holds (organization_id, relationship_id, scheduled_start);
+    `);
+    // Hook aditivo: liga um appointment a um vínculo da rede (o agendamento federado).
+    // Populado na F4 (confirmBooking governado); aqui o Availability Engine já subtrai
+    // appointments que carreguem este vínculo — forward-compatible, 0-regressão.
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN network_relationship_id TEXT`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha ao criar clinic_slot_holds (ADR-180 F3)', e); }
 };
 
 initDb();

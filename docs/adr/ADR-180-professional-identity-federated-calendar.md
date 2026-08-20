@@ -1,8 +1,8 @@
 # ADR-180 — Professional Identity & Federated Calendar (Agenda Federada)
 
 - **Status:** ABERTO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
-  relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, EM PR). Plano
-  F0–F4 (MVP) + fatias diferidas.
+  relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
+  F3 (Availability Engine + hold atômico, EM PR). Plano F0–F4 (MVP) + fatias diferidas.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -94,9 +94,19 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
   `/api/clinic/professional-network/relationships/:id/{offerings,windows}` +
   `/offerings/:offeringId`. `test:professional-schedule-config` (20). É a config que o
   Availability Engine (F3) consome.
-- **F3 — Availability Engine + Hold + confirm atômico.** Estende
-  `ClinicScheduleSessionService.availability` com janelas/buffers; `clinic_slot_holds`;
-  confirm atômico (template `addParticipant`); teste de concorrência (2 confirms na mesma vaga).
+- **F3 — Availability Engine + Hold + confirm atômico. FECHADA (em PR).**
+  `ProfessionalAvailabilityService`: `availableSlots` gera vagas das janelas (F2)
+  respeitando duração + buffer, subtrai holds vivos/confirmados + appointments do
+  vínculo e descarta o passado (nunca inventa vaga — RN-PN-4); `hold` reserva com
+  guarda ATÔMICA (SELECT COUNT dentro da transação antes do INSERT — padrão AC-012),
+  então duas reservas na mesma vaga → só uma vence (`slot_taken`); TTL + `sweepExpired`
+  (holds vencidos não bloqueiam); `confirm` trava a vaga durável (idempotente); `release`
+  libera. Tabela `clinic_slot_holds` + hook aditivo `appointments.network_relationship_id`
+  (populado na F4). Só sobre vínculo ACEITO; isolado por org (RN-PN-2). Rotas
+  `/professional-network/relationships/:id/{availability,holds}` +
+  `/holds/:holdId/{confirm,release}`. `test:professional-availability` (27) — geração de
+  vagas, buffer, corrida na mesma vaga, TTL/expiração, confirm/release, subtração de
+  appointment e isolamento cross-org.
 - **F4 — UI da clínica + ferramentas de IA + AutoBooking.** Ferramentas
   `getProfessionalAvailability` / `holdSlot` / `confirmBooking`; Fala Tu; AutoBooking via
   handler `auto_booking` na espinha de governança; waitlist em `business_signals`;

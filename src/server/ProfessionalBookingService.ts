@@ -30,6 +30,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicProfessionalRelationshipService } from "./ClinicProfessionalRelationshipService.js";
 import { ProfessionalAvailabilityService, type Slot } from "./ProfessionalAvailabilityService.js";
+import { ClinicAgendaService } from "./ClinicAgendaService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { DecisionActionService } from "./DecisionActionService.js";
 import { CommandExecutorService } from "./CommandExecutorService.js";
@@ -115,6 +116,17 @@ export class ProfessionalBookingService {
       if (!pet) throw new Error("pet_not_found");
     }
 
+    // F5.1 — se a oferta EXIGE sala, valida a sala LIVRE no horário ANTES de confirmar o
+    // hold (falha limpa: hold segue active, nada criado). Reusa o findConflicts/
+    // checkRoomCapacity da agenda (integridade de sala da org).
+    const requiredRoomId = ProfessionalAvailabilityService.requiredRoomFor(orgId, hold.relationshipId, hold.serviceId || undefined);
+    if (requiredRoomId) {
+      const startMs = new Date(hold.start).getTime(), endMs = new Date(hold.end).getTime();
+      const conflicts = ClinicAgendaService.findConflicts(orgId, { roomId: requiredRoomId, startMs, endMs }).filter((c: any) => c.reason === "room");
+      const overCap = ClinicAgendaService.checkRoomCapacity(orgId, requiredRoomId, startMs, endMs);
+      if (conflicts.length > 0 || overCap) throw new Error("room_taken");
+    }
+
     // Confirma o hold (F3, atômico + idempotente) — trava a vaga durável.
     ProfessionalAvailabilityService.confirm(orgId, holdId, { nowISO: input?.nowISO || undefined }, actorId);
 
@@ -135,9 +147,9 @@ export class ProfessionalBookingService {
 
     const id = randomUUID();
     db.prepare(`INSERT INTO appointments
-      (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_name_snapshot, network_relationship_id, slot_hold_id, pet_id, network_service_id, network_service_price)
-      VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?)`)
-      .run(id, orgId, contactId, title, hold.start, hold.end, profName, hold.relationshipId, holdId, petId, serviceId, servicePrice);
+      (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_name_snapshot, network_relationship_id, slot_hold_id, pet_id, network_service_id, network_service_price, room_id)
+      VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, contactId, title, hold.start, hold.end, profName, hold.relationshipId, holdId, petId, serviceId, servicePrice, requiredRoomId);
 
     try {
       logAuthEvent(orgId, actorId || "system", id, "PROF_BOOKING_CONFIRMED", {

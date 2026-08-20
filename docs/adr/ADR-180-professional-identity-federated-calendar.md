@@ -6,7 +6,8 @@
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (F8.1 split derivado
   #1237 · F8.2 split aberto + imposto + previsão #1238 · F8b UI #1239). **Agora F6 — Google
-  Calendar por profissional: F6.1 (conexão per-profissional, EM PR).** Como F1–F3, cada
+  Calendar por profissional: F6.1 (conexão per-profissional, MERGED PR #1240) · F6.2
+  (disponibilidade subtrai o Google busy, EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -167,9 +168,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     rede. Rotas na clínica gated por VÍNCULO ACEITO (`/relationships/:id/google/{status,
     login-url,disconnect}`, owner/admin). Coluna aditiva `appointments.network_google_event_id`
     (registry de evento próprio, populado na F6.3). `test:professional-google` (20).
-  - **F6.2 — Disponibilidade subtrai o Google busy (a fazer).** `availableSlots` recebe o
-    busy do profissional (opt, async) como 3ª fonte no `busyIntervals` → nunca OFERECE vaga
-    em cima de compromisso do Google. Sem conexão → 0-regressão.
+  - **F6.2 — Disponibilidade subtrai o Google busy (EM PR).** `availableSlots` ganha
+    `opts.externalBusy` (3ª fonte, além de holds+appointments) — mantém o núcleo SÍNCRONO e
+    puro; o fetch async do Google vive na borda: `getAvailability` (async) resolve o
+    profissional do vínculo, busca `ProfessionalGoogleService.busyIntervals` do dia e passa
+    o busy → a IA/operador nunca vê vaga em cima de compromisso do Google. O AutoBooking
+    também subtrai (uma busca de freeBusy pra toda a janela). Best-effort (falha no Google
+    nunca derruba a agenda); sem conexão → 0-regressão. O `hold()` atômico segue só com
+    holds+appointments (DB) — o Google é subtraído na SUGESTÃO, não no lock. Rota
+    `/availability` passa a `await getAvailability`. `test:professional-availability-google`
+    (6); regressão `test:professional-availability` 27/27 e `test:professional-booking` 23/23.
   - **F6.3 — Empurra o atendimento federado pra agenda do profissional (a fazer).**
     `confirmBooking` cria o evento (guarda `network_google_event_id`); cancelamento remove.
   - **F6b — UI (a fazer).** Conectar/desconectar Google do profissional na aba "Rede".

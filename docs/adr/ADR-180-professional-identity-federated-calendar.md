@@ -317,8 +317,17 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     `confirmed`/`completed`), por SERVIÇO e por PROFISSIONAL, numa janela. Pressão
     QUALITATIVA (high/medium/low; sem sinal → `insufficient_data`, §103 — não inventa).
     Isolado por org (RN-PN-2). Rota `GET /api/clinic/professional-network/demand`.
-    `test:professional-demand` (10). Fatias seguintes (a fazer): sinal proativo de gap de
-    demanda + sugestão (mais janelas / novo profissional) na superfície.
+    `test:professional-demand` (10).
+  - **F9.2 — Sinal proativo de gap de demanda (EM PR).** `ProfessionalDemandService.publishGaps`
+    torna a demanda PROATIVA: por serviço com pressão ALTA publica `professional_network/
+    demand_gap` na espinha (`business_signals`, conv. nº 12 — nunca tabela paralela), com a
+    sugestão (mais janelas / novo profissional); advisório, NUNCA inventa dinheiro (impact
+    null). Self-healing: quando o gap fecha, RESOLVE (`resolveByDedupe`); quando recorre,
+    REABRE (`reopenByDedupe`, novo — só reabre auto-`resolved`, nunca um `dismissed` humano,
+    §65). `pass()` no `Scheduler.tick` só pras orgs com a rede habilitada. `test:professional-
+    demand-gap` (8) — publica alto, idempotente, self-heal ao fechar, reabre ao recorrer,
+    gate do pass, sem dinheiro, isolamento. **Fecha o núcleo do F9** (sugestão de nova
+    clínica fica pra F10/marketplace).
 - **F10** — Rede/marketplace (profissional descobre clínicas, clínica descobre especialistas).
 
 ## Reuso vs. novo (resumo)

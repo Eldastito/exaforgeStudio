@@ -210,6 +210,16 @@ export class BusinessSignalService {
   }
 
   /**
+   * Reabre um sinal que um detector havia auto-RESOLVIDO (o padrão voltou a valer). Só
+   * toca `resolved` — NUNCA reabre um `dismissed` (o humano disse "não me interessa";
+   * respeitar isso). Complemento do `resolveByDedupe` p/ detectores self-healing. Isolado.
+   */
+  static reopenByDedupe(orgId: string, dedupeKey: string): { ok: boolean } {
+    const r = db.prepare("UPDATE business_signals SET status = 'open' WHERE organization_id = ? AND dedupe_key = ? AND status = 'resolved'").run(orgId, dedupeKey);
+    return { ok: r.changes > 0 };
+  }
+
+  /**
    * PRD 2 F2.2 (§52-53) — enforcement do TTL: marca como `expired` os sinais
    * ABERTOS cujo `expires_at` já passou (o `attention()` já os filtra na leitura;
    * este sweep faz o STATUS refletir a realidade, pra list/queries/observabilidade).

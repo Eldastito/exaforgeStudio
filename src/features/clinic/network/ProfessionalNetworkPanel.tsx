@@ -18,7 +18,7 @@
  * ATENDIDO (RN-PN-5): confirmar cria o agendamento; o comparecimento é outra etapa.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot } from 'lucide-react';
+import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -26,7 +26,11 @@ import { toast, confirmDialog } from '@/src/lib/toast';
 type ContactLite = { id: string; name?: string | null };
 
 type Professional = { id: string; council: string; registrationNumber: string; name: string; specialties: string[]; phone: string | null; email: string | null };
-type Relationship = { id: string; professionalId: string; status: string; permissions: { services: string[] }; commissionPercent: number | null; professional: Professional | null };
+type Relationship = { id: string; professionalId: string; status: string; permissions: { services: string[] }; commissionPercent: number | null; commissionBeneficiary?: 'professional' | 'clinic'; taxWithholdingPercent?: number | null; professional: Professional | null };
+type FinanceTotals = { count: number; gross: number | null; professionalAmount: number | null; clinicAmount: number | null; taxAmount: number | null; netProfessional: number | null; missingPrice: number };
+type Settlement = { appointmentId: string; scheduledStart: string | null; serviceName: string | null; status: string; realized: boolean; gross: number | null; professionalAmount: number | null; clinicAmount: number | null; taxAmount: number | null; netProfessional: number | null; basis: string };
+type Statement = { commissionBeneficiary: string; taxWithholdingPercent: number | null; realized: FinanceTotals; expected: FinanceTotals; events: Settlement[] };
+type ForecastRow = { relationshipId: string; professionalName: string | null; nextServiceDate: string | null; expected: FinanceTotals };
 type Offering = { id: string; serviceId: string; serviceName: string | null; durationMin: number | null; active: boolean };
 type Window = { id: string; dayOfWeek: number; startMinute: number; endMinute: number; start: string; end: string; bufferMin: number; active: boolean };
 type Slot = { start: string; end: string; startMinute: number; durationMin: number };
@@ -37,6 +41,9 @@ const NET = '/api/clinic/professional-network';
 
 function hhmm(iso: string): string { try { const d = new Date(iso); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; } catch { return iso; } }
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
+function dmy(iso: string | null): string { if (!iso) return '—'; try { const d = new Date(iso); return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`; } catch { return iso; } }
+/** BRL honesto: null (não sabido) vira '—', nunca R$ 0,00 inventado (RN-PN-4). */
+function brl(n: number | null | undefined): string { return n == null ? '—' : `R$ ${Number(n).toFixed(2).replace('.', ',')}`; }
 async function jread(p: string, init?: RequestInit): Promise<any> {
   const r = await apiFetch(p, init);
   const d = await r.json().catch(() => ({}));
@@ -89,6 +96,45 @@ function ActivationCard({ onActivate }: { onActivate: () => void }) {
   );
 }
 
+// ── Previsão de receita a receber (F8.2) — visão geral por profissional ──
+function ForecastPanel() {
+  const [fc, setFc] = useState<{ byProfessional: ForecastRow[]; totalNetProfessional: number | null } | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try { const d = await jread(`${NET}/finance/forecast`); if (alive) setFc(d); }
+      catch { if (alive) setFc(null); } finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, []);
+  if (loading) return <div className="text-xs text-zinc-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> carregando previsão…</div>;
+  if (!fc || fc.byProfessional.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><TrendingUp className="w-4 h-4 text-indigo-400" /> Previsão a receber <span className="text-zinc-500 text-xs">(agendado, ainda não atendido)</span></div>
+      <div className="space-y-1">
+        {fc.byProfessional.map((r) => (
+          <div key={r.relationshipId} className="flex items-center justify-between gap-2 text-xs border-b border-zinc-800/60 pb-1">
+            <span className="text-zinc-300">{r.professionalName || 'profissional'}</span>
+            <span className="flex items-center gap-3 text-zinc-500">
+              <span title="1º atendimento previsto"><Clock className="w-3 h-3 inline mr-0.5" />{dmy(r.nextServiceDate)}</span>
+              <span className="text-zinc-600">{r.expected.count}×</span>
+              <span className="text-indigo-300 font-medium" title="líquido do profissional">{brl(r.expected.netProfessional)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      {fc.totalNetProfessional != null && (
+        <div className="flex items-center justify-between text-xs pt-1">
+          <span className="text-zinc-400">Total líquido previsto</span>
+          <span className="text-indigo-300 font-semibold">{brl(fc.totalNetProfessional)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Gestor (rede ativa) ──
 function NetworkManager({ contacts, settings, onSettings }: { contacts: ContactLite[]; settings: { networkEnabled: boolean; autobookingEnabled: boolean }; onSettings: (s: any) => void }) {
   const [rels, setRels] = useState<Relationship[]>([]);
@@ -135,7 +181,10 @@ function NetworkManager({ contacts, settings, onSettings }: { contacts: ContactL
               <ProfessionalDetail rel={selected} services={services} contacts={contacts} autobooking={settings.autobookingEnabled} onChanged={loadRels} />
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-zinc-800 p-10 text-center text-zinc-600 text-sm">Selecione um profissional para configurar serviços, janelas e agendar.</div>
+            <div className="space-y-4">
+              <div className="rounded-lg border border-dashed border-zinc-800 p-6 text-center text-zinc-600 text-sm">Selecione um profissional para configurar serviços, janelas e agendar.</div>
+              <ForecastPanel />
+            </div>
           )}
         </div>
       </div>
@@ -232,6 +281,109 @@ function ProfessionalDetail({ rel, services, contacts, autobooking, onChanged }:
       <OfferingsEditor relId={rel.id} services={services} disabled={!accepted} />
       <WindowsEditor relId={rel.id} disabled={!accepted} />
       {accepted && <AvailabilityBooker rel={rel} contacts={contacts} autobooking={autobooking} onBooked={onChanged} />}
+      {accepted && <FinancePanel rel={rel} onChanged={onChanged} />}
+    </div>
+  );
+}
+
+// ── Financeiro do vínculo (F8) — split clínica×profissional + imposto + extrato ──
+function FinancePanel({ rel, onChanged }: { rel: Relationship; onChanged: () => void }) {
+  const [beneficiary, setBeneficiary] = useState<'professional' | 'clinic'>(rel.commissionBeneficiary || 'professional');
+  const [commission, setCommission] = useState<string>(rel.commissionPercent == null ? '' : String(rel.commissionPercent));
+  const [tax, setTax] = useState<string>(rel.taxWithholdingPercent == null ? '' : String(rel.taxWithholdingPercent));
+  const [busy, setBusy] = useState(false);
+  const [st, setSt] = useState<Statement | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadStatement = useCallback(async () => {
+    setLoading(true);
+    try { setSt(await jread(`${NET}/relationships/${rel.id}/finance/statement`)); }
+    catch { setSt(null); } finally { setLoading(false); }
+  }, [rel.id]);
+  useEffect(() => { loadStatement(); }, [loadStatement]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await jread(`${NET}/relationships/${rel.id}/permissions`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commissionBeneficiary: beneficiary,
+          commissionPercent: commission.trim() === '' ? null : Number(commission),
+          taxWithholdingPercent: tax.trim() === '' ? null : Number(tax),
+        }),
+      });
+      toast.success('Acordo financeiro salvo.');
+      onChanged(); loadStatement();
+    } catch (e: any) { toast.error(e?.message === 'percent_out_of_range' ? 'Percentual deve ser de 0 a 100.' : (e?.message || 'Falha ao salvar.')); }
+    finally { setBusy(false); }
+  };
+
+  const otherSide = beneficiary === 'professional' ? 'a clínica fica com o resto' : 'o profissional fica com o resto';
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-3">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><Wallet className="w-4 h-4 text-emerald-400" /> Financeiro</div>
+
+      {/* Acordo: direção do split + comissão + imposto retido */}
+      <div className="flex flex-wrap items-end gap-2 text-xs">
+        <label className="flex flex-col gap-1">
+          <span className="text-zinc-500">O percentual é de</span>
+          <select value={beneficiary} onChange={(e) => setBeneficiary(e.target.value as any)} className="bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm">
+            <option value="professional">Profissional</option>
+            <option value="clinic">Clínica</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-zinc-500">Comissão %</span>
+          <input type="number" min={0} max={100} value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="—" className="w-20 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-zinc-500">Imposto retido %</span>
+          <input type="number" min={0} max={100} value={tax} onChange={(e) => setTax(e.target.value)} placeholder="—" className="w-20 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm" />
+        </label>
+        <Button onClick={save} disabled={busy} className="bg-emerald-600 hover:bg-emerald-500 text-xs">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Salvar acordo</Button>
+      </div>
+      <div className="text-[11px] text-zinc-500">Cada par combina o seu — {otherSide}. Sem imposto configurado, o líquido é igual ao bruto (nada é inventado).</div>
+
+      {/* Extrato: realizado × previsto */}
+      {loading ? <div className="text-xs text-zinc-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> carregando extrato…</div> : st && (
+        <div className="grid grid-cols-2 gap-2">
+          <TotalsCard title="Realizado (atendido)" tone="emerald" t={st.realized} />
+          <TotalsCard title="Previsto (agendado)" tone="indigo" t={st.expected} />
+        </div>
+      )}
+      {st && st.events.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">Ver {st.events.length} atendimento(s)</summary>
+          <div className="mt-2 space-y-1">
+            {st.events.map((e) => (
+              <div key={e.appointmentId} className="flex items-center justify-between gap-2 border-b border-zinc-800/60 pb-1">
+                <span className="text-zinc-400">{dmy(e.scheduledStart)} · {e.serviceName || 'serviço'}</span>
+                <span className="flex items-center gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${e.realized ? 'bg-emerald-600/20 text-emerald-300' : 'bg-indigo-600/20 text-indigo-300'}`}>{e.realized ? 'atendido' : 'agendado'}</span>
+                  <span className="text-zinc-300">{brl(e.gross)}</span>
+                  <span className="text-zinc-500" title="líquido do profissional">→ {brl(e.netProfessional)}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function TotalsCard({ title, tone, t }: { title: string; tone: 'emerald' | 'indigo'; t: FinanceTotals }) {
+  const ring = tone === 'emerald' ? 'border-emerald-700/40' : 'border-indigo-700/40';
+  return (
+    <div className={`rounded border ${ring} bg-zinc-950/50 p-2 text-xs space-y-0.5`}>
+      <div className="text-zinc-300 font-medium">{title} <span className="text-zinc-600">· {t.count}</span></div>
+      <div className="flex justify-between text-zinc-400"><span>Bruto</span><span className="text-zinc-200">{brl(t.gross)}</span></div>
+      <div className="flex justify-between text-zinc-400"><span>Profissional</span><span>{brl(t.professionalAmount)}</span></div>
+      <div className="flex justify-between text-zinc-400"><span>Clínica</span><span>{brl(t.clinicAmount)}</span></div>
+      <div className="flex justify-between text-zinc-400"><span>Imposto retido</span><span>{brl(t.taxAmount)}</span></div>
+      <div className="flex justify-between text-emerald-300 font-medium"><span>Líquido profissional</span><span>{brl(t.netProfessional)}</span></div>
+      {t.missingPrice > 0 && <div className="text-[10px] text-amber-400/80">{t.missingPrice} sem preço combinado</div>}
     </div>
   );
 }

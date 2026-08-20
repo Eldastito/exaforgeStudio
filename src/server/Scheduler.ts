@@ -26,6 +26,7 @@ import { ClinicRetentionService } from "./ClinicRetentionService.js";
 import { ClinicFollowUpNoticeService } from "./ClinicFollowUpNoticeService.js";
 import { ClinicMonthlyReportDeliveryService } from "./ClinicMonthlyReportDeliveryService.js";
 import { ClinicRenewalTaskService } from "./ClinicRenewalTaskService.js";
+import { ProfessionalAvailabilityService } from "./ProfessionalAvailabilityService.js";
 import { PlanFitSignalPublisher } from "./PlanFitSignalPublisher.js";
 import { ChurnRiskDetectorService } from "./ChurnRiskDetectorService.js";
 import { ReputationEscalationRiskDetectorService } from "./ReputationEscalationRiskDetectorService.js";
@@ -421,6 +422,26 @@ export class Scheduler {
         if (!ModuleService.isEnabled(orgId, "clinica")) continue;
         ClinicRenewalTaskService.run(orgId);
       } catch (e) { console.error("[Clínica] sweep de renovação falhou", orgId, e); }
+    }
+  }
+
+  /**
+   * ADR-180 F4 — sweep de holds vencidos da Agenda Federada. Holds `active` cujo TTL
+   * estourou viram `expired` (não bloqueiam mais a vaga — RN-PN-5). Best-effort,
+   * idempotente, só orgs com holds vivos. Reusa a espinha (§184 — sem scheduler paralelo).
+   */
+  static professionalHoldSweepPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(
+        `SELECT DISTINCT organization_id FROM clinic_slot_holds WHERE status = 'active'`
+      ).all() as any[];
+    } catch { return; }
+    if (!orgs.length) return;
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try { ProfessionalAvailabilityService.sweepExpired(orgId); }
+      catch (e) { console.error("[Agenda Federada] sweep de holds falhou", orgId, e); }
     }
   }
 
@@ -938,6 +959,7 @@ export class Scheduler {
     await this.clinicFollowUpNoticePass().catch(e => console.error('[Scheduler] aviso de retorno clínica falhou', e));
     await this.clinicMonthlyReportPass().catch(e => console.error('[Scheduler] relatório mensal clínica falhou', e));
     try { this.clinicRenewalTaskPass(); } catch (e: any) { console.error('[Scheduler] sweep de renovação clínica falhou', e?.message); }
+    try { this.professionalHoldSweepPass(); } catch (e: any) { console.error('[Scheduler] sweep de holds da Agenda Federada falhou', e?.message); }
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));

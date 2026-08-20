@@ -6,6 +6,7 @@ import { PatientService } from "../PatientService.js";
 import { ClinicPetService } from "../ClinicPetService.js";
 import { ClinicGroomingService } from "../ClinicGroomingService.js";
 import { ClinicPetCareService } from "../ClinicPetCareService.js";
+import { ClinicPetHistoryService } from "../ClinicPetHistoryService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
@@ -2086,6 +2087,13 @@ router.put("/pets/:id", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicPetService.update(orgId, String(req.params.id), req.body || {}, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// GET /api/clinic/pets/:id/history — histórico de saúde consolidado (Petshop F6).
+router.get("/pets/:id/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ history: ClinicPetHistoryService.history(orgId, String(req.params.id)) });
 });
 
 // GET /api/clinic/pets/:id/vaccinations — carteira de vacinação do pet.

@@ -1452,6 +1452,7 @@ function PetCard({ pet, terms, expanded, onToggle, onChanged }: { pet: any; term
           <PetVaccinationCard petId={pet.id} terms={terms} />
           <PetHospitalizationSection petId={pet.id} terms={terms} />
           <PetSurgerySection petId={pet.id} terms={terms} />
+          <PetHistorySection petId={pet.id} />
         </div>
       )}
     </div>
@@ -1484,6 +1485,49 @@ function PetHealthPlanRow({ pet, onChanged }: { pet: any; onChanged: () => void 
           <button onClick={() => setEditing(true)} className="text-[11px] text-indigo-300 hover:text-indigo-200">{pet.healthPlanName ? 'editar' : 'definir'}</button>
           {pet.healthPlanName && <button onClick={() => save(true)} className="text-[11px] text-zinc-500 hover:text-zinc-300">remover</button>}
         </>
+      )}
+    </div>
+  );
+}
+
+// Histórico de saúde do pet (F6) — timeline consolidado (read-only).
+const HIST_META: Record<string, { icon: string; cls: string }> = {
+  vaccination: { icon: '💉', cls: 'text-emerald-300' },
+  hospitalization: { icon: '🏥', cls: 'text-amber-300' },
+  surgery: { icon: '🔪', cls: 'text-red-300' },
+  appointment: { icon: '🩺', cls: 'text-sky-300' },
+  grooming: { icon: '🛁', cls: 'text-indigo-300' },
+};
+function PetHistorySection({ petId }: { petId: string }) {
+  const [items, setItems] = useState<any[] | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open || items !== null) return;
+    apiFetch(`/api/clinic/pets/${petId}/history`).then((r) => (r.ok ? r.json() : { history: [] })).then((d) => setItems(Array.isArray(d?.history) ? d.history : [])).catch(() => setItems([]));
+  }, [open, petId, items]);
+  return (
+    <div>
+      <button onClick={() => setOpen((v) => !v)} className="text-xs font-medium text-zinc-300 inline-flex items-center gap-1">
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />} Histórico de saúde
+      </button>
+      {open && (
+        items === null ? <p className="mt-1 text-xs text-zinc-500">Carregando…</p> :
+        items.length === 0 ? <p className="mt-1 text-xs text-zinc-500">Sem eventos registrados ainda.</p> : (
+          <ol className="mt-2 space-y-1.5 border-l border-zinc-800 pl-3">
+            {items.map((e, i) => {
+              const m = HIST_META[e.kind] || { icon: '•', cls: 'text-zinc-300' };
+              return (
+                <li key={`${e.refId}-${i}`} className="text-[12px] flex items-start gap-2">
+                  <span>{m.icon}</span>
+                  <div className="min-w-0">
+                    <div className={`${m.cls} truncate`}>{e.title}{e.status ? <span className="text-zinc-600"> · {e.status}</span> : null}</div>
+                    <div className="text-[10px] text-zinc-500">{e.at ? fmtDateTime(e.at) : '—'}{e.detail ? ` · ${e.detail}` : ''}</div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )
       )}
     </div>
   );

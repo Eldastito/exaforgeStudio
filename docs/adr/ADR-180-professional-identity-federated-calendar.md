@@ -403,7 +403,18 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     match (determinístico); usa as coords que existem. Rotas
     `GET /api/clinic/professional-network/discovery/specialists` (owner/admin) +
     `GET /api/public/professional/discovery/clinics` (sessão). `test:professional-discovery` (12).
-  - **F10.4 — Descoberta → convite.** Fio pro `invite` existente (nenhum bypass do aceite).
+  - **F10.4 — Descoberta → convite (EM PR).** RN-PN-11 (descoberta ≠ conexão):
+    `ProfessionalDiscoveryService.inviteSpecialist(orgId, professionalId)` — a clínica AGE
+    sobre um match e convida o especialista descoberto; só um DESCOBRÍVEL é convidável por
+    aqui (RN-PN-9; não-descobrível segue a via manual da F1); cunha o `invite→accept`
+    existente (nasce `pending`, nunca auto-vincula), idempotente pelo UNIQUE(org,professional).
+    `requestJoin(professionalId, orgId)` — o profissional EXPRESSA interesse (ele não cria o
+    vínculo — só a clínica convida): publica `professional_network/join_request` na espinha
+    da clínica (`business_signals`, conv. nº 12) só pra um MATCH real (clínica descobrível +
+    procura a especialidade dele) e sem vínculo vivo; a projeção do sinal carrega só o tier
+    público (RN-PN-10). Rotas `POST /discovery/specialists/:professionalId/invite` (owner/
+    admin) + `POST /api/public/professional/discovery/clinics/:orgId/request` (sessão).
+    `test:professional-discovery-connect` (11).
   - **F10b — UI dos dois lados** (aba "Rede" p/ a clínica; webapp do profissional p/ ele).
   Guardrails RN-PN-9..11 codificados como teste em cada fatia. Auditoria completa em
   `docs/professional-network/f10-discovery-audit.md`.

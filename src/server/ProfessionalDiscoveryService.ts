@@ -15,6 +15,8 @@ import db from "./db.js";
 import { SupplyNetworkService } from "./SupplyNetworkService.js";
 import { ProfessionalService } from "./ProfessionalService.js";
 import { ClinicDiscoveryService } from "./ClinicDiscoveryService.js";
+import { ClinicProfessionalRelationshipService } from "./ClinicProfessionalRelationshipService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /** Normaliza texto pra match: minúsculo, sem acento, colapsa espaço. */
 function norm(s: string): string {
@@ -108,6 +110,59 @@ export class ProfessionalDiscoveryService {
     }
     out.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));
     return out.slice(0, limit);
+  }
+
+  // ── F10.4 — Descoberta → convite (RN-PN-11: descoberta ≠ conexão) ──
+
+  /**
+   * A clínica AGE sobre um match: convida o especialista descoberto. Só um profissional
+   * DESCOBRÍVEL pode ser convidado por AQUI (RN-PN-9 — quem não optou por aparecer é
+   * convidado pela via manual da F1, por conselho+registro). Cunha o `invite→accept`
+   * existente (nasce `pending` — a conexão segue exigindo o aceite, RN-PN-11; nunca
+   * auto-vincula). Idempotente pelo UNIQUE(org, professional) do invite.
+   */
+  static inviteSpecialist(orgId: string, professionalId: string, actorId?: string): any {
+    const p = ProfessionalService.getById(String(professionalId || ""));
+    if (!p) throw new Error("professional_not_found");
+    if (!p.discoverable) throw new Error("professional_not_discoverable");
+    return ClinicProfessionalRelationshipService.invite(orgId, { professionalId: p.id }, actorId);
+  }
+
+  /**
+   * O profissional EXPRESSA INTERESSE numa clínica descoberta. Ele não cria o vínculo
+   * (só a clínica convida — RN-PN-11); publica um sinal `professional_network/join_request`
+   * na espinha da clínica (`business_signals`, conv. nº 12) pra ela convidar. Só vale pra
+   * um MATCH real (clínica descobrível que procura a especialidade dele) e sem vínculo vivo.
+   * Idempotente por dedupe. A projeção do sinal carrega só o tier público (RN-PN-10).
+   */
+  static requestJoin(professionalId: string, orgId: string, opts?: { message?: string }): { ok: boolean } {
+    const p = ProfessionalService.getById(String(professionalId || ""));
+    if (!p) throw new Error("professional_not_found");
+    const clinic = ClinicDiscoveryService.settings(String(orgId || ""));
+    if (!clinic.discoverable) throw new Error("clinic_not_discoverable");
+    const matched = specialtyMatch(p.specialties, ClinicDiscoveryService.soughtSpecialties(orgId));
+    if (!matched.length) throw new Error("no_match");
+    if (this.alreadyLinked(orgId, p.id)) throw new Error("already_linked");
+    BusinessSignalService.publish(orgId, {
+      domain: "clinic",
+      signalType: "professional_network/join_request",
+      severity: "attention",
+      basis: "fact",
+      confidence: 1,
+      impactAmount: null,                 // não inventa dinheiro (RN-PN-4)
+      sourceService: "ProfessionalDiscoveryService",
+      sourceEntityType: "professional",
+      sourceEntityId: p.id,
+      subjectType: "professional",
+      subjectId: p.id,
+      dedupeKey: `clinic:prof_join_request:${p.id}`,
+      evidence: {
+        professionalId: p.id, name: p.name, council: p.council, registrationNumber: p.registrationNumber,
+        specialties: matched, baseCity: p.baseCity, baseState: p.baseState,
+        message: opts?.message || `${p.name} tem interesse em atender a especialidade que sua clínica procura.`,
+      },
+    } as any);
+    return { ok: true };
   }
 }
 

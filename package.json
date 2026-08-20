@@ -253,6 +253,7 @@
     "test:professional-discoverability": "tsx scripts/test-professional-discoverability.ts",
     "test:clinic-discovery": "tsx scripts/test-clinic-discovery.ts",
     "test:professional-discovery": "tsx scripts/test-professional-discovery.ts",
+    "test:professional-discovery-connect": "tsx scripts/test-professional-discovery-connect.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
     "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",
     "test:professional-booking-response": "tsx scripts/test-professional-booking-response.ts",

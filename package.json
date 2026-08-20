@@ -230,6 +230,7 @@
     "test:beauty-hardening": "tsx scripts/test-beauty-hardening.ts",
     "test:beauty-tenant-b-generalization": "tsx scripts/test-beauty-tenant-b-generalization.ts",
     "test:beauty-admin-vertical": "tsx scripts/test-beauty-admin-vertical.ts",
+    "test:petshop-vertical": "tsx scripts/test-petshop-vertical.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

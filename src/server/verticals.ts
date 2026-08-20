@@ -6,7 +6,7 @@
 // ligados e NÃO entram nesta lista — aqui ficam só os módulos OPCIONAIS.
 
 export type VerticalKey =
-  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "beleza" | "outro";
+  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "beleza" | "petshop" | "outro";
 
 export type Vertical = {
   key: VerticalKey;
@@ -36,6 +36,10 @@ export const CONSENT_BY_VERTICAL: Record<string, string[]> = {
   // "use_in_marketing" (publicar antes/depois) é OUTRO consent separado
   // (RN-BS-04). Aqui só o essencial pra operação.
   beleza: ["dados_pessoais", "comunicacoes", "marketing"],
+  // Petshop: dado do TUTOR (pessoa) + comunicações (lembrete de vacina/retorno) +
+  // marketing. A ficha clínica é do ANIMAL, não é dado sensível de pessoa natural
+  // (LGPD Art.11), então NÃO entra `dados_sensiveis` (diferente de 'saude' humana).
+  petshop: ["dados_pessoais", "comunicacoes", "marketing"],
   outro: ["marketing", "dados_pessoais", "perfilamento", "comunicacoes"],
 };
 
@@ -161,6 +165,20 @@ export const VERTICALS: Vertical[] = [
     key: "beleza", label: "Beleza & Salões", icon: "💇",
     descricao: "Salão, barbearia, estética, nail designer — agenda, retorno de manutenção e simulador de visual.",
     modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "estudio", "diretor", "rie", "execucao"],
+    saleMode: "unit",
+  },
+  {
+    key: "petshop", label: "Petshop / Veterinário", icon: "🐾",
+    descricao: "Loja + clínica veterinária num só negócio: produtos, consultas, cirurgia, internação e banho & tosa.",
+    // Petshop = VAREJO (produtos) + CLÍNICA (vet/cirurgia/internação) + SERVIÇOS
+    // (banho & tosa). Compõe módulos que já existem, sem motor novo: 'clinica' dá
+    // corpo à parte veterinária (prontuário/agenda clínica/portal); 'agenda'+'areas'
+    // organizam serviços e vários profissionais/salas; 'compras' cuida do estoque;
+    // 'assinaturas'+'cadencias' cobrem plano de saúde pet e retorno de vacina/vermífugo.
+    // A adaptação de terminologia (pet/tutor) e campos pet-específicos (espécie, raça,
+    // carteira de vacina) são fatias seguintes — aqui é o preset que torna a vertical
+    // selecionável no onboarding e liga os módulos certos.
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "compras", "agenda", "clinica", "areas", "cadencias", "assinaturas", "campanhas", "integracoes", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

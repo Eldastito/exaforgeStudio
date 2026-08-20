@@ -81,6 +81,7 @@ export class ProfessionalAvailabilityService {
       ...this.busyIntervals(orgId, relationshipId, dateISO, opts?.nowISO),
       ...(Array.isArray(opts?.externalBusy) ? opts!.externalBusy! : []),
       ...this.requiredRoomBusy(orgId, relationshipId, dateISO, opts?.serviceId),
+      ...this.crossClinicBusy(orgId, relationshipId, dateISO),        // F5.2 — deslocamento
     ];
     const nowMs = opts?.nowISO ? toMs(opts.nowISO) : Date.now();
     const out: Slot[] = [];
@@ -147,6 +148,35 @@ export class ProfessionalAvailabilityService {
     for (const r of rows) {
       const s = toMs(r.scheduled_start); const e = r.scheduled_end ? toMs(r.scheduled_end) : s;
       if (Number.isFinite(s) && Number.isFinite(e)) out.push({ start: s, end: e });
+    }
+    return out;
+  }
+
+  /**
+   * F5.2 — deslocamento entre clínicas. O profissional é GLOBAL; seus atendimentos
+   * federados em OUTRAS clínicas o impedem de estar AQUI no mesmo horário. Se o vínculo
+   * tem `travelBufferMin` configurado (opt-in; null = desligado, 0-regressão), devolve os
+   * blocos de tempo desses atendimentos EXPANDIDOS pela margem de deslocamento de cada
+   * lado. PRIVACIDADE (exceção mínima à RN-PN-2): só o intervalo {start,end} é lido —
+   * nunca a clínica de origem nem detalhes do atendimento.
+   */
+  private static crossClinicBusy(orgId: string, relationshipId: string, dateISO: string): Array<{ start: number; end: number }> {
+    const rel = ClinicProfessionalRelationshipService.get(orgId, relationshipId);
+    if (!rel || rel.travelBufferMin == null) return [];              // feature off → 0-regressão
+    const bufferMs = Math.max(0, Number(rel.travelBufferMin)) * 60000;
+    const dayStart = toMs(`${dateISO}T00:00:00.000Z`), dayEnd = toMs(`${dateISO}T23:59:59.999Z`);
+    const rows = db.prepare(`
+      SELECT a.scheduled_start, a.scheduled_end
+      FROM appointments a
+      JOIN clinic_professional_relationships r ON r.id = a.network_relationship_id
+      WHERE r.professional_id = ? AND a.organization_id != ?
+        AND a.status NOT IN ('cancelled','no_show')
+        AND a.scheduled_start <= ? AND a.scheduled_start >= ?
+    `).all(rel.professionalId, orgId, new Date(dayEnd + bufferMs).toISOString(), new Date(dayStart - bufferMs).toISOString()) as any[];
+    const out: Array<{ start: number; end: number }> = [];
+    for (const r of rows) {
+      const s = toMs(r.scheduled_start); const e = r.scheduled_end ? toMs(r.scheduled_end) : s;
+      if (Number.isFinite(s) && Number.isFinite(e)) out.push({ start: s - bufferMs, end: e + bufferMs });
     }
     return out;
   }

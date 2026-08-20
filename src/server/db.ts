@@ -10324,6 +10324,19 @@ const initDb = () => {
   try {
     try { db.exec(`ALTER TABLE clinic_professional_offerings ADD COLUMN required_room_id TEXT`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de recursos federados (ADR-180 F5.1)', e); }
+
+  // ── ADR-180 F5.2 — Deslocamento entre clínicas ──
+  // travel_buffer_min: o profissional é GLOBAL e atende em VÁRIAS clínicas; se ele tem um
+  // atendimento federado em OUTRA clínica, ele não pode estar aqui no mesmo horário. Esta
+  // coluna liga (opt-in) o bloqueio cross-clínica pra ESTE vínculo: NULL = desligado
+  // (0-regressão, sem consciência cross-clínica); um valor (inclusive 0) = LIGA — bloqueia
+  // a sobreposição com atendimentos do profissional em outras clínicas + margem de
+  // deslocamento (minutos) de cada lado. Privacidade (exceção mínima à RN-PN-2): a
+  // disponibilidade só enxerga o BLOCO DE TEMPO do outro atendimento, nunca a clínica nem
+  // detalhes — o suficiente pra não marcar em cima, nada mais.
+  try {
+    try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN travel_buffer_min INTEGER`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de deslocamento federado (ADR-180 F5.2)', e); }
 };
 
 initDb();

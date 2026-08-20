@@ -24,6 +24,7 @@ export interface RelationshipPermissions {
   commissionPercent?: number | null;
   commissionBeneficiary?: CommissionBeneficiary;   // F8.2 — de quem é o %
   taxWithholdingPercent?: number | null;           // F8.2 — imposto retido na fonte
+  travelBufferMin?: number | null;                 // F5.2 — deslocamento cross-clínica (null = off)
 }
 
 export interface ClinicProfessionalRelationship {
@@ -35,6 +36,7 @@ export interface ClinicProfessionalRelationship {
   commissionPercent: number | null;
   commissionBeneficiary: CommissionBeneficiary;    // F8.2 — 'professional' (default) | 'clinic'
   taxWithholdingPercent: number | null;            // F8.2 — null = sem retenção configurada
+  travelBufferMin: number | null;                  // F5.2 — null = deslocamento desligado
   notes: string | null;
   invitedAt: string | null;
   respondedAt: string | null;
@@ -56,6 +58,13 @@ function normBeneficiary(v: CommissionBeneficiary | undefined): CommissionBenefi
   if (v !== "professional" && v !== "clinic") throw new Error("beneficiary_invalid");
   return v;
 }
+/** Buffer de deslocamento (min): null = desligado; senão inteiro ≥ 0. */
+function normBufferMin(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < 0 || n > 1440) throw new Error("travel_buffer_invalid");
+  return n;
+}
 
 function parsePerms(json?: string | null): { services: string[] } {
   try { const v = JSON.parse(json || "{}"); const s = Array.isArray(v?.services) ? v.services.map(String) : []; return { services: s }; }
@@ -70,6 +79,7 @@ export class ClinicProfessionalRelationshipService {
       commissionPercent: r.commission_percent ?? null,
       commissionBeneficiary: r.commission_beneficiary === "clinic" ? "clinic" : "professional",
       taxWithholdingPercent: r.tax_withholding_percent ?? null,
+      travelBufferMin: r.travel_buffer_min ?? null,
       notes: r.notes ?? null,
       invitedAt: r.invited_at ?? null, respondedAt: r.responded_at ?? null, revokedAt: r.revoked_at ?? null,
       professional: ProfessionalService.getById(r.professional_id),
@@ -183,9 +193,10 @@ export class ClinicProfessionalRelationshipService {
     const commission = perms.commissionPercent === undefined ? rel.commissionPercent : normPct(perms.commissionPercent);
     const beneficiary = perms.commissionBeneficiary === undefined ? rel.commissionBeneficiary : (normBeneficiary(perms.commissionBeneficiary) || "professional");
     const tax = perms.taxWithholdingPercent === undefined ? rel.taxWithholdingPercent : normPct(perms.taxWithholdingPercent);
+    const travel = perms.travelBufferMin === undefined ? rel.travelBufferMin : normBufferMin(perms.travelBufferMin);
     db.prepare(
-      `UPDATE clinic_professional_relationships SET permissions_json = ?, commission_percent = ?, commission_beneficiary = ?, tax_withholding_percent = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
-    ).run(JSON.stringify({ services }), commission, beneficiary, tax, orgId, relId);
+      `UPDATE clinic_professional_relationships SET permissions_json = ?, commission_percent = ?, commission_beneficiary = ?, tax_withholding_percent = ?, travel_buffer_min = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(JSON.stringify({ services }), commission, beneficiary, tax, travel, orgId, relId);
     try { logAuthEvent(orgId, actorId || "system", relId, "CLINIC_PROFESSIONAL_SET_PERMISSIONS", { services: services.length }); } catch { /* noop */ }
     return ClinicProfessionalRelationshipService.get(orgId, relId)!;
   }

@@ -249,6 +249,7 @@
     "test:professional-rooms": "tsx scripts/test-professional-rooms.ts",
     "test:professional-travel": "tsx scripts/test-professional-travel.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
+    "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",
     "test:professional-access-link": "tsx scripts/test-professional-access-link.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",

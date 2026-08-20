@@ -15,6 +15,7 @@
 import db from "./db.js";
 import { ProfessionalService } from "./ProfessionalService.js";
 import { ProfessionalFinanceService } from "./ProfessionalFinanceService.js";
+import { ProfessionalScheduleConfigService, WindowInput } from "./ProfessionalScheduleConfigService.js";
 
 export interface ClinicLink { organizationId: string; clinicName: string | null; relationshipId: string; status: string; }
 
@@ -98,6 +99,40 @@ export class ProfessionalSelfService {
     });
     const totals = byClinic.reduce((acc, c) => ({ realized: this.add(acc.realized, c.realized), expected: this.add(acc.expected, c.expected) }), { realized: { ...empty }, expected: { ...empty } });
     return { currency: "BRL", byClinic, totals };
+  }
+
+  // ── F7.3 — Escrita: o profissional edita a PRÓPRIA disponibilidade por clínica ──
+
+  /**
+   * Resolve o vínculo GARANTINDO que é DESTE profissional e está ACEITO — a barreira de
+   * autorização da escrita (a sessão dá o professionalId; o vínculo tem de ser dele).
+   * Devolve o orgId real do vínculo pra delegar aos serviços por-org. Cross-org por
+   * professional_id (a identidade é global), nunca cruza outro profissional.
+   */
+  private static relScope(professionalId: string, relationshipId: string): { orgId: string; relationshipId: string } {
+    const r = db.prepare(
+      `SELECT id, organization_id, status FROM clinic_professional_relationships WHERE id = ? AND professional_id = ?`
+    ).get(String(relationshipId || ""), String(professionalId || "")) as any;
+    if (!r) throw new Error("relationship_not_found");                 // não é dele → isolamento
+    if (r.status !== "accepted") throw new Error("relationship_not_accepted");
+    return { orgId: r.organization_id, relationshipId: r.id };
+  }
+
+  /** Janelas de trabalho do profissional numa clínica dele (leitura). */
+  static windows(professionalId: string, relationshipId: string): any {
+    const { orgId, relationshipId: rid } = this.relScope(professionalId, relationshipId);
+    return ProfessionalScheduleConfigService.listWindows(orgId, rid);
+  }
+
+  /**
+   * O profissional define a PRÓPRIA disponibilidade numa clínica dele. Reusa o
+   * `ProfessionalScheduleConfigService.setWindows` (mesma validação de dia/hora/buffer) —
+   * a diferença é só QUEM autoriza: aqui é a sessão do profissional (relScope), não o
+   * owner/admin da clínica.
+   */
+  static setWindows(professionalId: string, relationshipId: string, windows: WindowInput[]): any {
+    const { orgId, relationshipId: rid } = this.relScope(professionalId, relationshipId);
+    return ProfessionalScheduleConfigService.setWindows(orgId, rid, windows, `professional:${professionalId}`);
   }
 }
 

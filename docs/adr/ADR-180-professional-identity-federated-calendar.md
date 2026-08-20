@@ -244,7 +244,14 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     UI `AccessLinkPanel` na aba "Rede" (gerar/copiar/revogar + status/último acesso).
     `test:professional-access-link` (11) — só aceito emite, pendente/de-outra-org não,
     revogar mata o acesso, reemissão gera token novo.
-  - **F7.3 — Escrita: o profissional edita a PRÓPRIA disponibilidade por clínica (a fazer).**
+  - **F7.3 — Escrita: o profissional edita a PRÓPRIA disponibilidade por clínica (EM PR).**
+    `ProfessionalSelfService.windows/setWindows` reusam o `ProfessionalScheduleConfigService`
+    (MESMA validação de dia/hora/buffer) — a diferença é só QUEM autoriza: `relScope`
+    garante que o vínculo é DESTE profissional (join por professional_id) e está ACEITO
+    (não é do owner/admin da clínica). Rotas `GET/PUT /api/public/professional/relationships/
+    :relId/windows` (sessão escopada). `test:professional-availability-write` (8) — escreve
+    as próprias janelas, validação herdada, NÃO edita vínculo de outro profissional nem
+    pendente (isolamento pela identidade).
   - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (a fazer).**
   - **F7b — Página `/profissional/:token` (a fazer).**
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**

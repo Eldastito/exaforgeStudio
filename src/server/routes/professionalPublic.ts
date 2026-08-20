@@ -55,4 +55,16 @@ router.get("/finance", requireProfessional, (req: ProfReq, res: Response): any =
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
+// F7.3 — o profissional edita a PRÓPRIA disponibilidade numa clínica dele.
+router.get("/relationships/:relId/windows", requireProfessional, (req: ProfReq, res: Response): any => {
+  try { res.json(ProfessionalSelfService.windows(req.professionalId!, String(req.params.relId))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/relationships/:relId/windows", requireProfessional, (req: ProfReq, res: Response): any => {
+  try {
+    const windows = Array.isArray(req.body?.windows) ? req.body.windows : req.body;
+    res.json(ProfessionalSelfService.setWindows(req.professionalId!, String(req.params.relId), windows));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
 export default router;

@@ -45,7 +45,7 @@ async function main() {
   REL.accept(A, rel.id, "userA");
 
   // 1. Ferramentas de IA — grounding: getAvailability só devolve o que o motor prova.
-  const slots = BOOK.getAvailability(A, rel.id, DATE, { serviceId: svc, nowISO: NOW });
+  const slots = await BOOK.getAvailability(A, rel.id, DATE, { serviceId: svc, nowISO: NOW });
   check("1.1 getAvailability devolve as vagas do motor (3)", slots.length === 3 && slots[0].start === `${DATE}T09:00:00.000Z`);
   check("1.2 nenhuma vaga fora da janela (09–12)", slots.every((s) => s.start >= `${DATE}T09:00:00.000Z` && s.end <= `${DATE}T12:00:00.000Z`));
 
@@ -58,7 +58,7 @@ async function main() {
   check("2.4 carrega o pet (petshop)", appt.petId === pet);
   check("2.5 confirma o hold subjacente", AV.getHold(A, h.id)!.status === "confirmed");
   // a vaga agendada some da disponibilidade
-  check("2.6 vaga agendada sai da disponibilidade", BOOK.getAvailability(A, rel.id, DATE, { serviceId: svc, nowISO: NOW }).every((s) => s.start !== `${DATE}T09:00:00.000Z`));
+  check("2.6 vaga agendada sai da disponibilidade", (await BOOK.getAvailability(A, rel.id, DATE, { serviceId: svc, nowISO: NOW })).every((s) => s.start !== `${DATE}T09:00:00.000Z`));
 
   // 3. Idempotência durável — 2ª confirmação do MESMO hold devolve o MESMO appointment.
   const appt2 = BOOK.confirmBooking(A, { holdId: h.id, contactId: tutor, petId: pet }, "userA");

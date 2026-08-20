@@ -29,8 +29,12 @@ function clamp(n: any, lo: number, hi: number, dflt: number): number {
   const v = Number(n); return Number.isFinite(v) ? Math.min(Math.max(Math.round(v), lo), hi) : dflt;
 }
 
-/** Procura a 1ª vaga livre na janela [fromDate, fromDate+days). null se nenhuma. */
-function firstSlot(orgId: string, p: any): { start: string; end: string; dateISO: string } | null {
+/**
+ * Procura a 1ª vaga livre na janela [fromDate, fromDate+days). null se nenhuma.
+ * `externalBusy` (F6.2) é o Google busy do profissional pré-buscado (opcional) — a MESMA
+ * janela vale pra todos os dias, o overlap por dia é filtrado dentro de `availableSlots`.
+ */
+function firstSlot(orgId: string, p: any, externalBusy?: Array<{ start: number; end: number }>): { start: string; end: string; dateISO: string } | null {
   const nowISO = p.nowISO || undefined;
   const fromDate = (p.fromDate && /^\d{4}-\d{2}-\d{2}$/.test(p.fromDate)) ? p.fromDate : (nowISO ? String(nowISO).slice(0, 10) : new Date().toISOString().slice(0, 10));
   const days = clamp(p.days, 1, 60, 14);
@@ -42,11 +46,28 @@ function firstSlot(orgId: string, p: any): { start: string; end: string; dateISO
         serviceId: p.serviceId || undefined,
         slotMinutes: p.slotMinutes || undefined,
         nowISO,
+        externalBusy,
       });
     } catch { return null; } // config inválida (vínculo/serviço) — não inventa vaga
     if (slots.length) return { start: slots[0].start, end: slots[0].end, dateISO };
   }
   return null;
+}
+
+/** Google busy do profissional do vínculo pra toda a janela de busca (best-effort). */
+async function googleBusyForWindow(orgId: string, p: any): Promise<Array<{ start: number; end: number }>> {
+  try {
+    const { ClinicProfessionalRelationshipService } = await import("./ClinicProfessionalRelationshipService.js");
+    const rel = ClinicProfessionalRelationshipService.get(orgId, String(p.relationshipId || ""));
+    if (!rel?.professionalId) return [];
+    const nowISO = p.nowISO || new Date().toISOString();
+    const fromDate = (p.fromDate && /^\d{4}-\d{2}-\d{2}$/.test(p.fromDate)) ? p.fromDate : String(nowISO).slice(0, 10);
+    const days = clamp(p.days, 1, 60, 14);
+    const { ProfessionalGoogleService } = await import("./ProfessionalGoogleService.js");
+    return await ProfessionalGoogleService.busyIntervals(rel.professionalId, {
+      timeMinISO: `${fromDate}T00:00:00.000Z`, timeMaxISO: `${addDays(fromDate, days)}T00:00:00.000Z`,
+    });
+  } catch { return []; }
 }
 
 export const AutoBookingCommandHandler: CommandHandler = {
@@ -65,7 +86,9 @@ export const AutoBookingCommandHandler: CommandHandler = {
   async execute(orgId, action) {
     const p = payloadOf(action);
     const relationshipId = String(p.relationshipId || "");
-    const slot = firstSlot(orgId, p);
+    // F6.2 — não auto-agenda em cima de compromisso do Google do profissional.
+    const externalBusy = await googleBusyForWindow(orgId, p);
+    const slot = firstSlot(orgId, p, externalBusy);
     const svc = await import("./ProfessionalBookingService.js");
     const BOOK = svc.ProfessionalBookingService;
 

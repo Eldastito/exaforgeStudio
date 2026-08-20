@@ -63,7 +63,7 @@ export class ProfessionalAvailabilityService {
    */
   static availableSlots(
     orgId: string, relationshipId: string, dateISO: string,
-    opts?: { serviceId?: string; slotMinutes?: number; nowISO?: string },
+    opts?: { serviceId?: string; slotMinutes?: number; nowISO?: string; externalBusy?: Array<{ start: number; end: number }> },
   ): Slot[] {
     this.requireAcceptedRel(orgId, relationshipId);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateISO || ""))) throw new Error("date_invalid");
@@ -72,7 +72,10 @@ export class ProfessionalAvailabilityService {
     const windows = ProfessionalScheduleConfigService.listWindows(orgId, relationshipId).filter((w) => w.active && w.dayOfWeek === dow);
     if (!windows.length) return [];
 
-    const busy = this.busyIntervals(orgId, relationshipId, dateISO, opts?.nowISO);
+    // F6.2 — o busy do Google do profissional (buscado async pelo caller) entra como 3ª
+    // fonte, além de holds e appointments: nunca OFERECE vaga em cima de compromisso do
+    // Google. Sem conexão → externalBusy vazio → 0-regressão.
+    const busy = [...this.busyIntervals(orgId, relationshipId, dateISO, opts?.nowISO), ...(Array.isArray(opts?.externalBusy) ? opts!.externalBusy! : [])];
     const nowMs = opts?.nowISO ? toMs(opts.nowISO) : Date.now();
     const out: Slot[] = [];
     for (const w of windows) {

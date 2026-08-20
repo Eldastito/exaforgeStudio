@@ -2335,10 +2335,11 @@ router.put("/professional-network/relationships/:id/windows", requireRole("owner
 });
 
 // F3 — Availability Engine + hold atômico + confirm.
-router.get("/professional-network/relationships/:id/availability", (req: AuthRequest, res): any => {
+router.get("/professional-network/relationships/:id/availability", async (req: AuthRequest, res): Promise<any> => {
   const orgId = gatePN(req, res); if (!orgId) return;
   try {
-    res.json(ProfessionalAvailabilityService.availableSlots(orgId, String(req.params.id), String(req.query.date || ""), {
+    // F6.2 — getAvailability (async) subtrai o Google busy do profissional além de holds+appointments.
+    res.json(await ProfessionalBookingService.getAvailability(orgId, String(req.params.id), String(req.query.date || ""), {
       serviceId: req.query.serviceId as string,
       slotMinutes: req.query.slotMinutes ? Number(req.query.slotMinutes) : undefined,
     }));

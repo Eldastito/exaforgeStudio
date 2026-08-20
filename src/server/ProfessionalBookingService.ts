@@ -58,11 +58,24 @@ export interface AutoBookInput {
 
 export class ProfessionalBookingService {
   // ── Ferramenta de IA 1: disponibilidade ATERRADA (nunca inventa — RN-PN-4). ──
-  static getAvailability(
+  // F6.2: subtrai o Google busy do PROFISSIONAL (best-effort, async) além de holds+
+  // appointments — a IA/operador nunca vê vaga em cima de compromisso do Google. Sem
+  // conexão Google → externalBusy vazio → mesmo resultado de antes (0-regressão).
+  static async getAvailability(
     orgId: string, relationshipId: string, dateISO: string,
     opts?: { serviceId?: string; slotMinutes?: number; nowISO?: string },
-  ): Slot[] {
-    return ProfessionalAvailabilityService.availableSlots(orgId, relationshipId, dateISO, opts);
+  ): Promise<Slot[]> {
+    let externalBusy: Array<{ start: number; end: number }> = [];
+    try {
+      const rel = ClinicProfessionalRelationshipService.get(orgId, relationshipId);
+      if (rel?.professionalId && /^\d{4}-\d{2}-\d{2}$/.test(String(dateISO || ""))) {
+        const g = await import("./ProfessionalGoogleService.js");
+        externalBusy = await g.ProfessionalGoogleService.busyIntervals(rel.professionalId, {
+          timeMinISO: `${dateISO}T00:00:00.000Z`, timeMaxISO: `${dateISO}T23:59:59.999Z`,
+        });
+      }
+    } catch { externalBusy = []; }  // best-effort: falha no Google nunca derruba a disponibilidade
+    return ProfessionalAvailabilityService.availableSlots(orgId, relationshipId, dateISO, { ...opts, externalBusy });
   }
 
   // ── Ferramenta de IA 2: segurar a vaga (hold atômico — RN-PN-5). ──

@@ -218,9 +218,10 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 // componente principal (isola o re-render por refresh a 60s).
 // Badges âmbar sinalizam trabalho pendente (RN-014: sinalizar, não
 // decidir por conta própria — a decisão é do humano na aba).
-type ClinicTab = 'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
+type ClinicTab = 'agenda' | 'pets' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
 function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab) => void }) {
   const { counts } = useJourneyCounts();
+  const terms = useClinicTerms();
   const badgeFor = (id: ClinicTab): { n: number; hi: boolean } | null => {
     if (!counts) return null;
     if (id === 'episodios') return { n: counts.withoutSchedule, hi: true };
@@ -229,6 +230,8 @@ function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab)
   };
   const items: Array<[ClinicTab, string]> = [
     ['agenda', 'Agenda'],
+    // Petshop F3b: aba de Pets só aparece na vertical petshop (ficha + vacinação).
+    ...(terms.isPet ? [['pets', 'Pets'] as [ClinicTab, string]] : []),
     ['episodios', 'Episódios'],
     ['ciclos', 'Ciclos'],
     ['grupos', 'Grupos'],
@@ -388,6 +391,7 @@ export function ClinicAgendaView() {
       {/* Abas internas — badge numérico por aba vem do useJourneyCounts (F40 /counts) */}
       <ClinicTabsBar tab={tab} setTab={setTab} />
 
+      {tab === 'pets' && <PetsTab contacts={contacts} />}
       {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
 
       {tab === 'conexao' && <ConnectionTab />}
@@ -1144,6 +1148,222 @@ function RoomsPanel({ rooms, onChanged }: { rooms: Room[]; onChanged: () => void
         <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs shrink-0">
           {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// Aba: Pets (Petshop F3b) — ficha do pet + carteira de vacinação
+// ================================================================
+const SPECIES_LABEL: Record<string, string> = { cachorro: 'Cachorro', gato: 'Gato', ave: 'Ave', roedor: 'Roedor', reptil: 'Réptil', outro: 'Outro' };
+const SIZE_LABEL: Record<string, string> = { small: 'Pequeno', medium: 'Médio', large: 'Grande', giant: 'Gigante' };
+const SEX_LABEL: Record<string, string> = { male: 'Macho', female: 'Fêmea', unknown: '—' };
+
+// Situação de uma dose vs. hoje (espelha ClinicPetService.vaccinationStatus, janela 30d).
+function vaxStatus(nextDueAt?: string | null): 'no_due' | 'ok' | 'due' | 'overdue' {
+  if (!nextDueAt) return 'no_due';
+  const due = new Date(nextDueAt.length <= 10 ? nextDueAt + 'T00:00:00' : nextDueAt);
+  if (isNaN(due.getTime())) return 'no_due';
+  const diff = Math.floor((due.getTime() - Date.now()) / 86400000);
+  if (diff < 0) return 'overdue';
+  if (diff <= 30) return 'due';
+  return 'ok';
+}
+const VAX_CHIP: Record<string, { label: string; cls: string }> = {
+  overdue: { label: 'vencida', cls: 'text-red-300 bg-red-500/15 border-red-500/30' },
+  due: { label: 'a vencer', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },
+  ok: { label: 'em dia', cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30' },
+  no_due: { label: 'sem próxima', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700' },
+};
+
+function PetsTab({ contacts }: { contacts: ContactLite[] }) {
+  const terms = useClinicTerms();
+  const [tutorId, setTutorId] = useState('');
+  const [pets, setPets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const loadPets = async (tid: string) => {
+    if (!tid) { setPets([]); return; }
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/pets?tutor=${encodeURIComponent(tid)}`).then((x) => (x.ok ? x.json() : { pets: [] }));
+      setPets(Array.isArray(r?.pets) ? r.pets : []);
+    } catch { setPets([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { loadPets(tutorId); /* eslint-disable-next-line */ }, [tutorId]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end gap-3 flex-wrap">
+        <div className="min-w-[16rem]">
+          <label className="text-sm text-zinc-400 mb-1 block">{terms.guardian}</label>
+          <select value={tutorId} onChange={(e) => setTutorId(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
+            <option value="">Selecione o {terms.guardianLower}…</option>
+            {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` — ${c.identifier}` : ''}</option>)}
+          </select>
+        </div>
+        {tutorId && (
+          <button onClick={() => setShowNew(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+            <Plus className="w-4 h-4" /> Novo {terms.patientLower}
+          </button>
+        )}
+      </div>
+
+      {!tutorId ? (
+        <p className="text-sm text-zinc-500">Escolha um {terms.guardianLower} para ver e cadastrar os {terms.patientPluralLower}.</p>
+      ) : loading ? (
+        <p className="text-sm text-zinc-500 inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</p>
+      ) : pets.length === 0 ? (
+        <p className="text-sm text-zinc-500">Nenhum {terms.patientLower} cadastrado para este {terms.guardianLower}.</p>
+      ) : (
+        <div className="space-y-2">
+          {pets.map((p) => (
+            <div key={p.id}><PetCard pet={p} terms={terms} expanded={expanded === p.id} onToggle={() => { setExpanded(expanded === p.id ? null : p.id); }} onChanged={() => { loadPets(tutorId); }} /></div>
+          ))}
+        </div>
+      )}
+
+      {showNew && <NewPetModal tutorId={tutorId} terms={terms} onClose={() => setShowNew(false)} onCreated={() => { setShowNew(false); loadPets(tutorId); }} />}
+    </div>
+  );
+}
+
+function PetCard({ pet, terms, expanded, onToggle, onChanged }: { pet: any; terms: ClinicTerms; expanded: boolean; onToggle: () => void; onChanged: () => void }) {
+  const meta = [SPECIES_LABEL[pet.species] || pet.species, pet.breed, pet.age?.label, SIZE_LABEL[pet.size] || null, pet.weightKg ? `${pet.weightKg} kg` : null].filter(Boolean).join(' · ');
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40">
+      <button onClick={onToggle} className="w-full flex items-center gap-2 p-3 text-left">
+        <span className="text-lg">{pet.species === 'gato' ? '🐱' : pet.species === 'ave' ? '🐦' : '🐶'}</span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-zinc-100 truncate">{pet.name}{pet.status !== 'active' && <span className="ml-2 text-[10px] text-zinc-500">({pet.status})</span>}</div>
+          <div className="text-[11px] text-zinc-500 truncate">{meta || '—'}</div>
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500 ml-auto" /> : <ChevronDown className="w-4 h-4 text-zinc-500 ml-auto" />}
+      </button>
+      {expanded && (
+        <div className="border-t border-zinc-800 p-3 space-y-3">
+          <PetVaccinationCard petId={pet.id} terms={terms} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PetVaccinationCard({ petId, terms }: { petId: string; terms: ClinicTerms }) {
+  const [vax, setVax] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ vaccine: '', dose: '', appliedAt: '', nextDueAt: '', lote: '' });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/pets/${petId}/vaccinations`).then((x) => (x.ok ? x.json() : { vaccinations: [] }));
+      setVax(Array.isArray(r?.vaccinations) ? r.vaccinations : []);
+    } catch { setVax([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [petId]);
+
+  const add = async () => {
+    if (!form.vaccine.trim()) { toast.error('Informe a vacina.'); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/clinic/pets/${petId}/vaccinations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vaccine: form.vaccine.trim(), dose: form.dose.trim() || null, appliedAt: form.appliedAt || null, nextDueAt: form.nextDueAt || null, lote: form.lote.trim() || null }) });
+      if (!r.ok) throw new Error();
+      toast.success('Vacina registrada.'); setForm({ vaccine: '', dose: '', appliedAt: '', nextDueAt: '', lote: '' }); setShowAdd(false); load();
+    } catch { toast.error('Erro ao registrar'); } finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-medium text-zinc-300">Carteira de vacinação</div>
+        <button onClick={() => setShowAdd((v) => !v)} className="text-[11px] inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200"><Plus className="w-3 h-3" /> Registrar vacina</button>
+      </div>
+      {showAdd && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2 mb-2 grid grid-cols-2 gap-2">
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Vacina (ex.: V10)" value={form.vaccine} onChange={(e) => setForm((f) => ({ ...f, vaccine: e.target.value }))} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Dose (ex.: anual)" value={form.dose} onChange={(e) => setForm((f) => ({ ...f, dose: e.target.value }))} />
+          <label className="text-[10px] text-zinc-500">Aplicada em<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={form.appliedAt} onChange={(e) => setForm((f) => ({ ...f, appliedAt: e.target.value }))} /></label>
+          <label className="text-[10px] text-zinc-500">Próxima dose<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={form.nextDueAt} onChange={(e) => setForm((f) => ({ ...f, nextDueAt: e.target.value }))} /></label>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100 col-span-2" placeholder="Lote (opcional)" value={form.lote} onChange={(e) => setForm((f) => ({ ...f, lote: e.target.value }))} />
+          <div className="col-span-2 flex justify-end">
+            <button onClick={add} disabled={saving} className="text-[11px] rounded bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar dose'}</button>
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <p className="text-xs text-zinc-500">Carregando…</p>
+      ) : vax.length === 0 ? (
+        <p className="text-xs text-zinc-500">Nenhuma vacina registrada ainda.</p>
+      ) : (
+        <div className="space-y-1">
+          {vax.map((v) => {
+            const st = VAX_CHIP[vaxStatus(v.nextDueAt)];
+            return (
+              <div key={v.id} className="flex items-center gap-2 text-[12px]">
+                <span className="text-zinc-100 font-medium w-28 truncate">{v.vaccine}</span>
+                {v.dose && <span className="text-zinc-500 text-[10px]">{v.dose}</span>}
+                <span className="text-zinc-500">{v.appliedAt ? `aplicada ${v.appliedAt}` : ''}</span>
+                {v.nextDueAt && <span className="text-zinc-400 ml-auto">próxima {v.nextDueAt}</span>}
+                <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${st.cls} ${v.nextDueAt ? '' : 'ml-auto'}`}>{st.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NewPetModal({ tutorId, terms, onClose, onCreated }: { tutorId: string; terms: ClinicTerms; onClose: () => void; onCreated: () => void }) {
+  const [f, setF] = useState({ name: '', species: 'cachorro', breed: '', sex: 'unknown', size: '', birthDate: '', weightKg: '', microchip: '', neutered: false, notes: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
+  const save = async () => {
+    if (!f.name.trim()) { toast.error('Informe o nome.'); return; }
+    setBusy(true);
+    try {
+      const body: any = { tutorContactId: tutorId, name: f.name.trim(), species: f.species || null, breed: f.breed.trim() || null, sex: f.sex || null, size: f.size || null, birthDate: f.birthDate || null, weightKg: f.weightKg ? Number(f.weightKg) : null, microchip: f.microchip.trim() || null, neutered: f.neutered, notes: f.notes.trim() || null };
+      const r = await apiFetch('/api/clinic/pets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success(`${terms.patient} cadastrado.`); onCreated();
+    } catch (e: any) { toast.error(e.message || 'Erro'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+      <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">Novo {terms.patientLower}</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <input className="col-span-2 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" placeholder="Nome do pet" value={f.name} onChange={(e) => set('name', e.target.value)} />
+          <select className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" value={f.species} onChange={(e) => set('species', e.target.value)}>
+            {Object.entries(SPECIES_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <input className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" placeholder="Raça" value={f.breed} onChange={(e) => set('breed', e.target.value)} />
+          <select className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" value={f.sex} onChange={(e) => set('sex', e.target.value)}>
+            {Object.entries(SEX_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <select className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" value={f.size} onChange={(e) => set('size', e.target.value)}>
+            <option value="">Porte…</option>
+            {Object.entries(SIZE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <label className="text-[11px] text-zinc-500">Nascimento<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" value={f.birthDate} onChange={(e) => set('birthDate', e.target.value)} /></label>
+          <input className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" placeholder="Peso (kg)" inputMode="decimal" value={f.weightKg} onChange={(e) => set('weightKg', e.target.value)} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" placeholder="Microchip (opcional)" value={f.microchip} onChange={(e) => set('microchip', e.target.value)} />
+          <label className="col-span-2 inline-flex items-center gap-2 text-sm text-zinc-300"><input type="checkbox" checked={f.neutered} onChange={(e) => set('neutered', e.target.checked)} /> Castrado</label>
+          <textarea className="col-span-2 h-16 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 resize-none" placeholder="Observações" value={f.notes} onChange={(e) => set('notes', e.target.value)} />
+        </div>
+        <div className="flex justify-end mt-4">
+          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"><Plus className="w-4 h-4" /> {busy ? 'Salvando…' : `Cadastrar ${terms.patientLower}`}</button>
+        </div>
       </div>
     </div>
   );

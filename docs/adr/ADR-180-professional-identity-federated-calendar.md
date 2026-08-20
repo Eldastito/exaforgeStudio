@@ -4,11 +4,9 @@
   relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
   F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
-  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (F8.1 split derivado
-  #1237 · F8.2 split aberto + imposto + previsão #1238 · F8b UI #1239). **Agora F6 — Google
-  Calendar (F6) FECHADO** (F6.1 conexão per-profissional #1240 · F6.2 disponibilidade subtrai
-  o Google busy #1241 · F6.3 push do atendimento federado #1242 · F6b UI conectar/desconectar,
-  EM PR)**.** Como F1–F3, cada
+  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (#1237/#1238/#1239).
+  **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). **Agora F5 — recursos +
+  deslocamento: F5.1 (sala exigida na disponibilidade, EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -155,7 +153,19 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
 
 **DEFERIDO (fora do MVP):**
 
-- **F5** — Recursos (salas/equipamentos) + deslocamento entre clínicas.
+- **F5 — Recursos (salas/equipamentos) + deslocamento entre clínicas.** Fatiada:
+  - **F5.1 — Sala exigida na disponibilidade (EM PR).** A oferta (serviço×vínculo) pode
+    EXIGIR uma sala da própria clínica (`clinic_professional_offerings.required_room_id`,
+    aditivo, validado contra `clinic_rooms` ativa da org — não inventa recurso). A
+    disponibilidade subtrai a 4ª fonte de ocupação: a sala tomada por QUALQUER atendimento
+    da org (`requiredRoomBusy`, conservador). O `confirmBooking` VALIDA a sala livre antes
+    de confirmar o hold (reusa `ClinicAgendaService.findConflicts`/`checkRoomCapacity` — a
+    integridade de sala da org) e RESERVA (`appointments.room_id`); sala tomada → `room_taken`
+    (o hold segue vivo). Sem sala exigida → 0-regressão. `test:professional-rooms` (8).
+  - **F5.2 — Deslocamento entre clínicas (a fazer).** O profissional é global: seus
+    atendimentos federados em OUTRAS clínicas bloqueiam a vaga aqui (só o bloco de tempo,
+    nunca detalhes — privacidade) + buffer de deslocamento entre clínicas distintas.
+  - **F5b — UI (a fazer).** Escolher a sala exigida por serviço no editor de ofertas.
 - **F6 — Google Calendar por profissional.** Decisão de fronteira (§90): a conexão é
   GLOBAL, chaveada por `professional_id` (uma agenda que TODAS as clínicas respeitam), não
   por `relationship_id`. Fatiada backend-first:

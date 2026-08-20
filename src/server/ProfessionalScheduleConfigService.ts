@@ -17,11 +17,13 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicProfessionalRelationshipService } from "./ClinicProfessionalRelationshipService.js";
 
-export interface OfferingInput { serviceId?: string; durationMin?: number | null; active?: boolean; }
+export interface OfferingInput { serviceId?: string; durationMin?: number | null; active?: boolean; requiredRoomId?: string | null; }
 export interface Offering {
   id: string; relationshipId: string; serviceId: string; serviceName: string | null;
   durationMin: number | null;              // efetiva (override → catálogo)
   durationSource: "override" | "catalog" | "unknown";
+  requiredRoomId: string | null;           // F5.1 — sala EXIGIDA (da própria clínica) ou null
+  requiredRoomName: string | null;
   active: boolean;
 }
 export interface WindowInput { dayOfWeek?: number; start?: string | number; end?: string | number; bufferMin?: number; }
@@ -59,10 +61,16 @@ export class ProfessionalScheduleConfigService {
     const override = r.duration_min == null ? null : Number(r.duration_min);
     const catalog = svc && svc.duration_minutes != null ? Number(svc.duration_minutes) : null;
     const durationMin = override != null ? override : catalog;
+    let requiredRoomName: string | null = null;
+    if (r.required_room_id) {
+      const room = db.prepare(`SELECT name FROM clinic_rooms WHERE organization_id = ? AND id = ?`).get(r.organization_id, r.required_room_id) as any;
+      requiredRoomName = room ? room.name : null;
+    }
     return {
       id: r.id, relationshipId: r.relationship_id, serviceId: r.service_id,
       serviceName: svc ? svc.name : null,
       durationMin, durationSource: override != null ? "override" : (catalog != null ? "catalog" : "unknown"),
+      requiredRoomId: r.required_room_id ?? null, requiredRoomName,
       active: !!r.active,
     };
   }
@@ -80,15 +88,28 @@ export class ProfessionalScheduleConfigService {
       if (!(durationMin > 0)) throw new Error("duration_invalid");
     }
     const active = input.active === false ? 0 : 1;
+    // F5.1 — sala exigida (opcional). undefined = não mexer (no update); ""/null = limpar;
+    // valor = precisa ser uma sala ATIVA da própria clínica (não inventa recurso).
+    const roomProvided = input.requiredRoomId !== undefined;
+    let requiredRoomId: string | null = null;
+    if (roomProvided && input.requiredRoomId) {
+      const room = db.prepare(`SELECT id FROM clinic_rooms WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, String(input.requiredRoomId)) as any;
+      if (!room) throw new Error("room_not_found");
+      requiredRoomId = String(input.requiredRoomId);
+    }
     const existing = db.prepare(`SELECT id FROM clinic_professional_offerings WHERE organization_id = ? AND relationship_id = ? AND service_id = ?`).get(orgId, relationshipId, serviceId) as any;
     if (existing) {
-      db.prepare(`UPDATE clinic_professional_offerings SET duration_min = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(durationMin, active, existing.id);
+      if (roomProvided) {
+        db.prepare(`UPDATE clinic_professional_offerings SET duration_min = ?, active = ?, required_room_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(durationMin, active, requiredRoomId, existing.id);
+      } else {
+        db.prepare(`UPDATE clinic_professional_offerings SET duration_min = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(durationMin, active, existing.id);
+      }
       try { logAuthEvent(orgId, actorId || "system", existing.id, "PROF_OFFERING_UPDATE", { serviceId }); } catch { /* noop */ }
       return this.getOffering(orgId, existing.id)!;
     }
     const id = randomUUID();
-    db.prepare(`INSERT INTO clinic_professional_offerings (id, organization_id, relationship_id, service_id, duration_min, active) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(id, orgId, relationshipId, serviceId, durationMin, active);
+    db.prepare(`INSERT INTO clinic_professional_offerings (id, organization_id, relationship_id, service_id, duration_min, active, required_room_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, relationshipId, serviceId, durationMin, active, requiredRoomId);
     try { logAuthEvent(orgId, actorId || "system", id, "PROF_OFFERING_ADD", { serviceId }); } catch { /* noop */ }
     return this.getOffering(orgId, id)!;
   }

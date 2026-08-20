@@ -75,7 +75,13 @@ export class ProfessionalAvailabilityService {
     // F6.2 — o busy do Google do profissional (buscado async pelo caller) entra como 3ª
     // fonte, além de holds e appointments: nunca OFERECE vaga em cima de compromisso do
     // Google. Sem conexão → externalBusy vazio → 0-regressão.
-    const busy = [...this.busyIntervals(orgId, relationshipId, dateISO, opts?.nowISO), ...(Array.isArray(opts?.externalBusy) ? opts!.externalBusy! : [])];
+    // F5.1 — se a oferta EXIGE sala, a ocupação da sala (por qualquer atendimento da org)
+    // é a 4ª fonte: não oferece vaga sem a sala livre.
+    const busy = [
+      ...this.busyIntervals(orgId, relationshipId, dateISO, opts?.nowISO),
+      ...(Array.isArray(opts?.externalBusy) ? opts!.externalBusy! : []),
+      ...this.requiredRoomBusy(orgId, relationshipId, dateISO, opts?.serviceId),
+    ];
     const nowMs = opts?.nowISO ? toMs(opts.nowISO) : Date.now();
     const out: Slot[] = [];
     for (const w of windows) {
@@ -109,6 +115,36 @@ export class ProfessionalAvailabilityService {
     `).all(orgId, relationshipId, dayEnd, dayStart) as any[];
     const out: Array<{ start: number; end: number }> = [];
     for (const r of [...holds, ...appts]) {
+      const s = toMs(r.scheduled_start); const e = r.scheduled_end ? toMs(r.scheduled_end) : s;
+      if (Number.isFinite(s) && Number.isFinite(e)) out.push({ start: s, end: e });
+    }
+    return out;
+  }
+
+  /** Sala EXIGIDA pela oferta (serviço×vínculo), ou null. */
+  static requiredRoomFor(orgId: string, relationshipId: string, serviceId?: string): string | null {
+    if (!serviceId) return null;
+    const off = ProfessionalScheduleConfigService.listOfferings(orgId, relationshipId).find((o) => o.serviceId === serviceId);
+    return off?.requiredRoomId ?? null;
+  }
+
+  /**
+   * F5.1 — intervalos em que a SALA EXIGIDA pela oferta está ocupada no dia (por QUALQUER
+   * atendimento da org — federado ou local). Conservador (bloqueia se há sobreposição);
+   * a capacidade real de sala compartilhada é reforçada no commit (confirmBooking). Vazio
+   * se a oferta não exige sala (0-regressão).
+   */
+  private static requiredRoomBusy(orgId: string, relationshipId: string, dateISO: string, serviceId?: string): Array<{ start: number; end: number }> {
+    const roomId = this.requiredRoomFor(orgId, relationshipId, serviceId);
+    if (!roomId) return [];
+    const dayStart = `${dateISO}T00:00:00.000Z`, dayEnd = `${dateISO}T23:59:59.999Z`;
+    const rows = db.prepare(`
+      SELECT scheduled_start, scheduled_end FROM appointments
+      WHERE organization_id = ? AND room_id = ? AND status NOT IN ('cancelled','no_show')
+        AND scheduled_start <= ? AND scheduled_start >= ?
+    `).all(orgId, roomId, dayEnd, dayStart) as any[];
+    const out: Array<{ start: number; end: number }> = [];
+    for (const r of rows) {
       const s = toMs(r.scheduled_start); const e = r.scheduled_end ? toMs(r.scheduled_end) : s;
       if (Number.isFinite(s) && Number.isFinite(e)) out.push({ start: s, end: e });
     }

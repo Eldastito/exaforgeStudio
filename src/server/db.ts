@@ -10314,6 +10314,16 @@ const initDb = () => {
     // `google_event_id` (que é da agenda da ORG); federado nunca passa pelo sync da org.
     try { db.exec(`ALTER TABLE appointments ADD COLUMN network_google_event_id TEXT`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha ao criar professional_google_connections (ADR-180 F6.1)', e); }
+
+  // ── ADR-180 F5.1 — Recursos (sala/equipamento) como restrição de disponibilidade ──
+  // required_room_id: a oferta (serviço×profissional numa clínica) pode EXIGIR uma sala
+  // da própria clínica (`clinic_rooms`, per-org). Quando exige, a disponibilidade subtrai
+  // os horários em que a sala está ocupada (por QUALQUER atendimento da org — federado ou
+  // local) e o `confirmBooking` reserva a sala (grava `appointments.room_id`, reusando o
+  // findConflicts/checkRoomCapacity da agenda). Aditivo; sem sala exigida → 0-regressão.
+  try {
+    try { db.exec(`ALTER TABLE clinic_professional_offerings ADD COLUMN required_room_id TEXT`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de recursos federados (ADR-180 F5.1)', e); }
 };
 
 initDb();

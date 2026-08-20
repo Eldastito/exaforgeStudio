@@ -109,6 +109,7 @@ import uploadsRoutes from "./src/server/routes/uploads.js";
 import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
+import professionalPublicRoutes from "./src/server/routes/professionalPublic.js";
 import beautyRoutes from "./src/server/routes/beauty.js";
 import beautyPublicRoutes from "./src/server/routes/beautyPublic.js";
 import { artifactsRoutes, artifactsPublicRoutes } from "./src/server/routes/artifacts.js";
@@ -516,6 +517,10 @@ async function startServer() {
   // Fase 2/ADR-012). Mesmo motivo de registro cedo: nunca deve exigir JWT.
   app.use("/api/public/radar", radarPublicRoutes);
   app.use("/api/public/clinic", clinicPublicRoutes);
+  // ADR-180 F7 — webapp de autoatendimento do profissional (Agenda Federada). Público de
+  // propósito: a segurança é o magic-link → sessão escopada (professional_portal), nunca o
+  // JWT de staff. Antes do protectedApi pra /api/public/* jamais exigir sessão de painel.
+  app.use("/api/public/professional", professionalPublicRoutes);
   // ADR-169 F7 (BEAUTY-007) — Beauty AI mídia privada por URL assinada
   // (fileSigning canônico, escopo `beauty_private_media_v1`, TTL 15min).
   // Antes do protectedApi porque a assinatura é a segurança — sessão não é

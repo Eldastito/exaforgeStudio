@@ -843,6 +843,13 @@ export class Scheduler {
       import("./CreativeLearningService.js").then((m) => m.CreativeLearningService.pass())
         .catch((e) => console.error('[Scheduler] aprendizado criativo falhou', e));
     } catch (e) { console.error('[Scheduler] pass de aprendizado criativo falhou', e); }
+    // Petshop F3 — lembretes de VACINA do pet: doses vencidas/a vencer viram
+    // `business_signal` (conv. nº 12 — sem tabela paralela), de onde fluem pra
+    // atenção/Fala Tu. Idempotente por dose; só orgs com pets ativos. Best-effort.
+    try {
+      import("./ClinicPetService.js").then((m) => m.ClinicPetService.passVaccinationReminders())
+        .catch((e) => console.error('[Scheduler] lembrete de vacina pet falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de lembrete de vacina pet falhou', e); }
     // Tutor de Ajuda — digest "aprenda 1 coisa" (ADR-179 F5): publica UMA dica semanal
     // (gate de 7 dias no próprio pass) de artigo publicado no `business_signals` (conv.
     // nº 12 — sem tabela paralela), de onde flui pro Fala Tu/atenção. Só conteúdo curado;

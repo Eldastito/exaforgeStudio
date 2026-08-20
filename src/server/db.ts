@@ -9975,6 +9975,60 @@ const initDb = () => {
   // que ILUSTRA a feature. Curada (nunca inventada); NULL por padrão → sem mídia, o
   // tour/orb só mostra os passos. Aditivo.
   try { db.exec(`ALTER TABLE help_articles ADD COLUMN media_url TEXT`); } catch (e) { /* noop */ }
+
+  // PETSHOP F3 — Ficha do PET. O `contact` é a PESSOA (tutor); o PET é uma entidade
+  // própria que pertence a um tutor (1 tutor → N pets). Aditivo; só a vertical petshop
+  // usa, mas a tabela é neutra. Idade é DERIVADA de birth_date (RN-004, sem contador).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_pets (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        tutor_contact_id TEXT NOT NULL,                  -- dono (contacts.id)
+        name TEXT NOT NULL,
+        species TEXT,                                    -- cachorro|gato|ave|roedor|reptil|outro
+        breed TEXT,                                      -- raça (texto livre)
+        sex TEXT,                                        -- male|female|unknown
+        size TEXT,                                       -- porte: small|medium|large|giant
+        weight_kg REAL,                                  -- peso atual (kg)
+        birth_date TEXT,                                 -- ISO date (idade DERIVADA)
+        color TEXT,                                      -- pelagem/cor
+        microchip TEXT,                                  -- nº do microchip
+        neutered INTEGER DEFAULT 0,                      -- castrado (0/1)
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'active',           -- active|inactive|deceased
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_pets_tutor ON clinic_pets (organization_id, tutor_contact_id, status);
+    `);
+  } catch (e) { /* noop */ }
+
+  // PETSHOP F3 — Carteira de VACINAÇÃO do pet. Cada dose é uma linha; `next_due_at`
+  // alimenta os lembretes (Scheduler → business_signals, conv. nº 12). Aditivo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_pet_vaccinations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pet_id TEXT NOT NULL,
+        vaccine TEXT NOT NULL,                           -- V8/V10/antirrábica/gripe/...
+        dose TEXT,                                       -- 1ª dose|2ª dose|reforço|anual
+        applied_at TEXT,                                 -- ISO date da aplicação
+        next_due_at TEXT,                                -- ISO date da próxima dose (lembrete)
+        professional_id TEXT,                            -- quem aplicou (clinic_professionals.id)
+        lote TEXT,                                       -- lote/batch do imunizante
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'applied',          -- applied|scheduled|cancelled
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_vax_pet ON clinic_pet_vaccinations (organization_id, pet_id);
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_vax_due ON clinic_pet_vaccinations (organization_id, next_due_at) WHERE next_due_at IS NOT NULL AND status = 'applied';
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

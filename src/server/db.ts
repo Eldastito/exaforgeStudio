@@ -10029,6 +10029,33 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinic_pet_vax_due ON clinic_pet_vaccinations (organization_id, next_due_at) WHERE next_due_at IS NOT NULL AND status = 'applied';
     `);
   } catch (e) { /* noop */ }
+
+  // PETSHOP F4 — catálogo de serviços de BANHO & TOSA (grooming) da loja. Curado pela
+  // loja (nome/duração/preço); alimenta o agendamento. Aditivo; a fila é a própria
+  // agenda (reuso — o appointment recebe pet_id + grooming_service_id abaixo).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_grooming_services (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        name TEXT NOT NULL,                              -- Banho | Tosa | Banho e tosa | Hidratação | ...
+        duration_min INTEGER DEFAULT 60,                -- duração padrão (min)
+        price_cents INTEGER,                            -- preço (opcional)
+        notes TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_grooming_services_org ON clinic_grooming_services (organization_id, active);
+    `);
+  } catch (e) { /* noop */ }
+
+  // PETSHOP F4 — o agendamento de grooming aponta pro PET (F3) e pro SERVIÇO. Aditivos;
+  // agendamentos legados/veterinários ficam NULL (0-regressão). A fila da vez segue
+  // sendo a agenda (chegada→atendimento→checkout já existentes).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN pet_id TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN grooming_service_id TEXT`); } catch (e) { /* noop */ }
 };
 
 initDb();

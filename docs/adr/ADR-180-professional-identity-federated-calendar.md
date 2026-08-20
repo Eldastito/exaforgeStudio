@@ -10,7 +10,9 @@
   autoatendimento do profissional, COM escrita) FECHADO** (F7.1 auth passwordless + leitura
   #1247 · F7.2 magic-link emitido pela clínica #1248 · F7.3 escrita da disponibilidade #1249 ·
   F7.4 aceita/recusa #1250 · F7b página `/profissional/:token` #1251)**.** **Agora F9 — inteligência de demanda:
-  F9.1 (read-model derivado, EM PR).** DIFERIDO restante: F10 (rede/marketplace). Como F1–F3, cada
+  F9.1/F9.2 núcleo FECHADO (read-model #1252 + gap proativo #1253).** **Agora F10 —
+  rede/marketplace (descoberta cross-org): F10.0 (auditoria + design da fronteira de
+  privacidade, doc-only, EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -328,7 +330,66 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     demand-gap` (8) — publica alto, idempotente, self-heal ao fechar, reabre ao recorrer,
     gate do pass, sem dinheiro, isolamento. **Fecha o núcleo do F9** (sugestão de nova
     clínica fica pra F10/marketplace).
-- **F10** — Rede/marketplace (profissional descobre clínicas, clínica descobre especialistas).
+- **F10 — Rede/marketplace: descoberta cross-org (profissional ↔ clínica).** É a única
+  fatia que cruza a fronteira de isolamento (RN-PN-2) de propósito — o valor É revelar QUEM
+  (qual clínica precisa / qual especialista está disponível). Fatiada backend-first; F10.0
+  (esta, doc-only) trava a fronteira de privacidade.
+
+  ### Decisão de fronteira (F10.0)
+  A descoberta é **identidade-atribuída** — espelha `SupplyNetworkService` (marketplace de
+  fornecedores cross-org, opt-in, tier público×privado), **NÃO** `vertical_intelligence`. O
+  padrão anonimizado (camada org-free + `assertNoTenantData`) é o ERRADO aqui: seu gate
+  REJEITARIA justamente as identidades que a descoberta precisa expor. A privacidade em F10
+  protege **dados de paciente, financeiros e o grafo de relacionamentos** — nunca as
+  identidades públicas (nome do profissional/conselho/especialidade; nome/cidade da clínica).
+
+  ### Dois opt-ins independentes (ambos default OFF, como `professional_network_enabled`)
+  - **Profissional se publica** (a identidade é GLOBAL e não tem `organization_settings` —
+    precisa de flag + localização NOVAS em `professionals`): `discoverable` + `base_city`/
+    `base_state`/`base_lat`/`base_lng`. Publica: nome, conselho, especialidades
+    (`specialties_json` — a ÚNICA fonte org-free autoritativa; `clinic_professional_specialties`
+    é tenant-privada e NÃO pode semear o diretório), região, contato-ao-conectar. NUNCA:
+    em quais clínicas já atende (grafo de vínculos), comissão/termos financeiros.
+  - **Clínica se publica** (estende `organization_settings`, flag NOVA `network_discoverable`):
+    business_name, cidade/estado (`address_city`/`address_state` já existem), especialidades
+    PROCURADAS (derivadas dos `demand_gap` de pressão ALTA — F9.2). NUNCA: dado de paciente,
+    linhas de waitlist, contagens cruas de demanda, receita/`met`.
+  - Matching por **especialidade** (`specialties_json` canonicalizado ↔ especialidade
+    procurada) + **região grossa** (cidade/estado ou raio lat/lng via Haversine +
+    `geocode_cache`, reusados do `SupplyNetworkService`). NUNCA expõe endereço exato.
+
+  ### A descoberta ALIMENTA o funil existente (nunca o bypassa)
+  Um match entrega um `professionalId` (prof→clínica) ou `orgId` (clínica→prof); agir sobre
+  ele chama `ClinicProfessionalRelationshipService.invite(clinicOrgId, {professionalId})` →
+  `pending` → o aceite existente (F1). A descoberta só SUGERE; a conexão segue exigindo o
+  consentimento invite→accept dos dois lados (RN-PN-5). Sem tabela de vínculo nova.
+
+  ### Guardrails (RN-PN-9..11)
+  - **RN-PN-9 — Descoberta é opt-in dos DOIS lados.** Ninguém aparece no diretório sem ter
+    ligado a própria visibilidade (default OFF). Desligar remove da descoberta imediatamente;
+    não apaga identidade nem vínculos (espírito RN-PN-3).
+  - **RN-PN-10 — Nunca vaza o privado.** A projeção publicável carrega só identidade pública
+    + especialidade + região grossa. Paciente, financeiro, contagem crua de demanda e o
+    grafo de relacionamentos NUNCA entram na descoberta.
+  - **RN-PN-11 — Descoberta ≠ conexão.** O diretório só surface; criar o vínculo é sempre o
+    `invite→accept` governado (consentimento dos dois lados). Nenhum auto-vínculo.
+
+  ### Plano de fatias
+  - **F10.0 — Auditoria + design (esta, doc-only).** Fronteira travada acima.
+    `docs/professional-network/f10-discovery-audit.md` (síntese da auditoria) + esta seção.
+  - **F10.1 — Profissional descobrível.** Colunas `professionals.{discoverable,base_city,
+    base_state,base_lat,base_lng}` + `ProfessionalService` (set/get de visibilidade +
+    localização; geocode reusado). Opt-in default 0.
+  - **F10.2 — Clínica descobrível + projeção de especialidades procuradas.** Flag
+    `organization_settings.network_discoverable` + derivação das especialidades procuradas
+    a partir dos `demand_gap` ALTOS (sem contagem crua).
+  - **F10.3 — Serviço de descoberta (bidirecional).** `ProfessionalDiscoveryService` no
+    molde `SupplyNetworkService.listSuppliers`: `clinicsSeeking(professionalId)` +
+    `specialistsFor(orgId, {specialty,radius})`, match especialidade+região, exclui já-vinculados.
+  - **F10.4 — Descoberta → convite.** Fio pro `invite` existente (nenhum bypass do aceite).
+  - **F10b — UI dos dois lados** (aba "Rede" p/ a clínica; webapp do profissional p/ ele).
+  Guardrails RN-PN-9..11 codificados como teste em cada fatia. Auditoria completa em
+  `docs/professional-network/f10-discovery-audit.md`.
 
 ## Reuso vs. novo (resumo)
 

@@ -1006,4 +1006,9 @@ router.get("/help-gaps", (req: AuthRequest, res): any => {
   res.json({ gaps: HelpKnowledgeService.globalGaps({ limit }) });
 });
 
+// GET /api/admin/help-metrics — métricas GLOBAIS (cross-org) da base de ajuda (F4).
+router.get("/help-metrics", (_req: AuthRequest, res): any => {
+  res.json(HelpKnowledgeService.globalMetrics());
+});
+
 export default router;

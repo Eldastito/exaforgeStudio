@@ -61,6 +61,15 @@ async function main() {
   check("3.3 fila de lacunas prioriza a dúvida repetida (hits≥2)", !!nf && nf!.hits >= 2);
   check("3.4 fila ordenada por hits desc", gaps.length >= 1 && gaps[0].hits >= (gaps[gaps.length - 1]?.hits ?? 0));
 
+  // ═══════════════ 3b. globalMetrics agrega cross-org (painel master) ═══════════════
+  const gm = KB.globalMetrics();
+  check("3b.1 globalMetrics soma asks de todas as orgs", gm.totalAsks >= mReal.totalAsks && gm.totalAsks > 0);
+  check("3b.2 answerRatePct derivado (0..100)", gm.answerRatePct !== null && gm.answerRatePct >= 0 && gm.answerRatePct <= 100);
+  check("3b.3 openGaps agrega (distinct query+módulo)", gm.openGaps >= 1);
+  check("3b.4 orgsAsking conta as orgs que perguntaram", gm.orgsAsking >= 1);
+  check("3b.5 articlesPublished > 0 (seeds)", gm.articlesPublished > 0);
+  check("3b.6 byModule presente", Array.isArray(gm.byModule) && gm.byModule.length >= 1);
+
   // ═══════════════ 4. globalGaps agrega cross-org ═══════════════
   // A org B pergunta a MESMA coisa → globalGaps soma; org-scoped não vaza.
   const ownerB = { userId: "u2", email: "b@x.com", role: "owner", role_profile_id: prof(B, "owner"), organizationId: B };

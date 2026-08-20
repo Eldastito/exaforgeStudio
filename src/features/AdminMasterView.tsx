@@ -722,6 +722,7 @@ const HELP_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 function HelpCurationPanel() {
   const [articles, setArticles] = useState<any[]>([]);
   const [gaps, setGaps] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [bootModule, setBootModule] = useState('central_saude');
   const [busy, setBusy] = useState(false);
@@ -731,16 +732,21 @@ function HelpCurationPanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const [a, g] = await Promise.all([
+      const [a, g, m] = await Promise.all([
         apiFetch('/api/admin/help-articles?status=all').then((x) => (x.ok ? x.json() : { articles: [] })),
         apiFetch('/api/admin/help-gaps?limit=15').then((x) => (x.ok ? x.json() : { gaps: [] })),
+        apiFetch('/api/admin/help-metrics').then((x) => (x.ok ? x.json() : null)),
       ]);
       setArticles(Array.isArray(a?.articles) ? a.articles : []);
       setGaps(Array.isArray(g?.gaps) ? g.gaps : []);
+      setMetrics(m);
     } catch { /* noop */ }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const pct = (v: number | null) => (v === null || v === undefined ? '—' : `${v}%`);
+  const moduleLabel = (k: string | null) => HELP_MODULE_OPTIONS.find((m) => m.key === k)?.label || k || '—';
 
   const bootstrap = async () => {
     setBusy(true);
@@ -814,6 +820,47 @@ function HelpCurationPanel() {
       <p className="text-xs text-zinc-500 mb-4">
         A base que o <strong className="text-zinc-300">Tutor de Ajuda</strong> (orb) usa para responder o lojista. Gere um rascunho a partir de um módulo, revise o texto e publique com <strong className="text-zinc-300">quem revisou</strong> — sem isso, o artigo não vai ao ar (RN-HELP-3).
       </p>
+
+      {/* Métricas GLOBAIS (F4) — taxa de resposta, satisfação, volume, lacunas. null≠0. */}
+      {metrics && (
+        <div className="mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { label: 'Taxa de resposta', value: pct(metrics.answerRatePct), sub: `${metrics.answered}/${metrics.totalAsks} perguntas`, cls: 'text-emerald-300' },
+              { label: 'Satisfação (👍)', value: pct(metrics.helpfulRatePct), sub: `${metrics.helpfulVotes}👍 · ${metrics.notHelpfulVotes}👎`, cls: 'text-indigo-300' },
+              { label: 'Perguntas', value: String(metrics.totalAsks), sub: `${metrics.orgsAsking} empresa(s)`, cls: 'text-zinc-100' },
+              { label: 'Lacunas abertas', value: String(metrics.openGaps), sub: `${metrics.articlesPublished} artigos publicados`, cls: metrics.openGaps > 0 ? 'text-amber-300' : 'text-zinc-100' },
+            ].map((t) => (
+              <div key={t.label} className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+                <div className="text-[10px] uppercase tracking-wide text-zinc-500">{t.label}</div>
+                <div className={`text-xl font-semibold ${t.cls}`}>{t.value}</div>
+                <div className="text-[10px] text-zinc-500">{t.sub}</div>
+              </div>
+            ))}
+          </div>
+          {metrics.byModule?.length > 0 && (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="text-[11px] font-medium text-zinc-300 mb-2">Por módulo — onde as pessoas mais perguntam e travam</div>
+              <div className="space-y-1.5">
+                {metrics.byModule.slice(0, 8).map((m: any) => (
+                  <div key={m.moduleKey || 'none'} className="flex items-center gap-2 text-[12px]">
+                    <span className="w-36 shrink-0 truncate text-zinc-300">{moduleLabel(m.moduleKey)}</span>
+                    <div className="flex-1 h-2 rounded bg-zinc-800 overflow-hidden">
+                      <div className="h-full bg-emerald-600/70" style={{ width: `${m.answerRatePct ?? 0}%` }} />
+                    </div>
+                    <span className="w-10 text-right tabular-nums text-zinc-400">{pct(m.answerRatePct)}</span>
+                    <span className="w-16 text-right text-zinc-500">{m.asks} pergs</span>
+                    {m.openGaps > 0 && <span className="w-16 text-right text-amber-400">{m.openGaps} lac.</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {metrics.totalAsks === 0 && (
+            <div className="mt-2 text-[11px] text-zinc-500">Ainda sem perguntas registradas — as métricas aparecem conforme o orb for usado.</div>
+          )}
+        </div>
+      )}
 
       {/* Fila de lacunas (F4) — dúvidas reais sem cobertura, cross-org, que puxam a curadoria */}
       {gaps.length > 0 && (

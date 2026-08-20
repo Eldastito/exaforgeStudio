@@ -22,6 +22,10 @@ const GroupSessionPanel = React.lazy(() => import('./clinic/group-sessions/Group
 // GuideDraftButton (IA F48 com missing:true). Também lazy.
 const GuidesPanel = React.lazy(() => import('./clinic/guides/GuidesPanel'));
 
+// ADR-180 F4b: UI da Agenda Federada (rede de especialistas). Lazy — só carrega
+// quando o operador abre a aba. Self-gated pela flag `professional_network_enabled`.
+const ProfessionalNetworkPanel = React.lazy(() => import('./clinic/network/ProfessionalNetworkPanel'));
+
 // ADR-146 F56: header de métricas F40 + badges nas abas. NÃO lazy —
 // aparece imediatamente ao abrir a Clínica e alimenta os badges das
 // tabs (que precisam do count antes de qualquer aba ser clicada).
@@ -218,7 +222,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 // componente principal (isola o re-render por refresh a 60s).
 // Badges âmbar sinalizam trabalho pendente (RN-014: sinalizar, não
 // decidir por conta própria — a decisão é do humano na aba).
-type ClinicTab = 'agenda' | 'pets' | 'grooming' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
+type ClinicTab = 'agenda' | 'pets' | 'grooming' | 'especialidades' | 'rede' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
 function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab) => void }) {
   const { counts } = useJourneyCounts();
   const terms = useClinicTerms();
@@ -237,6 +241,7 @@ function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab)
     ['grupos', 'Grupos'],
     ['guias', 'Guias'],
     ['especialidades', 'Especialidades'],
+    ['rede', 'Rede'],
     ['autorizacoes', 'Autorizações'],
     ['conexao', 'Conexão'],
   ];
@@ -260,7 +265,7 @@ function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab)
 
 export function ClinicAgendaView() {
   const terms = useClinicTerms();
-  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'especialidades' | 'rede' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<string>('');
@@ -404,6 +409,16 @@ export function ClinicAgendaView() {
           </div>
         }>
           <SpecialtiesPanel />
+        </Suspense>
+      )}
+
+      {tab === 'rede' && (
+        <Suspense fallback={
+          <div className="flex items-center gap-2 text-zinc-500 text-sm py-10">
+            <Loader2 className="w-4 h-4 animate-spin" /> Carregando rede de especialistas…
+          </div>
+        }>
+          <ProfessionalNetworkPanel contacts={contacts} />
         </Suspense>
       )}
 

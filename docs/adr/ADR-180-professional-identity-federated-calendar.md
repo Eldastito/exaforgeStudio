@@ -1,11 +1,11 @@
 # ADR-180 — Professional Identity & Federated Calendar (Agenda Federada)
 
-- **Status:** ABERTO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
+- **Status:** MVP FECHADO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
   relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
-  F3 (Availability Engine + hold atômico, MERGED PR #1234) · **F4-backend (booking federado
-  + AutoBooking governado, EM PR)**. Plano F0–F4 (MVP) + fatias diferidas. A UI da clínica
-  (formulários do operador) sai numa fatia fina de continuação (F4b) — como F1–F3, o
-  backend fecha primeiro com teste como contrato.
+  F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
+  + AutoBooking governado, MERGED PR #1235) · **F4b (UI do operador na Clínica, EM PR)**.
+  Plano F0–F4 (MVP) entregue ponta-a-ponta; fatias F5–F10 diferidas (ver abaixo). Como
+  F1–F3, cada backend fechou primeiro com teste como contrato e a UI veio como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -110,7 +110,7 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
   `/holds/:holdId/{confirm,release}`. `test:professional-availability` (27) — geração de
   vagas, buffer, corrida na mesma vaga, TTL/expiração, confirm/release, subtração de
   appointment e isolamento cross-org.
-- **F4 — Booking federado + ferramentas de IA + AutoBooking. FECHADA (backend, em PR).**
+- **F4 — Booking federado + ferramentas de IA + AutoBooking. FECHADA (backend, MERGED PR #1235).**
   `ProfessionalBookingService` reúne as três ferramentas ATERRADAS que qualquer superfície
   de IA (Fala Tu / assistente) chama: `getAvailability`/`holdSlot`/`confirmBooking` — a IA
   só oferece o que o Availability Engine (F3) prova; **nunca inventa vaga** (RN-PN-4).
@@ -132,9 +132,22 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
   `test:professional-booking` (23) — grounding, idempotência durável, recusa de hold
   inexistente/expirado/de-outra-org (anti-alucinação), AutoBooking governado (propõe→
   aprova→executa + `booking_confirmation`) e sem-vaga→waitlist com ZERO appointment.
-- **F4b — UI da clínica (continuação).** Aba "Rede" na agenda: convidar/gerir vínculos,
-  configurar serviços/janelas, buscar disponibilidade, reservar/confirmar e disparar
-  AutoBooking. Fina, sobre as rotas já prontas.
+- **F4b — UI do operador na Clínica. FECHADA (EM PR).** Aba **"Rede"** na `ClinicAgendaView`
+  (lazy `ProfessionalNetworkPanel`, self-gated pela flag — mostra o convite de ativação
+  quando a rede está off): ativar a rede (opt-in) → convidar/aceitar/revogar profissional
+  (identidade global + vínculo) → configurar serviços ofertados + janelas de trabalho →
+  **ver as vagas provadas (F3) e agendar** (hold atômico → confirm → appointment federado;
+  `slot_taken` avisado e recarrega) → fila (waitlist) sem vaga → AutoBooking (propõe o
+  comando governado, só quando `autobooking_enabled`). Escrita é owner/admin no servidor —
+  a UI mostra o erro, não esconde o botão. Backend mínimo desta fatia:
+  `ProfessionalNetworkSettingsService` (get/set das duas flags — ÚNICO ponto NÃO gated,
+  senão nunca se ligaria a rede; coerência autobooking⇒rede, rede-off⇒autobooking-off) +
+  rotas `GET/PUT /professional-network/settings` (owner/admin). Serviços do catálogo vêm de
+  `/api/products` (filtrando `type='service'`, sem endpoint novo). `test:professional-
+  network-settings` (11) — default off, coerência das flags e isolamento por org.
+
+Com a F4b, o MVP (F0–F4) está fechado ponta-a-ponta: o operador da clínica agenda um
+especialista da rede sem contato manual, respeitando a disponibilidade real dele.
 
 **DEFERIDO (fora do MVP):**
 

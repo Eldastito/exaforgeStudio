@@ -43,6 +43,7 @@ import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRela
 import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
+import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -2227,6 +2228,21 @@ router.post("/surgeries/:sid/status", (req: AuthRequest, res): any => {
 // ── ADR-180 F1 — Professional Network & Agenda Federada ──
 // Opt-in SERVER-SIDE (RN-PN-8): a flag é imposta no CAMINHO real, não só na UI.
 // Sem a flag, as rotas recusam 403 antes de qualquer efeito.
+//
+// F4b — settings das flags (NÃO gated: é o ponto de LIGAR a rede; senão nunca
+// seria possível ativá-la). owner/admin. As rotas de operação seguem gated.
+router.get("/professional-network/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProfessionalNetworkSettingsService.get(orgId));
+});
+router.put("/professional-network/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProfessionalNetworkSettingsService.set(orgId, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
 function professionalNetworkEnabled(orgId: string): boolean {
   const row = db.prepare(`SELECT professional_network_enabled AS on FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
   return !!(row && row.on);

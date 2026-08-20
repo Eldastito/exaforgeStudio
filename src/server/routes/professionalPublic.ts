@@ -67,4 +67,14 @@ router.put("/relationships/:relId/windows", requireProfessional, (req: ProfReq, 
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
+// F7.4 — o profissional aceita (confirma presença) / recusa (cancela + avisa a clínica).
+router.post("/appointments/:apptId/accept", requireProfessional, (req: ProfReq, res: Response): any => {
+  try { res.json(ProfessionalSelfService.acceptAppointment(req.professionalId!, String(req.params.apptId))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/appointments/:apptId/decline", requireProfessional, async (req: ProfReq, res: Response): Promise<any> => {
+  try { res.json(await ProfessionalSelfService.declineAppointment(req.professionalId!, String(req.params.apptId), req.body?.reason)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
 export default router;

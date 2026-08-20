@@ -51,7 +51,7 @@ export class ProfessionalSelfService {
     const args: any[] = [String(professionalId || "")];
     let sql = `
       SELECT a.id, a.organization_id, a.title, a.scheduled_start, a.scheduled_end, a.status,
-             a.network_relationship_id AS relationship_id, a.pet_id,
+             a.network_relationship_id AS relationship_id, a.pet_id, a.professional_ack_at,
              c.name AS contact_name, p.name AS pet_name
       FROM appointments a
       JOIN clinic_professional_relationships r ON r.id = a.network_relationship_id
@@ -70,6 +70,7 @@ export class ProfessionalSelfService {
         clinicName: clinicName(r.organization_id),
         start: r.scheduled_start, end: r.scheduled_end, status: r.status,
         title: r.title, contactName: r.contact_name ?? null, petName: r.pet_name ?? null,
+        ackAt: r.professional_ack_at ?? null,
       })),
     };
   }
@@ -133,6 +134,63 @@ export class ProfessionalSelfService {
   static setWindows(professionalId: string, relationshipId: string, windows: WindowInput[]): any {
     const { orgId, relationshipId: rid } = this.relScope(professionalId, relationshipId);
     return ProfessionalScheduleConfigService.setWindows(orgId, rid, windows, `professional:${professionalId}`);
+  }
+
+  // ── F7.4 — Escrita: o profissional ACEITA/RECUSA um atendimento federado ──
+
+  /**
+   * Resolve o atendimento GARANTINDO que é de um vínculo DESTE profissional (join por
+   * professional_id). Barreira de autorização da escrita sobre appointment. Devolve o
+   * orgId real + status. Nunca alcança appointment de outro profissional.
+   */
+  private static apptScope(professionalId: string, appointmentId: string): { orgId: string; status: string } {
+    const r = db.prepare(`
+      SELECT a.organization_id, a.status FROM appointments a
+      JOIN clinic_professional_relationships r ON r.id = a.network_relationship_id
+      WHERE a.id = ? AND r.professional_id = ?
+    `).get(String(appointmentId || ""), String(professionalId || "")) as any;
+    if (!r) throw new Error("appointment_not_found");
+    return { orgId: r.organization_id, status: r.status };
+  }
+
+  /**
+   * O profissional CONFIRMA presença (ack). Não muda o status FSM (segue confirmed) — é um
+   * sinal positivo pra clínica (`professional_ack_at`). Idempotente; não confirma cancelado.
+   */
+  static acceptAppointment(professionalId: string, appointmentId: string): any {
+    const { orgId, status } = this.apptScope(professionalId, appointmentId);
+    if (["cancelled", "no_show"].includes(status)) throw new Error("appointment_not_active");
+    db.prepare(`UPDATE appointments SET professional_ack_at = COALESCE(professional_ack_at, CURRENT_TIMESTAMP) WHERE organization_id = ? AND id = ?`).run(orgId, appointmentId);
+    const r = db.prepare(`SELECT id, status, professional_ack_at FROM appointments WHERE id = ?`).get(appointmentId) as any;
+    return { id: r.id, status: r.status, ackAt: r.professional_ack_at };
+  }
+
+  /**
+   * O profissional RECUSA o atendimento (não pode atender). Cancela (reusa
+   * `ProfessionalBookingService.cancelBooking` — marca cancelled, preserva histórico, tira
+   * do Google) e PUBLICA um sinal pra clínica reagir (rebook/waitlist) — nunca silencioso.
+   */
+  static async declineAppointment(professionalId: string, appointmentId: string, reason?: string): Promise<any> {
+    const { orgId } = this.apptScope(professionalId, appointmentId);
+    const { ProfessionalBookingService } = await import("./ProfessionalBookingService.js");
+    const appt = await ProfessionalBookingService.cancelBooking(orgId, appointmentId, `professional:${professionalId}`);
+    // Sinal pra clínica (convenção nº 12 — nunca tabela de alerta paralela). Best-effort.
+    try {
+      const { BusinessSignalService } = await import("./BusinessSignalService.js");
+      BusinessSignalService.publish(orgId, {
+        domain: "clinic",
+        signalType: "professional_network/booking_declined",
+        severity: "attention",
+        basis: "fact",
+        confidence: 1,
+        sourceService: "ProfessionalSelfService",
+        sourceEntityType: "appointment",
+        sourceEntityId: appointmentId,
+        dedupeKey: `clinic:prof_declined:${appointmentId}`,
+        evidence: { professionalId, reason: reason || null, note: "O profissional recusou o atendimento — reagende ou coloque em espera." },
+      } as any);
+    } catch { /* best-effort */ }
+    return appt;
   }
 }
 

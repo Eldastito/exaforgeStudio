@@ -10282,6 +10282,38 @@ const initDb = () => {
     try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN commission_beneficiary TEXT DEFAULT 'professional'`); } catch (e) { /* noop */ }
     try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN tax_withholding_percent REAL`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de finanças federadas (ADR-180 F8.2)', e); }
+
+  // ── ADR-180 F6.1 — Google Calendar POR PROFISSIONAL (Agenda Federada) ──
+  // Conexão GLOBAL, chaveada por `professional_id` (sem organization_id) — o profissional
+  // tem UMA agenda que TODAS as clínicas respeitam (§90: o calendário é da identidade do
+  // ecossistema, não de uma clínica). Espelha `professionals` (global) e a shape de
+  // `oauth_connections`, mas keyed por profissional. Tokens CIFRADOS (EncryptionService,
+  // AES-GCM — convenção nº 4/6). Escopo calendar-only (least-privilege). `connected_by_org`
+  // é só AUDITORIA (qual clínica iniciou o connect) — não confere propriedade (RN-PN-1/3).
+  // Aditivo/opt-in: sem conexão, a disponibilidade opera igual (0-regressão).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS professional_google_connections (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'google',
+        access_token TEXT,           -- cifrado (enc:v1:...)
+        refresh_token TEXT,          -- cifrado
+        scopes TEXT,
+        account_email TEXT,
+        account_name TEXT,
+        expires_at DATETIME,
+        connected_by_org TEXT,       -- auditoria (não é propriedade)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(professional_id, provider)
+      );
+    `);
+    // Evento do Google criado na agenda DO PROFISSIONAL para o appointment federado
+    // (registry de "eventos que criamos" — só mexemos no que é nosso). Separado do
+    // `google_event_id` (que é da agenda da ORG); federado nunca passa pelo sync da org.
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN network_google_event_id TEXT`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha ao criar professional_google_connections (ADR-180 F6.1)', e); }
 };
 
 initDb();

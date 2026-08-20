@@ -4,10 +4,10 @@
   relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
   F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
-  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO: F8.1 (split derivado,
-  MERGED PR #1237) · F8.2 (direção do split aberta + imposto retido + previsão, MERGED PR
-  #1238) · F8b (UI do financeiro na aba "Rede", EM PR).** Como F1–F3, cada backend fecha
-  primeiro com teste como contrato e a UI vem como fatia fina.
+  Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (F8.1 split derivado
+  #1237 · F8.2 split aberto + imposto + previsão #1238 · F8b UI #1239). **Agora F6 — Google
+  Calendar por profissional: F6.1 (conexão per-profissional, EM PR).** Como F1–F3, cada
+  backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -154,7 +154,25 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
 **DEFERIDO (fora do MVP):**
 
 - **F5** — Recursos (salas/equipamentos) + deslocamento entre clínicas.
-- **F6** — Google Calendar por profissional (escopo calendar-only, eventos próprios, `getBusy`).
+- **F6 — Google Calendar por profissional.** Decisão de fronteira (§90): a conexão é
+  GLOBAL, chaveada por `professional_id` (uma agenda que TODAS as clínicas respeitam), não
+  por `relationship_id`. Fatiada backend-first:
+  - **F6.1 — Conexão per-profissional (EM PR).** `ProfessionalGoogleService` + tabela GLOBAL
+    `professional_google_connections` (chave `professional_id`, tokens CIFRADOS
+    `EncryptionService` AES-GCM, escopo CALENDAR-ONLY least-privilege — sem Drive/Sheets/Gmail).
+    Reusa a mecânica OAuth do `GoogleOAuthService` mas com `state` assinado carregando
+    professionalId+orgId e callback próprio `/api/integrations/google/professional-callback`
+    (público, em `server.ts`). `busyIntervals` (freeBusy ESTRUTURADO → {start,end} ms),
+    `createEvent`/`deleteEvent` (best-effort). `fetchFn` INJETÁVEL → teste determinístico sem
+    rede. Rotas na clínica gated por VÍNCULO ACEITO (`/relationships/:id/google/{status,
+    login-url,disconnect}`, owner/admin). Coluna aditiva `appointments.network_google_event_id`
+    (registry de evento próprio, populado na F6.3). `test:professional-google` (20).
+  - **F6.2 — Disponibilidade subtrai o Google busy (a fazer).** `availableSlots` recebe o
+    busy do profissional (opt, async) como 3ª fonte no `busyIntervals` → nunca OFERECE vaga
+    em cima de compromisso do Google. Sem conexão → 0-regressão.
+  - **F6.3 — Empurra o atendimento federado pra agenda do profissional (a fazer).**
+    `confirmBooking` cria o evento (guarda `network_google_event_id`); cancelamento remove.
+  - **F6b — UI (a fazer).** Conectar/desconectar Google do profissional na aba "Rede".
 - **F7** — Webapp de autoatendimento do profissional (login, agenda própria).
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**
   Fatiada backend-first (visão original do dono: *"quanto vai receber, o percentual da clínica

@@ -44,6 +44,7 @@ import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfig
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
 import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
+import { ProfessionalGoogleService } from "../ProfessionalGoogleService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -2405,6 +2406,32 @@ router.get("/professional-network/finance/forecast", requireRole("owner", "admin
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ProfessionalFinanceService.forecast(orgId, { fromISO: req.query.from as string, toISO: req.query.to as string })); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── F6.1 — Google Calendar por profissional ──
+// A conexão é GLOBAL (por professional_id); a clínica só a inicia via um VÍNCULO ACEITO
+// dela (gate natural). O callback público (server.ts) grava o token per-profissional.
+router.get("/professional-network/relationships/:id/google/status", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  const rel = ClinicProfessionalRelationshipService.get(orgId, String(req.params.id));
+  if (!rel) return res.status(404).json({ error: "relationship_not_found" });
+  res.json(ProfessionalGoogleService.status(rel.professionalId));
+});
+router.get("/professional-network/relationships/:id/google/login-url", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  const rel = ClinicProfessionalRelationshipService.get(orgId, String(req.params.id));
+  if (!rel) return res.status(404).json({ error: "relationship_not_found" });
+  if (rel.status !== "accepted") return res.status(400).json({ error: "relationship_not_accepted" });
+  if (!ProfessionalGoogleService.isConfigured()) return res.status(503).json({ error: "google_not_configured" });
+  res.json({ url: ProfessionalGoogleService.authUrl(rel.professionalId, orgId) });
+});
+router.post("/professional-network/relationships/:id/google/disconnect", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  const rel = ClinicProfessionalRelationshipService.get(orgId, String(req.params.id));
+  if (!rel) return res.status(404).json({ error: "relationship_not_found" });
+  ProfessionalGoogleService.disconnect(rel.professionalId);
+  try { logAuthEvent(orgId, actor(req), rel.professionalId, "PROF_GOOGLE_DISCONNECT", {}); } catch { /* noop */ }
+  res.json({ ok: true });
 });
 
 export default router;

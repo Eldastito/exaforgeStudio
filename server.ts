@@ -714,7 +714,7 @@ async function startServer() {
     }
     // Callbacks OAuth (Instagram/Google): o provedor redireciona o navegador
     // para cá SEM o nosso JWT — precisam ficar fora do middleware autenticado.
-    if (req.path === '/integrations/instagram/callback' || req.path === '/integrations/google/callback') {
+    if (req.path === '/integrations/instagram/callback' || req.path === '/integrations/google/callback' || req.path === '/integrations/google/professional-callback') {
       return next();
     }
     return protectedApi(req, res, next);
@@ -728,6 +728,15 @@ async function startServer() {
     const base = (process.env.APP_URL || '').replace(/\/$/, '') || `${req.protocol}://${req.headers.host}`;
     const orgId = await GoogleOAuthService.handleCallback(String(req.query.code || ''), String(req.query.state || ''));
     res.redirect(`${base}/?google=${orgId ? 'conectado' : 'erro'}`);
+  });
+
+  // Callback público do OAuth do Google POR PROFISSIONAL (Agenda Federada, ADR-180 F6).
+  // O `state` assinado carrega o professional_id; grava a conexão global do profissional.
+  app.get("/api/integrations/google/professional-callback", async (req, res) => {
+    const base = (process.env.APP_URL || '').replace(/\/$/, '') || `${req.protocol}://${req.headers.host}`;
+    const { ProfessionalGoogleService } = await import("./src/server/ProfessionalGoogleService.js");
+    const pid = await ProfessionalGoogleService.handleCallback(String(req.query.code || ''), String(req.query.state || ''));
+    res.redirect(`${base}/?google_prof=${pid ? 'conectado' : 'erro'}`);
   });
 
   // --- META WEBHOOK (WhatsApp & Instagram) ---

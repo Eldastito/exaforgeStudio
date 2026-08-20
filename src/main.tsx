@@ -9,6 +9,7 @@ import { LandingPage } from './landing/LandingPage.tsx';
 import { RadarPublicWizard } from './radar-public/RadarPublicWizard.tsx';
 import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx';
 import { ClinicPortalPage } from './clinic-public/ClinicPortalPage.tsx';
+import { ProfessionalPortalPage } from './clinic-public/ProfessionalPortalPage.tsx';
 import { PatientPortalPage } from './clinic-public/PatientPortalPage.tsx';
 import { ComigoMesaPage } from './comigo-public/ComigoMesaPage.tsx';
 import { FalatuApp } from './falatu-app/FalatuApp.tsx';
@@ -40,6 +41,9 @@ const isRadarPublic = !isRadarRespondent && (window.location.pathname === '/rada
 // Portal do Profissional (Clínica, Fase D2) — página pública read-only, sem
 // login. /clinic/professional/:token abre a agenda do dia do profissional.
 const isClinicPortal = window.location.pathname.startsWith('/clinic/professional/');
+// Webapp de autoatendimento do profissional (ADR-180 F7b) — /profissional/:token,
+// público, magic-link → sessão escopada. COM escrita (agenda + disponibilidade).
+const isProfessionalPortal = window.location.pathname.startsWith('/profissional/');
 const isPatientPortal = window.location.pathname.startsWith('/paciente/');
 // Comigo Mesa/QR (ADR-119) — autoatendimento público sem login (/mesa/:token).
 const isComigoMesa = window.location.pathname.startsWith('/mesa/');
@@ -99,6 +103,8 @@ createRoot(rootEl).render(
       <RadarPublicWizard />
     ) : isClinicPortal ? (
       <ClinicPortalPage />
+    ) : isProfessionalPortal ? (
+      <ProfessionalPortalPage />
     ) : isPatientPortal ? (
       <PatientPortalPage />
     ) : isComigoMesa ? (

@@ -109,6 +109,7 @@ export const AutoBookingCommandHandler: CommandHandler = {
 
     // Confirma o hold + cria o agendamento federado (idempotente por hold).
     const appt = BOOK.confirmBooking(orgId, { holdId: hold.id, contactId: String(p.contactId || ""), petId: p.petId ?? null, title: p.title ?? null, nowISO: p.nowISO || undefined }, "auto_booking");
+    await BOOK.pushToGoogle(orgId, appt.id);   // F6.3 — empurra pra agenda do profissional (best-effort)
 
     // AGENDADO ≠ ATENDIDO (RN-PN-5): arma a confirmação de comparecimento com SLA.
     try {

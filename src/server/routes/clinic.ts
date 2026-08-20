@@ -2363,9 +2363,18 @@ router.post("/professional-network/holds/:holdId/release", requireRole("owner", 
 
 // ── F4 — Booking federado + AutoBooking governado ──
 // Confirma um hold → cria o agendamento federado (idempotente por hold).
-router.post("/professional-network/holds/:holdId/booking", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/professional-network/holds/:holdId/booking", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = gatePN(req, res); if (!orgId) return;
-  try { res.json(ProfessionalBookingService.confirmBooking(orgId, { holdId: String(req.params.holdId), contactId: req.body?.contactId, petId: req.body?.petId ?? null, title: req.body?.title ?? null }, actor(req))); }
+  try {
+    const appt = ProfessionalBookingService.confirmBooking(orgId, { holdId: String(req.params.holdId), contactId: req.body?.contactId, petId: req.body?.petId ?? null, title: req.body?.title ?? null }, actor(req));
+    await ProfessionalBookingService.pushToGoogle(orgId, appt.id);   // F6.3 — best-effort
+    res.json(appt);
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// Cancela um atendimento federado (marca cancelled + remove do Google).
+router.post("/professional-network/appointments/:id/cancel", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(await ProfessionalBookingService.cancelBooking(orgId, String(req.params.id), actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 // Registra demanda sem vaga (waitlist na espinha canônica — não fabrica vaga).

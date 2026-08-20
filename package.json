@@ -245,6 +245,7 @@
     "test:professional-finance-forecast": "tsx scripts/test-professional-finance-forecast.ts",
     "test:professional-google": "tsx scripts/test-professional-google.ts",
     "test:professional-availability-google": "tsx scripts/test-professional-availability-google.ts",
+    "test:professional-google-sync": "tsx scripts/test-professional-google-sync.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

@@ -226,6 +226,60 @@ export class ProfessionalBookingService {
     });
   }
 
+  /**
+   * F6.3 — empurra o atendimento federado pra agenda GOOGLE do profissional (best-effort,
+   * async, IDEMPOTENTE). Chamado pelos callers ASSÍNCRONOS depois do `confirmBooking` (o
+   * confirm em si segue síncrono). Sem conexão Google → no-op (0-regressão); já empurrado
+   * (`network_google_event_id` setado) → no-op. Nunca lança pro caller (o agendamento já
+   * existe; o Google é aditivo). Guarda o id do evento (registry de "eventos que criamos").
+   */
+  static async pushToGoogle(orgId: string, appointmentId: string): Promise<void> {
+    try {
+      const a = db.prepare(`SELECT * FROM appointments WHERE organization_id = ? AND id = ? AND network_relationship_id IS NOT NULL`).get(orgId, String(appointmentId || "")) as any;
+      if (!a || !a.scheduled_start || a.network_google_event_id) return;   // não federado / sem data / já empurrado
+      if (["cancelled", "no_show"].includes(a.status)) return;
+      const rel = ClinicProfessionalRelationshipService.get(orgId, a.network_relationship_id);
+      if (!rel?.professionalId) return;
+      const g = await import("./ProfessionalGoogleService.js");
+      if (!g.ProfessionalGoogleService.getConnection(rel.professionalId)) return; // não conectado → 0-regressão
+      const endISO = a.scheduled_end || new Date(new Date(a.scheduled_start).getTime() + 60 * 60000).toISOString();
+      const eventId = await g.ProfessionalGoogleService.createEvent(rel.professionalId, {
+        summary: a.title || "Atendimento", description: "Agendamento via ZapFlow (Agenda Federada).",
+        startISO: a.scheduled_start, endISO,
+      });
+      if (eventId) db.prepare(`UPDATE appointments SET network_google_event_id = ? WHERE organization_id = ? AND id = ?`).run(eventId, orgId, appointmentId);
+    } catch (e) { console.error("[Prof Booking] pushToGoogle:", e); }
+  }
+
+  /** Remove o evento do Google do atendimento federado (best-effort) e limpa o vínculo. */
+  static async removeFromGoogle(orgId: string, appointmentId: string): Promise<void> {
+    try {
+      const a = db.prepare(`SELECT network_relationship_id, network_google_event_id FROM appointments WHERE organization_id = ? AND id = ?`).get(orgId, String(appointmentId || "")) as any;
+      if (!a?.network_google_event_id || !a.network_relationship_id) return;
+      const rel = ClinicProfessionalRelationshipService.get(orgId, a.network_relationship_id);
+      if (rel?.professionalId) {
+        const g = await import("./ProfessionalGoogleService.js");
+        await g.ProfessionalGoogleService.deleteEvent(rel.professionalId, a.network_google_event_id);
+      }
+      db.prepare(`UPDATE appointments SET network_google_event_id = NULL WHERE organization_id = ? AND id = ?`).run(orgId, appointmentId);
+    } catch (e) { console.error("[Prof Booking] removeFromGoogle:", e); }
+  }
+
+  /**
+   * Cancela um atendimento federado: marca `cancelled` (preserva histórico — nunca apaga,
+   * convenção nº 9) e remove o evento do Google. Idempotente. Retorna o appointment.
+   */
+  static async cancelBooking(orgId: string, appointmentId: string, actorId?: string): Promise<any> {
+    const a = db.prepare(`SELECT * FROM appointments WHERE organization_id = ? AND id = ? AND network_relationship_id IS NOT NULL`).get(orgId, String(appointmentId || "")) as any;
+    if (!a) throw new Error("appointment_not_found");
+    if (a.status !== "cancelled") {
+      db.prepare(`UPDATE appointments SET status = 'cancelled' WHERE organization_id = ? AND id = ?`).run(orgId, appointmentId);
+      try { logAuthEvent(orgId, actorId || "system", appointmentId, "PROF_BOOKING_CANCELLED", { relationshipId: a.network_relationship_id }); } catch { /* noop */ }
+    }
+    await this.removeFromGoogle(orgId, appointmentId);
+    return this.hydrate(orgId, db.prepare(`SELECT * FROM appointments WHERE id = ?`).get(appointmentId));
+  }
+
   /** Executa o efeito de uma ação de auto_booking APROVADA (pelo choke-point governado). */
   static executeAutoBooking(orgId: string, actionId: string): Promise<any> {
     return CommandExecutorService.execute(orgId, actionId);

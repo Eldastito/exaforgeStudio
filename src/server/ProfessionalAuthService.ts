@@ -22,12 +22,16 @@ import db from "./db.js";
 import { JWT_SECRET } from "./config/secret.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ProfessionalService } from "./ProfessionalService.js";
+import { ClinicProfessionalRelationshipService } from "./ClinicProfessionalRelationshipService.js";
 
 const TTL_DAYS = 30;
 const SESSION_TTL = "12h";
 const SCOPE = "professional_portal";
+const APP_URL = (process.env.APP_URL || "").replace(/\/$/, "");
 
 function hashToken(raw: string): string { return createHash("sha256").update(raw).digest("hex"); }
+/** URL do webapp do profissional. Absoluta se APP_URL definido; senão relativa (honesto). */
+function accessUrl(token: string): string { return `${APP_URL}/profissional/${token}`; }
 
 export interface ProfessionalSessionClaims { professionalId: string; scope: string; }
 
@@ -98,6 +102,39 @@ export class ProfessionalAuthService {
       if (!d || d.scope !== SCOPE || !d.professionalId || d.organizationId) return null;
       return { professionalId: String(d.professionalId) };
     } catch { return null; }
+  }
+
+  // ── F7.2 — Emissão pela clínica (política: só um vínculo ACEITO pode emitir) ──
+
+  /** Confere que o vínculo é da org e está ACEITO; devolve o professionalId ou lança. */
+  private static requireAcceptedRel(orgId: string, relationshipId: string): { professionalId: string; professionalName: string | null } {
+    const rel = ClinicProfessionalRelationshipService.get(orgId, String(relationshipId || ""));
+    if (!rel) throw new Error("relationship_not_found");                 // isolamento (RN-PN-2)
+    if (rel.status !== "accepted") throw new Error("relationship_not_accepted");
+    return { professionalId: rel.professionalId, professionalName: rel.professional?.name ?? null };
+  }
+
+  /**
+   * A clínica (vínculo aceito) gera o magic-link do profissional. Devolve a URL pronta pra
+   * compartilhar (a clínica já fala com o profissional — entrega pelo canal dela). Token
+   * global: serve pra TODAS as clínicas do profissional (uma identidade, um acesso).
+   */
+  static issueForRelationship(orgId: string, relationshipId: string, actorId?: string): { url: string; token: string; expiresAt: string; professionalName: string | null } {
+    const { professionalId, professionalName } = this.requireAcceptedRel(orgId, relationshipId);
+    const { token, expiresAt } = this.generateToken(professionalId, { issuerOrgId: orgId, actorId });
+    return { url: accessUrl(token), token, expiresAt, professionalName };
+  }
+
+  /** Status do link do profissional do vínculo (sem expor o token). Só vínculo da org. */
+  static statusForRelationship(orgId: string, relationshipId: string): { active: boolean; expiresAt: string | null; lastAccessAt: string | null } {
+    const { professionalId } = this.requireAcceptedRel(orgId, relationshipId);
+    return this.status(professionalId);
+  }
+
+  /** Revoga o link do profissional do vínculo (só vínculo aceito da org). */
+  static revokeForRelationship(orgId: string, relationshipId: string, actorId?: string): { revoked: boolean } {
+    const { professionalId } = this.requireAcceptedRel(orgId, relationshipId);
+    return { revoked: this.revoke(professionalId, actorId) };
   }
 }
 

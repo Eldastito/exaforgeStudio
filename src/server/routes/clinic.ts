@@ -43,6 +43,7 @@ import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRela
 import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
+import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
 import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
 import { ProfessionalGoogleService } from "../ProfessionalGoogleService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
@@ -2442,6 +2443,24 @@ router.post("/professional-network/relationships/:id/google/disconnect", require
   ProfessionalGoogleService.disconnect(rel.professionalId);
   try { logAuthEvent(orgId, actor(req), rel.professionalId, "PROF_GOOGLE_DISCONNECT", {}); } catch { /* noop */ }
   res.json({ ok: true });
+});
+
+// ── F7.2 — Magic-link do webapp do profissional (a clínica gera e compartilha) ──
+// Só um vínculo ACEITO da org pode emitir; o token é GLOBAL (uma identidade, um acesso).
+router.get("/professional-network/relationships/:id/access-link", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAuthService.statusForRelationship(orgId, String(req.params.id))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/access-link", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAuthService.issueForRelationship(orgId, String(req.params.id), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/access-link/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAuthService.revokeForRelationship(orgId, String(req.params.id), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

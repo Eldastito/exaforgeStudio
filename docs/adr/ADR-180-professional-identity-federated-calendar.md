@@ -234,7 +234,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     PÚBLICAS `/api/public/professional/{session,overview,agenda,finance}` (fora do
     `requireAuth`; `requireProfessional` valida a sessão escopada). `test:professional-selfservice`
     (19). Privacidade: o profissional só vê os PRÓPRIOS vínculos (join por professional_id).
-  - **F7.2 — Magic-link: a clínica gera e envia o acesso (a fazer).**
+  - **F7.2 — Magic-link: a clínica gera e compartilha o acesso (EM PR).** Política de
+    emissão em `ProfessionalAuthService.issueForRelationship/statusForRelationship/
+    revokeForRelationship` — só um vínculo ACEITO da org emite (isolamento RN-PN-2); o
+    token é GLOBAL (uma identidade, um acesso — serve pra todas as clínicas do profissional);
+    devolve a URL `${APP_URL}/profissional/:token` pronta pra compartilhar (a clínica já
+    fala com o profissional pelo canal dela — molde ClinicPortalService: entrega manual).
+    Rotas `GET/POST /relationships/:id/access-link` + `/access-link/revoke` (owner/admin).
+    UI `AccessLinkPanel` na aba "Rede" (gerar/copiar/revogar + status/último acesso).
+    `test:professional-access-link` (11) — só aceito emite, pendente/de-outra-org não,
+    revogar mata o acesso, reemissão gera token novo.
   - **F7.3 — Escrita: o profissional edita a PRÓPRIA disponibilidade por clínica (a fazer).**
   - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (a fazer).**
   - **F7b — Página `/profissional/:token` (a fazer).**

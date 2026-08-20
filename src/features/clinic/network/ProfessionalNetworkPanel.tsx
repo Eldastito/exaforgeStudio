@@ -18,7 +18,7 @@
  * ATENDIDO (RN-PN-5): confirmar cria o agendamento; o comparecimento é outra etapa.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays } from 'lucide-react';
+import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays, Link2, Copy } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -282,6 +282,7 @@ function ProfessionalDetail({ rel, services, contacts, autobooking, onChanged }:
       <OfferingsEditor relId={rel.id} services={services} disabled={!accepted} />
       <WindowsEditor relId={rel.id} disabled={!accepted} />
       {accepted && <TravelBufferControl rel={rel} onChanged={onChanged} />}
+      {accepted && <AccessLinkPanel relId={rel.id} professionalName={rel.professional?.name || 'profissional'} />}
       {accepted && <GoogleCalendarPanel relId={rel.id} professionalName={rel.professional?.name || 'profissional'} />}
       {accepted && <AvailabilityBooker rel={rel} contacts={contacts} autobooking={autobooking} onBooked={onChanged} />}
       {accepted && <FinancePanel rel={rel} onChanged={onChanged} />}
@@ -343,6 +344,49 @@ function GoogleCalendarPanel({ relId, professionalName }: { relId: string; profe
           <Button onClick={connect} disabled={busy} className="bg-sky-600 hover:bg-sky-500 text-xs shrink-0">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Conectar Google</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Acesso do profissional (F7.2) — magic-link do webapp de autoatendimento ──
+function AccessLinkPanel({ relId, professionalName }: { relId: string; professionalName: string }) {
+  const [st, setSt] = useState<{ active: boolean; expiresAt: string | null; lastAccessAt: string | null } | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => { try { setSt(await jread(`${NET}/relationships/${relId}/access-link`)); } catch { setSt(null); } }, [relId]);
+  useEffect(() => { load(); }, [load]);
+
+  const generate = async () => {
+    setBusy(true);
+    try { const r = await jread(`${NET}/relationships/${relId}/access-link`, { method: 'POST' }); setUrl(r.url); toast.success('Link de acesso gerado.'); load(); }
+    catch (e: any) { toast.error(e?.message || 'Falha ao gerar.'); } finally { setBusy(false); }
+  };
+  const revoke = async () => {
+    if (!(await confirmDialog(`Revogar o acesso de ${professionalName} ao webapp?`))) return;
+    setBusy(true);
+    try { await jread(`${NET}/relationships/${relId}/access-link/revoke`, { method: 'POST' }); setUrl(null); toast.success('Acesso revogado.'); load(); }
+    catch (e: any) { toast.error(e?.message || 'Falha ao revogar.'); } finally { setBusy(false); }
+  };
+  const copy = async () => { if (!url) return; try { await navigator.clipboard.writeText(url); toast.success('Link copiado.'); } catch { toast.info('Copie o link manualmente.'); } };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><Link2 className="w-4 h-4 text-violet-400" /> Acesso do profissional</div>
+      <div className="text-[11px] text-zinc-500">Gera um link pra o profissional ver a própria agenda e o que vai receber (todas as clínicas). Serve pra qualquer clínica dele — compartilhe pelo seu canal.</div>
+      {url && (
+        <div className="flex items-center gap-2">
+          <input readOnly value={url} className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-300" />
+          <button onClick={copy} className="text-[11px] px-2 py-1 rounded bg-violet-600/80 hover:bg-violet-500 text-white shrink-0 inline-flex items-center gap-1"><Copy className="w-3 h-3" /> Copiar</button>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] text-zinc-500">{st?.active ? `Link ativo${st.lastAccessAt ? ` · último acesso ${dmy(st.lastAccessAt)}` : ' · ainda não acessado'}` : 'Sem link ativo.'}</div>
+        <div className="flex gap-1.5 shrink-0">
+          <Button onClick={generate} disabled={busy} className="bg-violet-600 hover:bg-violet-500 text-xs">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />} {st?.active ? 'Gerar novo' : 'Gerar link'}</Button>
+          {st?.active && <button onClick={revoke} disabled={busy} className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-rose-600/80 text-zinc-300 hover:text-white">Revogar</button>}
+        </div>
+      </div>
     </div>
   );
 }

@@ -5,9 +5,9 @@
   F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (#1237/#1238/#1239).
-  **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). **Agora F5 — recursos +
-  deslocamento: F5.1 (sala exigida, MERGED PR #1244) · F5.2 (deslocamento entre clínicas,
-  EM PR).** Como F1–F3, cada
+  **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). F5 (recursos +
+  deslocamento) FECHADO** (F5.1 sala exigida #1244 · F5.2 deslocamento entre clínicas #1245 ·
+  F5b UI escolher sala + buffer, EM PR)**.** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -173,7 +173,12 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     (exceção mínima à RN-PN-2): nunca a clínica de origem nem detalhes. Config via
     `setPermissions({travelBufferMin})`. `test:professional-travel` (10); regressão
     `test:professional-availability` 27/27 e `test:professional-network` 23/23.
-  - **F5b — UI (a fazer).** Escolher a sala exigida por serviço no editor de ofertas.
+  - **F5b — UI (EM PR).** No `ProfessionalNetworkPanel` (aba "Rede"): o `OfferingsEditor`
+    ganha um seletor de **sala exigida** (opcional, das `clinic_rooms` da clínica) no form
+    de oferta e mostra a sala em cada linha; novo `TravelBufferControl` liga/desliga o
+    **deslocamento entre clínicas** e define a margem (min) via `PUT .../permissions`
+    (`travelBufferMin` null = desligado). UI-only sobre as rotas F5.1/F5.2; tsc + build
+    (vite) verdes. **Fecha o F5.**
 - **F6 — Google Calendar por profissional.** Decisão de fronteira (§90): a conexão é
   GLOBAL, chaveada por `professional_id` (uma agenda que TODAS as clínicas respeitam), não
   por `relationship_id`. Fatiada backend-first:

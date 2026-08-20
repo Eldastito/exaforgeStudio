@@ -26,12 +26,13 @@ import { toast, confirmDialog } from '@/src/lib/toast';
 type ContactLite = { id: string; name?: string | null };
 
 type Professional = { id: string; council: string; registrationNumber: string; name: string; specialties: string[]; phone: string | null; email: string | null };
-type Relationship = { id: string; professionalId: string; status: string; permissions: { services: string[] }; commissionPercent: number | null; commissionBeneficiary?: 'professional' | 'clinic'; taxWithholdingPercent?: number | null; professional: Professional | null };
+type Relationship = { id: string; professionalId: string; status: string; permissions: { services: string[] }; commissionPercent: number | null; commissionBeneficiary?: 'professional' | 'clinic'; taxWithholdingPercent?: number | null; travelBufferMin?: number | null; professional: Professional | null };
 type FinanceTotals = { count: number; gross: number | null; professionalAmount: number | null; clinicAmount: number | null; taxAmount: number | null; netProfessional: number | null; missingPrice: number };
 type Settlement = { appointmentId: string; scheduledStart: string | null; serviceName: string | null; status: string; realized: boolean; gross: number | null; professionalAmount: number | null; clinicAmount: number | null; taxAmount: number | null; netProfessional: number | null; basis: string };
 type Statement = { commissionBeneficiary: string; taxWithholdingPercent: number | null; realized: FinanceTotals; expected: FinanceTotals; events: Settlement[] };
 type ForecastRow = { relationshipId: string; professionalName: string | null; nextServiceDate: string | null; expected: FinanceTotals };
-type Offering = { id: string; serviceId: string; serviceName: string | null; durationMin: number | null; active: boolean };
+type Offering = { id: string; serviceId: string; serviceName: string | null; durationMin: number | null; requiredRoomId?: string | null; requiredRoomName?: string | null; active: boolean };
+type RoomLite = { id: string; name: string; active?: number | boolean };
 type Window = { id: string; dayOfWeek: number; startMinute: number; endMinute: number; start: string; end: string; bufferMin: number; active: boolean };
 type Slot = { start: string; end: string; startMinute: number; durationMin: number };
 type ServiceLite = { id: string; name: string; type?: string; active?: number | boolean };
@@ -280,6 +281,7 @@ function ProfessionalDetail({ rel, services, contacts, autobooking, onChanged }:
       {!accepted && <div className="rounded border border-amber-700/40 bg-amber-500/5 text-amber-300 text-xs px-3 py-2">Aceite o vínculo para configurar disponibilidade e agendar.</div>}
       <OfferingsEditor relId={rel.id} services={services} disabled={!accepted} />
       <WindowsEditor relId={rel.id} disabled={!accepted} />
+      {accepted && <TravelBufferControl rel={rel} onChanged={onChanged} />}
       {accepted && <GoogleCalendarPanel relId={rel.id} professionalName={rel.professional?.name || 'profissional'} />}
       {accepted && <AvailabilityBooker rel={rel} contacts={contacts} autobooking={autobooking} onBooked={onChanged} />}
       {accepted && <FinancePanel rel={rel} onChanged={onChanged} />}
@@ -341,6 +343,50 @@ function GoogleCalendarPanel({ relId, professionalName }: { relId: string; profe
           <Button onClick={connect} disabled={busy} className="bg-sky-600 hover:bg-sky-500 text-xs shrink-0">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Conectar Google</Button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Deslocamento entre clínicas (F5.2) — opt-in por vínculo ──
+function TravelBufferControl({ rel, onChanged }: { rel: Relationship; onChanged: () => void }) {
+  const on0 = rel.travelBufferMin != null;
+  const [enabled, setEnabled] = useState(on0);
+  const [mins, setMins] = useState<string>(rel.travelBufferMin == null ? '0' : String(rel.travelBufferMin));
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const val = !enabled ? null : Math.max(0, Number(mins) || 0);
+      await jread(`${NET}/relationships/${rel.id}/permissions`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ travelBufferMin: val }),
+      });
+      toast.success(val == null ? 'Deslocamento desligado.' : 'Deslocamento salvo.');
+      onChanged();
+    } catch (e: any) { toast.error(e?.message === 'travel_buffer_invalid' ? 'Informe minutos de 0 a 1440.' : (e?.message || 'Falha ao salvar.')); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><Clock className="w-4 h-4 text-amber-400" /> Deslocamento entre clínicas</div>
+      <label className="flex items-center gap-2 text-xs text-zinc-400">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="accent-amber-500" />
+        Considerar que o profissional atende em outras clínicas
+      </label>
+      {enabled && (
+        <div className="flex items-end gap-2 text-xs">
+          <label className="flex flex-col gap-1">
+            <span className="text-zinc-500">Margem de deslocamento (min)</span>
+            <input type="number" min={0} max={1440} value={mins} onChange={(e) => setMins(e.target.value)} className="w-24 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm" />
+          </label>
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] text-zinc-500">{enabled ? 'As vagas evitam os horários (± a margem) em que ele atende em outra clínica. Só o bloco de tempo é lido — nunca onde nem o quê.' : 'Desligado: a agenda daqui ignora atendimentos em outras clínicas.'}</div>
+        <Button onClick={save} disabled={busy} className="bg-amber-600 hover:bg-amber-500 text-xs shrink-0">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Salvar</Button>
+      </div>
     </div>
   );
 }
@@ -450,16 +496,20 @@ function TotalsCard({ title, tone, t }: { title: string; tone: 'emerald' | 'indi
 // ── Serviços ofertados ──
 function OfferingsEditor({ relId, services, disabled }: { relId: string; services: ServiceLite[]; disabled: boolean }) {
   const [offerings, setOfferings] = useState<Offering[]>([]);
+  const [rooms, setRooms] = useState<RoomLite[]>([]);
   const [svcId, setSvcId] = useState('');
   const [duration, setDuration] = useState('');
+  const [roomId, setRoomId] = useState('');
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { const d = await jread(`${NET}/relationships/${relId}/offerings`); setOfferings(Array.isArray(d) ? d : []); } catch { setOfferings([]); } }, [relId]);
   useEffect(() => { load(); }, [load]);
+  // Salas da própria clínica (F5.1 — recurso exigido opcional).
+  useEffect(() => { apiFetch('/api/clinic/rooms').then((r) => (r.ok ? r.json() : [])).then((d) => setRooms(Array.isArray(d) ? d.filter((x: any) => x.active === undefined || x.active) : [])).catch(() => setRooms([])); }, []);
 
   const add = async () => {
     if (!svcId) { toast.error('Escolha um serviço.'); return; }
     setBusy(true);
-    try { await jread(`${NET}/relationships/${relId}/offerings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceId: svcId, durationMin: duration ? Number(duration) : null }) }); toast.success('Serviço adicionado.'); setSvcId(''); setDuration(''); load(); }
+    try { await jread(`${NET}/relationships/${relId}/offerings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceId: svcId, durationMin: duration ? Number(duration) : null, requiredRoomId: roomId || null }) }); toast.success('Serviço adicionado.'); setSvcId(''); setDuration(''); setRoomId(''); load(); }
     catch (e: any) { toast.error(e?.message || 'Falha.'); } finally { setBusy(false); }
   };
   const remove = async (offeringId: string) => {
@@ -473,18 +523,24 @@ function OfferingsEditor({ relId, services, disabled }: { relId: string; service
         {offerings.length === 0 && <div className="text-xs text-zinc-600">Nenhum serviço ofertado ainda.</div>}
         {offerings.map((o) => (
           <div key={o.id} className="flex items-center justify-between text-sm bg-zinc-950/60 rounded px-2 py-1">
-            <span className="text-zinc-300">{o.serviceName || o.serviceId} <span className="text-zinc-500 text-xs">· {o.durationMin ? `${o.durationMin} min` : 'duração do catálogo'}</span></span>
+            <span className="text-zinc-300">{o.serviceName || o.serviceId} <span className="text-zinc-500 text-xs">· {o.durationMin ? `${o.durationMin} min` : 'duração do catálogo'}{o.requiredRoomName ? ` · sala: ${o.requiredRoomName}` : ''}</span></span>
             {!disabled && <button onClick={() => remove(o.id)} className="text-zinc-500 hover:text-rose-400"><Trash2 className="w-3.5 h-3.5" /></button>}
           </div>
         ))}
       </div>
       {!disabled && (
-        <div className="flex gap-2">
-          <select value={svcId} onChange={(e) => setSvcId(e.target.value)} className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <select value={svcId} onChange={(e) => setSvcId(e.target.value)} className="flex-1 min-w-[140px] bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm">
             <option value="">Serviço do catálogo…</option>
             {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="min" className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm" />
+          {rooms.length > 0 && (
+            <select value={roomId} onChange={(e) => setRoomId(e.target.value)} title="Sala exigida (opcional)" className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm">
+              <option value="">Sem sala fixa</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          )}
           <Button onClick={add} disabled={busy} className="bg-zinc-800 hover:bg-zinc-700">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}</Button>
         </div>
       )}

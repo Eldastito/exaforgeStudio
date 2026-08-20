@@ -10386,6 +10386,16 @@ const initDb = () => {
     try { db.exec(`ALTER TABLE professionals ADD COLUMN base_lat REAL`); } catch (e) { /* noop */ }
     try { db.exec(`ALTER TABLE professionals ADD COLUMN base_lng REAL`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de descoberta do profissional (ADR-180 F10.1)', e); }
+
+  // ── ADR-180 F10.2 — Clínica DESCOBRÍVEL (rede/marketplace) ──
+  // network_discoverable: OPT-IN (default 0) da clínica aparecer na descoberta pra
+  // especialistas (RN-PN-9). A projeção publicável carrega business_name + cidade/estado
+  // (address_city/address_state já existem) + especialidades PROCURADAS derivadas dos
+  // `demand_gap` de pressão ALTA (F9.2) — NUNCA contagem crua, dado de paciente ou receita
+  // (RN-PN-10). Aditivo/reversível.
+  try {
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_discoverable INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de descoberta da clínica (ADR-180 F10.2)', e); }
 };
 
 initDb();

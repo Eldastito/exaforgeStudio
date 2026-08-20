@@ -45,6 +45,7 @@ import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityServ
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
 import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
 import { ProfessionalDemandService } from "../ProfessionalDemandService.js";
+import { ClinicDiscoveryService } from "../ClinicDiscoveryService.js";
 import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
 import { ProfessionalGoogleService } from "../ProfessionalGoogleService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
@@ -2468,6 +2469,18 @@ router.post("/professional-network/relationships/:id/access-link/revoke", requir
 router.get("/professional-network/demand", (req: AuthRequest, res): any => {
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ProfessionalDemandService.demand(orgId, { windowDays: req.query.days ? Number(req.query.days) : undefined })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── F10.2 — Clínica descobrível (rede/marketplace) ──
+router.get("/professional-network/discovery", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json({ ...ClinicDiscoveryService.settings(orgId), soughtSpecialties: ClinicDiscoveryService.soughtSpecialties(orgId) }); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/professional-network/discovery", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ClinicDiscoveryService.setDiscoverable(orgId, !!req.body?.discoverable)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

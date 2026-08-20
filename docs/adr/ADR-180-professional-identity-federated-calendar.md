@@ -384,9 +384,13 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     edita via sessão: rotas `GET/PUT /api/public/professional/discovery-profile`. Opt-in
     default OFF (RN-PN-9 — ninguém aparece sem ligar); desligar/editar NÃO apaga identidade/
     especialidades (RN-PN-3). `test:professional-discoverability` (9).
-  - **F10.2 — Clínica descobrível + projeção de especialidades procuradas.** Flag
-    `organization_settings.network_discoverable` + derivação das especialidades procuradas
-    a partir dos `demand_gap` ALTOS (sem contagem crua).
+  - **F10.2 — Clínica descobrível + projeção de especialidades procuradas (EM PR).** Flag
+    `organization_settings.network_discoverable` (default 0) + `ClinicDiscoveryService`:
+    `settings`/`setDiscoverable` (opt-in RN-PN-9) · `soughtSpecialties` (nomes dos serviços
+    com `demand_gap` ALTO — F9.2, SEM contagem crua) · `publicProfile` = tier PÚBLICO
+    (business_name + cidade/estado + procura) só quando descobrível, NUNCA o privado
+    (contagem/paciente/receita/grafo — RN-PN-10). Rotas `GET/PUT /api/clinic/professional-
+    network/discovery` (owner/admin). `test:clinic-discovery` (11).
   - **F10.3 — Serviço de descoberta (bidirecional).** `ProfessionalDiscoveryService` no
     molde `SupplyNetworkService.listSuppliers`: `clinicsSeeking(professionalId)` +
     `specialistsFor(orgId, {specialty,radius})`, match especialidade+região, exclui já-vinculados.

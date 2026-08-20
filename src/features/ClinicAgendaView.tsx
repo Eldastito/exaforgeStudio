@@ -218,7 +218,7 @@ function computeOverrun(a: Appointment, now: number): OverrunState {
 // componente principal (isola o re-render por refresh a 60s).
 // Badges âmbar sinalizam trabalho pendente (RN-014: sinalizar, não
 // decidir por conta própria — a decisão é do humano na aba).
-type ClinicTab = 'agenda' | 'pets' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
+type ClinicTab = 'agenda' | 'pets' | 'grooming' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao';
 function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab) => void }) {
   const { counts } = useJourneyCounts();
   const terms = useClinicTerms();
@@ -230,8 +230,8 @@ function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab)
   };
   const items: Array<[ClinicTab, string]> = [
     ['agenda', 'Agenda'],
-    // Petshop F3b: aba de Pets só aparece na vertical petshop (ficha + vacinação).
-    ...(terms.isPet ? [['pets', 'Pets'] as [ClinicTab, string]] : []),
+    // Petshop F3b/F4b: abas Pets e Banho & Tosa só na vertical petshop.
+    ...(terms.isPet ? [['pets', 'Pets'] as [ClinicTab, string], ['grooming', 'Banho & Tosa'] as [ClinicTab, string]] : []),
     ['episodios', 'Episódios'],
     ['ciclos', 'Ciclos'],
     ['grupos', 'Grupos'],
@@ -392,6 +392,7 @@ export function ClinicAgendaView() {
       <ClinicTabsBar tab={tab} setTab={setTab} />
 
       {tab === 'pets' && <PetsTab contacts={contacts} />}
+      {tab === 'grooming' && <GroomingTab contacts={contacts} professionals={professionals} />}
       {tab === 'autorizacoes' && <AuthorizationsTab contacts={contacts} />}
 
       {tab === 'conexao' && <ConnectionTab />}
@@ -1148,6 +1149,206 @@ function RoomsPanel({ rooms, onChanged }: { rooms: Room[]; onChanged: () => void
         <Button onClick={create} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-3 text-xs shrink-0">
           {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />} Adicionar
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// Aba: Banho & Tosa (Petshop F4b) — serviços + agendar + fila do dia
+// ================================================================
+const GROOM_STATUS: Record<string, { label: string; cls: string }> = {
+  confirmed: { label: 'agendado', cls: 'text-zinc-300 bg-zinc-500/10 border-zinc-700' },
+  checked_in: { label: 'chegou', cls: 'text-sky-300 bg-sky-500/15 border-sky-500/30' },
+  in_care: { label: 'em atendimento', cls: 'text-amber-300 bg-amber-500/15 border-amber-500/30' },
+  completed: { label: 'concluído', cls: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30' },
+  no_show: { label: 'não veio', cls: 'text-red-300 bg-red-500/15 border-red-500/30' },
+};
+const groomStatusMeta = (s: string) => GROOM_STATUS[s] || { label: s, cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700' };
+
+function GroomingTab({ contacts, professionals }: { contacts: ContactLite[]; professionals: Professional[] }) {
+  const [services, setServices] = useState<any[]>([]);
+  const [date, setDate] = useState<string>(todayISO());
+  const [queue, setQueue] = useState<any[]>([]);
+  const [loadingQ, setLoadingQ] = useState(false);
+  const [showBook, setShowBook] = useState(false);
+  const [showSvc, setShowSvc] = useState(false);
+
+  const loadServices = async () => {
+    try { const r = await apiFetch('/api/clinic/grooming-services?all=1').then((x) => (x.ok ? x.json() : { services: [] })); setServices(Array.isArray(r?.services) ? r.services : []); } catch { /* noop */ }
+  };
+  const loadQueue = async () => {
+    setLoadingQ(true);
+    try { const r = await apiFetch(`/api/clinic/grooming/queue?date=${date}`).then((x) => (x.ok ? x.json() : { queue: [] })); setQueue(Array.isArray(r?.queue) ? r.queue : []); } catch { setQueue([]); } finally { setLoadingQ(false); }
+  };
+  useEffect(() => { loadServices(); }, []);
+  useEffect(() => { loadQueue(); /* eslint-disable-next-line */ }, [date]);
+
+  const activeServices = services.filter((s) => s.active);
+
+  return (
+    <div className="space-y-5">
+      {/* Ações */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="text-sm text-zinc-400">Dia
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" />
+        </label>
+        <button onClick={() => setShowBook(true)} disabled={activeServices.length === 0}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50" title={activeServices.length === 0 ? 'Cadastre um serviço primeiro' : ''}>
+          <Plus className="w-4 h-4" /> Agendar banho & tosa
+        </button>
+        <button onClick={() => setShowSvc((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800">
+          <ListChecks className="w-4 h-4" /> Serviços ({activeServices.length})
+        </button>
+      </div>
+
+      {/* Gestão de serviços (colapsável) */}
+      {showSvc && <GroomingServicesPanel services={services} onChanged={loadServices} />}
+
+      {/* Fila do dia */}
+      <div>
+        <div className="text-sm font-medium text-zinc-200 mb-2">Fila do dia</div>
+        {loadingQ ? (
+          <p className="text-sm text-zinc-500 inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</p>
+        ) : queue.length === 0 ? (
+          <p className="text-sm text-zinc-500">Nenhum banho & tosa agendado para este dia.</p>
+        ) : (
+          <div className="space-y-2">
+            {queue.map((q) => {
+              const st = groomStatusMeta(q.status);
+              return (
+                <div key={q.appointmentId} className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 flex items-center gap-3">
+                  <span className="text-lg">{q.species === 'gato' ? '🐱' : q.species === 'ave' ? '🐦' : '🐶'}</span>
+                  <div className="min-w-0">
+                    <div className="text-sm text-zinc-100 truncate"><span className="font-medium">{q.serviceName || 'Serviço'}</span> — {q.petName || 'Pet'}</div>
+                    <div className="text-[11px] text-zinc-500 truncate">{fmtTime(q.scheduledStart)} · tutor {q.tutorName || '—'}{q.professional ? ` · ${q.professional}` : ''}</div>
+                  </div>
+                  <span className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] ${st.cls}`}>{st.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-zinc-500">A chegada, o atendimento e o encerramento são feitos na aba <strong>Agenda</strong> (mesma fila da vez).</p>
+      </div>
+
+      {showBook && <BookGroomingModal contacts={contacts} professionals={professionals} services={activeServices} defaultDate={date}
+        onClose={() => setShowBook(false)} onBooked={() => { setShowBook(false); loadQueue(); }} />}
+    </div>
+  );
+}
+
+function GroomingServicesPanel({ services, onChanged }: { services: any[]; onChanged: () => void }) {
+  const [form, setForm] = useState({ name: '', durationMin: '60', priceCents: '' });
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!form.name.trim()) { toast.error('Informe o nome do serviço.'); return; }
+    setBusy(true);
+    try {
+      const body: any = { name: form.name.trim(), durationMin: form.durationMin ? Number(form.durationMin) : 60, priceCents: form.priceCents ? Math.round(Number(form.priceCents) * 100) : null };
+      const r = await apiFetch('/api/clinic/grooming-services', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success('Serviço criado.'); setForm({ name: '', durationMin: '60', priceCents: '' }); onChanged();
+    } catch (e: any) { toast.error(e.message || 'Erro'); } finally { setBusy(false); }
+  };
+  const toggle = async (s: any) => {
+    try { await apiFetch(`/api/clinic/grooming-services/${s.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: !s.active }) }); onChanged(); }
+    catch { toast.error('Erro ao atualizar'); }
+  };
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <input className="sm:col-span-2 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Serviço (ex.: Banho, Tosa)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+        <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Duração (min)" inputMode="numeric" value={form.durationMin} onChange={(e) => setForm((f) => ({ ...f, durationMin: e.target.value }))} />
+        <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Preço (R$)" inputMode="decimal" value={form.priceCents} onChange={(e) => setForm((f) => ({ ...f, priceCents: e.target.value }))} />
+      </div>
+      <div className="flex justify-end"><button onClick={add} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"><Plus className="w-4 h-4" /> Adicionar serviço</button></div>
+      {services.length > 0 && (
+        <div className="space-y-1">
+          {services.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 text-[13px]">
+              <span className={`font-medium ${s.active ? 'text-zinc-100' : 'text-zinc-500 line-through'}`}>{s.name}</span>
+              <span className="text-[11px] text-zinc-500">{s.durationMin} min{typeof s.priceCents === 'number' ? ` · R$ ${(s.priceCents / 100).toFixed(2)}` : ''}</span>
+              <button onClick={() => toggle(s)} className="ml-auto text-[11px] text-zinc-400 hover:text-zinc-200">{s.active ? 'desativar' : 'ativar'}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BookGroomingModal({ contacts, professionals, services, defaultDate, onClose, onBooked }: { contacts: ContactLite[]; professionals: Professional[]; services: any[]; defaultDate: string; onClose: () => void; onBooked: () => void }) {
+  const terms = useClinicTerms();
+  const [tutorId, setTutorId] = useState('');
+  const [pets, setPets] = useState<any[]>([]);
+  const [petId, setPetId] = useState('');
+  const [serviceId, setServiceId] = useState(services[0]?.id || '');
+  const [professionalId, setProfessionalId] = useState('');
+  const [start, setStart] = useState(defaultDateTimeLocal(defaultDate));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!tutorId) { setPets([]); setPetId(''); return; }
+    apiFetch(`/api/clinic/pets?tutor=${encodeURIComponent(tutorId)}`).then((r) => (r.ok ? r.json() : { pets: [] })).then((d) => setPets(Array.isArray(d?.pets) ? d.pets : [])).catch(() => setPets([]));
+  }, [tutorId]);
+
+  const book = async () => {
+    if (!petId) { toast.error(`Selecione o ${terms.patientLower}.`); return; }
+    if (!serviceId) { toast.error('Selecione o serviço.'); return; }
+    if (!start) { toast.error('Informe a data e hora.'); return; }
+    setBusy(true);
+    try {
+      const body: any = { petId, groomingServiceId: serviceId, scheduledStart: new Date(start).toISOString(), professionalId: professionalId || undefined };
+      const r = await apiFetch('/api/clinic/grooming/book', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao agendar');
+      toast.success('Banho & tosa agendado.'); onBooked();
+    } catch (e: any) { toast.error(e.message || 'Erro'); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">Agendar banho & tosa</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">{terms.guardian}</label>
+            <select value={tutorId} onChange={(e) => setTutorId(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100">
+              <option value="">Selecione o {terms.guardianLower}…</option>
+              {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` — ${c.identifier}` : ''}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">{terms.patient}</label>
+            <select value={petId} onChange={(e) => setPetId(e.target.value)} disabled={!tutorId} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 disabled:opacity-50">
+              <option value="">{tutorId ? `Selecione o ${terms.patientLower}…` : `Escolha o ${terms.guardianLower} primeiro`}</option>
+              {pets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Serviço</label>
+            <select value={serviceId} onChange={(e) => setServiceId(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100">
+              {services.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.durationMin} min)</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Profissional (opcional)</label>
+            <select value={professionalId} onChange={(e) => setProfessionalId(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100">
+              <option value="">—</option>
+              {professionals.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-sm text-zinc-400 mb-1 block">Data e hora</label>
+            <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100" />
+          </div>
+        </div>
+        <div className="flex justify-end mt-4">
+          <button onClick={book} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"><Plus className="w-4 h-4" /> {busy ? 'Agendando…' : 'Agendar'}</button>
+        </div>
       </div>
     </div>
   );

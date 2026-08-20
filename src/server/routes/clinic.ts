@@ -43,6 +43,7 @@ import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRela
 import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
+import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
 import { logAuthEvent } from "../auditLog.js";
 
@@ -2384,6 +2385,20 @@ router.post("/professional-network/autobook/:actionId/execute", requireRole("own
   if (!autobookingEnabled(orgId)) return res.status(403).json({ error: "autobooking_disabled" });
   try { res.json(await ProfessionalBookingService.executeAutoBooking(orgId, String(req.params.actionId))); }
   catch (e: any) { res.status(409).json({ error: e?.message || "erro" }); }
+});
+
+// ── F8.1 — Finanças da Agenda Federada (split clínica × profissional) ──
+// Dinheiro role-gated (§73 — só owner/admin veem valores): extrato do profissional
+// (realizado × previsto) + acerto de um atendimento. Read-model DERIVADO (RN-004).
+router.get("/professional-network/relationships/:id/finance/statement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalFinanceService.statement(orgId, String(req.params.id), { fromISO: req.query.from as string, toISO: req.query.to as string })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.get("/professional-network/appointments/:appointmentId/finance", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalFinanceService.settlement(orgId, String(req.params.appointmentId))); }
+  catch (e: any) { res.status(404).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

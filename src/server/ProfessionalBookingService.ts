@@ -109,11 +109,22 @@ export class ProfessionalBookingService {
     const profName = rel?.professional?.name || "Especialista da rede";
     const title = String(input?.title || `Atendimento — ${profName}`).trim() || "Atendimento";
 
+    // F8.1 — snapshot do serviço + preço ACORDADO no agendamento (o valor devido é o
+    // combinado quando reservou, não o catálogo de hoje — espírito da convenção nº 3).
+    // Sem serviço no hold ou sem preço no catálogo → NULL (o financeiro deriva honesto,
+    // nunca inventa dinheiro — RN-PN-4). O split fica DERIVADO no ProfessionalFinanceService.
+    const serviceId = hold.serviceId || null;
+    let servicePrice: number | null = null;
+    if (serviceId) {
+      const svc = db.prepare(`SELECT price FROM products_services WHERE id = ? AND organization_id = ?`).get(serviceId, orgId) as any;
+      servicePrice = svc && svc.price != null ? Number(svc.price) : null;
+    }
+
     const id = randomUUID();
     db.prepare(`INSERT INTO appointments
-      (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_name_snapshot, network_relationship_id, slot_hold_id, pet_id)
-      VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)`)
-      .run(id, orgId, contactId, title, hold.start, hold.end, profName, hold.relationshipId, holdId, petId);
+      (id, organization_id, contact_id, title, scheduled_start, scheduled_end, status, professional_name_snapshot, network_relationship_id, slot_hold_id, pet_id, network_service_id, network_service_price)
+      VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?)`)
+      .run(id, orgId, contactId, title, hold.start, hold.end, profName, hold.relationshipId, holdId, petId, serviceId, servicePrice);
 
     try {
       logAuthEvent(orgId, actorId || "system", id, "PROF_BOOKING_CONFIRMED", {

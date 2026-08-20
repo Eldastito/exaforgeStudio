@@ -10255,6 +10255,19 @@ const initDb = () => {
     // Índice parcial: garante 1 appointment por hold (idempotência forte do confirmBooking).
     try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_appointments_slot_hold ON appointments (organization_id, slot_hold_id) WHERE slot_hold_id IS NOT NULL`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de booking federado (ADR-180 F4)', e); }
+
+  // ── ADR-180 F8.1 — Finanças da Agenda Federada (split clínica×profissional) ──
+  // Snapshot do serviço + preço ACORDADO no momento do agendamento (confirmBooking):
+  // o valor devido é o combinado quando reservou, não o preço de catálogo de hoje
+  // (espírito da convenção nº 3 — congelar o que foi acordado). Aditivo, NULL em
+  // agendamento legado/sem serviço → o financeiro deriva honesto (gross null, nunca
+  // inventa dinheiro — RN-PN-4/RN-004). O split (comissão do profissional × resto da
+  // clínica) e realizado×previsto (completed×confirmed, AGENDADO≠ATENDIDO) são DERIVADOS
+  // por query no ProfessionalFinanceService — sem contador mutável, sem ledger paralelo.
+  try {
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN network_service_id TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN network_service_price REAL`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de finanças federadas (ADR-180 F8.1)', e); }
 };
 
 initDb();

@@ -250,6 +250,7 @@
     "test:professional-travel": "tsx scripts/test-professional-travel.ts",
     "test:professional-demand": "tsx scripts/test-professional-demand.ts",
     "test:professional-demand-gap": "tsx scripts/test-professional-demand-gap.ts",
+    "test:professional-discoverability": "tsx scripts/test-professional-discoverability.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
     "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",
     "test:professional-booking-response": "tsx scripts/test-professional-booking-response.ts",

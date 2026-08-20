@@ -38,6 +38,20 @@ export interface Professional {
   email: string | null;
   status: string;
   createdAt: string;
+  // F10.1 — descoberta (rede/marketplace). Opt-in; default off.
+  discoverable: boolean;
+  baseCity: string | null;
+  baseState: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+}
+
+export interface DiscoverabilityInput {
+  discoverable?: boolean;
+  baseCity?: string | null;
+  baseState?: string | null;
+  baseLat?: number | null;
+  baseLng?: number | null;
 }
 
 function norm(s?: string | null): string {
@@ -52,7 +66,34 @@ export class ProfessionalService {
       id: r.id, council: r.council, registrationNumber: r.registration_number,
       name: r.name, specialties, phone: r.phone ?? null, email: r.email ?? null,
       status: r.status || "active", createdAt: r.created_at,
+      discoverable: !!r.discoverable,
+      baseCity: r.base_city ?? null, baseState: r.base_state ?? null,
+      baseLat: r.base_lat ?? null, baseLng: r.base_lng ?? null,
     };
+  }
+
+  /**
+   * F10.1 — o profissional liga/desliga a própria DESCOBERTA e define a região base.
+   * Opt-in (RN-PN-9 — default off; desligar tira do diretório na hora, não apaga
+   * identidade/vínculos). Só grava o que foi passado (undefined = mantém); string vazia
+   * limpa. Nunca inventa: sem existir, lança. Determinístico (sem geocode/rede aqui — a
+   * F10.3 preenche lat/lng no matching, reusando o geocode_cache do SupplyNetworkService).
+   */
+  static setDiscoverability(professionalId: string, input: DiscoverabilityInput, actorId?: string): Professional {
+    const p = ProfessionalService.getById(String(professionalId || ""));
+    if (!p) throw new Error("professional_not_found");
+    const patch: Record<string, any> = {};
+    if (input.discoverable !== undefined) patch.discoverable = input.discoverable ? 1 : 0;
+    if (input.baseCity !== undefined) patch.base_city = input.baseCity == null ? null : (norm(input.baseCity) || null);
+    if (input.baseState !== undefined) patch.base_state = input.baseState == null ? null : (norm(input.baseState).toUpperCase().slice(0, 2) || null);
+    if (input.baseLat !== undefined) patch.base_lat = input.baseLat == null ? null : Number(input.baseLat);
+    if (input.baseLng !== undefined) patch.base_lng = input.baseLng == null ? null : Number(input.baseLng);
+    if (Object.keys(patch).length) {
+      const sets = Object.keys(patch).map((k) => `${k} = ?`).join(", ");
+      db.prepare(`UPDATE professionals SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...Object.values(patch), p.id);
+      try { logAuthEvent("system", actorId || "system", p.id, "PROFESSIONAL_DISCOVERABILITY_SET", { discoverable: patch.discoverable }); } catch { /* noop */ }
+    }
+    return ProfessionalService.getById(p.id)!;
   }
 
   /** Identidade por id (global). null se não existir. */

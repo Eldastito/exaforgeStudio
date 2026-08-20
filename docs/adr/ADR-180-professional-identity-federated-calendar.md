@@ -6,7 +6,8 @@
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (#1237/#1238/#1239).
   **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). **Agora F5 — recursos +
-  deslocamento: F5.1 (sala exigida na disponibilidade, EM PR).** Como F1–F3, cada
+  deslocamento: F5.1 (sala exigida, MERGED PR #1244) · F5.2 (deslocamento entre clínicas,
+  EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -162,9 +163,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     de confirmar o hold (reusa `ClinicAgendaService.findConflicts`/`checkRoomCapacity` — a
     integridade de sala da org) e RESERVA (`appointments.room_id`); sala tomada → `room_taken`
     (o hold segue vivo). Sem sala exigida → 0-regressão. `test:professional-rooms` (8).
-  - **F5.2 — Deslocamento entre clínicas (a fazer).** O profissional é global: seus
-    atendimentos federados em OUTRAS clínicas bloqueiam a vaga aqui (só o bloco de tempo,
-    nunca detalhes — privacidade) + buffer de deslocamento entre clínicas distintas.
+  - **F5.2 — Deslocamento entre clínicas (EM PR).** O profissional é GLOBAL: um atendimento
+    federado dele em OUTRA clínica o impede de estar aqui no mesmo horário. Opt-in por
+    `clinic_professional_relationships.travel_buffer_min` (nullable: NULL = desligado,
+    0-regressão; um valor incl. 0 = LIGA — bloqueia a sobreposição + margem de deslocamento
+    de cada lado). `ProfessionalAvailabilityService.crossClinicBusy` é a 5ª fonte de
+    ocupação: lê SÓ o bloco de tempo dos atendimentos do profissional em `a.organization_id
+    != orgId` (join por `professional_id` global), expandido pelo buffer — PRIVACIDADE
+    (exceção mínima à RN-PN-2): nunca a clínica de origem nem detalhes. Config via
+    `setPermissions({travelBufferMin})`. `test:professional-travel` (10); regressão
+    `test:professional-availability` 27/27 e `test:professional-network` 23/23.
   - **F5b — UI (a fazer).** Escolher a sala exigida por serviço no editor de ofertas.
 - **F6 — Google Calendar por profissional.** Decisão de fronteira (§90): a conexão é
   GLOBAL, chaveada por `professional_id` (uma agenda que TODAS as clínicas respeitam), não

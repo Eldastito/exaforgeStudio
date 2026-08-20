@@ -41,6 +41,7 @@ import { LgpdService } from "../LgpdService.js";
 import { ProfessionalService } from "../ProfessionalService.js";
 import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRelationshipService.js";
 import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
+import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -2305,6 +2306,32 @@ router.get("/professional-network/relationships/:id/windows", (req: AuthRequest,
 router.put("/professional-network/relationships/:id/windows", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ProfessionalScheduleConfigService.setWindows(orgId, String(req.params.id), Array.isArray(req.body?.windows) ? req.body.windows : req.body, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// F3 — Availability Engine + hold atômico + confirm.
+router.get("/professional-network/relationships/:id/availability", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try {
+    res.json(ProfessionalAvailabilityService.availableSlots(orgId, String(req.params.id), String(req.query.date || ""), {
+      serviceId: req.query.serviceId as string,
+      slotMinutes: req.query.slotMinutes ? Number(req.query.slotMinutes) : undefined,
+    }));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/holds", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAvailabilityService.hold(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(409).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/holds/:holdId/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAvailabilityService.confirm(orgId, String(req.params.holdId), {}, actor(req))); }
+  catch (e: any) { res.status(409).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/holds/:holdId/release", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalAvailabilityService.release(orgId, String(req.params.holdId), actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

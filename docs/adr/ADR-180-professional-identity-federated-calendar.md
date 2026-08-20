@@ -5,9 +5,10 @@
   F3 (Availability Engine + hold atômico, MERGED PR #1234) · F4-backend (booking federado
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (#1237/#1238/#1239).
-  **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). F5 (recursos +
-  deslocamento) FECHADO** (F5.1 sala exigida #1244 · F5.2 deslocamento entre clínicas #1245 ·
-  F5b UI escolher sala + buffer, EM PR)**.** Como F1–F3, cada
+  **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). **F5 (recursos +
+  deslocamento) FECHADO** (F5.1 #1244 · F5.2 #1245 · F5b #1246). **Agora F7 — webapp de
+  autoatendimento do profissional (COM escrita, decisão do dono): F7.1 (auth passwordless +
+  leitura por-profissional, EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -217,7 +218,26 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     botão **Conectar Google** (abre a URL de consentimento; recarrega o status ao voltar o
     foco) e **Desconectar** (com confirmação); honesto quando o servidor não tem o Google
     configurado. UI-only sobre as rotas da F6.1; tsc + build (vite) verdes. **Fecha o F6.**
-- **F7** — Webapp de autoatendimento do profissional (login, agenda própria).
+- **F7 — Webapp de autoatendimento do profissional (COM escrita — decisão do dono).** O
+  profissional é GLOBAL (§90) e não cabe em `users` (UNIQUE por e-mail + preso a 1 org).
+  **Auth PASSWORDLESS por magic-link** reusando o molde `ClinicPortalService` numa tabela
+  GLOBAL. Fatiada:
+  - **F7.1 — Auth + leitura por-profissional (EM PR).** Tabela GLOBAL `professional_auth_tokens`
+    (chave `professional_id`, SEM `organization_id`; token 32 bytes devolvido UMA vez, no
+    banco só hash SHA-256 + TTL + active; resolve por hash). `ProfessionalAuthService`
+    (generate/revoke/status/resolveToken + `startSession`→JWT escopado `professional_portal`
+    SEM organizationId + `verifySession` que RECUSA token com organizationId ou escopo
+    errado — nunca toca `users`). `ProfessionalSelfService` — leitura DERIVADA por
+    profissional (fan-out sobre vínculos aceitos cross-org): `overview` (identidade +
+    clínicas), `agenda` (atendimentos federados de TODAS as clínicas), `finance` (agrega
+    `ProfessionalFinanceService.statement` por clínica + total realizado×previsto). Rotas
+    PÚBLICAS `/api/public/professional/{session,overview,agenda,finance}` (fora do
+    `requireAuth`; `requireProfessional` valida a sessão escopada). `test:professional-selfservice`
+    (19). Privacidade: o profissional só vê os PRÓPRIOS vínculos (join por professional_id).
+  - **F7.2 — Magic-link: a clínica gera e envia o acesso (a fazer).**
+  - **F7.3 — Escrita: o profissional edita a PRÓPRIA disponibilidade por clínica (a fazer).**
+  - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (a fazer).**
+  - **F7b — Página `/profissional/:token` (a fazer).**
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**
   Fatiada backend-first (visão original do dono: *"quanto vai receber, o percentual da clínica
   e dele separados, previsão de receitas a receber"*):

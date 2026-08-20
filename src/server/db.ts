@@ -10337,6 +10337,31 @@ const initDb = () => {
   try {
     try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN travel_buffer_min INTEGER`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de deslocamento federado (ADR-180 F5.2)', e); }
+
+  // ── ADR-180 F7.1 — Auth passwordless do profissional (webapp de autoatendimento) ──
+  // Token GLOBAL de acesso do profissional (SEM organization_id — o acesso pertence à
+  // identidade do ecossistema, não a uma clínica; espelha a fronteira §90). Molde do
+  // ClinicPortalService: token aleatório de 32 bytes devolvido UMA vez; no banco fica só
+  // o hash SHA-256 + expiração + active. Resolve SEMPRE por hash (nunca por id — evita
+  // enumeração). A troca do magic-link por uma sessão (JWT com escopo `professional_portal`,
+  // sem organizationId) é feita no ProfessionalAuthService — nunca toca a tabela `users`
+  // (que é UNIQUE por e-mail + presa a 1 org, o invariante que o profissional cross-clínica
+  // quebraria).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS professional_auth_tokens (
+        id TEXT PRIMARY KEY,
+        professional_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        expires_at DATETIME,
+        last_access_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_prof_auth_tokens_hash ON professional_auth_tokens (token_hash, active);
+      CREATE INDEX IF NOT EXISTS idx_prof_auth_tokens_prof ON professional_auth_tokens (professional_id, active);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar professional_auth_tokens (ADR-180 F7.1)', e); }
 };
 
 initDb();

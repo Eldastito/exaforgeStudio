@@ -51,6 +51,7 @@ export class ClinicPetService {
       species: r.species ?? null, breed: r.breed ?? null, sex: r.sex ?? null, size: r.size ?? null,
       weightKg: r.weight_kg ?? null, birthDate: r.birth_date ?? null, color: r.color ?? null,
       microchip: r.microchip ?? null, neutered: !!r.neutered, notes: r.notes ?? null, status: r.status,
+      healthPlanName: r.health_plan_name ?? null, healthPlanStatus: r.health_plan_status ?? null,
       age: this.computeAge(r.birth_date, nowISO),
       createdAt: r.created_at, updatedAt: r.updated_at,
     };

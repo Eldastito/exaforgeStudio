@@ -10056,6 +10056,58 @@ const initDb = () => {
   // sendo a agenda (chegada→atendimento→checkout já existentes).
   try { db.exec(`ALTER TABLE appointments ADD COLUMN pet_id TEXT`); } catch (e) { /* noop */ }
   try { db.exec(`ALTER TABLE appointments ADD COLUMN grooming_service_id TEXT`); } catch (e) { /* noop */ }
+
+  // PETSHOP F5 — plano de saúde pet como ATRIBUTO do pet (o que está coberto). A
+  // COBRANÇA recorrente é do módulo Assinaturas (reuso, sem motor paralelo); aqui só
+  // guardamos qual plano o pet tem, pra aparecer na ficha e nos alertas. Aditivo.
+  try { db.exec(`ALTER TABLE clinic_pets ADD COLUMN health_plan_name TEXT`); } catch (e) { /* noop */ }
+  try { db.exec(`ALTER TABLE clinic_pets ADD COLUMN health_plan_status TEXT`); } catch (e) { /* noop */ } // active|inactive (NULL = sem plano)
+
+  // PETSHOP F5 — INTERNAÇÃO do pet. Registro de entrada/alta com motivo e
+  // profissional responsável. Aditivo; isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_pet_hospitalizations (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pet_id TEXT NOT NULL,
+        reason TEXT,                                     -- motivo da internação
+        professional_id TEXT,                            -- responsável
+        admitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- entrada
+        discharged_at DATETIME,                          -- alta (NULL = internado)
+        status TEXT NOT NULL DEFAULT 'admitted',         -- admitted|discharged
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_hosp_pet ON clinic_pet_hospitalizations (organization_id, pet_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_hosp_active ON clinic_pet_hospitalizations (organization_id, status);
+    `);
+  } catch (e) { /* noop */ }
+
+  // PETSHOP F5 — CIRURGIA/procedimento do pet com checklist pré-operatório. O
+  // checklist é uma lista de itens {label, done} em JSON. Aditivo; isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_pet_surgeries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pet_id TEXT NOT NULL,
+        procedure_name TEXT NOT NULL,                    -- castração, remoção de tumor, ...
+        professional_id TEXT,
+        scheduled_at DATETIME,                           -- data prevista
+        performed_at DATETIME,                           -- realizada em (NULL = não feita)
+        status TEXT NOT NULL DEFAULT 'scheduled',        -- scheduled|done|cancelled
+        checklist_json TEXT,                             -- [{label, done}] pré-operatório
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_surgery_pet ON clinic_pet_surgeries (organization_id, pet_id, status);
+    `);
+  } catch (e) { /* noop */ }
 };
 
 initDb();

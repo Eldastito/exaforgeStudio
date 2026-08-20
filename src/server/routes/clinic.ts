@@ -5,6 +5,7 @@ import db from "../db.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicPetService } from "../ClinicPetService.js";
 import { ClinicGroomingService } from "../ClinicGroomingService.js";
+import { ClinicPetCareService } from "../ClinicPetCareService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
@@ -2148,6 +2149,66 @@ router.get("/grooming/queue", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ queue: ClinicGroomingService.dayQueue(orgId, String(req.query?.date || "")) });
+});
+
+// ─────────── Plano de saúde + internação + cirurgia do pet (Petshop F5) ───────────
+
+// PUT /api/clinic/pets/:id/health-plan { name, status } — define o plano do pet.
+router.put("/pets/:id/health-plan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetCareService.setHealthPlan(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// Internação
+router.get("/pets/:id/hospitalizations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ hospitalizations: ClinicPetCareService.listHospitalizations(orgId, String(req.params.id)) });
+});
+router.post("/pets/:id/hospitalizations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetCareService.admit(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/hospitalizations/:hid/discharge", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetCareService.discharge(orgId, String(req.params.hid), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.get("/hospitalizations/active", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ active: ClinicPetCareService.activeHospitalizations(orgId) });
+});
+
+// Cirurgia + checklist
+router.get("/pets/:id/surgeries", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ surgeries: ClinicPetCareService.listSurgeries(orgId, String(req.params.id)) });
+});
+router.post("/pets/:id/surgeries", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetCareService.scheduleSurgery(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/surgeries/:sid/checklist", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try { res.json(ClinicPetCareService.setChecklistItem(orgId, String(req.params.sid), Number(b.index), !!b.done, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/surgeries/:sid/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetCareService.setSurgeryStatus(orgId, String(req.params.sid), req.body?.status, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

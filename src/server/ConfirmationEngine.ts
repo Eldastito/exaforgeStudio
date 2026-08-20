@@ -52,6 +52,10 @@ export const CONFIRMATION_METHODS = [
   // (engajamento/outcome medido) é armada aqui e resolvida na F12 (analytics→
   // outcome). PUBLISHED ≠ RESULTADO. Aditivo, não altera métodos existentes.
   "social_publish",
+  // ADR-180 F4 — agendamento federado criado (appointment tied ao vínculo da rede);
+  // a confirmação de RESULTADO (o especialista ATENDEU) é armada aqui com SLA. AGENDADO
+  // ≠ ATENDIDO (RN-PN-5) — timeout publica sinal via sweepTimeouts, não trava a vaga.
+  "booking_confirmation",
 ] as const;
 export type ConfirmationMethod = (typeof CONFIRMATION_METHODS)[number];
 

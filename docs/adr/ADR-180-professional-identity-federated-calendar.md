@@ -2,7 +2,10 @@
 
 - **Status:** ABERTO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
   relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, MERGED PR #1233) ·
-  F3 (Availability Engine + hold atômico, EM PR). Plano F0–F4 (MVP) + fatias diferidas.
+  F3 (Availability Engine + hold atômico, MERGED PR #1234) · **F4-backend (booking federado
+  + AutoBooking governado, EM PR)**. Plano F0–F4 (MVP) + fatias diferidas. A UI da clínica
+  (formulários do operador) sai numa fatia fina de continuação (F4b) — como F1–F3, o
+  backend fecha primeiro com teste como contrato.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -107,10 +110,31 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
   `/holds/:holdId/{confirm,release}`. `test:professional-availability` (27) — geração de
   vagas, buffer, corrida na mesma vaga, TTL/expiração, confirm/release, subtração de
   appointment e isolamento cross-org.
-- **F4 — UI da clínica + ferramentas de IA + AutoBooking.** Ferramentas
-  `getProfessionalAvailability` / `holdSlot` / `confirmBooking`; Fala Tu; AutoBooking via
-  handler `auto_booking` na espinha de governança; waitlist em `business_signals`;
-  teste anti-alucinação (IA nunca oferece vaga inexistente).
+- **F4 — Booking federado + ferramentas de IA + AutoBooking. FECHADA (backend, em PR).**
+  `ProfessionalBookingService` reúne as três ferramentas ATERRADAS que qualquer superfície
+  de IA (Fala Tu / assistente) chama: `getAvailability`/`holdSlot`/`confirmBooking` — a IA
+  só oferece o que o Availability Engine (F3) prova; **nunca inventa vaga** (RN-PN-4).
+  `confirmBooking` confirma o hold atômico e CRIA o agendamento federado amarrado ao
+  vínculo (`appointments.network_relationship_id`) + snapshot do nome do especialista (o
+  profissional da rede NÃO é `clinic_professionals` local), **idempotente por hold**
+  (UNIQUE parcial `(org, slot_hold_id)` → nunca 2 appointments). Sem vaga: `waitlist`
+  publica `professional_network/waitlist` em `business_signals` (convenção nº 12 — nunca
+  tabela paralela, RN-PN-7). **AutoBooking é COMANDO GOVERNADO** (RN-PN-6): `autoBook`
+  PROPÕE uma `decision_action` (commandType `auto_booking`, nasce `awaiting_approval` por
+  default) que atravessa `DecisionAction → ApprovalPolicy (Autonomy Contract) →
+  CommandExecutor`; o efeito real vive no `AutoBookingCommandHandler` (registrado no MESMO
+  registry, §184) — procura a 1ª vaga provada na janela, segura, confirma e cria o
+  appointment; **AGENDADO ≠ ATENDIDO** (RN-PN-5): arma `ConfirmationEngine.expect(method
+  `booking_confirmation`)` com SLA (timeout publica sinal via `sweepTimeouts`). 2ª flag
+  opt-in `autobooking_enabled` (default 0). Sweep de holds vencidos plugado no Scheduler
+  (`professionalHoldSweepPass`). Rotas `/professional-network/holds/:holdId/booking`,
+  `/relationships/:id/{waitlist,autobook}`, `/autobook/:actionId/execute`.
+  `test:professional-booking` (23) — grounding, idempotência durável, recusa de hold
+  inexistente/expirado/de-outra-org (anti-alucinação), AutoBooking governado (propõe→
+  aprova→executa + `booking_confirmation`) e sem-vaga→waitlist com ZERO appointment.
+- **F4b — UI da clínica (continuação).** Aba "Rede" na agenda: convidar/gerir vínculos,
+  configurar serviços/janelas, buscar disponibilidade, reservar/confirmar e disparar
+  AutoBooking. Fina, sobre as rotas já prontas.
 
 **DEFERIDO (fora do MVP):**
 

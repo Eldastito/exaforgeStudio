@@ -42,6 +42,7 @@ import { ProfessionalService } from "../ProfessionalService.js";
 import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRelationshipService.js";
 import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
+import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -2230,6 +2231,12 @@ function professionalNetworkEnabled(orgId: string): boolean {
   const row = db.prepare(`SELECT professional_network_enabled AS on FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
   return !!(row && row.on);
 }
+// 2ª flag opt-in (RN-PN-8): AutoBooking (agendar automático governado) exige habilitação
+// SEPARADA da rede. Rede pode estar ligada (busca/hold/confirm manual) sem AutoBooking.
+function autobookingEnabled(orgId: string): boolean {
+  const row = db.prepare(`SELECT autobooking_enabled AS on FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  return !!(row && row.on);
+}
 const gatePN = (req: AuthRequest, res: any): string | null => {
   const orgId = req.organizationId;
   if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return null; }
@@ -2333,6 +2340,34 @@ router.post("/professional-network/holds/:holdId/release", requireRole("owner", 
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ProfessionalAvailabilityService.release(orgId, String(req.params.holdId), actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── F4 — Booking federado + AutoBooking governado ──
+// Confirma um hold → cria o agendamento federado (idempotente por hold).
+router.post("/professional-network/holds/:holdId/booking", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalBookingService.confirmBooking(orgId, { holdId: String(req.params.holdId), contactId: req.body?.contactId, petId: req.body?.petId ?? null, title: req.body?.title ?? null }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// Registra demanda sem vaga (waitlist na espinha canônica — não fabrica vaga).
+router.post("/professional-network/relationships/:id/waitlist", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalBookingService.waitlist(orgId, { relationshipId: String(req.params.id), serviceId: req.body?.serviceId ?? null, contactId: req.body?.contactId ?? null, petId: req.body?.petId ?? null, note: req.body?.note ?? null })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// AutoBooking: PROPÕE a ação governada (nunca agenda direto — RN-PN-6).
+router.post("/professional-network/relationships/:id/autobook", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  if (!autobookingEnabled(orgId)) return res.status(403).json({ error: "autobooking_disabled" });
+  try { res.json(ProfessionalBookingService.autoBook(orgId, { ...(req.body || {}), relationshipId: String(req.params.id), createdBy: actor(req) }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// Executa o efeito de uma ação de auto_booking APROVADA (choke-point governado).
+router.post("/professional-network/autobook/:actionId/execute", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  if (!autobookingEnabled(orgId)) return res.status(403).json({ error: "autobooking_disabled" });
+  try { res.json(await ProfessionalBookingService.executeAutoBooking(orgId, String(req.params.actionId))); }
+  catch (e: any) { res.status(409).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

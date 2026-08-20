@@ -239,6 +239,7 @@
     "test:professional-network": "tsx scripts/test-professional-network.ts",
     "test:professional-schedule-config": "tsx scripts/test-professional-schedule-config.ts",
     "test:professional-availability": "tsx scripts/test-professional-availability.ts",
+    "test:professional-booking": "tsx scripts/test-professional-booking.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

@@ -10243,6 +10243,18 @@ const initDb = () => {
     // appointments que carreguem este vínculo — forward-compatible, 0-regressão.
     try { db.exec(`ALTER TABLE appointments ADD COLUMN network_relationship_id TEXT`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha ao criar clinic_slot_holds (ADR-180 F3)', e); }
+
+  // ── ADR-180 F4 — Booking federado governado + AutoBooking ──
+  // slot_hold_id: liga o appointment ao HOLD que o originou (idempotência DURÁVEL do
+  // confirmBooking — 2ª confirmação do mesmo hold devolve o MESMO appointment, nunca
+  // cria 2). autobooking_enabled: 2ª flag opt-in (RN-PN-8) — sem ela o AutoBooking
+  // (agendar automático governado) não roda; legado intocado (default 0).
+  try {
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN slot_hold_id TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN autobooking_enabled INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+    // Índice parcial: garante 1 appointment por hold (idempotência forte do confirmBooking).
+    try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_appointments_slot_hold ON appointments (organization_id, slot_hold_id) WHERE slot_hold_id IS NOT NULL`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de booking federado (ADR-180 F4)', e); }
 };
 
 initDb();

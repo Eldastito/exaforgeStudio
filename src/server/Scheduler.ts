@@ -871,6 +871,13 @@ export class Scheduler {
       import("./ClinicPetService.js").then((m) => m.ClinicPetService.passVaccinationReminders())
         .catch((e) => console.error('[Scheduler] lembrete de vacina pet falhou', e));
     } catch (e) { console.error('[Scheduler] pass de lembrete de vacina pet falhou', e); }
+    // Agenda Federada — gap de demanda (ADR-180 F9.2): publica UM sinal por serviço com
+    // pressão ALTA no `business_signals` (conv. nº 12), self-healing quando o gap fecha.
+    // Só orgs com a rede habilitada; advisório, nunca inventa dinheiro. Best-effort.
+    try {
+      import("./ProfessionalDemandService.js").then((m) => m.ProfessionalDemandService.pass())
+        .catch((e) => console.error('[Scheduler] gap de demanda da rede falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de gap de demanda falhou', e); }
     // Tutor de Ajuda — digest "aprenda 1 coisa" (ADR-179 F5): publica UMA dica semanal
     // (gate de 7 dias no próprio pass) de artigo publicado no `business_signals` (conv.
     // nº 12 — sem tabela paralela), de onde flui pro Fala Tu/atenção. Só conteúdo curado;

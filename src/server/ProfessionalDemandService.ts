@@ -11,6 +11,7 @@
  * de negócio).
  */
 import db from "./db.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 export type Pressure = "high" | "medium" | "low" | "insufficient_data";
 export interface DemandRow { unmet: number; declined: number; met: number; pressure: Pressure; }
@@ -103,6 +104,76 @@ export class ProfessionalDemandService {
     const totalDeclined = byService.reduce((n, s) => n + s.declined, 0);
     const totalMet = byService.reduce((n, s) => n + s.met, 0);
     return { byService, byProfessional, summary: { totalUnmet, totalDeclined, totalMet, insufficientData: totalUnmet + totalDeclined + totalMet === 0 } };
+  }
+
+  /**
+   * F9.2 — torna a demanda PROATIVA: publica um sinal `professional_network/demand_gap` na
+   * espinha (`business_signals`, convenção nº 12 — NUNCA tabela de alerta paralela) por
+   * SERVIÇO com pressão ALTA (demanda ≥ atendida), e RESOLVE o sinal quando o gap fecha
+   * (self-healing). Idempotente por dedupe (serviço). Advisório: nunca inventa dinheiro
+   * (impact null) nem promete resultado — só aponta onde abrir janela / incluir profissional.
+   * Best-effort; isolado por org.
+   */
+  static publishGaps(orgId: string): { published: number; resolved: number } {
+    const d = this.demand(orgId);
+    const highIds = new Set(d.byService.filter((s) => s.pressure === "high" && s.serviceId).map((s) => s.serviceId as string));
+    let published = 0, resolved = 0;
+    const dedupeFor = (serviceId: string) => `clinic:prof_demand_gap:svc:${serviceId}`;
+
+    for (const s of d.byService) {
+      if (s.pressure !== "high" || !s.serviceId) continue;
+      const label = s.serviceName || "essa especialidade";
+      const parts = [s.unmet ? `${s.unmet} pedido(s) sem vaga` : null, s.declined ? `${s.declined} recusa(s)` : null].filter(Boolean).join(" e ");
+      try {
+        BusinessSignalService.publish(orgId, {
+          domain: "clinic",
+          signalType: "professional_network/demand_gap",
+          severity: "attention",
+          basis: "fact",            // as contagens são medidas; a sugestão é advisória
+          confidence: 1,
+          impactAmount: null,       // não inventa dinheiro (RN-PN-4)
+          sourceService: "ProfessionalDemandService",
+          sourceEntityType: "service",
+          sourceEntityId: s.serviceId,
+          subjectType: "service",
+          subjectId: s.serviceId,
+          dedupeKey: dedupeFor(s.serviceId),
+          evidence: {
+            serviceName: s.serviceName, unmet: s.unmet, declined: s.declined, met: s.met,
+            suggestion: `${parts || "Demanda acima da oferta"} em ${label} — considere abrir mais janelas ou incluir outro profissional dessa especialidade.`,
+          },
+        } as any);
+        // Se o gap havia sido auto-resolvido e voltou, reabre (nunca reabre um dismissed
+        // pelo humano — RN §65). No 1º disparo o INSERT já nasce 'open', reopen é no-op.
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeFor(s.serviceId)); } catch { /* noop */ }
+        published += 1;
+      } catch { /* best-effort */ }
+    }
+
+    // Self-healing: gaps abertos cujo serviço não está mais ALTO → resolve.
+    try {
+      const open = db.prepare(
+        `SELECT source_entity_id, dedupe_key FROM business_signals WHERE organization_id = ? AND signal_type = 'professional_network/demand_gap' AND status = 'open'`
+      ).all(orgId) as any[];
+      for (const o of open) {
+        if (!o.source_entity_id || !highIds.has(String(o.source_entity_id))) {
+          try { BusinessSignalService.resolveByDedupe(orgId, o.dedupe_key); resolved += 1; } catch { /* noop */ }
+        }
+      }
+    } catch { /* noop */ }
+
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: publica gaps de demanda pras orgs com a rede habilitada. Best-effort. */
+  static pass(): void {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE professional_network_enabled = 1`).all() as any[]; }
+    catch { return; }
+    for (const o of orgs) {
+      try { this.publishGaps(o.organization_id); }
+      catch (e) { console.error("[Agenda Federada] demand gap pass falhou", o.organization_id, e); }
+    }
   }
 }
 

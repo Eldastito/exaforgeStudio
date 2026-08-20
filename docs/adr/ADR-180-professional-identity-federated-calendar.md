@@ -252,7 +252,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     :relId/windows` (sessão escopada). `test:professional-availability-write` (8) — escreve
     as próprias janelas, validação herdada, NÃO edita vínculo de outro profissional nem
     pendente (isolamento pela identidade).
-  - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (a fazer).**
+  - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (EM PR).** `apptScope`
+    autoriza pela identidade (join por professional_id — nunca alcança atendimento de
+    outro). `acceptAppointment` marca `professional_ack_at` (coluna aditiva) SEM mudar o
+    status FSM (ACK = sinal positivo pra clínica; idempotente). `declineAppointment` reusa
+    `ProfessionalBookingService.cancelBooking` (marca cancelled, preserva histórico, tira do
+    Google) e PUBLICA `professional_network/booking_declined` em `business_signals`
+    (convenção nº 12 — a clínica reage: rebook/waitlist; nunca silencioso). Rotas
+    `POST /api/public/professional/appointments/:apptId/{accept,decline}`. `ackAt` exposto na
+    agenda. `test:professional-booking-response` (10) — ACK sem mudar FSM/idempotente,
+    recusa cancela+sinaliza, isolamento, não confirma cancelado.
   - **F7b — Página `/profissional/:token` (a fazer).**
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**
   Fatiada backend-first (visão original do dono: *"quanto vai receber, o percentual da clínica

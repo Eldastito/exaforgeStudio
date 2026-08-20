@@ -10362,6 +10362,15 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_prof_auth_tokens_prof ON professional_auth_tokens (professional_id, active);
     `);
   } catch (e) { console.error('[DB] Falha ao criar professional_auth_tokens (ADR-180 F7.1)', e); }
+
+  // ── ADR-180 F7.4 — Aceitar/recusar do profissional (webapp) ──
+  // professional_ack_at: quando o profissional CONFIRMOU presença no atendimento federado
+  // (sinal positivo pra clínica). NÃO muda o status FSM (segue `confirmed`) — é um ACK
+  // aditivo. Recusar não usa coluna: vira `cancelled` (reusa cancelBooking) + sinal pra
+  // clínica. Aditivo; legado sem ack → null.
+  try {
+    try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_ack_at DATETIME`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de aceite do profissional (ADR-180 F7.4)', e); }
 };
 
 initDb();

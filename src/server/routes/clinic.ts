@@ -38,6 +38,8 @@ import { ClinicGuideService, GuideType, GuideStatus } from "../ClinicGuideServic
 import { ClinicGuideDeliveryService } from "../ClinicGuideDeliveryService.js";
 import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
+import { ProfessionalService } from "../ProfessionalService.js";
+import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRelationshipService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -2216,6 +2218,65 @@ router.post("/surgeries/:sid/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ClinicPetCareService.setSurgeryStatus(orgId, String(req.params.sid), req.body?.status, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── ADR-180 F1 — Professional Network & Agenda Federada ──
+// Opt-in SERVER-SIDE (RN-PN-8): a flag é imposta no CAMINHO real, não só na UI.
+// Sem a flag, as rotas recusam 403 antes de qualquer efeito.
+function professionalNetworkEnabled(orgId: string): boolean {
+  const row = db.prepare(`SELECT professional_network_enabled AS on FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  return !!(row && row.on);
+}
+const gatePN = (req: AuthRequest, res: any): string | null => {
+  const orgId = req.organizationId;
+  if (!orgId) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  if (!professionalNetworkEnabled(orgId)) { res.status(403).json({ error: "professional_network_disabled" }); return null; }
+  return orgId;
+};
+
+// Busca de identidade global (para o fluxo de convite).
+router.get("/professional-network/professionals/search", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalService.search(req.query.q as string, Number(req.query.limit) || 20)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// Lookup pela chave natural (conselho + registro) — evita duplicar identidade.
+router.get("/professional-network/professionals/by-registration", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  const p = ProfessionalService.findByRegistration(req.query.council as string, req.query.registration as string);
+  res.json(p);
+});
+// Relações da org (o "meus profissionais" da rede).
+router.get("/professional-network/relationships", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  res.json(ClinicProfessionalRelationshipService.list(orgId, { status: req.query.status as string }));
+});
+router.get("/professional-network/relationships/:id", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  const rel = ClinicProfessionalRelationshipService.get(orgId, String(req.params.id));
+  if (!rel) return res.status(404).json({ error: "not_found" });
+  res.json(rel);
+});
+// Convidar (por professionalId existente OU criando identidade global). owner/admin.
+router.post("/professional-network/relationships", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ClinicProfessionalRelationshipService.invite(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/accept", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ClinicProfessionalRelationshipService.accept(orgId, String(req.params.id), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ClinicProfessionalRelationshipService.revoke(orgId, String(req.params.id), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/professional-network/relationships/:id/permissions", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ClinicProfessionalRelationshipService.setPermissions(orgId, String(req.params.id), req.body || {}, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

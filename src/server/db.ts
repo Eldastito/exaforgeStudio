@@ -10108,6 +10108,64 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_clinic_pet_surgery_pet ON clinic_pet_surgeries (organization_id, pet_id, status);
     `);
   } catch (e) { /* noop */ }
+
+  // ── ADR-180 F1 — Professional Identity & Federated Calendar (Agenda Federada) ──
+  // Decisão de fronteira (§90): o profissional pertence ao ECOSSISTEMA ZapFlow, não
+  // a uma clínica. Espelha vertical_intelligence (GLOBAL, sem organization_id) +
+  // organization_contextualization (bridge por-org), estruturado como
+  // retail_sellers (identidade) + assignments (vínculo).
+  try {
+    // `professionals` — camada GLOBAL, SEM organization_id (RN-PN-1). Identidade do
+    // profissional no ecossistema, chaveada por conselho + registro (ex.
+    // "CRMV-SP" + "12345"). Zero dado por-org/relação aqui — tudo que é da relação
+    // clínica↔profissional vive no bridge abaixo.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS professionals (
+        id TEXT PRIMARY KEY,
+        council TEXT NOT NULL,                   -- conselho (CRMV, CRM, CRO, CREFITO, ...)
+        registration_number TEXT NOT NULL,       -- nº de registro no conselho
+        name TEXT NOT NULL,
+        specialties_json TEXT,                   -- ["cardiologia veterinária", ...]
+        phone TEXT,
+        email TEXT,
+        status TEXT NOT NULL DEFAULT 'active',   -- active | inactive
+        created_by TEXT,                         -- org que cadastrou (auditoria; NÃO é dono)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(council, registration_number)     -- 1 identidade por registro no conselho
+      );
+      CREATE INDEX IF NOT EXISTS idx_professionals_name ON professionals (name);
+    `);
+    // `clinic_professional_relationships` — bridge POR-ORG (RN-PN-2, isolado por
+    // organization_id). É onde vive a RELAÇÃO clínica↔profissional: status do
+    // convite, permissões (quais serviços a clínica pode agendar), comissão. Revogar
+    // não apaga a identidade global (RN-PN-3). UNIQUE(org, professional) → 1 relação
+    // viva por par.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professional_relationships (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        professional_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | revoked
+        permissions_json TEXT,                   -- {services:[serviceId,...]} — o que pode agendar
+        commission_percent REAL,                 -- % da clínica (âncora de finanças, F8 diferido)
+        notes TEXT,
+        invited_by TEXT,
+        invited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        responded_at DATETIME,                   -- quando aceitou/recusou
+        revoked_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, professional_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_rel_by_org
+        ON clinic_professional_relationships (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_rel_by_prof
+        ON clinic_professional_relationships (professional_id, status);
+    `);
+    // Opt-in por org (RN-PN-8, convenção nº 10). Default 0: legado opera intocado.
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN professional_network_enabled INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha ao criar professionals / relationships (ADR-180 F1)', e); }
 };
 
 initDb();

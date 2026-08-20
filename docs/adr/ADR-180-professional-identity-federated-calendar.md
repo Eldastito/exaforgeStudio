@@ -1,6 +1,7 @@
 # ADR-180 — Professional Identity & Federated Calendar (Agenda Federada)
 
-- **Status:** ABERTO — F0 (auditoria + ADR, doc-only). Plano F0–F4 (MVP) + fatias diferidas.
+- **Status:** ABERTO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
+  relacionamento, EM PR). Plano F0–F4 (MVP) + fatias diferidas.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -73,10 +74,16 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
 **MVP (F0–F4):**
 
 - **F0 — Auditoria + ADR (esta fatia, doc-only).** `codebase-audit.md` + ADR-180.
-- **F1 — Identidade cross-org + relacionamento.** Tabelas `professionals` (global) +
-  `clinic_professional_relationships` (bridge). Convite/aceite/revogação.
-  `ProfessionalService` + `ClinicProfessionalRelationshipService`. Flag
-  `professional_network_enabled`. Testes de isolamento cross-org.
+- **F1 — Identidade cross-org + relacionamento. FECHADA (em PR).** Tabelas
+  `professionals` (GLOBAL, sem `organization_id`) + `clinic_professional_relationships`
+  (bridge por-org, UNIQUE(org, professional)) + flag `professional_network_enabled`
+  (opt-in, default 0). `ProfessionalService` (identidade global idempotente pela chave
+  do conselho, NUNCA sobrescreve com vazio — RN-PN-3) + `ClinicProfessionalRelationshipService`
+  (ciclo convite `pending`→aceite `accepted`→revogação `revoked`; revogar não apaga a
+  identidade global; reconvite reativa). Rotas `/api/clinic/professional-network/*`
+  (busca de identidade, relationships CRUD/accept/revoke/permissions), gate server-side
+  pela flag (RN-PN-8 — recusa 403 sem opt-in). `test:professional-network` (23) cobre
+  idempotência, não-sobrescrita, ciclo, isolamento cross-org (RN-PN-2) e revogação.
 - **F2 — Serviços + janelas de disponibilidade.** Quais serviços o profissional presta em
   cada clínica; janelas de trabalho + buffers por profissional/clínica.
 - **F3 — Availability Engine + Hold + confirm atômico.** Estende

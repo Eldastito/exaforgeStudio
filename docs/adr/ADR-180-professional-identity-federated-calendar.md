@@ -6,9 +6,11 @@
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (#1237/#1238/#1239).
   **Google Calendar (F6) FECHADO** (#1240/#1241/#1242/#1243). **F5 (recursos +
-  deslocamento) FECHADO** (F5.1 #1244 · F5.2 #1245 · F5b #1246). **Agora F7 — webapp de
-  autoatendimento do profissional (COM escrita, decisão do dono): F7.1 (auth passwordless +
-  leitura por-profissional, EM PR).** Como F1–F3, cada
+  deslocamento) FECHADO** (F5.1 #1244 · F5.2 #1245 · F5b #1246). **F7 (webapp de
+  autoatendimento do profissional, COM escrita) FECHADO** (F7.1 auth passwordless + leitura
+  #1247 · F7.2 magic-link emitido pela clínica #1248 · F7.3 escrita da disponibilidade #1249 ·
+  F7.4 aceita/recusa #1250 · F7b página `/profissional/:token`, EM PR)**.** DIFERIDO restante:
+  F9 (inteligência de demanda) · F10 (rede/marketplace). Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -252,7 +254,7 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     :relId/windows` (sessão escopada). `test:professional-availability-write` (8) — escreve
     as próprias janelas, validação herdada, NÃO edita vínculo de outro profissional nem
     pendente (isolamento pela identidade).
-  - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (EM PR).** `apptScope`
+  - **F7.4 — Escrita: o profissional ACEITA/RECUSA agendamentos (MERGED PR #1250).** `apptScope`
     autoriza pela identidade (join por professional_id — nunca alcança atendimento de
     outro). `acceptAppointment` marca `professional_ack_at` (coluna aditiva) SEM mudar o
     status FSM (ACK = sinal positivo pra clínica; idempotente). `declineAppointment` reusa
@@ -262,7 +264,14 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     `POST /api/public/professional/appointments/:apptId/{accept,decline}`. `ackAt` exposto na
     agenda. `test:professional-booking-response` (10) — ACK sem mudar FSM/idempotente,
     recusa cancela+sinaliza, isolamento, não confirma cancelado.
-  - **F7b — Página `/profissional/:token` (a fazer).**
+  - **F7b — Página `/profissional/:token` (EM PR). FECHA o F7.** `ProfessionalPortalPage`
+    standalone (sem AuthProvider/useStore) montada no `main.tsx` pela rota `/profissional/`,
+    fora do injetor do token de staff. Troca o magic-link por sessão (`POST /session`) e a
+    envia como Bearer em cada chamada a `/api/public/professional/*`. Três abas: **Agenda**
+    (federada, com Confirmar/Recusar por atendimento — F7.4), **A receber** (totais
+    realizado×previsto + por clínica — F7.1, líquido do profissional), **Disponibilidade**
+    (edita as próprias janelas por clínica — F7.3). Link inválido/expirado → tela honesta.
+    UI-only sobre os endpoints testados F7.1–F7.4; tsc + build (vite) verdes.
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**
   Fatiada backend-first (visão original do dono: *"quanto vai receber, o percentual da clínica
   e dele separados, previsão de receitas a receber"*):

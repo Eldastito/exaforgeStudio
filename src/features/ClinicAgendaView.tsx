@@ -31,6 +31,15 @@ import { Stethoscope, Plus, X, Clock, User, DoorOpen, ShieldCheck, Timer, LogIn,
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { useStore } from '@/src/store/useStore';
+import { clinicTerms, type ClinicTerms } from '@/src/lib/clinicTerms';
+
+// Vertical Petshop F2 — vocabulário da vertical (pet/tutor × paciente/responsável).
+// Hook fino: lê a vertical do store e devolve os rótulos. Não muda comportamento.
+function useClinicTerms(): ClinicTerms {
+  const vertical = useStore((s) => s.vertical);
+  return clinicTerms(vertical);
+}
 
 // ---- Tipos ----
 type Professional = { id: string; name: string; specialty?: string | null; color?: string | null; user_id?: string | null; active?: boolean | number };
@@ -247,6 +256,7 @@ function ClinicTabsBar({ tab, setTab }: { tab: ClinicTab; setTab: (t: ClinicTab)
 }
 
 export function ClinicAgendaView() {
+  const terms = useClinicTerms();
   const [tab, setTab] = useState<'agenda' | 'especialidades' | 'episodios' | 'ciclos' | 'grupos' | 'guias' | 'autorizacoes' | 'conexao'>('agenda');
   const [date, setDate] = useState<string>(todayISO());
   const [filterProfessional, setFilterProfessional] = useState<string>('');
@@ -352,7 +362,7 @@ export function ClinicAgendaView() {
           <h2 className="zf-page-title flex items-center gap-2">
             <Stethoscope className="w-6 h-6 text-emerald-400" /> Agenda Clínica
           </h2>
-          <p className="text-zinc-400 text-sm mt-1">Fluxo do dia: chegada, atendimento e controle de permanência por paciente.</p>
+          <p className="text-zinc-400 text-sm mt-1">Fluxo do dia: chegada, atendimento e controle de permanência por {terms.patientLower}.</p>
         </div>
         {tab === 'agenda' && (
           <div className="flex items-center gap-2 flex-wrap print:hidden">
@@ -463,7 +473,7 @@ export function ClinicAgendaView() {
         <div className="mb-5 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
           <span className="text-sm text-red-200">
-            {overCount === 1 ? '1 paciente excedeu o tempo previsto.' : `${overCount} pacientes excederam o tempo previsto.`}
+            {overCount === 1 ? `1 ${terms.patientLower} excedeu o tempo previsto.` : `${overCount} ${terms.patientPluralLower} excederam o tempo previsto.`}
           </span>
         </div>
       )}
@@ -558,6 +568,7 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
   onExtended: () => void;
   onOpenChart: () => void;
 }) {
+  const terms = useClinicTerms();
   const st = STATUS_BADGE[a.status] || STATUS_BADGE.confirmed;
   const ov = OVERRUN_BADGE[overrun] || OVERRUN_BADGE.idle;
   const color = a.professional_color || '#71717a';
@@ -579,7 +590,7 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono text-sm text-zinc-200 inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-500" /> {fmtTime(a.scheduled_start)}</span>
-            <h3 className="font-semibold text-zinc-100 truncate">{a.contact_name || 'Paciente'}</h3>
+            <h3 className="font-semibold text-zinc-100 truncate">{a.contact_name || terms.patient}</h3>
             {a.contact_identifier && <span className="text-[11px] text-zinc-500">{a.contact_identifier}</span>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-400">
@@ -655,17 +666,17 @@ function AppointmentCard({ a, overrun, busyId, extendOpen, onToggleExtend, onChe
           </span>
         )}
         {a.patient_confirmed_at && (
-          <span className="text-[10px] rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 px-1.5 inline-flex items-center gap-1" title={`Paciente confirmou em ${new Date(a.patient_confirmed_at).toLocaleString('pt-BR')}`}>
-            <Check className="w-3 h-3" /> confirmado pelo paciente
+          <span className="text-[10px] rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 px-1.5 inline-flex items-center gap-1" title={`${terms.client} confirmou em ${new Date(a.patient_confirmed_at).toLocaleString('pt-BR')}`}>
+            <Check className="w-3 h-3" /> confirmado pelo {terms.clientLower}
           </span>
         )}
         {a.cancelled_by === 'patient' && (
-          <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 inline-flex items-center gap-1" title={`Cancelado pelo paciente em ${a.cancelled_at ? new Date(a.cancelled_at).toLocaleString('pt-BR') : ''}`}>
-            <Ban className="w-3 h-3" /> cancelado pelo paciente
+          <span className="text-[10px] rounded-full bg-red-500/15 text-red-300 border border-red-500/30 px-1.5 inline-flex items-center gap-1" title={`Cancelado pelo ${terms.clientLower} em ${a.cancelled_at ? new Date(a.cancelled_at).toLocaleString('pt-BR') : ''}`}>
+            <Ban className="w-3 h-3" /> cancelado pelo {terms.clientLower}
           </span>
         )}
         {Number(a.needs_manual_confirmation) === 1 && !a.patient_confirmed_at && a.status !== 'cancelled' && a.status !== 'completed' && a.status !== 'no_show' && (
-          <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 inline-flex items-center gap-1" title="Paciente não confirmou nos lembretes automáticos — recepção precisa ligar ou liberar a vaga.">
+          <span className="text-[10px] rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 inline-flex items-center gap-1" title={`${terms.client} não confirmou nos lembretes automáticos — recepção precisa ligar ou liberar a vaga.`}>
             <AlertTriangle className="w-3 h-3" /> aguarda confirmação
           </span>
         )}
@@ -767,6 +778,7 @@ function NewAppointmentModal({ dateISO, contacts, professionals, rooms, onClose,
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const terms = useClinicTerms();
   const [contactId, setContactId] = useState('');
   const [title, setTitle] = useState('');
   const [scheduledStart, setScheduledStart] = useState(defaultDateTimeLocal(dateISO));
@@ -777,7 +789,7 @@ function NewAppointmentModal({ dateISO, contacts, professionals, rooms, onClose,
   const [conflicts, setConflicts] = useState<Conflict[] | null>(null);
 
   const submit = async (force = false) => {
-    if (!contactId) { toast.error('Selecione o paciente.'); return; }
+    if (!contactId) { toast.error(`Selecione o ${terms.patientLower}.`); return; }
     if (!scheduledStart) { toast.error('Informe a data e hora.'); return; }
     setBusy(true);
     try {
@@ -827,10 +839,10 @@ function NewAppointmentModal({ dateISO, contacts, professionals, rooms, onClose,
         ) : (
           <form onSubmit={e => { e.preventDefault(); submit(false); }} className="space-y-4">
             <div>
-              <label className="text-sm text-zinc-400 mb-1 block">Paciente</label>
+              <label className="text-sm text-zinc-400 mb-1 block">{terms.patient}</label>
               <select required value={contactId} onChange={e => setContactId(e.target.value)}
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
-                <option value="">Selecione um paciente</option>
+                <option value="">Selecione um {terms.patientLower}</option>
                 {contacts.map(c => <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` — ${c.identifier}` : ''}</option>)}
               </select>
             </div>
@@ -1238,6 +1250,7 @@ function AuthorizationsTab({ contacts }: { contacts: ContactLite[] }) {
 
 // ---- Card de autorização ----
 function AuthCard({ auth, onChanged }: { auth: Authorization; onChanged: () => void }) {
+  const terms = useClinicTerms();
   const [form, setForm] = useState<'' | 'prepare' | 'submit' | 'return'>('');
   const meta = authStatusMeta(auth.status);
   const canPrepare = auth.status === 'draft' || auth.status === 'pending_documents';
@@ -1250,7 +1263,7 @@ function AuthCard({ auth, onChanged }: { auth: Authorization; onChanged: () => v
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <User className="w-3.5 h-3.5 text-zinc-500" />
-            <h3 className="font-semibold text-zinc-100 truncate">{auth.contact_name || 'Paciente'}</h3>
+            <h3 className="font-semibold text-zinc-100 truncate">{auth.contact_name || terms.patient}</h3>
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-zinc-400">
             <span className="inline-flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-zinc-500" /> {auth.operator_name || 'Sem operadora'}</span>
@@ -1480,13 +1493,14 @@ function NewAuthorizationModal({ contacts, operators, procedures, onClose, onCre
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const terms = useClinicTerms();
   const [contactId, setContactId] = useState('');
   const [operatorId, setOperatorId] = useState('');
   const [procedureId, setProcedureId] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    if (!contactId) { toast.error('Selecione o paciente.'); return; }
+    if (!contactId) { toast.error(`Selecione o ${terms.patientLower}.`); return; }
     setBusy(true);
     try {
       const r = await apiFetch('/api/clinic/authorizations', {
@@ -1517,10 +1531,10 @@ function NewAuthorizationModal({ contacts, operators, procedures, onClose, onCre
         </div>
         <form onSubmit={e => { e.preventDefault(); submit(); }} className="space-y-4">
           <div>
-            <label className="text-sm text-zinc-400 mb-1 block">Paciente</label>
+            <label className="text-sm text-zinc-400 mb-1 block">{terms.patient}</label>
             <select required value={contactId} onChange={e => setContactId(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 outline-none focus:border-emerald-500">
-              <option value="">Selecione um paciente</option>
+              <option value="">Selecione um {terms.patientLower}</option>
               {contacts.map(c => <option key={c.id} value={c.id}>{c.name}{c.identifier ? ` — ${c.identifier}` : ''}</option>)}
             </select>
           </div>
@@ -2280,6 +2294,7 @@ type Encounter = {
 };
 
 function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onClose: () => void }) {
+  const terms = useClinicTerms();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [contactId, setContactId] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -2329,7 +2344,7 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [appointmentId]);
 
   const grantConsent = async () => {
-    if (!contactId) { toast.error('Paciente não identificado.'); return; }
+    if (!contactId) { toast.error(`${terms.patient} não identificado.`); return; }
     setBusy(true);
     try {
       const res = await apiFetch(`/api/clinic/patients/${contactId}/consent/sensitive`, {
@@ -2408,7 +2423,7 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
               <div>
                 <div className="text-sm text-amber-100 font-medium">Consentimento LGPD Art.11 necessário</div>
                 <p className="text-xs text-amber-200/90 mt-1">
-                  Prontuário contém <strong>dado sensível de saúde</strong>. Antes de abrir, o paciente precisa autorizar o registro (verbal ou por assinatura). Confirme com o paciente e registre abaixo — fica auditado.
+                  Prontuário contém <strong>dado sensível de saúde</strong>. Antes de abrir, o {terms.clientLower} precisa autorizar o registro (verbal ou por assinatura). Confirme com o {terms.clientLower} e registre abaixo — fica auditado.
                 </p>
                 <button onClick={grantConsent} disabled={busy} className="mt-3 text-xs px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white inline-flex items-center gap-1 disabled:opacity-60">
                   {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />} Confirmar consentimento e abrir prontuário
@@ -2440,7 +2455,7 @@ function EncounterModal({ appointmentId, onClose }: { appointmentId: string; onC
             <div className="mt-3">
               {tab === 'S' && (
                 <textarea disabled={isSigned} value={val('subjective')} onChange={setVal('subjective')}
-                  rows={10} placeholder="Queixa principal, história da doença, antecedentes relatados pelo paciente…"
+                  rows={10} placeholder={`Queixa principal, história da doença, antecedentes relatados pelo ${terms.clientLower}…`}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 disabled:opacity-60" />
               )}
               {tab === 'O' && (
@@ -2558,6 +2573,7 @@ function downloadPdf(url: string, filename: string) {
 type DeliveryDto = { id: string; status: 'queued' | 'sent' | 'failed'; providerMessageId: string | null; error: string | null; sentAt: string };
 
 function DocSendButton({ kind, docId }: { kind: 'prescription' | 'certificate'; docId: string }) {
+  const terms = useClinicTerms();
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<DeliveryDto | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -2571,14 +2587,14 @@ function DocSendButton({ kind, docId }: { kind: 'prescription' | 'certificate'; 
   useEffect(() => { loadHistory(); /* eslint-disable-next-line */ }, [kind, docId]);
 
   const send = async () => {
-    if (!(await confirmDialog(kind === 'prescription' ? 'Enviar receita por WhatsApp para o paciente?' : 'Enviar atestado por WhatsApp para o paciente?'))) return;
+    if (!(await confirmDialog(kind === 'prescription' ? `Enviar receita por WhatsApp para o ${terms.clientLower}?` : `Enviar atestado por WhatsApp para o ${terms.clientLower}?`))) return;
     setBusy(true);
     try {
       const path = kind === 'prescription' ? 'prescriptions' : 'certificates';
       const r = await apiFetch(`/api/clinic/${path}/${docId}/send`, { method: 'POST' });
       const out: any = await r.json().catch(() => ({}));
       if (r.status === 409 && (out?.code === 'LGPD_COMMS_CONSENT_REQUIRED' || out?.code === 'LGPD_CONSENT_REQUIRED')) {
-        toast.error(out?.error || 'Consentimento LGPD necessário — abra a Ficha do paciente e registre.');
+        toast.error(out?.error || `Consentimento LGPD necessário — abra a Ficha do ${terms.patientLower} e registre.`);
         return;
       }
       if (!r.ok) { toast.error(out?.error || 'Falha ao enviar.'); return; }
@@ -3020,6 +3036,7 @@ function AttachmentThumb({ att }: { att: AttachmentDto }) {
 }
 
 function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: string; isSigned: boolean }) {
+  const terms = useClinicTerms();
   const [items, setItems] = useState<AttachmentDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -3139,7 +3156,7 @@ function EncounterAttachmentsPanel({ encounterId, isSigned }: { encounterId: str
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <label className="text-[11px] text-zinc-400 inline-flex items-center gap-1 cursor-pointer select-none" title="Compartilhar com o Portal do Paciente">
+              <label className="text-[11px] text-zinc-400 inline-flex items-center gap-1 cursor-pointer select-none" title={`Compartilhar com o Portal do ${terms.client}`}>
                 <input type="checkbox" checked={att.shareWithPatient} onChange={(e) => toggleShare(att, e.target.checked)} className="accent-indigo-500" />
                 Portal
               </label>
@@ -3230,6 +3247,7 @@ function StatCard({ label, value, hint, tone }: { label: string; value: string; 
 }
 
 function MetricsCards({ m }: { m: MetricsOverview }) {
+  const terms = useClinicTerms();
   const noShowTone = m.appointments.noShowRate >= 20 ? 'bad' : m.appointments.noShowRate >= 10 ? 'neutral' : 'good';
   const confirmTone = m.reminders.confirmationRate >= 60 ? 'good' : m.reminders.confirmationRate >= 30 ? 'neutral' : 'bad';
   const days = m.window.days;
@@ -3244,7 +3262,7 @@ function MetricsCards({ m }: { m: MetricsOverview }) {
         <StatCard label="Consultas" value={String(m.appointments.total)} hint={`${m.appointments.past} já passaram`} />
         <StatCard label="No-show" value={`${m.appointments.noShowRate}%`} hint={`base: ${m.appointments.past} passadas`} tone={noShowTone} />
         <StatCard label="Concluídas" value={`${m.appointments.completedRate}%`} hint={`${m.appointments.byStatus['completed'] || 0} completed`} tone="good" />
-        <StatCard label="Confirmadas pelo paciente" value={`${m.appointments.patientConfirmedRate}%`} hint="do total agendado" />
+        <StatCard label={`Confirmadas pelo ${terms.clientLower}`} value={`${m.appointments.patientConfirmedRate}%`} hint="do total agendado" />
       </div>
 
       <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Bell className="w-3 h-3" /> Lembretes automáticos</h4>
@@ -3260,13 +3278,13 @@ function MetricsCards({ m }: { m: MetricsOverview }) {
         <StatCard label="Vagas oferecidas" value={String(m.automations.vacancy.offered)} hint={`${m.automations.vacancy.accepted} aceitas · ${m.automations.vacancy.declined} recusadas`} />
         <StatCard label="Horário recuperado" value={`${Math.round(m.automations.vacancy.recoveredMinutes / 60 * 10) / 10}h`} hint="vagas aceitas × duração" tone={m.automations.vacancy.recoveredMinutes > 0 ? 'good' : 'neutral'} />
         <StatCard label="Reagendamentos ofertados" value={String(m.automations.reschedule.offered)} hint={`${m.automations.reschedule.chosen} escolheu`} />
-        <StatCard label="Ofertas abandonadas/expiradas" value={String(m.automations.reschedule.abandoned + m.automations.reschedule.expired + m.automations.vacancy.expired)} hint="paciente não respondeu" tone="neutral" />
+        <StatCard label="Ofertas abandonadas/expiradas" value={String(m.automations.reschedule.abandoned + m.automations.reschedule.expired + m.automations.vacancy.expired)} hint={`${terms.clientLower} não respondeu`} tone="neutral" />
       </div>
-      <p className="text-[10px] text-zinc-500 mb-4">Ofertas automáticas de vaga (para quem está na fila de retorno) e de reagendamento (quando o paciente responde REMARCAR).</p>
+      <p className="text-[10px] text-zinc-500 mb-4">Ofertas automáticas de vaga (para quem está na fila de retorno) e de reagendamento (quando o {terms.clientLower} responde REMARCAR).</p>
 
       <h4 className="text-[11px] text-zinc-400 uppercase tracking-wider mb-2 inline-flex items-center gap-1"><Ban className="w-3 h-3" /> Cancelamentos ({m.cancellations.total})</h4>
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <StatCard label="Pelo paciente" value={String(m.cancellations.byOrigin.patient)} hint={`${m.cancellations.patientShare}% do total`} tone="neutral" />
+        <StatCard label={`Pelo ${terms.clientLower}`} value={String(m.cancellations.byOrigin.patient)} hint={`${m.cancellations.patientShare}% do total`} tone="neutral" />
         <StatCard label="Pela equipe" value={String(m.cancellations.byOrigin.staff)} />
         <StatCard label="Pelo sistema" value={String(m.cancellations.byOrigin.system)} />
       </div>
@@ -3333,6 +3351,7 @@ type VacancyOfferDto = {
 };
 
 function VacancyOffersPanel() {
+  const terms = useClinicTerms();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<VacancyOfferDto[] | null>(null);
@@ -3380,12 +3399,12 @@ function VacancyOffersPanel() {
               {items.map((v) => (
                 <div key={v.id} className="p-3 text-xs">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-zinc-100 font-medium">{v.candidateName || 'Paciente'}</span>
+                    <span className="text-zinc-100 font-medium">{v.candidateName || terms.patient}</span>
                     {statusPill(v.status)}
                     <span className="text-zinc-500">→ {new Date(v.slotStart).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} · {v.slotDurationMinutes}min</span>
                   </div>
                   <div className="text-[11px] text-zinc-500 mt-0.5">
-                    Convidado por vaga aberta de <span className="text-zinc-400">{v.sourcePatientName || 'paciente'}</span>
+                    Convidado por vaga aberta de <span className="text-zinc-400">{v.sourcePatientName || terms.patientLower}</span>
                     {v.professionalName && <> com <span className="text-zinc-400">{v.professionalName}</span></>}
                     <> · ofertada em {new Date(v.createdAt).toLocaleString('pt-BR')}</>
                   </div>
@@ -3401,6 +3420,7 @@ function VacancyOffersPanel() {
 
 // ---- Fila de retornos pendentes (painel colapsável na Agenda) --------------
 function FollowUpQueuePanel() {
+  const terms = useClinicTerms();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -3457,7 +3477,7 @@ function FollowUpQueuePanel() {
         <div className="px-5 pb-4 border-t border-zinc-800 pt-3">
           {loading && <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>}
           {!loading && items.length === 0 && (
-            <div className="text-xs text-zinc-500">Nenhum retorno pendente na fila. Quando o profissional marcar "voltar em X dias" no prontuário, o paciente aparece aqui pra confirmação.</div>
+            <div className="text-xs text-zinc-500">Nenhum retorno pendente na fila. Quando o profissional marcar "voltar em X dias" no prontuário, o {terms.patientLower} aparece aqui pra confirmação.</div>
           )}
           {!loading && items.map((it) => (
             <div key={it.encounterId} className="flex items-center justify-between gap-3 py-2 border-b border-zinc-800 last:border-b-0">

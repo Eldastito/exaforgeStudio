@@ -2400,5 +2400,11 @@ router.get("/professional-network/appointments/:appointmentId/finance", requireR
   try { res.json(ProfessionalFinanceService.settlement(orgId, String(req.params.appointmentId))); }
   catch (e: any) { res.status(404).json({ error: e?.message || "erro" }); }
 });
+// F8.2 — previsão de receita a receber por profissional (agendado ainda não atendido).
+router.get("/professional-network/finance/forecast", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalFinanceService.forecast(orgId, { fromISO: req.query.from as string, toISO: req.query.to as string })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
 
 export default router;

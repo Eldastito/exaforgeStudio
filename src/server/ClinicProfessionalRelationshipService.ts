@@ -18,9 +18,12 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ProfessionalService, ProfessionalIdentityInput, Professional } from "./ProfessionalService.js";
 
+export type CommissionBeneficiary = "professional" | "clinic";
 export interface RelationshipPermissions {
   services?: string[];            // ids de serviços que a clínica pode agendar
   commissionPercent?: number | null;
+  commissionBeneficiary?: CommissionBeneficiary;   // F8.2 — de quem é o %
+  taxWithholdingPercent?: number | null;           // F8.2 — imposto retido na fonte
 }
 
 export interface ClinicProfessionalRelationship {
@@ -30,6 +33,8 @@ export interface ClinicProfessionalRelationship {
   status: string;                 // pending | accepted | revoked
   permissions: { services: string[] };
   commissionPercent: number | null;
+  commissionBeneficiary: CommissionBeneficiary;    // F8.2 — 'professional' (default) | 'clinic'
+  taxWithholdingPercent: number | null;            // F8.2 — null = sem retenção configurada
   notes: string | null;
   invitedAt: string | null;
   respondedAt: string | null;
@@ -38,6 +43,19 @@ export interface ClinicProfessionalRelationship {
 }
 
 const STATUSES = new Set(["pending", "accepted", "revoked"]);
+
+/** Normaliza um percentual opcional (0..100) ou null; lança se fora da faixa. */
+function normPct(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error("percent_out_of_range");
+  return n;
+}
+function normBeneficiary(v: CommissionBeneficiary | undefined): CommissionBeneficiary | undefined {
+  if (v == null) return undefined;
+  if (v !== "professional" && v !== "clinic") throw new Error("beneficiary_invalid");
+  return v;
+}
 
 function parsePerms(json?: string | null): { services: string[] } {
   try { const v = JSON.parse(json || "{}"); const s = Array.isArray(v?.services) ? v.services.map(String) : []; return { services: s }; }
@@ -49,7 +67,10 @@ export class ClinicProfessionalRelationshipService {
     return {
       id: r.id, organizationId: r.organization_id, professionalId: r.professional_id,
       status: r.status, permissions: parsePerms(r.permissions_json),
-      commissionPercent: r.commission_percent ?? null, notes: r.notes ?? null,
+      commissionPercent: r.commission_percent ?? null,
+      commissionBeneficiary: r.commission_beneficiary === "clinic" ? "clinic" : "professional",
+      taxWithholdingPercent: r.tax_withholding_percent ?? null,
+      notes: r.notes ?? null,
       invitedAt: r.invited_at ?? null, respondedAt: r.responded_at ?? null, revokedAt: r.revoked_at ?? null,
       professional: ProfessionalService.getById(r.professional_id),
     };
@@ -116,11 +137,13 @@ export class ClinicProfessionalRelationshipService {
 
     const id = randomUUID();
     const perms = JSON.stringify({ services: Array.isArray(input.permissions?.services) ? input.permissions!.services!.map(String) : [] });
-    const commission = input.permissions?.commissionPercent;
+    const commission = normPct(input.permissions?.commissionPercent);
+    const beneficiary = normBeneficiary(input.permissions?.commissionBeneficiary) || "professional";
+    const tax = normPct(input.permissions?.taxWithholdingPercent);
     db.prepare(`
-      INSERT INTO clinic_professional_relationships (id, organization_id, professional_id, status, permissions_json, commission_percent, notes, invited_by)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
-    `).run(id, orgId, professionalId, perms, commission == null ? null : Number(commission), input.notes ?? null, actorId || null);
+      INSERT INTO clinic_professional_relationships (id, organization_id, professional_id, status, permissions_json, commission_percent, commission_beneficiary, tax_withholding_percent, notes, invited_by)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+    `).run(id, orgId, professionalId, perms, commission, beneficiary, tax, input.notes ?? null, actorId || null);
     try { logAuthEvent(orgId, actorId || "system", id, "CLINIC_PROFESSIONAL_INVITE", { professionalId }); } catch { /* noop */ }
     return ClinicProfessionalRelationshipService.get(orgId, id)!;
   }
@@ -157,10 +180,12 @@ export class ClinicProfessionalRelationshipService {
     const rel = ClinicProfessionalRelationshipService.get(orgId, relId);
     if (!rel) throw new Error("relationship_not_found");
     const services = Array.isArray(perms.services) ? perms.services.map(String) : rel.permissions.services;
-    const commission = perms.commissionPercent === undefined ? rel.commissionPercent : (perms.commissionPercent == null ? null : Number(perms.commissionPercent));
+    const commission = perms.commissionPercent === undefined ? rel.commissionPercent : normPct(perms.commissionPercent);
+    const beneficiary = perms.commissionBeneficiary === undefined ? rel.commissionBeneficiary : (normBeneficiary(perms.commissionBeneficiary) || "professional");
+    const tax = perms.taxWithholdingPercent === undefined ? rel.taxWithholdingPercent : normPct(perms.taxWithholdingPercent);
     db.prepare(
-      `UPDATE clinic_professional_relationships SET permissions_json = ?, commission_percent = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
-    ).run(JSON.stringify({ services }), commission, orgId, relId);
+      `UPDATE clinic_professional_relationships SET permissions_json = ?, commission_percent = ?, commission_beneficiary = ?, tax_withholding_percent = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(JSON.stringify({ services }), commission, beneficiary, tax, orgId, relId);
     try { logAuthEvent(orgId, actorId || "system", relId, "CLINIC_PROFESSIONAL_SET_PERMISSIONS", { services: services.length }); } catch { /* noop */ }
     return ClinicProfessionalRelationshipService.get(orgId, relId)!;
   }

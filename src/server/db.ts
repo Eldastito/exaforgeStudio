@@ -10268,6 +10268,20 @@ const initDb = () => {
     try { db.exec(`ALTER TABLE appointments ADD COLUMN network_service_id TEXT`); } catch (e) { /* noop */ }
     try { db.exec(`ALTER TABLE appointments ADD COLUMN network_service_price REAL`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de finanças federadas (ADR-180 F8.1)', e); }
+
+  // ── ADR-180 F8.2 — Direção do split (aberto) + imposto retido + previsão ──
+  // commission_beneficiary: DE QUEM é o percentual do vínculo — 'professional' (a parte
+  // do profissional) ou 'clinic' (a parte da clínica). Cada par clínica↔profissional
+  // combina o seu (o dono pediu: "cada parte define o seu percentual combinado"); a
+  // config nomeia o lado, o financeiro sempre mostra AS DUAS partes. Default 'professional'
+  // = 0-regressão sobre a F8.1 (que tratava o % como do profissional).
+  // tax_withholding_percent: % de imposto RETIDO na fonte sobre o repasse do profissional,
+  // OPT-IN por vínculo. Sem config → imposto NULL (nunca inventa CLT/ISS — RN-PN-4);
+  // o líquido do profissional = bruto dele − retido.
+  try {
+    try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN commission_beneficiary TEXT DEFAULT 'professional'`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN tax_withholding_percent REAL`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de finanças federadas (ADR-180 F8.2)', e); }
 };
 
 initDb();

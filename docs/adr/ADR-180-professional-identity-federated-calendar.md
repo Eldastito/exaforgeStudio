@@ -377,9 +377,13 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
   ### Plano de fatias
   - **F10.0 — Auditoria + design (esta, doc-only).** Fronteira travada acima.
     `docs/professional-network/f10-discovery-audit.md` (síntese da auditoria) + esta seção.
-  - **F10.1 — Profissional descobrível.** Colunas `professionals.{discoverable,base_city,
-    base_state,base_lat,base_lng}` + `ProfessionalService` (set/get de visibilidade +
-    localização; geocode reusado). Opt-in default 0.
+  - **F10.1 — Profissional descobrível (EM PR).** Colunas `professionals.{discoverable
+    (default 0),base_city,base_state,base_lat,base_lng}` + `ProfessionalService.setDiscoverability`
+    (liga/desliga a visibilidade + região base; só grava o que passa, string vazia limpa, UF
+    normalizada; determinístico — geocode fica pra F10.3 no match). O PRÓPRIO profissional
+    edita via sessão: rotas `GET/PUT /api/public/professional/discovery-profile`. Opt-in
+    default OFF (RN-PN-9 — ninguém aparece sem ligar); desligar/editar NÃO apaga identidade/
+    especialidades (RN-PN-3). `test:professional-discoverability` (9).
   - **F10.2 — Clínica descobrível + projeção de especialidades procuradas.** Flag
     `organization_settings.network_discoverable` + derivação das especialidades procuradas
     a partir dos `demand_gap` ALTOS (sem contagem crua).

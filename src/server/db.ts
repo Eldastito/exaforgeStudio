@@ -10371,6 +10371,21 @@ const initDb = () => {
   try {
     try { db.exec(`ALTER TABLE appointments ADD COLUMN professional_ack_at DATETIME`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de aceite do profissional (ADR-180 F7.4)', e); }
+
+  // ── ADR-180 F10.1 — Profissional DESCOBRÍVEL (rede/marketplace) ──
+  // discoverable: OPT-IN (default 0) do profissional aparecer na descoberta cross-org
+  // (RN-PN-9 — ninguém aparece sem ligar a própria visibilidade). base_city/base_state/
+  // base_lat/base_lng: localização base pra match por região grossa (RN-PN-10 — nunca rua
+  // exata). Colunas na identidade GLOBAL (o profissional não tem organization_settings). A
+  // projeção publicável carrega só nome/conselho/especialidades/região — NUNCA em quais
+  // clínicas atende nem termos financeiros (isso vive no bridge, fora daqui).
+  try {
+    try { db.exec(`ALTER TABLE professionals ADD COLUMN discoverable INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE professionals ADD COLUMN base_city TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE professionals ADD COLUMN base_state TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE professionals ADD COLUMN base_lat REAL`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE professionals ADD COLUMN base_lng REAL`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de descoberta do profissional (ADR-180 F10.1)', e); }
 };
 
 initDb();

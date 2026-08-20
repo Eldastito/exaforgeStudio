@@ -10,6 +10,7 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
 import { ProfessionalSelfService } from "../ProfessionalSelfService.js";
+import { ProfessionalService } from "../ProfessionalService.js";
 
 const router = Router();
 
@@ -75,6 +76,24 @@ router.post("/appointments/:apptId/accept", requireProfessional, (req: ProfReq, 
 router.post("/appointments/:apptId/decline", requireProfessional, async (req: ProfReq, res: Response): Promise<any> => {
   try { res.json(await ProfessionalSelfService.declineAppointment(req.professionalId!, String(req.params.apptId), req.body?.reason)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// F10.1 — o profissional liga/desliga a própria descoberta (rede/marketplace) + região base.
+router.get("/discovery-profile", requireProfessional, (req: ProfReq, res: Response): any => {
+  try {
+    const p = ProfessionalService.getById(req.professionalId!);
+    if (!p) return res.status(404).json({ error: "professional_not_found" });
+    res.json({ discoverable: p.discoverable, baseCity: p.baseCity, baseState: p.baseState, specialties: p.specialties });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/discovery-profile", requireProfessional, (req: ProfReq, res: Response): any => {
+  try {
+    const b = req.body || {};
+    const p = ProfessionalService.setDiscoverability(req.professionalId!, {
+      discoverable: b.discoverable, baseCity: b.baseCity, baseState: b.baseState,
+    }, `professional:${req.professionalId}`);
+    res.json({ discoverable: p.discoverable, baseCity: p.baseCity, baseState: p.baseState, specialties: p.specialties });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

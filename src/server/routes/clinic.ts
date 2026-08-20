@@ -3,6 +3,7 @@ import multer from "multer";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import db from "../db.js";
 import { PatientService } from "../PatientService.js";
+import { ClinicPetService } from "../ClinicPetService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
@@ -2047,6 +2048,65 @@ router.get("/connection/readiness", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(ClinicConnectionService.readiness(orgId));
+});
+
+// ─────────────── Ficha do PET + carteira de vacinação (Petshop F3) ───────────────
+
+// GET /api/clinic/pets?tutor=<contactId> — pets de um tutor (default só ativos).
+router.get("/pets", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const tutor = String(req.query?.tutor || "");
+  if (!tutor) return res.status(400).json({ error: "tutor (contactId) é obrigatório." });
+  res.json({ pets: ClinicPetService.listByTutor(orgId, tutor, { includeInactive: req.query?.all === "1" }) });
+});
+
+// GET /api/clinic/pets/:id — ficha completa do pet.
+router.get("/pets/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const pet = ClinicPetService.get(orgId, String(req.params.id));
+  if (!pet) return res.status(404).json({ error: "Pet não encontrado." });
+  res.json(pet);
+});
+
+// POST /api/clinic/pets — cria um pet (valida o tutor).
+router.post("/pets", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetService.create(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// PUT /api/clinic/pets/:id — atualiza ficha (patch) / muda status.
+router.put("/pets/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetService.update(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// GET /api/clinic/pets/:id/vaccinations — carteira de vacinação do pet.
+router.get("/pets/:id/vaccinations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ vaccinations: ClinicPetService.listVaccinations(orgId, String(req.params.id)) });
+});
+
+// POST /api/clinic/pets/:id/vaccinations — registra uma dose.
+router.post("/pets/:id/vaccinations", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetService.addVaccination(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// GET /api/clinic/pets-vaccinations/due?withinDays= — doses vencidas/a vencer (gestor).
+router.get("/pets-vaccinations/due", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const withinDays = typeof req.query?.withinDays === "string" ? Number(req.query.withinDays) : undefined;
+  res.json({ due: ClinicPetService.dueVaccinations(orgId, { withinDays }) });
 });
 
 export default router;

@@ -46,6 +46,7 @@ import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
 import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
 import { ProfessionalDemandService } from "../ProfessionalDemandService.js";
 import { ClinicDiscoveryService } from "../ClinicDiscoveryService.js";
+import { ProfessionalDiscoveryService } from "../ProfessionalDiscoveryService.js";
 import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
 import { ProfessionalGoogleService } from "../ProfessionalGoogleService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
@@ -2482,6 +2483,16 @@ router.put("/professional-network/discovery", requireRole("owner", "admin"), (re
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ClinicDiscoveryService.setDiscoverable(orgId, !!req.body?.discoverable)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+// F10.3 — descoberta: a clínica encontra especialistas descobríveis que casam com a procura.
+router.get("/professional-network/discovery/specialists", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try {
+    res.json(ProfessionalDiscoveryService.specialistsFor(orgId, {
+      specialty: req.query.specialty as string,
+      maxDistanceKm: req.query.radiusKm ? Number(req.query.radiusKm) : undefined,
+    }));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

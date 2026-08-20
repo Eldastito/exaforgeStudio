@@ -18,7 +18,7 @@
  * ATENDIDO (RN-PN-5): confirmar cria o agendamento; o comparecimento é outra etapa.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp } from 'lucide-react';
+import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -280,8 +280,67 @@ function ProfessionalDetail({ rel, services, contacts, autobooking, onChanged }:
       {!accepted && <div className="rounded border border-amber-700/40 bg-amber-500/5 text-amber-300 text-xs px-3 py-2">Aceite o vínculo para configurar disponibilidade e agendar.</div>}
       <OfferingsEditor relId={rel.id} services={services} disabled={!accepted} />
       <WindowsEditor relId={rel.id} disabled={!accepted} />
+      {accepted && <GoogleCalendarPanel relId={rel.id} professionalName={rel.professional?.name || 'profissional'} />}
       {accepted && <AvailabilityBooker rel={rel} contacts={contacts} autobooking={autobooking} onBooked={onChanged} />}
       {accepted && <FinancePanel rel={rel} onChanged={onChanged} />}
+    </div>
+  );
+}
+
+// ── Google Calendar do profissional (F6) — conectar/desconectar ──
+function GoogleCalendarPanel({ relId, professionalName }: { relId: string; professionalName: string }) {
+  const [st, setSt] = useState<{ configured: boolean; connected: boolean; email: string; name: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setSt(await jread(`${NET}/relationships/${relId}/google/status`)); }
+    catch { setSt(null); } finally { setLoading(false); }
+  }, [relId]);
+  useEffect(() => { load(); }, [load]);
+  // Ao voltar da janela de consentimento do Google, o operador reativa a aba → recarrega.
+  useEffect(() => {
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const { url } = await jread(`${NET}/relationships/${relId}/google/login-url`);
+      window.open(url, '_blank', 'noopener');
+      toast.info('Autorize a agenda na janela do Google e volte aqui.');
+    } catch (e: any) {
+      toast.error(e?.message === 'google_not_configured' ? 'Integração Google não configurada no servidor.' : (e?.message || 'Falha ao gerar o link.'));
+    } finally { setBusy(false); }
+  };
+  const disconnect = async () => {
+    if (!(await confirmDialog(`Desconectar a agenda Google de ${professionalName}?`))) return;
+    setBusy(true);
+    try { await jread(`${NET}/relationships/${relId}/google/disconnect`, { method: 'POST' }); toast.success('Agenda Google desconectada.'); load(); }
+    catch (e: any) { toast.error(e?.message || 'Falha ao desconectar.'); }
+    finally { setBusy(false); }
+  };
+
+  if (loading) return <div className="text-xs text-zinc-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Google…</div>;
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-sky-400" /> Agenda Google</div>
+      {st && !st.configured ? (
+        <div className="text-xs text-amber-400/80">Integração Google não está configurada neste servidor.</div>
+      ) : st?.connected ? (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-zinc-400">Conectada{st.email ? ` · ${st.email}` : ''}. As vagas já respeitam os compromissos do Google e os atendimentos vão pra essa agenda.</div>
+          <button onClick={disconnect} disabled={busy} className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-rose-600/80 text-zinc-300 hover:text-white shrink-0">Desconectar</button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-zinc-500">Conecte a agenda do profissional pra não oferecer horários ocupados e lançar os atendimentos automaticamente.</div>
+          <Button onClick={connect} disabled={busy} className="bg-sky-600 hover:bg-sky-500 text-xs shrink-0">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CalendarDays className="w-3.5 h-3.5" />} Conectar Google</Button>
+        </div>
+      )}
     </div>
   );
 }

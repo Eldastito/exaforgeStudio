@@ -6,9 +6,9 @@
   + AutoBooking governado, MERGED PR #1235) · F4b (UI do operador na Clínica, MERGED PR #1236).
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (F8.1 split derivado
   #1237 · F8.2 split aberto + imposto + previsão #1238 · F8b UI #1239). **Agora F6 — Google
-  Calendar por profissional: F6.1 (conexão per-profissional, MERGED PR #1240) · F6.2
-  (disponibilidade subtrai o Google busy, MERGED PR #1241) · F6.3 (empurra o atendimento
-  federado pra agenda do profissional, EM PR).** Como F1–F3, cada
+  Calendar (F6) FECHADO** (F6.1 conexão per-profissional #1240 · F6.2 disponibilidade subtrai
+  o Google busy #1241 · F6.3 push do atendimento federado #1242 · F6b UI conectar/desconectar,
+  EM PR)**.** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -189,7 +189,11 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     limpa o vínculo. Nunca lança pro caller (o agendamento já existe; o Google é aditivo).
     Rota `POST /professional-network/appointments/:id/cancel`. `test:professional-google-sync`
     (9); regressão `test:professional-booking` 23/23.
-  - **F6b — UI (a fazer).** Conectar/desconectar Google do profissional na aba "Rede".
+  - **F6b — UI (EM PR).** `GoogleCalendarPanel` no detalhe do vínculo (aba "Rede",
+    `ProfessionalNetworkPanel`): estado da conexão (conectado + e-mail, ou "conectar"),
+    botão **Conectar Google** (abre a URL de consentimento; recarrega o status ao voltar o
+    foco) e **Desconectar** (com confirmação); honesto quando o servidor não tem o Google
+    configurado. UI-only sobre as rotas da F6.1; tsc + build (vite) verdes. **Fecha o F6.**
 - **F7** — Webapp de autoatendimento do profissional (login, agenda própria).
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**
   Fatiada backend-first (visão original do dono: *"quanto vai receber, o percentual da clínica

@@ -557,6 +557,39 @@ export class HelpKnowledgeService {
   }
 
   /**
+   * Métricas GLOBAIS (cross-org, admin master) — a curadoria é de artigos GLOBAIS,
+   * então o painel do Master vê a plataforma inteira. Derivado por query (RN-004);
+   * percentuais null sem denominador (null≠0). Sem dado por-org identificável.
+   */
+  static globalMetrics(): {
+    totalAsks: number; answered: number; unanswered: number; answerRatePct: number | null;
+    helpfulVotes: number; notHelpfulVotes: number; helpfulRatePct: number | null;
+    openGaps: number; orgsAsking: number; articlesPublished: number;
+    byModule: Array<{ moduleKey: string | null; asks: number; answered: number; answerRatePct: number | null; openGaps: number }>;
+  } {
+    const agg = db.prepare(`SELECT COALESCE(SUM(asks),0) asks, COALESCE(SUM(answered),0) answered FROM help_ask_stats`).get() as any;
+    const totalAsks = Number(agg?.asks || 0); const answered = Number(agg?.answered || 0);
+    const fb = db.prepare(`SELECT COALESCE(SUM(up),0) up, COALESCE(SUM(down),0) down FROM help_feedback`).get() as any;
+    const up = Number(fb?.up || 0); const down = Number(fb?.down || 0); const votes = up + down;
+    const openGaps = Number((db.prepare(`SELECT COUNT(*) c FROM (SELECT 1 FROM help_gap_log GROUP BY query_norm, module_key)`).get() as any)?.c || 0);
+    const orgsAsking = Number((db.prepare(`SELECT COUNT(DISTINCT organization_id) c FROM help_ask_stats WHERE asks > 0`).get() as any)?.c || 0);
+    const articlesPublished = Number((db.prepare(`SELECT COUNT(*) c FROM help_articles WHERE status='published'`).get() as any)?.c || 0);
+    const rows = db.prepare(`SELECT module_key, SUM(asks) asks, SUM(answered) answered FROM help_ask_stats GROUP BY module_key ORDER BY SUM(asks) DESC`).all() as any[];
+    const gapByModule = db.prepare(`SELECT module_key, COUNT(*) c FROM (SELECT module_key, query_norm FROM help_gap_log GROUP BY module_key, query_norm) GROUP BY module_key`).all() as any[];
+    const gapMap = new Map<string, number>(gapByModule.map((g) => [g.module_key || "", Number(g.c)]));
+    const byModule = rows.map((r) => {
+      const a = Number(r.asks); const ans = Number(r.answered);
+      return { moduleKey: r.module_key || null, asks: a, answered: ans, answerRatePct: a > 0 ? Math.round((ans / a) * 100) : null, openGaps: gapMap.get(r.module_key || "") || 0 };
+    });
+    return {
+      totalAsks, answered, unanswered: Math.max(0, totalAsks - answered),
+      answerRatePct: totalAsks > 0 ? Math.round((answered / totalAsks) * 100) : null,
+      helpfulVotes: up, notHelpfulVotes: down, helpfulRatePct: votes > 0 ? Math.round((up / votes) * 100) : null,
+      openGaps, orgsAsking, articlesPublished, byModule,
+    };
+  }
+
+  /**
    * Fila GLOBAL de lacunas (cross-org, admin master) — agrega o MESMO texto
    * normalizado somando hits entre tenants, pra direcionar a curadoria (F2). Sem
    * dado por-org identificável: só a pergunta normalizada + total + nº de orgs.

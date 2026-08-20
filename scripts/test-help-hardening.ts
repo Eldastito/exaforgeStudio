@@ -55,7 +55,7 @@ async function main() {
   const adminPaths = routePaths(adminRouter);
   check("B5 rotas de curadoria montadas (/help-articles + bootstrap + publish + archive)",
     adminPaths.includes("/help-articles") && adminPaths.includes("/help-articles/bootstrap") && adminPaths.includes("/help-articles/:id/publish") && adminPaths.includes("/help-articles/:id/archive"));
-  check("B6 rota global de lacunas montada (/help-gaps)", adminPaths.includes("/help-gaps"));
+  check("B6 rotas globais master montadas (/help-gaps, /help-metrics)", adminPaths.includes("/help-gaps") && adminPaths.includes("/help-metrics"));
 
   // ═══════════ RN-HELP-3: curadoria humana obrigatória ═══════════
   const d = KB.upsert({ moduleKey: "agenda", title: "Rascunho X", what: "abc", keywords: "quiron nebula agenda" }, "m1");

@@ -10166,6 +10166,49 @@ const initDb = () => {
     // Opt-in por org (RN-PN-8, convenção nº 10). Default 0: legado opera intocado.
     try { db.exec(`ALTER TABLE organization_settings ADD COLUMN professional_network_enabled INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha ao criar professionals / relationships (ADR-180 F1)', e); }
+
+  // ── ADR-180 F2 — Serviços ofertados + janelas de disponibilidade (por vínculo) ──
+  // Ambas as tabelas são POR-ORG (RN-PN-2), presas ao VÍNCULO (relationship_id) — o
+  // profissional oferta serviços e trabalha janelas ESPECÍFICAS de cada clínica. São a
+  // config que o Availability Engine (F3) consome. Isolamento pela org do vínculo.
+  try {
+    // Serviços que o profissional OFERTA nesta clínica. service_id → products_services.id
+    // (catálogo canônico). duration_min sobrepõe a duração do catálogo quando setado
+    // (null = usa a do catálogo). active=0 desliga sem apagar. UNIQUE evita duplicar.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professional_offerings (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        relationship_id TEXT NOT NULL,
+        service_id TEXT NOT NULL,
+        duration_min INTEGER,                    -- override; null = duração do catálogo
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, relationship_id, service_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_offerings
+        ON clinic_professional_offerings (organization_id, relationship_id, active);
+    `);
+    // Janelas de trabalho SEMANAIS recorrentes do profissional NESTA clínica.
+    // day_of_week 0=domingo..6=sábado. start_minute/end_minute = minutos desde a
+    // meia-noite (0..1440), start < end. buffer_min = folga entre atendimentos (F3).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_professional_windows (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        relationship_id TEXT NOT NULL,
+        day_of_week INTEGER NOT NULL,            -- 0..6
+        start_minute INTEGER NOT NULL,           -- 0..1440
+        end_minute INTEGER NOT NULL,             -- 0..1440, > start_minute
+        buffer_min INTEGER DEFAULT 0,            -- folga pós-atendimento (min)
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_prof_windows
+        ON clinic_professional_windows (organization_id, relationship_id, day_of_week);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar offerings / windows (ADR-180 F2)', e); }
 };
 
 initDb();

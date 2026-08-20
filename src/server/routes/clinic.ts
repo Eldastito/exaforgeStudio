@@ -40,6 +40,7 @@ import { ClinicReceiptService } from "../ClinicReceiptService.js";
 import { LgpdService } from "../LgpdService.js";
 import { ProfessionalService } from "../ProfessionalService.js";
 import { ClinicProfessionalRelationshipService } from "../ClinicProfessionalRelationshipService.js";
+import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfigService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 // Upload de anexo clínico (ADR-080 Fase J) — mesmo padrão de radar.ts:24-31.
@@ -2277,6 +2278,33 @@ router.post("/professional-network/relationships/:id/revoke", requireRole("owner
 router.put("/professional-network/relationships/:id/permissions", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ClinicProfessionalRelationshipService.setPermissions(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// F2 — serviços ofertados + janelas de disponibilidade (config do vínculo).
+router.get("/professional-network/relationships/:id/offerings", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalScheduleConfigService.listOfferings(orgId, String(req.params.id), { includeInactive: req.query.all === "1" })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/professional-network/relationships/:id/offerings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalScheduleConfigService.setOffering(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.delete("/professional-network/offerings/:offeringId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalScheduleConfigService.removeOffering(orgId, String(req.params.offeringId), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.get("/professional-network/relationships/:id/windows", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalScheduleConfigService.listWindows(orgId, String(req.params.id))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.put("/professional-network/relationships/:id/windows", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalScheduleConfigService.setWindows(orgId, String(req.params.id), Array.isArray(req.body?.windows) ? req.body.windows : req.body, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

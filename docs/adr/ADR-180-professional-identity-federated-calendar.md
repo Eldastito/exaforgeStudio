@@ -1,7 +1,8 @@
 # ADR-180 — Professional Identity & Federated Calendar (Agenda Federada)
 
 - **Status:** ABERTO — F0 (auditoria + ADR, MERGED PR #1231) · F1 (identidade cross-org +
-  relacionamento, EM PR). Plano F0–F4 (MVP) + fatias diferidas.
+  relacionamento, MERGED PR #1232) · F2 (serviços ofertados + janelas, EM PR). Plano
+  F0–F4 (MVP) + fatias diferidas.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
   (cirurgião de aves, cardiologista, etc.) atendem em VÁRIAS clínicas; quando aparece um
@@ -84,8 +85,15 @@ auth atual e não bloqueia o valor central (agendar sem depender de contato manu
   (busca de identidade, relationships CRUD/accept/revoke/permissions), gate server-side
   pela flag (RN-PN-8 — recusa 403 sem opt-in). `test:professional-network` (23) cobre
   idempotência, não-sobrescrita, ciclo, isolamento cross-org (RN-PN-2) e revogação.
-- **F2 — Serviços + janelas de disponibilidade.** Quais serviços o profissional presta em
-  cada clínica; janelas de trabalho + buffers por profissional/clínica.
+- **F2 — Serviços + janelas de disponibilidade. FECHADA (em PR).** Config presa ao
+  VÍNCULO (por-org): `clinic_professional_offerings` (serviços ofertados na clínica +
+  override de duração, fallback pro catálogo `products_services`; valida serviço no
+  catálogo da org — não inventa) + `clinic_professional_windows` (janelas semanais
+  0..6 em minutos-do-dia + buffer; replace-all atômico validado). `ProfessionalScheduleConfigService`
+  só configura vínculo não revogado da org (RN-PN-2). Rotas
+  `/api/clinic/professional-network/relationships/:id/{offerings,windows}` +
+  `/offerings/:offeringId`. `test:professional-schedule-config` (20). É a config que o
+  Availability Engine (F3) consome.
 - **F3 — Availability Engine + Hold + confirm atômico.** Estende
   `ClinicScheduleSessionService.availability` com janelas/buffers; `clinic_slot_holds`;
   confirm atômico (template `addParticipant`); teste de concorrência (2 confirms na mesma vaga).

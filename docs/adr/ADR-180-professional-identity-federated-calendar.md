@@ -7,7 +7,8 @@
   Plano F0–F4 (MVP) entregue ponta-a-ponta. **Finanças (F8) FECHADO** (F8.1 split derivado
   #1237 · F8.2 split aberto + imposto + previsão #1238 · F8b UI #1239). **Agora F6 — Google
   Calendar por profissional: F6.1 (conexão per-profissional, MERGED PR #1240) · F6.2
-  (disponibilidade subtrai o Google busy, EM PR).** Como F1–F3, cada
+  (disponibilidade subtrai o Google busy, MERGED PR #1241) · F6.3 (empurra o atendimento
+  federado pra agenda do profissional, EM PR).** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -178,8 +179,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     holds+appointments (DB) — o Google é subtraído na SUGESTÃO, não no lock. Rota
     `/availability` passa a `await getAvailability`. `test:professional-availability-google`
     (6); regressão `test:professional-availability` 27/27 e `test:professional-booking` 23/23.
-  - **F6.3 — Empurra o atendimento federado pra agenda do profissional (a fazer).**
-    `confirmBooking` cria o evento (guarda `network_google_event_id`); cancelamento remove.
+  - **F6.3 — Empurra o atendimento federado pra agenda do profissional (EM PR).** O
+    `confirmBooking` segue SÍNCRONO (muitos callers + testes de erro dependem do throw
+    síncrono); o push é um passo async SEPARADO: `pushToGoogle` (best-effort, IDEMPOTENTE —
+    pula se `network_google_event_id` já setado ou sem conexão) cria o evento na agenda do
+    profissional e guarda o id. Chamado pelos callers assíncronos (rota `/holds/:holdId/
+    booking` e `AutoBookingCommandHandler.execute`) DEPOIS do confirm. `cancelBooking` marca
+    `cancelled` (preserva histórico, convenção nº 9) e `removeFromGoogle` apaga o evento +
+    limpa o vínculo. Nunca lança pro caller (o agendamento já existe; o Google é aditivo).
+    Rota `POST /professional-network/appointments/:id/cancel`. `test:professional-google-sync`
+    (9); regressão `test:professional-booking` 23/23.
   - **F6b — UI (a fazer).** Conectar/desconectar Google do profissional na aba "Rede".
 - **F7** — Webapp de autoatendimento do profissional (login, agenda própria).
 - **F8 — Finanças (comissão split clínica×profissional, impostos retidos, previsão de receita).**

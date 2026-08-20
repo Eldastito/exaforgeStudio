@@ -4,6 +4,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import db from "../db.js";
 import { PatientService } from "../PatientService.js";
 import { ClinicPetService } from "../ClinicPetService.js";
+import { ClinicGroomingService } from "../ClinicGroomingService.js";
 import { ClinicAgendaService } from "../ClinicAgendaService.js";
 import { ClinicPortalService } from "../ClinicPortalService.js";
 import { ClinicAuthorizationService } from "../ClinicAuthorizationService.js";
@@ -2107,6 +2108,46 @@ router.get("/pets-vaccinations/due", requireRole("owner", "admin"), (req: AuthRe
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const withinDays = typeof req.query?.withinDays === "string" ? Number(req.query.withinDays) : undefined;
   res.json({ due: ClinicPetService.dueVaccinations(orgId, { withinDays }) });
+});
+
+// ─────────────── Banho & Tosa / grooming (Petshop F4) ───────────────
+
+// GET /api/clinic/grooming-services — catálogo de serviços de grooming.
+router.get("/grooming-services", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ services: ClinicGroomingService.listServices(orgId, { includeInactive: req.query?.all === "1" }) });
+});
+
+// POST /api/clinic/grooming-services — cria serviço (gestor).
+router.post("/grooming-services", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicGroomingService.createService(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// PUT /api/clinic/grooming-services/:id — edita/ativa/desativa serviço (gestor).
+router.put("/grooming-services/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicGroomingService.updateService(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// POST /api/clinic/grooming/book — agenda um banho & tosa (pet + serviço).
+router.post("/grooming/book", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicGroomingService.book(orgId, req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro", code: e?.code }); }
+});
+
+// GET /api/clinic/grooming/queue?date=YYYY-MM-DD — fila do dia de banho & tosa.
+router.get("/grooming/queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ queue: ClinicGroomingService.dayQueue(orgId, String(req.query?.date || "")) });
 });
 
 export default router;

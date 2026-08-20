@@ -11,6 +11,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
 import { ProfessionalSelfService } from "../ProfessionalSelfService.js";
 import { ProfessionalService } from "../ProfessionalService.js";
+import { ProfessionalDiscoveryService } from "../ProfessionalDiscoveryService.js";
 
 const router = Router();
 
@@ -93,6 +94,15 @@ router.put("/discovery-profile", requireProfessional, (req: ProfReq, res: Respon
       discoverable: b.discoverable, baseCity: b.baseCity, baseState: b.baseState,
     }, `professional:${req.professionalId}`);
     res.json({ discoverable: p.discoverable, baseCity: p.baseCity, baseState: p.baseState, specialties: p.specialties });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// F10.3 — descoberta: o profissional encontra clínicas descobríveis que procuram a especialidade dele.
+router.get("/discovery/clinics", requireProfessional, (req: ProfReq, res: Response): any => {
+  try {
+    res.json(ProfessionalDiscoveryService.clinicsSeeking(req.professionalId!, {
+      maxDistanceKm: req.query.radiusKm ? Number(req.query.radiusKm) : undefined,
+    }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

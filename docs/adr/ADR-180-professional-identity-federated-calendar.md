@@ -391,9 +391,18 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     (business_name + cidade/estado + procura) só quando descobrível, NUNCA o privado
     (contagem/paciente/receita/grafo — RN-PN-10). Rotas `GET/PUT /api/clinic/professional-
     network/discovery` (owner/admin). `test:clinic-discovery` (11).
-  - **F10.3 — Serviço de descoberta (bidirecional).** `ProfessionalDiscoveryService` no
-    molde `SupplyNetworkService.listSuppliers`: `clinicsSeeking(professionalId)` +
-    `specialistsFor(orgId, {specialty,radius})`, match especialidade+região, exclui já-vinculados.
+  - **F10.3 — Serviço de descoberta (bidirecional, EM PR).** `ProfessionalDiscoveryService`
+    no molde `SupplyNetworkService.listSuppliers`: `specialistsFor(orgId,{specialty,radius})`
+    (a clínica acha especialistas descobríveis) + `clinicsSeeking(professionalId,{radius})`
+    (o profissional acha clínicas que procuram sua especialidade). Match determinístico por
+    ESPECIALIDADE (fuzzy — normaliza acento/caixa, substring nos 2 sentidos: "Cardiologia
+    Veterinária" casa "Cardiologia") + REGIÃO grossa (raio via `distanceKm` Haversine se
+    ambos têm coords; senão mesmo estado; senão não sobre-filtra — honesto). Exclui vínculo
+    VIVO (pending/accepted). Só aparece quem OPTOU (RN-PN-9). Projeção só tier público —
+    nunca paciente/contagem/grafo (RN-PN-10). Geocoding (Nominatim, async) FICA FORA do
+    match (determinístico); usa as coords que existem. Rotas
+    `GET /api/clinic/professional-network/discovery/specialists` (owner/admin) +
+    `GET /api/public/professional/discovery/clinics` (sessão). `test:professional-discovery` (12).
   - **F10.4 — Descoberta → convite.** Fio pro `invite` existente (nenhum bypass do aceite).
   - **F10b — UI dos dois lados** (aba "Rede" p/ a clínica; webapp do profissional p/ ele).
   Guardrails RN-PN-9..11 codificados como teste em cada fatia. Auditoria completa em

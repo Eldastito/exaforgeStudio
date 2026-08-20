@@ -44,6 +44,7 @@ import { ProfessionalScheduleConfigService } from "../ProfessionalScheduleConfig
 import { ProfessionalAvailabilityService } from "../ProfessionalAvailabilityService.js";
 import { ProfessionalBookingService } from "../ProfessionalBookingService.js";
 import { ProfessionalAuthService } from "../ProfessionalAuthService.js";
+import { ProfessionalDemandService } from "../ProfessionalDemandService.js";
 import { ProfessionalFinanceService } from "../ProfessionalFinanceService.js";
 import { ProfessionalGoogleService } from "../ProfessionalGoogleService.js";
 import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
@@ -2460,6 +2461,13 @@ router.post("/professional-network/relationships/:id/access-link", requireRole("
 router.post("/professional-network/relationships/:id/access-link/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = gatePN(req, res); if (!orgId) return;
   try { res.json(ProfessionalAuthService.revokeForRelationship(orgId, String(req.params.id), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── F9.1 — Inteligência de demanda da rede (read-model derivado) ──
+router.get("/professional-network/demand", (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalDemandService.demand(orgId, { windowDays: req.query.days ? Number(req.query.days) : undefined })); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

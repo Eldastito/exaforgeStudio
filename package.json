@@ -248,6 +248,7 @@
     "test:professional-google-sync": "tsx scripts/test-professional-google-sync.ts",
     "test:professional-rooms": "tsx scripts/test-professional-rooms.ts",
     "test:professional-travel": "tsx scripts/test-professional-travel.ts",
+    "test:professional-demand": "tsx scripts/test-professional-demand.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
     "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",
     "test:professional-booking-response": "tsx scripts/test-professional-booking-response.ts",

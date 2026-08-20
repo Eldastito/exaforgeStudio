@@ -9,8 +9,8 @@
   deslocamento) FECHADO** (F5.1 #1244 · F5.2 #1245 · F5b #1246). **F7 (webapp de
   autoatendimento do profissional, COM escrita) FECHADO** (F7.1 auth passwordless + leitura
   #1247 · F7.2 magic-link emitido pela clínica #1248 · F7.3 escrita da disponibilidade #1249 ·
-  F7.4 aceita/recusa #1250 · F7b página `/profissional/:token`, EM PR)**.** DIFERIDO restante:
-  F9 (inteligência de demanda) · F10 (rede/marketplace). Como F1–F3, cada
+  F7.4 aceita/recusa #1250 · F7b página `/profissional/:token` #1251)**.** **Agora F9 — inteligência de demanda:
+  F9.1 (read-model derivado, EM PR).** DIFERIDO restante: F10 (rede/marketplace). Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -309,7 +309,16 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     previsto por profissional + o "quando" (1º atendimento) + total. BRL honesto (null →
     "—", nunca R$ 0,00 inventado). UI-only sobre endpoints já testados (F8.1/F8.2); tsc +
     build (vite) verdes. **Fecha o F8.** As demais diferidas (F5/F6/F7/F9/F10) seguem abertas.
-- **F9** — Inteligência (padrões de demanda por especialidade, sugestão de nova clínica).
+- **F9 — Inteligência de demanda por especialidade.** Fatiada:
+  - **F9.1 — Read-model de demanda (EM PR).** `ProfessionalDemandService.demand` DERIVA
+    (RN-004, sem tabela nova) onde a rede tem demanda NÃO atendida cruzando os sinais que a
+    operação já produz — waitlist (`professional_network/waitlist`, sem vaga) + recusa
+    (`booking_declined`) — contra a demanda ATENDIDA (atendimentos federados
+    `confirmed`/`completed`), por SERVIÇO e por PROFISSIONAL, numa janela. Pressão
+    QUALITATIVA (high/medium/low; sem sinal → `insufficient_data`, §103 — não inventa).
+    Isolado por org (RN-PN-2). Rota `GET /api/clinic/professional-network/demand`.
+    `test:professional-demand` (10). Fatias seguintes (a fazer): sinal proativo de gap de
+    demanda + sugestão (mais janelas / novo profissional) na superfície.
 - **F10** — Rede/marketplace (profissional descobre clínicas, clínica descobre especialistas).
 
 ## Reuso vs. novo (resumo)

@@ -1443,11 +1443,170 @@ function PetCard({ pet, terms, expanded, onToggle, onChanged }: { pet: any; term
           <div className="text-sm font-semibold text-zinc-100 truncate">{pet.name}{pet.status !== 'active' && <span className="ml-2 text-[10px] text-zinc-500">({pet.status})</span>}</div>
           <div className="text-[11px] text-zinc-500 truncate">{meta || '—'}</div>
         </div>
+        {pet.healthPlanName && pet.healthPlanStatus === 'active' && <span className="ml-1 rounded-full border border-indigo-700/50 bg-indigo-950/30 text-indigo-300 px-2 py-0.5 text-[10px]">{pet.healthPlanName}</span>}
         {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500 ml-auto" /> : <ChevronDown className="w-4 h-4 text-zinc-500 ml-auto" />}
       </button>
       {expanded && (
-        <div className="border-t border-zinc-800 p-3 space-y-3">
+        <div className="border-t border-zinc-800 p-3 space-y-4">
+          <PetHealthPlanRow pet={pet} onChanged={onChanged} />
           <PetVaccinationCard petId={pet.id} terms={terms} />
+          <PetHospitalizationSection petId={pet.id} terms={terms} />
+          <PetSurgerySection petId={pet.id} terms={terms} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Plano de saúde do pet (F5b) — atributo editável; cobrança recorrente é do Assinaturas.
+function PetHealthPlanRow({ pet, onChanged }: { pet: any; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(pet.healthPlanName || '');
+  const save = async (clear = false) => {
+    try {
+      const r = await apiFetch(`/api/clinic/pets/${pet.id}/health-plan`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: clear ? null : (name.trim() || null) }) });
+      if (!r.ok) throw new Error();
+      toast.success('Plano atualizado.'); setEditing(false); onChanged();
+    } catch { toast.error('Erro ao salvar plano'); }
+  };
+  return (
+    <div className="flex items-center gap-2 text-[12px]">
+      <span className="text-zinc-400">Plano de saúde:</span>
+      {editing ? (
+        <>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-1 text-xs text-zinc-100 w-44" placeholder="Nome do plano" value={name} onChange={(e) => setName(e.target.value)} />
+          <button onClick={() => save(false)} className="text-[11px] text-emerald-300 hover:text-emerald-200">salvar</button>
+          <button onClick={() => { setEditing(false); setName(pet.healthPlanName || ''); }} className="text-[11px] text-zinc-500">cancelar</button>
+        </>
+      ) : (
+        <>
+          <span className="text-zinc-100">{pet.healthPlanName && pet.healthPlanStatus === 'active' ? pet.healthPlanName : 'sem plano'}</span>
+          <button onClick={() => setEditing(true)} className="text-[11px] text-indigo-300 hover:text-indigo-200">{pet.healthPlanName ? 'editar' : 'definir'}</button>
+          {pet.healthPlanName && <button onClick={() => save(true)} className="text-[11px] text-zinc-500 hover:text-zinc-300">remover</button>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// Internação do pet (F5b) — internar/dar alta + histórico.
+function PetHospitalizationSection({ petId, terms }: { petId: string; terms: ClinicTerms }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdmit, setShowAdmit] = useState(false);
+  const [reason, setReason] = useState('');
+  const load = async () => {
+    setLoading(true);
+    try { const r = await apiFetch(`/api/clinic/pets/${petId}/hospitalizations`).then((x) => (x.ok ? x.json() : { hospitalizations: [] })); setItems(Array.isArray(r?.hospitalizations) ? r.hospitalizations : []); } catch { setItems([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [petId]);
+  const admit = async () => {
+    try { const r = await apiFetch(`/api/clinic/pets/${petId}/hospitalizations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: reason.trim() || null }) }); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha'); toast.success('Pet internado.'); setReason(''); setShowAdmit(false); load(); }
+    catch (e: any) { toast.error(e.message || 'Erro'); }
+  };
+  const discharge = async (hid: string) => {
+    try { await apiFetch(`/api/clinic/hospitalizations/${hid}/discharge`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); toast.success('Alta registrada.'); load(); }
+    catch { toast.error('Erro'); }
+  };
+  const active = items.find((i) => i.status === 'admitted');
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-xs font-medium text-zinc-300">Internação</div>
+        {!active && <button onClick={() => setShowAdmit((v) => !v)} className="text-[11px] inline-flex items-center gap-1 text-amber-300 hover:text-amber-200"><Plus className="w-3 h-3" /> Internar</button>}
+      </div>
+      {showAdmit && !active && (
+        <div className="flex items-center gap-2 mb-2">
+          <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Motivo da internação" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button onClick={admit} className="text-[11px] rounded bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-1">Confirmar</button>
+        </div>
+      )}
+      {loading ? <p className="text-xs text-zinc-500">Carregando…</p> : active ? (
+        <div className="rounded-lg border border-amber-700/40 bg-amber-950/10 p-2 flex items-center gap-2 text-[12px]">
+          <span className="text-amber-300">🏥 Internado desde {fmtDateTime(active.admittedAt)}</span>
+          {active.reason && <span className="text-zinc-400 truncate">· {active.reason}</span>}
+          <button onClick={() => discharge(active.id)} className="ml-auto text-[11px] rounded bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1">Dar alta</button>
+        </div>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-zinc-500">Sem internações.</p>
+      ) : (
+        <div className="text-[11px] text-zinc-500">Última: {fmtDateTime(items[0].admittedAt)} → alta {items[0].dischargedAt ? fmtDateTime(items[0].dischargedAt) : '—'}</div>
+      )}
+    </div>
+  );
+}
+
+// Cirurgia + checklist pré-operatório (F5b).
+function PetSurgerySection({ petId, terms }: { petId: string; terms: ClinicTerms }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState('');
+  const [when, setWhen] = useState('');
+  const load = async () => {
+    setLoading(true);
+    try { const r = await apiFetch(`/api/clinic/pets/${petId}/surgeries`).then((x) => (x.ok ? x.json() : { surgeries: [] })); setItems(Array.isArray(r?.surgeries) ? r.surgeries : []); } catch { setItems([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [petId]);
+  const schedule = async () => {
+    if (!name.trim()) { toast.error('Informe o procedimento.'); return; }
+    try { const r = await apiFetch(`/api/clinic/pets/${petId}/surgeries`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ procedureName: name.trim(), scheduledAt: when ? new Date(when).toISOString() : null }) }); if (!r.ok) throw new Error(); toast.success('Cirurgia agendada.'); setName(''); setWhen(''); setShowAdd(false); load(); }
+    catch { toast.error('Erro'); }
+  };
+  const toggleItem = async (sid: string, index: number, done: boolean) => {
+    try { await apiFetch(`/api/clinic/surgeries/${sid}/checklist`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ index, done }) }); load(); }
+    catch { toast.error('Erro'); }
+  };
+  const setStatus = async (sid: string, status: 'done' | 'cancelled') => {
+    try { const r = await apiFetch(`/api/clinic/surgeries/${sid}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha'); toast.success(status === 'done' ? 'Cirurgia concluída.' : 'Cirurgia cancelada.'); load(); }
+    catch (e: any) { toast.error(e.message || 'Erro'); }
+  };
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-xs font-medium text-zinc-300">Cirurgias</div>
+        <button onClick={() => setShowAdd((v) => !v)} className="text-[11px] inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200"><Plus className="w-3 h-3" /> Agendar</button>
+      </div>
+      {showAdd && (
+        <div className="flex items-center gap-2 mb-2">
+          <input className="flex-1 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Procedimento (ex.: Castração)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input type="datetime-local" className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={when} onChange={(e) => setWhen(e.target.value)} />
+          <button onClick={schedule} className="text-[11px] rounded bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1">Agendar</button>
+        </div>
+      )}
+      {loading ? <p className="text-xs text-zinc-500">Carregando…</p> : items.length === 0 ? (
+        <p className="text-xs text-zinc-500">Nenhuma cirurgia.</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((s) => {
+            const total = s.checklist.length; const done = s.checklist.filter((c: any) => c.done).length;
+            return (
+              <div key={s.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+                <div className="flex items-center gap-2 text-[12px]">
+                  <span className="font-medium text-zinc-100">{s.procedureName}</span>
+                  {s.scheduledAt && <span className="text-zinc-500">{fmtDateTime(s.scheduledAt)}</span>}
+                  <span className={`ml-auto rounded-full border px-1.5 py-0.5 text-[10px] ${s.status === 'done' ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : s.status === 'cancelled' ? 'text-zinc-500 border-zinc-700' : 'text-amber-300 border-amber-500/30 bg-amber-500/10'}`}>{s.status === 'done' ? 'realizada' : s.status === 'cancelled' ? 'cancelada' : 'agendada'}</span>
+                </div>
+                {s.status === 'scheduled' && (
+                  <>
+                    <div className="mt-2 space-y-1">
+                      {s.checklist.map((c: any, i: number) => (
+                        <label key={i} className="flex items-center gap-2 text-[11px] text-zinc-300 cursor-pointer">
+                          <input type="checkbox" checked={c.done} onChange={(e) => toggleItem(s.id, i, e.target.checked)} /> {c.label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-500">checklist {done}/{total}</span>
+                      <button onClick={() => setStatus(s.id, 'done')} disabled={done < total} title={done < total ? 'Complete o checklist' : ''}
+                        className="ml-auto text-[11px] rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white px-2 py-1">Concluir</button>
+                      <button onClick={() => setStatus(s.id, 'cancelled')} className="text-[11px] rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-800 px-2 py-1">Cancelar</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -105,5 +105,10 @@ router.get("/discovery/clinics", requireProfessional, (req: ProfReq, res: Respon
     }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
+// F10.4 — o profissional EXPRESSA INTERESSE numa clínica (sinal pra ela convidar; não vincula).
+router.post("/discovery/clinics/:orgId/request", requireProfessional, (req: ProfReq, res: Response): any => {
+  try { res.json(ProfessionalDiscoveryService.requestJoin(req.professionalId!, String(req.params.orgId), { message: req.body?.message })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
 
 export default router;

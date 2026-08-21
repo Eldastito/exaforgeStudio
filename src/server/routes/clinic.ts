@@ -2494,5 +2494,11 @@ router.get("/professional-network/discovery/specialists", requireRole("owner", "
     }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
+// F10.4 — a clínica AGE sobre um match: convida o especialista (cunha o invite→accept; pending).
+router.post("/professional-network/discovery/specialists/:professionalId/invite", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = gatePN(req, res); if (!orgId) return;
+  try { res.json(ProfessionalDiscoveryService.inviteSpecialist(orgId, String(req.params.professionalId), actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
 
 export default router;

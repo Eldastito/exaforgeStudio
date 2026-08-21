@@ -285,6 +285,48 @@ export class PaymentService {
   }
 
   /**
+   * ADR-183 F1 — Cobrança de RECEBÍVEL (Eixo B: lojista → cliente). Reference `rcv:<id>` (o
+   * webhook dá baixa em `receivables` na F3). Roteia SEMPRE pelo gateway POR-ORG
+   * (`pay_gateway_token`) — NUNCA pela chave ASAAS de plataforma (RN-COB-1). Sem gateway/config
+   * → degrada HONESTO (`manual_required`/`not_enabled`), nunca cai na plataforma nem finge
+   * (RN-COB-2). Idempotente por `rcv-<id>` + reuso de cobrança pending (RN-COB-3). Devolve o
+   * `paymentId` pra F2 armar a confirmação, e a `message` pronta pro WhatsApp.
+   */
+  static async chargeForReceivable(
+    orgId: string,
+    p: { receivableId: string; amount: number; contactName?: string; contactId?: string; description?: string }
+  ): Promise<{ ok: boolean; paymentId?: string; qrCode?: string; ticketUrl?: string; message?: string; provider?: string; reason?: string }> {
+    const o = this.getSettings(orgId);
+    if (!o.pay_enabled || !(Number(p.amount) > 0)) return { ok: false, reason: "not_enabled" };
+    const provider = o.pay_provider || "pix_manual";
+    const ref = `rcv:${p.receivableId}`;
+    const idemKey = `rcv-${p.receivableId}`;
+    const desc = p.description || `Cobrança #${String(p.receivableId).slice(0, 8)}`;
+    const val = `R$ ${Number(p.amount || 0).toFixed(2)}`;
+
+    if (provider === "mercadopago") {
+      const charge = await this._mpPix(orgId, { reference: ref, amount: p.amount, contactName: p.contactName, contactId: p.contactId, description: desc, idemKey });
+      if (!charge) return { ok: false, reason: "gateway_error" };   // NUNCA cai na plataforma
+      const lines = [`Você tem um pagamento pendente via *Pix* (${val}):`];
+      if (charge.qrCode) lines.push(`\n📋 *Pix copia e cola:*`, charge.qrCode);
+      if (charge.ticketUrl) lines.push(`\n💳 Ou pague pelo link: ${charge.ticketUrl}`);
+      lines.push(`\nAssim que o pagamento cair, dou baixa automaticamente. ✅`);
+      return { ok: true, paymentId: charge.id, qrCode: charge.qrCode, ticketUrl: charge.ticketUrl, message: lines.join("\n"), provider };
+    }
+    if (provider === "stone") {
+      const charge = await this._stoneLink(orgId, { reference: ref, amount: p.amount, description: desc });
+      if (!charge) return { ok: false, reason: "gateway_error" };
+      const msg = [`Você tem um pagamento pendente (${val}).`, `\n💳 Pague pelo link: ${charge.link}`, `\nAssim que cair, dou baixa automaticamente. ✅`].join("\n");
+      return { ok: true, paymentId: charge.id, ticketUrl: charge.link, message: msg, provider };
+    }
+    // pix_manual (ou provider desconhecido): chave estática — SEM auto-baixa (honesto), sem
+    // paymentId (não há como conciliar por webhook). Nunca usa a chave de plataforma.
+    const msg = this.buildChargeMessage(orgId, p.amount);
+    if (!msg) return { ok: false, reason: "manual_required" };
+    return { ok: true, message: msg, provider: "pix_manual" };
+  }
+
+  /**
    * Consulta um pagamento no Mercado Pago (usado pelo webhook, que recebe só o
    * id). Se aprovado, marca o pedido como pago. Retorna o status do MP.
    */

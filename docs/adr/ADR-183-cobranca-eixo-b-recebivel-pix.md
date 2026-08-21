@@ -1,6 +1,7 @@
 # ADR-183 — Cobrança de recebível (PIX) no Eixo B correto + reconciliação (fecha o "F4b")
 
-**Estado:** **F0 (auditoria + ADR, doc-only) — ESTA fatia.** Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1280)** · **F1 EM PR** — `chargeForReceivable`. Fatias seguintes
+fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto:** conclui o "F4b pendente" da ADR-152 (Execution Runtime / Receivable Collection MVP).
 Aditivo/reversível. Convenções: isolamento multi-tenant, money-critical fail-closed, webhook
@@ -87,9 +88,13 @@ precisa **criar** esse caminho, não só religar.
 ## 5. Plano por fatias (fatia = 1 PR draft, com teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — `PaymentService.chargeForReceivable(orgId, {receivableId, amountCents, description, dueDate})`.**
-  Roteia por `pay_provider`/token POR-ORG (reusa `_mpPix`/`_stoneLink`), reference `rcv:<id>`,
-  idempotente; sem gateway → `manual_required` (honesto, RN-COB-2). `test:charge-for-receivable`.
+- **F1 — `PaymentService.chargeForReceivable(orgId, {receivableId, amount, ...})` (EM PR).**
+  Roteia por `pay_provider`/token POR-ORG (reusa `_mpPix`/`_stoneLink`), reference `rcv:<id>` +
+  idem `rcv-<id>`, idempotente (reusa pending); devolve `{ ok, paymentId, message, provider,
+  reason }`. Sem gateway/config → degrada honesto (`not_enabled`/`gateway_error`/`manual_required`)
+  — **NUNCA cai na chave de plataforma** (RN-COB-1/2); `pix_manual` sem `paymentId` (sem
+  auto-baixa, honesto). `test:charge-for-receivable` (16, fetch stubado — prova roteamento MP
+  por-org, reference/idem `rcv:`, idempotência, degradação, e **zero chamada ao ASAAS**).
 - **F2 — Handlers deixam de usar a chave de plataforma.** `RuntimeCommandHandlers.createPixCharge`
   + `CollectionPlaybook.createPixCharge` passam a chamar `PaymentService.chargeForReceivable`
   (mata o `AsaasService._req`); sem gateway → degradação honesta (não cobra na plataforma).

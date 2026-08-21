@@ -254,6 +254,7 @@
     "test:clinic-discovery": "tsx scripts/test-clinic-discovery.ts",
     "test:professional-discovery": "tsx scripts/test-professional-discovery.ts",
     "test:professional-discovery-connect": "tsx scripts/test-professional-discovery-connect.ts",
+    "test:professional-geocode": "tsx scripts/test-professional-geocode.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
     "test:professional-invite-response": "tsx scripts/test-professional-invite-response.ts",
     "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",

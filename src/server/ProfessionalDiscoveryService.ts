@@ -112,6 +112,38 @@ export class ProfessionalDiscoveryService {
     return out.slice(0, limit);
   }
 
+  /**
+   * F11.2 — preenche lat/lng (best-effort) das entidades DESCOBRÍVEIS que têm cidade/estado
+   * mas ainda não têm coords, reusando `SupplyNetworkService.geocodeCity` + `geocode_cache`
+   * (Nominatim no miss, cache no hit). Assim a descoberta passa a casar por RAIO (o
+   * `regionMatch` já prefere coords a estado). Isolado do caminho do match (que é síncrono);
+   * roda no Scheduler. `limit` por passe respeita o rate-limit do Nominatim.
+   */
+  static async geocodePass(opts?: { limit?: number }): Promise<{ professionals: number; clinics: number }> {
+    const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 100);
+    let profs = 0, clinics = 0;
+    const pRows = db.prepare(`SELECT id, base_city, base_state FROM professionals WHERE discoverable = 1 AND (base_lat IS NULL OR base_lng IS NULL) AND base_city IS NOT NULL AND base_city != '' LIMIT ?`).all(limit) as any[];
+    for (const r of pRows) {
+      try {
+        const g = await SupplyNetworkService.geocodeCity(r.base_city, r.base_state || undefined);
+        if (g) { db.prepare(`UPDATE professionals SET base_lat = ?, base_lng = ? WHERE id = ?`).run(g.lat, g.lng, r.id); profs++; }
+      } catch { /* best-effort */ }
+    }
+    const cRows = db.prepare(`SELECT organization_id, address_city, address_state FROM organization_settings WHERE network_discoverable = 1 AND (address_lat IS NULL OR address_lng IS NULL) AND address_city IS NOT NULL AND address_city != '' LIMIT ?`).all(limit) as any[];
+    for (const r of cRows) {
+      try {
+        const g = await SupplyNetworkService.geocodeCity(r.address_city, r.address_state || undefined);
+        if (g) { db.prepare(`UPDATE organization_settings SET address_lat = ?, address_lng = ? WHERE organization_id = ?`).run(g.lat, g.lng, r.organization_id); clinics++; }
+      } catch { /* best-effort */ }
+    }
+    return { professionals: profs, clinics };
+  }
+
+  /** Passe do Scheduler: geocoda as entidades descobríveis sem coords. Best-effort. */
+  static geocodeSchedulerPass(): void {
+    this.geocodePass().catch((e) => console.error("[Agenda Federada] geocode pass falhou", e));
+  }
+
   // ── F10.4 — Descoberta → convite (RN-PN-11: descoberta ≠ conexão) ──
 
   /**

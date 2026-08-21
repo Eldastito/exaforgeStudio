@@ -878,6 +878,12 @@ export class Scheduler {
       import("./ProfessionalDemandService.js").then((m) => m.ProfessionalDemandService.pass())
         .catch((e) => console.error('[Scheduler] gap de demanda da rede falhou', e));
     } catch (e) { console.error('[Scheduler] pass de gap de demanda falhou', e); }
+    // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
+    // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
+    try {
+      import("./ProfessionalDiscoveryService.js").then((m) => m.ProfessionalDiscoveryService.geocodeSchedulerPass())
+        .catch((e) => console.error('[Scheduler] geocode da descoberta falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de geocode da descoberta falhou', e); }
     // Tutor de Ajuda — digest "aprenda 1 coisa" (ADR-179 F5): publica UMA dica semanal
     // (gate de 7 dias no próprio pass) de artigo publicado no `business_signals` (conv.
     // nº 12 — sem tabela paralela), de onde flui pro Fala Tu/atenção. Só conteúdo curado;

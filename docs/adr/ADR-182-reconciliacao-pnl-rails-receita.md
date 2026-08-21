@@ -1,6 +1,7 @@
 # ADR-182 — Reconciliação dos dois rails de P&L (receita coerente e honesta)
 
-**Estado:** **F0 (auditoria + ADR, doc-only) — ESTA fatia.** Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1274)** · **F1 EM PR** — `PnlReconciliationService`. Fatias
+seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto:** aditivo sobre ADR-128 (DRE gerencial), ADR-129 (Empresa×Proprietário), a Operação
 da Rede (`RetailStoreCostService`) e a ponte opt-in `RetailRevenueBridgeService`. Aditivo/
@@ -95,11 +96,13 @@ mexer).
 ## 5. Plano por fatias (fatia = 1 PR draft, com teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — `PnlReconciliationService.monthlyRevenue(orgId, period)`.** Read-model derivado:
+- **F1 — `PnlReconciliationService.monthlyRevenue(orgId, period)` (EM PR).** Read-model derivado:
   `{ segments: {coreOrders, comigo, storeClosings}, total, bridgeEnabled, overlapRisk, note }`.
-  Reusa as queries existentes; `total` = soma dos segmentos (0-regressão vs `a+b+c`);
-  `overlapRisk` = true quando `coreOrders>0 && storeClosings>0` (única condição em que a dobra é
-  possível), com nota honesta. `test:pnl-reconciliation`.
+  Reusa as queries existentes (`orders`/`comigo_orders`/`RetailRevenueBridgeService.monthlyRevenue`);
+  `total` = soma dos segmentos (**0-regressão provada** vs `LossMarginService.monthlyRevenue`,
+  ponte on e off); `overlapRisk` = true só quando `coreOrders>0 && storeClosings>0` (única
+  condição de dobra possível), com nota honesta. `monthlyRevenueTotal` (compat número).
+  `test:pnl-reconciliation` (17).
 - **F2 — `LossMarginService.monthlyRevenue` DELEGA ao reconciliador** (fonte única). Total
   idêntico (RN-PNL-6); todos os consumidores passam a herdar a decomposição rastreável. Sem
   regressão nos testes que dependem do número.

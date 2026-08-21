@@ -13,8 +13,8 @@
   F9.1/F9.2 núcleo FECHADO (read-model #1252 + gap proativo #1253).** **F10 (rede/marketplace —
   descoberta cross-org) FECHADO** (F10.0 design #1254 · F10.1 prof descobrível #1255 · F10.2
   clínica descobrível #1256 · F10.3 descoberta bidirecional #1257 · F10.4 descoberta→convite
-  #1258 · F10b UI dos 2 lados, EM PR)**.** **ADR-180 completo — nenhuma fatia diferida
-  restante.** Como F1–F3, cada
+  #1258 · F10b UI dos 2 lados #1259)**.** **ADR-180 completo — nenhuma fatia diferida
+  restante. Runbook em `docs/runbook/agenda-federada-operacao.md`.** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas

@@ -44,7 +44,8 @@ async function main() {
   const { DecisionActionService } = await import("../src/server/DecisionActionService.js");
   const { ConfirmationEngine } = await import("../src/server/ConfirmationEngine.js");
   const { MessageProviderService } = await import("../src/server/MessageProviderService.js");
-  const { AsaasService } = await import("../src/server/AsaasService.js");
+  const { PaymentService } = await import("../src/server/PaymentService.js");
+  const { EncryptionService } = await import("../src/server/EncryptionService.js");
   const { OutcomeMeasurementService } = await import("../src/server/OutcomeMeasurementService.js");
   const { Scheduler } = await import("../src/server/Scheduler.js");
 
@@ -54,26 +55,36 @@ async function main() {
     sentMessages.push({ channelId, to, text });
     return `msg_${randomUUID().slice(0, 8)}`;
   };
-  const createdPayments: Array<{ body: any }> = [];
+  // ADR-183 — cobrança de recebível vai pelo gateway POR-ORG (Mercado Pago), NUNCA ASAAS.
+  const mpCalls: Array<{ method: string; url: string; body: any }> = [];
+  const mpPayments: Record<string, { ref: string; amount: number }> = {};
   let nextPaymentSeq = 1;
-  let asaasShouldFail: { status: number; message: string } | null = null;
-  (AsaasService as any)._req = async (method: string, urlPath: string, body: any) => {
-    if (asaasShouldFail) { const e: any = new Error(asaasShouldFail.message); e.status = asaasShouldFail.status; throw e; }
-    if (method === "POST" && urlPath === "/payments") {
-      const id = `pay_col_${nextPaymentSeq++}`;
-      createdPayments.push({ body });
-      return { id, status: "PENDING", value: body?.value, dueDate: body?.dueDate };
+  let mpShouldFail = false;
+  (globalThis as any).fetch = async (url: string, init: any) => {
+    const method = String(init?.method || "GET").toUpperCase();
+    const u = String(url); const body = init?.body ? JSON.parse(init.body) : null;
+    mpCalls.push({ method, url: u, body });
+    if (u.includes("api.mercadopago.com/v1/payments") && method === "POST") {
+      if (mpShouldFail) return { ok: false, status: 503, json: async () => ({ message: "MP indisponível" }), text: async () => "" } as any;
+      const id = `mp_col_${nextPaymentSeq++}`;
+      mpPayments[id] = { ref: body.external_reference, amount: Number(body.transaction_amount) };
+      return { ok: true, status: 201, json: async () => ({ id, status: "pending", external_reference: body.external_reference, point_of_interaction: { transaction_data: { qr_code: "QR", ticket_url: "http://t" } } }), text: async () => "" } as any;
     }
-    return null;
+    if (u.includes("api.mercadopago.com/v1/payments/") && method === "GET") {
+      const id = decodeURIComponent(u.split("/payments/")[1] || "");
+      const pay = mpPayments[id];
+      return { ok: true, status: 200, json: async () => ({ id, status: "approved", external_reference: pay?.ref || "", transaction_amount: pay?.amount ?? 0 }), text: async () => "" } as any;
+    }
+    return { ok: false, status: 404, json: async () => ({}), text: async () => "" } as any;
   };
-  // Get pra webhook confirm — devolve CONFIRMED.
-  (AsaasService as any).getPayment = async (id: string) => ({ id, status: "CONFIRMED", value: 100 });
 
   // ── Helpers ────────────────────────────────────────────────────────────
   const mkOrg = () => {
     const id = `org_${randomUUID().slice(0, 8)}`;
     db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, execution_runtime_enabled, external_customer_id, external_subscription_id, billing_status) VALUES (?, ?, 'X', 'active', 1, ?, ?, 'active')`)
       .run(randomUUID(), id, `cust_${id}`, `sub_${id}`);
+    // ADR-183 — gateway POR-ORG (Mercado Pago) para o lojista cobrar o cliente dele (Eixo B).
+    db.prepare(`UPDATE organization_settings SET pay_enabled = 1, pay_provider = 'mercadopago', pay_gateway_token = ? WHERE organization_id = ?`).run(EncryptionService.encrypt(`MP-${id}`), id);
     return id;
   };
   const setPolicy = (orgId: string, domain: string, actionType: string) => {
@@ -130,14 +141,15 @@ async function main() {
   const runA = await ProcessRuntimeService.runToCompletion(orgA, instA.id, { actor: "u-runner" });
   check("runToCompletion termina em 'completed' (webhook async, action fica open)", runA.instance.status === "completed");
   check("1 step executado (send_reminder)", runA.steps.filter((s: any) => s.nextStep !== null).length === 1);
-  check("PIX criado no Asaas (_req chamado com POST /payments)", createdPayments.length === 1 && createdPayments[0].body.value === 100 && createdPayments[0].body.billingType === "PIX");
+  const mpPost = mpCalls.find((c) => c.method === "POST" && c.url.includes("mercadopago"));
+  check("PIX criado no gateway POR-ORG (MP), NUNCA no ASAAS", !!mpPost && mpPost.body.transaction_amount === 100 && String(mpPost.body.external_reference).startsWith("rcv:") && !mpCalls.some((c) => c.url.includes("asaas")));
   check("WhatsApp enviado (MessageProvider.sendMessage 1×)", sentMessages.length === beforeMsgs + 1);
   const sent = sentMessages[sentMessages.length - 1];
   check("mensagem tem valor formatado (R$ 100,00)", /R\$ ?100,00/.test(sent.text));
   check("mensagem enviada pro phone/channel corretos", sent.channelId === channelA && sent.to === "5511988887777");
 
   const sendResult = runA.instance.result?.send_reminder;
-  check("result.send_reminder (artifact) tem paymentId", !!sendResult?.paymentId && String(sendResult.paymentId).startsWith("pay_col_"));
+  check("result.send_reminder (artifact) tem paymentId", !!sendResult?.paymentId && String(sendResult.paymentId).startsWith("mp_col_"));
   check("result.send_reminder.kind='collection_reminder_sent'", sendResult?.kind === "collection_reminder_sent");
 
   // ===== 3. ConfirmationEngine.expect foi amarrada com externalRef=paymentId =====
@@ -150,19 +162,16 @@ async function main() {
   const actionId: string = actionsCollection[0]?.id;
   check("actionId do step send_reminder existe", !!actionId);
   const confBefore = confirmationOf(orgA, actionId);
-  check("ConfirmationEngine.expect ativa amarrada ao paymentId", confBefore?.status === "pending" && confBefore?.confirmation_method === "asaas_payment_webhook" && !!confBefore?.external_ref);
+  check("ConfirmationEngine.expect ativa amarrada ao paymentId", confBefore?.status === "pending" && confBefore?.confirmation_method === "gateway_payment_webhook" && !!confBefore?.external_ref);
   const paymentId: string = confBefore.external_ref;
-  const found = ConfirmationEngine.findByExternalRef("asaas_payment_webhook", paymentId);
+  const found = ConfirmationEngine.findByExternalRef("gateway_payment_webhook", paymentId);
   check("findByExternalRef(payment_id) retorna a confirmação viva da orgA", found?.orgId === orgA && found?.confirmation.action_id === actionId);
 
-  // ===== 4. Webhook Asaas fecha ação com result_amount → outcome revenue_recovered =====
-  (AsaasService as any).getPayment = async (id: string) => ({ id, status: "CONFIRMED", value: 100 });
-  const w1 = await (AsaasService as any).handleWebhook({}, {
-    id: "evt_col_1", event: "PAYMENT_RECEIVED",
-    payment: { id: paymentId, status: "RECEIVED", value: 100, subscription: `sub_${orgA}`, customer: `cust_${orgA}`, dueDate: "2026-08-30" },
-  });
-  check("webhook Asaas OK", w1.status === "ok");
+  // ===== 4. Webhook do gateway (MP) fecha ação + result_amount → outcome revenue_recovered =====
+  const w1 = await PaymentService.syncMercadoPagoPayment(orgA, paymentId);
+  check("webhook MP re-consulta e aprova", w1 === "approved");
   await new Promise((r) => setTimeout(r, 30));
+  check("F3: recebível marcado 'received' (system-of-record)", (db.prepare(`SELECT status FROM receivables WHERE id = ?`).get(recA) as any).status === "received");
 
   const closedAction = DecisionActionService.get(orgA, actionId);
   check("webhook fecha a ação (status='done')", closedAction.status === "done");
@@ -174,13 +183,10 @@ async function main() {
   const ledA = OutcomeMeasurementService.ledger(orgA, {});
   check("ledger F3.1 acumula revenue_recovered ≥ 100", Number(ledA.totals?.categories?.revenueRecovered || 0) >= 100);
 
-  // ===== 5. Webhook duplicado NÃO reabre =====
-  const w2 = await (AsaasService as any).handleWebhook({}, {
-    id: "evt_col_1_dup", event: "PAYMENT_RECEIVED",
-    payment: { id: paymentId, status: "RECEIVED", value: 100, subscription: `sub_${orgA}`, customer: `cust_${orgA}`, dueDate: "2026-08-30" },
-  });
+  // ===== 5. Webhook duplicado (re-sync) NÃO reabre =====
+  const w2 = await PaymentService.syncMercadoPagoPayment(orgA, paymentId);
   await new Promise((r) => setTimeout(r, 30));
-  check("webhook duplicado é NO-OP (ação permanece done)", w2.status === "ok" && DecisionActionService.get(orgA, actionId).status === "done");
+  check("re-sync do webhook é NO-OP (ação permanece done)", w2 === "approved" && DecisionActionService.get(orgA, actionId).status === "done");
 
   // ===== 6. Idempotência do start (dedupe por subject vivo) =====
   const recIdem = mkReceivable(orgA, 200, "2026-09-05");
@@ -268,11 +274,11 @@ async function main() {
     receivableId: recFail, phone: "5511955556666", channelId: channelA,
     customerId: `cust_${orgA}`, amount: 90, dueDate: "2026-10-01",
   });
-  asaasShouldFail = { status: 503, message: "Asaas indisponível" };
+  mpShouldFail = true;
   const runFail = await ProcessRuntimeService.runToCompletion(orgA, instFail.id, { actor: "u-runner" });
-  asaasShouldFail = null;
-  check("Asaas 503 → processo não completa em 'completed'", runFail.instance.status !== "completed");
-  check("Asaas 503: G-4b-3 — NÃO envia WhatsApp sem PIX (contagem inalterada)", sentMessages.length === msgsBeforeFail);
+  mpShouldFail = false;
+  check("Gateway 503 → processo não completa em 'completed'", runFail.instance.status !== "completed");
+  check("Gateway 503: G-4b-3 — NÃO envia WhatsApp sem PIX (contagem inalterada)", sentMessages.length === msgsBeforeFail);
 
   // ============================================================
   // Resultado

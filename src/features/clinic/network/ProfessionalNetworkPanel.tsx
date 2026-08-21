@@ -18,7 +18,7 @@
  * ATENDIDO (RN-PN-5): confirmar cria o agendamento; o comparecimento é outra etapa.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays, Link2, Copy, Search } from 'lucide-react';
+import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays, Link2, Copy, Search, Mail } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -427,6 +427,20 @@ function AccessLinkPanel({ relId, professionalName }: { relId: string; professio
     try { const r = await jread(`${NET}/relationships/${relId}/access-link`, { method: 'POST' }); setUrl(r.url); toast.success('Link de acesso gerado.'); load(); }
     catch (e: any) { toast.error(e?.message || 'Falha ao gerar.'); } finally { setBusy(false); }
   };
+  // F11.3 — gera E envia o link pro e-mail do profissional (best-effort, honesto).
+  const generateAndSend = async () => {
+    setBusy(true);
+    try {
+      const r = await jread(`${NET}/relationships/${relId}/access-link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ send: true }) });
+      setUrl(r.url);
+      const d = r.delivery;
+      if (d?.sent) toast.success(`Link enviado para ${d.to}.`);
+      else if (d?.reason === 'no_destination') toast.info('Profissional sem e-mail cadastrado — link gerado, compartilhe manualmente.');
+      else if (d?.reason === 'no_channel') toast.info('Sem canal de e-mail configurado — link gerado, compartilhe manualmente.');
+      else toast.info('Link gerado; envio não confirmado — compartilhe manualmente.');
+      load();
+    } catch (e: any) { toast.error(e?.message || 'Falha ao gerar.'); } finally { setBusy(false); }
+  };
   const revoke = async () => {
     if (!(await confirmDialog(`Revogar o acesso de ${professionalName} ao webapp?`))) return;
     setBusy(true);
@@ -449,6 +463,7 @@ function AccessLinkPanel({ relId, professionalName }: { relId: string; professio
         <div className="text-[11px] text-zinc-500">{st?.active ? `Link ativo${st.lastAccessAt ? ` · último acesso ${dmy(st.lastAccessAt)}` : ' · ainda não acessado'}` : 'Sem link ativo.'}</div>
         <div className="flex gap-1.5 shrink-0">
           <Button onClick={generate} disabled={busy} className="bg-violet-600 hover:bg-violet-500 text-xs">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />} {st?.active ? 'Gerar novo' : 'Gerar link'}</Button>
+          <button onClick={generateAndSend} disabled={busy} className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-violet-600/80 text-zinc-300 hover:text-white inline-flex items-center gap-1"><Mail className="w-3 h-3" /> Gerar e enviar</button>
           {st?.active && <button onClick={revoke} disabled={busy} className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 hover:bg-rose-600/80 text-zinc-300 hover:text-white">Revogar</button>}
         </div>
       </div>

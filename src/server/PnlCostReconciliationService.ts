@@ -29,6 +29,7 @@ import db from "./db.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { RetailStoreCostService } from "./RetailStoreCostService.js";
 import { DRIVER_LABEL } from "./LossMarginService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 function round2(n: number): number { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
 
@@ -205,6 +206,55 @@ export class PnlCostReconciliationService {
       ? `Perdas operacionais de R$ ${total.toFixed(2)} NÃO entram no resultado do DRE — reduzem o lucro real sem aparecer na linha.`
       : "Sem perdas operacionais registradas no período.";
     return { total: round2(total), items, note };
+  }
+
+  /**
+   * ADR-184 F4 — sinal ADVISORY de BASE INCOERENTE do resultado. Espelha o `publishOverlapSignal`
+   * do ADR-182: quando o `unknownCostRisk` do período existe (a maioria da receita não tem custo
+   * cadastrado → CMV subestimado, margem/lucro NÃO confiáveis), publica um `business_signal` pro
+   * dono CADASTRAR os custos — nunca conserta sozinho (não inventa custo). É hipótese (não prova):
+   * `basis:'hypothesis'`, `impactAmount:null`. Self-healing: risco some → `resolveByDedupe`;
+   * recorre → `reopenByDedupe` (respeita o `dismissed` humano §65). Dedupe por período. Best-effort.
+   */
+  static publishCostCoherenceSignal(orgId: string, period: string): { published: boolean; resolved: boolean } {
+    const dedupeKey = `pnl_cost_coherence:${period}`;
+    let published = false, resolved = false;
+    try {
+      const c = this.monthlyCost(orgId, period);
+      if (c.unknownCostRisk) {
+        BusinessSignalService.publish(orgId, {
+          domain: "pnl_cost",
+          signalType: "base_incoherent",
+          severity: "attention",
+          basis: "hypothesis",            // risco, não prova
+          confidence: 0.5,
+          impactAmount: null,             // nunca inventa dinheiro/custo
+          sourceService: "PnlCostReconciliationService",
+          evidence: {
+            period, cmvCoverage: c.segments.cogs.coverage,
+            message: "A maioria da sua receita não tem custo de aquisição cadastrado — o CMV está subestimado e a margem/lucro do mês NÃO são confiáveis. Cadastre os custos dos produtos (entrada/NF-e) para o resultado fechar.",
+          },
+          dedupeKey,
+        });
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeKey); } catch { /* noop */ }
+        published = true;
+      } else {
+        try { const rr = BusinessSignalService.resolveByDedupe(orgId, dedupeKey); resolved = !!rr?.ok; } catch { /* noop */ }
+      }
+    } catch { /* best-effort */ }
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: orgs que venderam no mês corrente (onde o risco de CMV faz sentido). */
+  static pass(): void {
+    let orgs: any[] = [];
+    const period = new Date().toISOString().slice(0, 7);
+    try { orgs = db.prepare(`SELECT DISTINCT organization_id FROM orders WHERE strftime('%Y-%m', created_at) = ?`).all(period) as any[]; }
+    catch { return; }
+    for (const o of orgs) {
+      try { this.publishCostCoherenceSignal(o.organization_id, period); }
+      catch (e) { console.error("[PnL-Custo] coherence pass falhou", o.organization_id, e); }
+    }
   }
 }
 

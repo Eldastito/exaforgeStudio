@@ -1,7 +1,7 @@
 # ADR-184 — Reconciliação do lado de CUSTO/DESPESA do P&L (resultado coerente e honesto)
 
-**Estado:** **F0 MERGEADA (PR #1285)** · **F1 MERGEADA (PR #1286)** · **F2 MERGEADA (PR #1287)** ·
-**F3 EM PR** — perdas operacionais na foto de custo. Plano F0–F5.
+**Estado:** **F0 (#1285)** · **F1 (#1286)** · **F2 (#1287)** · **F3 (#1288) MERGEADAS** · **F4 EM
+PR** — sinal advisory de base incoerente. Falta só F5 (hardening + runbook). Plano F0–F5.
 **Data:** 2026-08-21.
 **Contexto:** companion do ADR-182 (que reconciliou os rails de RECEITA). Aditivo sobre ADR-128
 (DRE gerencial `ManagerialDreService`), ADR-114 (`LossMarginService`/`loss_events`), ADR-125
@@ -137,12 +137,13 @@ por loja/canal (sem dimensão — impossível hoje, honesto); inventar `avg_cost
   dedução de receita). Surge no snapshot `dre.operationalLossesDetail`. NÃO muda o
   `resultadoOperacional` (RN-PNL-C-5/6 — só expõe o que já sai do lucro sem aviso); honesto sem
   perda. `test:pnl-operational-losses` (12); `test:loss-margin` sem regressão.
-- **F4 — Sinal de base incoerente (advisory).** `PnlCostReconciliationService.publishCostCoherenceSignal`
-  — quando a base do resultado é incoerente (receita de loja material mas custos de loja fora) OU a
-  cobertura de CMV é baixa (unknown-cost risk), publica `business_signals` (`pnl_cost/
-  base_incoherent`, `basis:hypothesis`, `impactAmount:null`, severity attention) pro dono conferir;
-  nunca corrige sozinho (zero `decision_action`). Self-healing (`resolveByDedupe`/`reopenByDedupe`,
-  respeita `dismissed` §65). `pass()` no Scheduler. `test:pnl-cost-coherence-signal`.
+- **F4 — Sinal de base incoerente (advisory) (EM PR).** `PnlCostReconciliationService.
+  publishCostCoherenceSignal` — quando a cobertura de CMV é baixa (`unknownCostRisk` → margem/lucro
+  não confiáveis), publica `business_signals` (`pnl_cost/base_incoherent`, `basis:hypothesis`,
+  `impactAmount:null`, severity attention) pro dono CADASTRAR os custos; nunca corrige sozinho (zero
+  `decision_action`, não inventa custo). Self-healing (`resolveByDedupe` quando o custo é cadastrado
+  / `reopenByDedupe` quando recorre, respeita `dismissed` §65); dedupe por período. `pass()` no
+  Scheduler (só orgs que venderam no mês). `test:pnl-cost-coherence-signal` (11).
 - **F5 — Hardening + runbook (FECHA o ADR-184).** `test:pnl-cost-reconciliation-hardening` —
   doc-of-record executável: (A) codifica RN-PNL-C-1..7 como regressão sobre os serviços reais
   F1–F4 + (B) fiação (`pass` no Scheduler, testes wired, runbook/ADR presentes) + runbook

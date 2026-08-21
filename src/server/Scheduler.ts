@@ -884,6 +884,12 @@ export class Scheduler {
       import("./PnlReconciliationService.js").then((m) => m.PnlReconciliationService.pass())
         .catch((e) => console.error('[Scheduler] sinal de sobreposição de P&L falhou', e));
     } catch (e) { console.error('[Scheduler] pass de sobreposição de P&L falhou', e); }
+    // Reconciliação de CUSTO (ADR-184 F4): sinal advisory de base incoerente do resultado
+    // (CMV sem cobertura → margem/lucro não confiáveis). Hipótese, nunca inventa custo. Best-effort.
+    try {
+      import("./PnlCostReconciliationService.js").then((m) => m.PnlCostReconciliationService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de custo incoerente falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de custo incoerente falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

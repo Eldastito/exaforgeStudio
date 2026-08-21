@@ -427,6 +427,23 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
   Guardrails RN-PN-9..11 codificados como teste em cada fatia. Auditoria completa em
   `docs/professional-network/f10-discovery-audit.md`.
 
+## Ajustes finos pós-fechamento (F11, a pedido do dono)
+
+- **F11.1 — Aceite do vínculo PELO profissional (mútuo consentimento, RN-PN-11) (EM PR).**
+  Antes só a clínica aceitava; agora o profissional aceita/recusa o convite pela sessão dele.
+  Coluna aditiva `clinic_professional_relationships.professional_accepted_at`.
+  `ProfessionalSelfService.pendingInvites` (convites pendentes cross-org, por identidade) +
+  `respondToInvite(accept)` — aceitar → `accept()` + marca o consentimento; recusar →
+  `revoke()` (preserva a identidade global, RN-PN-3) + publica `professional_network/
+  invite_declined` na espinha da clínica. Autoriza pela identidade (vínculo dele + pending).
+  Rotas `GET /api/public/professional/invites` + `POST /invites/:relId/{accept,decline}` +
+  banner de convites no `ProfessionalPortalPage`. `test:professional-invite-response` (11).
+- **F11.2 — Geocoding pra match por raio (a fazer).** Passe best-effort que geocoda
+  cidade→lat/lng (reusa `geocode_cache`/`SupplyNetworkService`) → a descoberta casa por
+  distância, não só por estado.
+- **F11.3 — Envio do magic-link (a fazer).** Entregar o link de acesso do profissional por
+  e-mail/WhatsApp (hoje a clínica copia e compartilha manual).
+
 ## Reuso vs. novo (resumo)
 
 - **Reusar:** `findConflicts`/`checkRoomCapacity`, padrão atômico `addParticipant`,

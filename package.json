@@ -255,6 +255,7 @@
     "test:professional-discovery": "tsx scripts/test-professional-discovery.ts",
     "test:professional-discovery-connect": "tsx scripts/test-professional-discovery-connect.ts",
     "test:professional-selfservice": "tsx scripts/test-professional-selfservice.ts",
+    "test:professional-invite-response": "tsx scripts/test-professional-invite-response.ts",
     "test:professional-availability-write": "tsx scripts/test-professional-availability-write.ts",
     "test:professional-booking-response": "tsx scripts/test-professional-booking-response.ts",
     "test:professional-access-link": "tsx scripts/test-professional-access-link.ts",

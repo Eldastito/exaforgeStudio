@@ -192,6 +192,54 @@ export class ProfessionalSelfService {
     } catch { /* best-effort */ }
     return appt;
   }
+
+  // ── F11.1 — Aceite/recusa do VÍNCULO pelo profissional (mútuo consentimento, RN-PN-11) ──
+
+  /** Convites PENDENTES da identidade (clínicas que o convidaram, cross-org). */
+  static pendingInvites(professionalId: string): Array<{ relationshipId: string; organizationId: string; clinicName: string | null; invitedAt: string | null }> {
+    const rows = db.prepare(
+      `SELECT id, organization_id, invited_at FROM clinic_professional_relationships WHERE professional_id = ? AND status = 'pending' ORDER BY invited_at DESC`
+    ).all(String(professionalId || "")) as any[];
+    return rows.map((r) => ({ relationshipId: r.id, organizationId: r.organization_id, clinicName: clinicName(r.organization_id), invitedAt: r.invited_at ?? null }));
+  }
+
+  /**
+   * O profissional ACEITA ou RECUSA o convite de vínculo (pela sessão dele). Fecha o
+   * consentimento dos DOIS lados (RN-PN-11 — antes só a clínica aceitava). Autoriza pela
+   * identidade: o vínculo tem de ser DELE e estar `pending`. Aceitar → `accepted` +
+   * `professional_accepted_at`. Recusar → revoga (reusa `revoke`, preserva a identidade
+   * global RN-PN-3) e PUBLICA um sinal pra clínica (nunca silencioso).
+   */
+  static async respondToInvite(professionalId: string, relationshipId: string, accept: boolean, reason?: string): Promise<any> {
+    const r = db.prepare(
+      `SELECT id, organization_id, status FROM clinic_professional_relationships WHERE id = ? AND professional_id = ?`
+    ).get(String(relationshipId || ""), String(professionalId || "")) as any;
+    if (!r) throw new Error("relationship_not_found");                 // não é dele → isolamento
+    if (r.status !== "pending") throw new Error("invite_not_pending");
+    const orgId = r.organization_id;
+    const { ClinicProfessionalRelationshipService } = await import("./ClinicProfessionalRelationshipService.js");
+    if (accept) {
+      db.prepare(`UPDATE clinic_professional_relationships SET professional_accepted_at = CURRENT_TIMESTAMP WHERE id = ?`).run(r.id);
+      return ClinicProfessionalRelationshipService.accept(orgId, r.id, `professional:${professionalId}`);
+    }
+    const rel = ClinicProfessionalRelationshipService.revoke(orgId, r.id, `professional:${professionalId}`);
+    try {
+      const { BusinessSignalService } = await import("./BusinessSignalService.js");
+      BusinessSignalService.publish(orgId, {
+        domain: "clinic",
+        signalType: "professional_network/invite_declined",
+        severity: "attention",
+        basis: "fact",
+        confidence: 1,
+        sourceService: "ProfessionalSelfService",
+        sourceEntityType: "relationship",
+        sourceEntityId: r.id,
+        dedupeKey: `clinic:prof_invite_declined:${r.id}`,
+        evidence: { professionalId, reason: reason || null, note: "O profissional recusou o convite de vínculo." },
+      } as any);
+    } catch { /* best-effort */ }
+    return rel;
+  }
 }
 
 export default ProfessionalSelfService;

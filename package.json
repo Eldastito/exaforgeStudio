@@ -426,6 +426,7 @@
     "test:receivable-pix-routing": "tsx scripts/test-receivable-pix-routing.ts",
     "test:receivable-reconciliation-poll": "tsx scripts/test-receivable-reconciliation-poll.ts",
     "test:cobranca-eixo-b-hardening": "tsx scripts/test-cobranca-eixo-b-hardening.ts",
+    "test:pnl-cost-reconciliation": "tsx scripts/test-pnl-cost-reconciliation.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

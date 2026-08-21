@@ -1,7 +1,8 @@
 # ADR-184 — Reconciliação do lado de CUSTO/DESPESA do P&L (resultado coerente e honesto)
 
-**Estado:** **F0 (#1285)** · **F1 (#1286)** · **F2 (#1287)** · **F3 (#1288) MERGEADAS** · **F4 EM
-PR** — sinal advisory de base incoerente. Falta só F5 (hardening + runbook). Plano F0–F5.
+**Estado:** **FECHADO.** F0 (#1285) · F1 (#1286) · F2 (#1287) · F3 (#1288) · F4 (#1289) MERGEADAS ·
+**F5 EM PR** — hardening (`test:pnl-cost-reconciliation-hardening`, RN-PNL-C-1..7) + runbook. Plano
+F0–F5 completo.
 **Data:** 2026-08-21.
 **Contexto:** companion do ADR-182 (que reconciliou os rails de RECEITA). Aditivo sobre ADR-128
 (DRE gerencial `ManagerialDreService`), ADR-114 (`LossMarginService`/`loss_events`), ADR-125
@@ -144,11 +145,14 @@ por loja/canal (sem dimensão — impossível hoje, honesto); inventar `avg_cost
   `decision_action`, não inventa custo). Self-healing (`resolveByDedupe` quando o custo é cadastrado
   / `reopenByDedupe` quando recorre, respeita `dismissed` §65); dedupe por período. `pass()` no
   Scheduler (só orgs que venderam no mês). `test:pnl-cost-coherence-signal` (11).
-- **F5 — Hardening + runbook (FECHA o ADR-184).** `test:pnl-cost-reconciliation-hardening` —
-  doc-of-record executável: (A) codifica RN-PNL-C-1..7 como regressão sobre os serviços reais
-  F1–F4 + (B) fiação (`pass` no Scheduler, testes wired, runbook/ADR presentes) + runbook
-  `docs/runbook/pnl-custo-operacao.md` (mapa, a base do resultado, custo desconhecido, o sinal,
-  guardrails, **track futuro**: dimensão de rateio via `cost_centers` + custo de loja no DRE).
+- **F5 — Hardening + runbook (EM PR; FECHA o ADR-184).** `test:pnl-cost-reconciliation-hardening`
+  (13) — doc-of-record executável: (A) codifica RN-PNL-C-1..7 como regressão sobre os serviços
+  reais F1–F4 (segmentos não bolo · custo desconhecido ≠ zero · escopo rotulado · read-only ·
+  perdas visíveis · 0-regressão/advisory · isolado/honesto) + (B) fiação (`pass` no Scheduler,
+  snapshot expõe `costScope`+`operationalLossesDetail`, 5 testes wired, runbook/ADR presentes) +
+  runbook `docs/runbook/pnl-custo-operacao.md` (mapa dos serviços, os números, a base do resultado,
+  custo desconhecido, o sinal, guardrails RN-PNL-C, troubleshooting, **track futuro**: dimensão de
+  rateio via `cost_centers` + custo de loja no DRE).
 
 **Critério de sucesso:** um read-model de custo segment-explícito e coerente; a base do resultado
 do DRE fica AUTO-DESCRITA (escopo + cobertura de CMV); custo desconhecido e perdas operacionais

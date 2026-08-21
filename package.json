@@ -270,6 +270,7 @@
     "test:fiscal-hardening": "tsx scripts/test-fiscal-hardening.ts",
     "test:pnl-reconciliation": "tsx scripts/test-pnl-reconciliation.ts",
     "test:pnl-delegation": "tsx scripts/test-pnl-delegation.ts",
+    "test:pnl-snapshot-coherence": "tsx scripts/test-pnl-snapshot-coherence.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

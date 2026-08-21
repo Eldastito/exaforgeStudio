@@ -10404,6 +10404,29 @@ const initDb = () => {
   try {
     try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN professional_accepted_at DATETIME`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de aceite do vínculo (ADR-180 F11.1)', e); }
+
+  // ── ADR-181 F1 — Perfil Fiscal da org (prontidão Reforma Tributária CBS/IBS/IS) ──
+  // Identidade fiscal por-org, aditiva/opt-in. NÃO duplica comigo_cnpj/comigo_formalization
+  // (aqueles são do fluxo de formalização MEI do Comigo, grosseiros); o perfil fiscal é o
+  // recorte estruturado que o motor CBS/IBS/IS (F3) precisa: regime + inscrições + município
+  // (código IBGE p/ IBS) + a opção pelo regime regular (Simples híbrido — RN-FISCAL-9, default
+  // DAS). Tudo nullable: perfil incompleto → o motor não calcula, avisa (RN-FISCAL-4). Regime
+  // é string livre validada no service contra um registry (mei/simples/simples_hibrido/
+  // presumido/real), não enum de coluna (CREATE-then-ALTER não reordena — convenção nº 2).
+  try {
+    // Regime tributário declarado pelo dono (null = não declarado; nunca presumido).
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_regime TEXT`); } catch (e) { /* noop */ }
+    // Opção pelo regime regular de CBS/IBS (Simples híbrido). 0 = dentro do DAS (default,
+    // RN-FISCAL-9). Só o híbrido gera/aproveita crédito (LC 214 art. 47 §9).
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_regime_regular_optin INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
+    // Inscrições fiscais (municipal p/ ISS→IBS de serviço; estadual p/ ICMS→IBS de mercadoria).
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_municipal_registration TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_state_registration TEXT`); } catch (e) { /* noop */ }
+    // Município do estabelecimento + código IBGE (chave do IBS municipal). UF reusa
+    // address_state; guardamos o código IBGE explícito porque o município é o fato gerador.
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_municipality_ibge TEXT`); } catch (e) { /* noop */ }
+    try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_municipality_name TEXT`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes do Perfil Fiscal (ADR-181 F1)', e); }
 };
 
 initDb();

@@ -1,6 +1,6 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
-**Estado:** **F0 (auditoria + ADR, doc-only) — ESTA fatia.** Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1264)** · **F1 EM PR** — Perfil Fiscal da org. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -149,9 +149,12 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
 ## 6. Plano por fatias (fatia = 1 PR draft, com flag/teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — Perfil Fiscal da org.** Colunas fiscais em `organization_settings` (regime,
-  inscrições, município+UF+código IBGE, opção regime regular) + `FiscalProfileService`
-  (get/set, `completeness` derivado RN-004, honesto). Rotas owner/admin. `test:fiscal-profile`.
+- **F1 — Perfil Fiscal da org (EM PR).** 6 colunas aditivas em `organization_settings`
+  (`fiscal_regime`, `fiscal_regime_regular_optin` default 0, inscrição municipal/estadual,
+  `fiscal_municipality_ibge`+nome) + `FiscalProfileService` (`get`/`save` só-patch/`completeness`
+  derivado RN-004). Nada presumido (regime null sem declarar — RN-FISCAL-4); híbrido só liga
+  no Simples (RN-FISCAL-9); CNPJ reflete `comigo_cnpj` (fonte única); UF reflete
+  `address_state`. Rotas owner/admin `GET/PUT /api/fiscal/profile`. `test:fiscal-profile` (23).
 - **F2 — Base de Referência Tributária curada.** `tax_reference_rates` GLOBAL date-effective
   (tributo, fase, alíquota, vigência, fonte, `reviewed_by`), **nasce vazia**, curadoria
   master-only (molde ADR-178). `TaxReferenceService.rateFor(tributo, date)`. Sem vigência →

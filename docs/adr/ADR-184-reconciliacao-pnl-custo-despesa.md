@@ -1,7 +1,7 @@
 # ADR-184 — Reconciliação do lado de CUSTO/DESPESA do P&L (resultado coerente e honesto)
 
-**Estado:** **F0 MERGEADA (PR #1285)** · **F1 MERGEADA (PR #1286)** · **F2 EM PR** — coerência de
-custo no snapshot executivo. Plano F0–F5.
+**Estado:** **F0 MERGEADA (PR #1285)** · **F1 MERGEADA (PR #1286)** · **F2 MERGEADA (PR #1287)** ·
+**F3 EM PR** — perdas operacionais na foto de custo. Plano F0–F5.
 **Data:** 2026-08-21.
 **Contexto:** companion do ADR-182 (que reconciliou os rails de RECEITA). Aditivo sobre ADR-128
 (DRE gerencial `ManagerialDreService`), ADR-114 (`LossMarginService`/`loss_events`), ADR-125
@@ -130,9 +130,13 @@ por loja/canal (sem dimensão — impossível hoje, honesto); inventar `avg_cost
   nota diz que margem/lucro NÃO são fato). **0-regressão**: só ADICIONA campos; as linhas do DRE e
   o `scope`/`scopeNote` de receita (ADR-182 F3) ficam intactos. `test:pnl-cost-snapshot-coherence`
   (12); `test:pnl-snapshot-coherence`/`test:business-health` sem regressão.
-- **F3 — Perdas operacionais na foto de custo.** Superfície das perdas puras (merma/quebra/furto/
-  calote/divergencia) que o resultado do DRE ignora hoje — como decomposição (RN-PNL-C-5), sem
-  mudar o resultado. `test:pnl-operational-losses`.
+- **F3 — Perdas operacionais na foto de custo (EM PR).** `PnlCostReconciliationService.
+  operationalLossesDetail` torna LEGÍVEL o vazamento: decompõe as perdas puras (merma/quebra/furto/
+  calote/divergencia) por driver com o rótulo canônico (`DRIVER_LABEL` exportado do
+  `LossMarginService` — fonte única, não duplica), ordenado desc, exclui desconto/devolucao (já
+  dedução de receita). Surge no snapshot `dre.operationalLossesDetail`. NÃO muda o
+  `resultadoOperacional` (RN-PNL-C-5/6 — só expõe o que já sai do lucro sem aviso); honesto sem
+  perda. `test:pnl-operational-losses` (12); `test:loss-margin` sem regressão.
 - **F4 — Sinal de base incoerente (advisory).** `PnlCostReconciliationService.publishCostCoherenceSignal`
   — quando a base do resultado é incoerente (receita de loja material mas custos de loja fora) OU a
   cobertura de CMV é baixa (unknown-cost risk), publica `business_signals` (`pnl_cost/

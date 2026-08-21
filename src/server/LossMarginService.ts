@@ -16,8 +16,9 @@ export const LOSS_DRIVERS = [
   "merma", "quebra", "vencimento", "furto", "desconto", "devolucao", "calote", "divergencia", "retrabalho", "no_show", "outro",
 ] as const;
 
-// Rótulo curto por driver (para as frases do diagnóstico).
-const DRIVER_LABEL: Record<string, string> = {
+// Rótulo curto por driver (para as frases do diagnóstico). Exportado como fonte ÚNICA dos rótulos
+// (reusado pelo PnlCostReconciliationService, ADR-184 F3 — nunca duplicar).
+export const DRIVER_LABEL: Record<string, string> = {
   merma: "merma (perda no preparo)", quebra: "quebra", vencimento: "vencimento", furto: "furto/desvio",
   desconto: "desconto", devolucao: "devolução", calote: "calote (fiado não pago)", divergencia: "divergência de caixa",
   retrabalho: "retrabalho", no_show: "no-show", outro: "outros",

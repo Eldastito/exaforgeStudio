@@ -28,6 +28,7 @@
 import db from "./db.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { RetailStoreCostService } from "./RetailStoreCostService.js";
+import { DRIVER_LABEL } from "./LossMarginService.js";
 
 function round2(n: number): number { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
 
@@ -182,6 +183,28 @@ export class PnlCostReconciliationService {
   /** Só a base de custo do DRE (compat número). */
   static monthlyCostTotal(orgId: string, period: string): number {
     return this.monthlyCost(orgId, period).total;
+  }
+
+  /**
+   * ADR-184 F3 — DETALHE das perdas operacionais que o resultado do DRE IGNORA (RN-PNL-C-5).
+   * Torna LEGÍVEL o vazamento: decompõe as perdas puras (exclui desconto/devolucao, que são
+   * dedução de receita já no DRE) por driver, com o rótulo canônico (`DRIVER_LABEL`, fonte única —
+   * não duplica), ordenado por valor desc. Read-only/derivado; honesto (sem perda → items vazio).
+   * NÃO muda o resultado — só expõe o que já sai do lucro sem aviso.
+   */
+  static operationalLossesDetail(orgId: string, period: string): {
+    total: number;
+    items: { driver: string; label: string; amount: number }[];
+    note: string;
+  } {
+    const { byDriver, total } = this.operationalLosses(orgId, period);
+    const items = Object.entries(byDriver)
+      .map(([driver, amount]) => ({ driver, label: DRIVER_LABEL[driver] || driver, amount: round2(amount) }))
+      .sort((a, b) => b.amount - a.amount);
+    const note = total > 0
+      ? `Perdas operacionais de R$ ${total.toFixed(2)} NÃO entram no resultado do DRE — reduzem o lucro real sem aparecer na linha.`
+      : "Sem perdas operacionais registradas no período.";
+    return { total: round2(total), items, note };
   }
 }
 

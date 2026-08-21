@@ -428,6 +428,7 @@
     "test:cobranca-eixo-b-hardening": "tsx scripts/test-cobranca-eixo-b-hardening.ts",
     "test:pnl-cost-reconciliation": "tsx scripts/test-pnl-cost-reconciliation.ts",
     "test:pnl-cost-snapshot-coherence": "tsx scripts/test-pnl-cost-snapshot-coherence.ts",
+    "test:pnl-operational-losses": "tsx scripts/test-pnl-operational-losses.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

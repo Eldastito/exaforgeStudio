@@ -66,6 +66,9 @@ export class FinanceSnapshotAdapter {
           cmvCoverage: cost ? cost.segments?.cogs?.coverage ?? null : null,
           unknownCostRisk: cost ? cost.unknownCostRisk : null,
           excludedFromResultado: cost ? cost.excludedFromResultado : null,
+          // ADR-184 F3 — DETALHE legível das perdas operacionais que o resultado ignora (merma/
+          // quebra/furto/etc.), com rótulo canônico. Não muda o resultado; torna o vazamento visível.
+          operationalLossesDetail: safe(() => PnlCostReconciliationService.operationalLossesDetail(orgId, period) as any, null),
           costScopeNote: cost
             ? "Base do resultado = margem dos canais core − despesas (payables) org-wide. " +
               (cost.unknownCostRisk ? "A maioria da receita não tem custo cadastrado — o CMV está subestimado e a margem/lucro NÃO podem ser afirmados como fato. " : "") +

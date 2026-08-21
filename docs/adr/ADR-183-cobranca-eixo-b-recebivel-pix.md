@@ -1,7 +1,7 @@
 # ADR-183 — Cobrança de recebível (PIX) no Eixo B correto + reconciliação (fecha o "F4b")
 
-**Estado:** **F0 MERGEADA (PR #1280)** · **F1 MERGEADA (PR #1281)** · **F2 EM PR (funde F2+F3)**
-— handlers roteiam Eixo B + reconciliação por webhook. Falta F4 (polling) + F5 (hardening).
+**Estado:** **F0 MERGEADA (PR #1280)** · **F1 MERGEADA (PR #1281)** · **F2+F3 MERGEADA (PR #1282)**
+· **F4 EM PR** — polling de fallback (webhook-perdido). Falta só F5 (hardening + runbook).
 **Data:** 2026-08-21.
 **Contexto:** conclui o "F4b pendente" da ADR-152 (Execution Runtime / Receivable Collection MVP).
 Aditivo/reversível. Convenções: isolamento multi-tenant, money-critical fail-closed, webhook
@@ -106,9 +106,16 @@ precisa **criar** esse caminho, não só religar.
   o e2e acopla charge+confirmação (rotear sem reconciliar deixaria a cobrança sem baixa).
   `test:receivable-pix-routing` (9) + `test:runtime-execute-e2e` reescrito pro fluxo Eixo B
   (29, prova: cobra no MP do lojista/nunca ASAAS, webhook baixa o recebível + fecha a ação).
-- **F4 — Polling de fallback (webhook-perdido).** Pass no Scheduler re-consulta PIX de recebível
-  pendentes e dá baixa quando o gateway confirma pago (espelha `billingDunningPass`).
-  `test:receivable-reconciliation-poll`.
+- **F4 — Polling de fallback (webhook-perdido) (EM PR).** `Scheduler.receivableReconciliationPass`
+  re-consulta as cobranças de recebível `pending` (Mercado Pago, o caminho totalmente
+  instrumentado — `payment_charges.id` É o id do pagamento MP) pelo gateway POR-ORG (RN-COB-1) e,
+  quando aprovado, dá baixa via o MESMO caminho do webhook (`syncMercadoPagoPayment` →
+  `onReceivablePaid`, RN-COB-4/5). Espelha o `billingDunningPass` do Eixo A. Guarda anti-trabalho
+  (recebível já `received` → só alinha a cobrança, não re-consulta); janela de 14 dias limita a
+  varredura (PIX expirado sai sozinho); best-effort/idempotente; isolado por org. Stone segue
+  webhook-only (o id guardado é o do payment-link, não o do pedido re-consultável — sem polling
+  fingido). `test:receivable-reconciliation-poll` (18, fetch stubado — prova baixa por polling,
+  pending fica pending, já-recebido não re-consulta, provider/janela/token filtram, isolamento).
 - **F5 — Hardening + runbook.** `test:cobranca-eixo-b-hardening` codifica RN-COB-1..6 + runbook
   `docs/runbook/cobranca-recebivel-operacao.md`.
 

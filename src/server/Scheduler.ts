@@ -1038,6 +1038,8 @@ export class Scheduler {
     // linha antiga pra não confundir dashboards/rotas.
     try { this.planFitCooldownExpirePass(); } catch (e: any) { console.error('[Scheduler] expiração de cooldown F7.7 falhou', e?.message); }
     await this.billingDunningPass().catch(e => console.error('[Scheduler] régua de inadimplência falhou', e));
+    // ADR-183 F4 — polling de fallback do Eixo B (recebível PIX): webhook perdido não prende a baixa.
+    await this.receivableReconciliationPass().catch(e => console.error('[Scheduler] reconciliação de recebível falhou', e));
   }
 
   /**
@@ -1251,6 +1253,49 @@ export class Scheduler {
         await this.applyDunningStage(o.organization_id, daysOverdue, stage);
         this.markDunning(o.organization_id, stage);
       } catch (e) { console.error("[Scheduler] dunning de uma org falhou", e); }
+    }
+  }
+
+  /**
+   * ADR-183 F4 — Polling de fallback pra COBRANÇA DE RECEBÍVEL (Eixo B, PIX `rcv:<id>`).
+   * Espelha o `billingDunningPass` (que re-consulta o ASAAS do Eixo A): webhook perdido NUNCA
+   * deixa a baixa presa. Re-consulta no gateway POR-ORG (NUNCA na chave de plataforma, RN-COB-1)
+   * as cobranças de recebível ainda `pending` e, quando o gateway confirma pago, dá baixa via o
+   * MESMO caminho do webhook (`syncMercadoPagoPayment` → `onReceivablePaid` = system-of-record +
+   * confirmação). Idempotente ponta-a-ponta (`receiveReceivable`/`confirm` ignoram já-feito,
+   * RN-COB-3/4); best-effort por cobrança; isolado por org. Escopo: Mercado Pago (o caminho
+   * totalmente instrumentado — `payment_charges.id` É o id do pagamento MP). Stone segue por
+   * webhook (o id guardado é o do payment-link, não o do pedido re-consultável) — sem polling
+   * fingido. Janela de 14 dias limita a varredura; PIX expirado sai sozinho (o MP devolve
+   * cancelled/expired e a cobrança deixa de ser `pending`).
+   */
+  static async receivableReconciliationPass() {
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(`
+        SELECT c.id AS charge_id, c.organization_id AS org, c.order_id AS ref
+        FROM payment_charges c
+        JOIN organization_settings o ON o.organization_id = c.organization_id
+        WHERE c.provider = 'mercadopago'
+          AND c.order_id LIKE 'rcv:%'
+          AND c.status = 'pending'
+          AND COALESCE(o.pay_enabled, 0) = 1
+          AND o.pay_provider = 'mercadopago'
+          AND o.pay_gateway_token IS NOT NULL
+          AND c.created_at >= datetime('now', '-14 days')`).all() as any[];
+    } catch { return; } // tabelas/colunas ainda não migradas
+    for (const r of rows) {
+      try {
+        const rcvId = String(r.ref).slice(4);
+        // Guarda anti-trabalho: recebível já baixado por outro caminho → só alinha a cobrança.
+        const rcv: any = db.prepare(`SELECT status FROM receivables WHERE id = ? AND organization_id = ?`).get(rcvId, r.org);
+        if (rcv && rcv.status === "received") {
+          try { db.prepare(`UPDATE payment_charges SET status = 'paid' WHERE id = ?`).run(r.charge_id); } catch { /* noop */ }
+          continue;
+        }
+        // Re-consulta a fonte da verdade; aprovado → syncMercadoPagoPayment já dá a baixa (rcv:).
+        await PaymentService.syncMercadoPagoPayment(r.org, r.charge_id);
+      } catch (e) { console.error("[Scheduler] polling de recebível falhou", r.charge_id, e); }
     }
   }
 

@@ -266,6 +266,7 @@
     "test:fiscal-document-breakdown": "tsx scripts/test-fiscal-document-breakdown.ts",
     "test:simples-hybrid-advisor": "tsx scripts/test-simples-hybrid-advisor.ts",
     "test:fiscal-issuance-scaffold": "tsx scripts/test-fiscal-issuance-scaffold.ts",
+    "test:fiscal-dre-integration": "tsx scripts/test-fiscal-dre-integration.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

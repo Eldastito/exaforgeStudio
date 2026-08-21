@@ -2,7 +2,7 @@
 
 **Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
 · **F3 MERGEADA (PR #1267)** · **F4 MERGEADA (PR #1268)** · **F5 MERGEADA (PR #1269)** · **F6
-EM PR** — scaffold honesto de emissão. Fatias seguintes fatia-por-PR.
+MERGEADA (PR #1270)** · **F7 EM PR** — projeção na DRE. Falta só F8 (hardening + runbook + UI).
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -201,8 +201,14 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   `fiscal_awaiting_homologation`/`fiscal_not_configured` — nunca finge emitir nota nem inventa
   número. Rotas owner/admin `/api/fiscal/issuance/{status,config,disconnect,issue}`.
   `test:fiscal-issuance-scaffold` (16).
-- **F7 — Integração DRE/financeiro** (quando efetivo): CBS/IBS como tributo na DRE gerencial,
-  reconciliado com `tax_sale` (sem dupla contagem). `test:fiscal-dre-integration`.
+- **F7 — Integração DRE/financeiro (EM PR).** `FiscalDreProjectionService.project(orgId,
+  period)` — projeta CBS/IBS sobre a receita líquida do período (via `ManagerialDreService` +
+  motor F3) como bloco READ-ONLY. Resolve a dupla contagem ESTRUTURALMENTE: a projeção NUNCA é
+  somada no `sobra` da DRE, então jamais duplica o `tax_sale`. Tratamento pelo regime:
+  Simples/MEI (das_embedded) → `informative_embedded` (já no DAS; se usa `tax_sale`, avisa que é
+  o mesmo ônus, não some); regime regular → `operating_expense`. Honesto: sem regime →
+  indisponível; alíquota não curada → amount null. Rota owner/admin `GET
+  /api/fiscal/dre-projection`. `test:fiscal-dre-integration` (13).
 - **F8 — Hardening + runbook.** `test:fiscal-hardening` codifica RN-FISCAL-1..10 como
   regressão + runbook `docs/runbook/fiscal-reforma-operacao.md`.
 - **UI:** perfil fiscal (owner/admin) + painel de curadoria de alíquotas (master).

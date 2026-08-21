@@ -19,6 +19,7 @@
  */
 import db from "./db.js";
 import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 function round2(n: number): number { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
 
@@ -66,6 +67,55 @@ export class PnlReconciliationService {
   /** Só o total (compat com o `monthlyRevenue: number` legado — usado pela F2). */
   static monthlyRevenueTotal(orgId: string, period: string): number {
     return this.monthlyRevenue(orgId, period).total;
+  }
+
+  /**
+   * F4 — sinal ADVISORY de sobreposição. Quando o `overlapRisk` do período existe (receita nos
+   * dois rails → uma venda PODE estar contada em pedido E em fechamento), publica um
+   * `business_signal` pro dono CONFERIR — nunca corrige sozinho (não há chave p/ deduplicar).
+   * É hipótese (não prova de dobra): `basis:'hypothesis'`, `impactAmount:null` (não inventa
+   * dinheiro). Self-healing: risco some → `resolveByDedupe`; recorre → `reopenByDedupe` (respeita
+   * o `dismissed` humano — §65). Dedupe por período (1 sinal/mês/org). Best-effort.
+   */
+  static publishOverlapSignal(orgId: string, period: string): { published: boolean; resolved: boolean } {
+    const dedupeKey = `pnl_overlap:${period}`;
+    let published = false, resolved = false;
+    try {
+      const r = this.monthlyRevenue(orgId, period);
+      if (r.overlapRisk) {
+        BusinessSignalService.publish(orgId, {
+          domain: "pnl_reconciliation",
+          signalType: "overlap_risk",
+          severity: "attention",
+          basis: "hypothesis",            // risco, não prova de dobra
+          confidence: 0.5,
+          impactAmount: null,             // nunca inventa dinheiro
+          sourceService: "PnlReconciliationService",
+          evidence: {
+            period, segments: r.segments, total: r.total,
+            message: "Sua receita do mês soma pedidos (core) E fechamentos de loja. Confira se uma mesma venda não está registrada nas duas — o sistema não consegue deduplicar automaticamente.",
+          },
+          dedupeKey,
+        });
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeKey); } catch { /* noop */ }
+        published = true;
+      } else {
+        try { const rr = BusinessSignalService.resolveByDedupe(orgId, dedupeKey); resolved = !!rr?.ok; } catch { /* noop */ }
+      }
+    } catch { /* best-effort */ }
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: só orgs com a ponte ligada (sem ela não há fechamentos → sem overlap). */
+  static pass(): void {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE retail_revenue_bridge = 1`).all() as any[]; }
+    catch { return; }
+    const period = new Date().toISOString().slice(0, 7);
+    for (const o of orgs) {
+      try { this.publishOverlapSignal(o.organization_id, period); }
+      catch (e) { console.error("[PnL] overlap pass falhou", o.organization_id, e); }
+    }
   }
 }
 

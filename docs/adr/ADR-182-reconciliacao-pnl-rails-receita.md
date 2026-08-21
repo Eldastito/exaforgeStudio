@@ -1,7 +1,8 @@
 # ADR-182 — Reconciliação dos dois rails de P&L (receita coerente e honesta)
 
 **Estado:** **F0 MERGEADA (PR #1274)** · **F1 MERGEADA (PR #1275)** · **F2 MERGEADA (PR #1276)**
-· **F3 EM PR** — coerência no snapshot. Fatias seguintes fatia-por-PR.
+· **F3 MERGEADA (PR #1277)** · **F4 EM PR** — sinal de sobreposição. Falta só F5 (hardening +
+runbook).
 **Data:** 2026-08-21.
 **Contexto:** aditivo sobre ADR-128 (DRE gerencial), ADR-129 (Empresa×Proprietário), a Operação
 da Rede (`RetailStoreCostService`) e a ponte opt-in `RetailRevenueBridgeService`. Aditivo/
@@ -115,10 +116,13 @@ mexer).
   AUTO-DESCRITOS: a divergência (receita de loja) é EXPLICADA, não misteriosa, e o LLM tem os
   rótulos pra nunca somar/confundir (RN-PNL-3). Valor 0-regressão. `test:pnl-snapshot-coherence`
   (12); `test:business-health`/`test:survival-index`/`test:snapshot-read-default` sem regressão.
-- **F4 — Sinal de sobreposição (advisory).** Quando `overlapRisk` é material, publica
-  `business_signals` (`pnl_reconciliation/overlap_risk`, dedupe por org+período) pro dono
-  conferir — honesto ("confira se uma venda não está contada em pedido E em fechamento");
-  self-healing (`resolveByDedupe` quando o risco some). Nunca corrige sozinho.
+- **F4 — Sinal de sobreposição (advisory) (EM PR).** `PnlReconciliationService.publishOverlapSignal`
+  — quando o período tem `overlapRisk`, publica `business_signals` (`pnl_reconciliation/
+  overlap_risk`, `basis:hypothesis`, `impactAmount:null`, severity attention, dedupe
+  `pnl_overlap:<period>`) pro dono conferir; nunca corrige sozinho (zero `decision_action`).
+  Self-healing: risco some → `resolveByDedupe`; recorre → `reopenByDedupe` (respeita `dismissed`
+  humano, §65). `pass()` no Scheduler só pras orgs com a ponte ligada. `test:pnl-overlap-signal`
+  (13).
 - **F5 — Hardening + runbook.** `test:pnl-reconciliation-hardening` codifica RN-PNL-1..7 +
   runbook `docs/runbook/pnl-reconciliacao-operacao.md` (inclui o track futuro da chave de
   correlação para dedupe transação-a-transação).

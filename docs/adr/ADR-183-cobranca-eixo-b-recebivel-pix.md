@@ -1,7 +1,7 @@
 # ADR-183 — Cobrança de recebível (PIX) no Eixo B correto + reconciliação (fecha o "F4b")
 
-**Estado:** **F0 MERGEADA (PR #1280)** · **F1 MERGEADA (PR #1281)** · **F2+F3 MERGEADA (PR #1282)**
-· **F4 EM PR** — polling de fallback (webhook-perdido). Falta só F5 (hardening + runbook).
+**Estado:** **FECHADO.** F0 (#1280) · F1 (#1281) · F2+F3 (#1282) · F4 (#1283) MERGEADAS ·
+**F5 EM PR** — hardening (`test:cobranca-eixo-b-hardening`, RN-COB-1..6) + runbook. ADR completo.
 **Data:** 2026-08-21.
 **Contexto:** conclui o "F4b pendente" da ADR-152 (Execution Runtime / Receivable Collection MVP).
 Aditivo/reversível. Convenções: isolamento multi-tenant, money-critical fail-closed, webhook
@@ -116,8 +116,15 @@ precisa **criar** esse caminho, não só religar.
   webhook-only (o id guardado é o do payment-link, não o do pedido re-consultável — sem polling
   fingido). `test:receivable-reconciliation-poll` (18, fetch stubado — prova baixa por polling,
   pending fica pending, já-recebido não re-consulta, provider/janela/token filtram, isolamento).
-- **F5 — Hardening + runbook.** `test:cobranca-eixo-b-hardening` codifica RN-COB-1..6 + runbook
-  `docs/runbook/cobranca-recebivel-operacao.md`.
+- **F5 — Hardening + runbook (EM PR).** `test:cobranca-eixo-b-hardening` (23) — doc-of-record
+  executável de dupla função: (A) codifica RN-COB-1..6 como REGRESSÃO sobre os serviços/handlers
+  REAIS F1–F4 (Eixo B nunca a plataforma · degrada honesto · idem/reference `rcv:` · baixa pela
+  system-of-record · webhook re-consultado + polling · fail-closed + isolamento); (B) verifica a
+  FIAÇÃO de produção (helpers roteiam via `PaymentService.chargeForReceivable` e não `_req.call` ·
+  `gateway_payment_webhook` em `CONFIRMATION_METHODS` · `receivableReconciliationPass` no Scheduler ·
+  4 testes wired · ADR/runbook presentes). Runbook `docs/runbook/cobranca-recebivel-operacao.md`
+  (mapa dos serviços, fluxo detectar→cobrar→confirmar→baixar, guardrails RN-COB, escopo/limites,
+  troubleshooting, como adicionar gateway ao polling). **Fecha a ADR-183.**
 
 **Critério de sucesso:** a cobrança de recebível (PIX) sai pela conta do LOJISTA (token por-org),
 com idempotência e reference `rcv:`; o pagamento dá baixa em `receivables.status='received'` por

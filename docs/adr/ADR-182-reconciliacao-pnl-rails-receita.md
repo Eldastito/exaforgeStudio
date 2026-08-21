@@ -1,8 +1,8 @@
 # ADR-182 — Reconciliação dos dois rails de P&L (receita coerente e honesta)
 
 **Estado:** **F0 MERGEADA (PR #1274)** · **F1 MERGEADA (PR #1275)** · **F2 MERGEADA (PR #1276)**
-· **F3 MERGEADA (PR #1277)** · **F4 EM PR** — sinal de sobreposição. Falta só F5 (hardening +
-runbook).
+· **F3 MERGEADA (PR #1277)** · **F4 MERGEADA (PR #1278)** · **F5 EM PR** — hardening + runbook
+(FECHA o ADR-182).
 **Data:** 2026-08-21.
 **Contexto:** aditivo sobre ADR-128 (DRE gerencial), ADR-129 (Empresa×Proprietário), a Operação
 da Rede (`RetailStoreCostService`) e a ponte opt-in `RetailRevenueBridgeService`. Aditivo/
@@ -123,9 +123,13 @@ mexer).
   Self-healing: risco some → `resolveByDedupe`; recorre → `reopenByDedupe` (respeita `dismissed`
   humano, §65). `pass()` no Scheduler só pras orgs com a ponte ligada. `test:pnl-overlap-signal`
   (13).
-- **F5 — Hardening + runbook.** `test:pnl-reconciliation-hardening` codifica RN-PNL-1..7 +
-  runbook `docs/runbook/pnl-reconciliacao-operacao.md` (inclui o track futuro da chave de
-  correlação para dedupe transação-a-transação).
+- **F5 — Hardening + runbook (EM PR; FECHA o ADR-182).** `test:pnl-reconciliation-hardening`
+  (14) — doc-of-record executável: (A) codifica RN-PNL-1..7 como regressão sobre os serviços
+  reais F1–F4 (segmentos não duplicatas · sobreposição detectada+sinalizada · escopo rotulado ·
+  read-only · ponte opt-in · 0-regressão vs LossMargin · honesto) + (B) fiação (`pass` no
+  Scheduler, 5 testes wired, runbook/ADR presentes) + runbook
+  `docs/runbook/pnl-reconciliacao-operacao.md` (mapa, os dois números, o sinal, guardrails,
+  troubleshooting, **track futuro** da chave de correlação p/ dedupe transação-a-transação).
 
 **Critério de sucesso:** um único read-model de receita, segment-explícito e coerente entre DRE,
 vendas e Operação da Rede; a sobreposição possível é DETECTADA e sinalizada (não some nem dobra

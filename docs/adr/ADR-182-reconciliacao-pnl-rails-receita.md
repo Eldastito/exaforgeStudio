@@ -1,7 +1,7 @@
 # ADR-182 — Reconciliação dos dois rails de P&L (receita coerente e honesta)
 
-**Estado:** **F0 MERGEADA (PR #1274)** · **F1 EM PR** — `PnlReconciliationService`. Fatias
-seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1274)** · **F1 MERGEADA (PR #1275)** · **F2 EM PR** — LossMargin
+delega. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto:** aditivo sobre ADR-128 (DRE gerencial), ADR-129 (Empresa×Proprietário), a Operação
 da Rede (`RetailStoreCostService`) e a ponte opt-in `RetailRevenueBridgeService`. Aditivo/
@@ -103,9 +103,11 @@ mexer).
   ponte on e off); `overlapRisk` = true só quando `coreOrders>0 && storeClosings>0` (única
   condição de dobra possível), com nota honesta. `monthlyRevenueTotal` (compat número).
   `test:pnl-reconciliation` (17).
-- **F2 — `LossMarginService.monthlyRevenue` DELEGA ao reconciliador** (fonte única). Total
-  idêntico (RN-PNL-6); todos os consumidores passam a herdar a decomposição rastreável. Sem
-  regressão nos testes que dependem do número.
+- **F2 — `LossMarginService.monthlyRevenue` DELEGA ao reconciliador (EM PR).** Fonte única: o
+  método agora só chama `PnlReconciliationService.monthlyRevenueTotal`. Total idêntico (RN-PNL-6);
+  todos os consumidores (`SurvivalIndex`, `DecisionSimulator`, `BusinessHealth`, `SalesSnapshot`,
+  `monthlySummary`) herdam a decomposição rastreável. `test:pnl-delegation` (6) + `test:loss-margin`
+  segue 26/26.
 - **F3 — Coerência no snapshot executivo.** `BusinessSnapshotV2Service`/`FinanceSnapshotAdapter`
   passam a rotular o ESCOPO (`dre.receitaLiquida` = core; `sales.receitaMes` = all-channels) e a
   expor a decomposição, pro Diretor IA NUNCA somar/confundir os dois (RN-PNL-3).

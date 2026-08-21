@@ -10463,6 +10463,27 @@ const initDb = () => {
   // (congela junto do resto do snapshot canônico — convenção nº 3; recurar alíquota depois NÃO
   // muda o documento emitido). Aditivo; recibos legados/rascunho → null. Informativo (2026).
   try { db.exec(`ALTER TABLE clinical_receipts ADD COLUMN fiscal_breakdown_snapshot TEXT`); } catch (e) { /* noop */ }
+
+  // ── ADR-181 F6 — Conexão de EMISSÃO fiscal (NFS-e/NFC-e) — SCAFFOLD HONESTO ──
+  // Espelha sicredi_cobranca_connections (ADR-177): guarda a config CIFRADA + estado observável.
+  // NUNCA marca 'connected' sem homologação real (certificado A1 + prefeitura/SEFAZ ou provedor
+  // homologado) — RN-FISCAL-8. Enquanto não homologa, `issue` LANÇA (nunca finge emitir nota).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_issuance_connections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        config_enc TEXT,                                   -- JSON cifrado (provedor/token/certificado A1)
+        connection_state TEXT NOT NULL DEFAULT 'not_configured', -- not_configured|awaiting_homologation|connected|disabled
+        state_detail TEXT,
+        enabled INTEGER NOT NULL DEFAULT 0,                -- opt-in; 0 = desligada
+        configured_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_issuance_org ON fiscal_issuance_connections (organization_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar fiscal_issuance_connections (ADR-181 F6)', e); }
 };
 
 initDb();

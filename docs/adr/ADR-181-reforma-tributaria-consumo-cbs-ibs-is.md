@@ -1,8 +1,8 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
 **Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
-· **F3 MERGEADA (PR #1267)** · **F4 MERGEADA (PR #1268)** · **F5 EM PR** — advisor Simples
-híbrido. Fatias seguintes fatia-por-PR.
+· **F3 MERGEADA (PR #1267)** · **F4 MERGEADA (PR #1268)** · **F5 MERGEADA (PR #1269)** · **F6
+EM PR** — scaffold honesto de emissão. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -192,8 +192,15 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   força** (RN-FISCAL-9); disclaimer cravado. `setChoice` só PERSISTE a decisão do dono (delega
   ao `FiscalProfileService`; só Simples). Rotas owner/admin `GET /api/fiscal/simples-advisor` +
   `POST /simples-advisor/choice`. `test:simples-hybrid-advisor` (17).
-- **F6 — Scaffold honesto de emissão** (`FiscalIssuanceService`, molde Sicredi/ADR-177):
-  estado observável, `issue` LANÇA `fiscal_awaiting_homologation`. `test:fiscal-issuance-scaffold`.
+- **F6 — Scaffold honesto de emissão (EM PR).** `FiscalIssuanceService` (molde
+  `SicrediCobrancaService`/ADR-177): tabela `fiscal_issuance_connections` (config CIFRADA
+  AES-GCM, opt-in, UNIQUE(org)); `status`/`configure`/`disconnect`/`issue`. NUNCA marca
+  `connected` sem homologação (RN-FISCAL-8 — certificado A1 + prefeitura/SEFAZ ou provedor
+  homologado); com credencial → `awaiting_homologation`; capacidades (nfse/nfce/cancel/query)
+  DESCOBERTAS indisponíveis; segredo cifrado/redigido (nunca volta no status); `issue` LANÇA
+  `fiscal_awaiting_homologation`/`fiscal_not_configured` — nunca finge emitir nota nem inventa
+  número. Rotas owner/admin `/api/fiscal/issuance/{status,config,disconnect,issue}`.
+  `test:fiscal-issuance-scaffold` (16).
 - **F7 — Integração DRE/financeiro** (quando efetivo): CBS/IBS como tributo na DRE gerencial,
   reconciliado com `tax_sale` (sem dupla contagem). `test:fiscal-dre-integration`.
 - **F8 — Hardening + runbook.** `test:fiscal-hardening` codifica RN-FISCAL-1..10 como

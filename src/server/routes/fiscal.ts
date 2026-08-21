@@ -9,6 +9,7 @@ import { FiscalProfileService, FISCAL_REGIMES } from "../FiscalProfileService.js
 import { TaxReferenceService, TRIBUTES } from "../TaxReferenceService.js";
 import { ConsumptionTaxService } from "../ConsumptionTaxService.js";
 import { SimplesHybridAdvisorService } from "../SimplesHybridAdvisorService.js";
+import { FiscalIssuanceService } from "../FiscalIssuanceService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -66,6 +67,27 @@ router.get("/simples-advisor", requireRole("owner", "admin"), (req: AuthRequest,
 router.post("/simples-advisor/choice", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(SimplesHybridAdvisorService.setChoice(req.organizationId!, req.body?.optIn === true, actor(req))); }
   catch (e: any) { fail(res, e); }
+});
+
+// ── F6 — Emissão fiscal NFS-e/NFC-e (scaffold honesto; owner/admin; segredos nunca voltam) ──
+router.get("/issuance/status", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(FiscalIssuanceService.status(req.organizationId!)); }
+  catch (e: any) { fail(res, e); }
+});
+router.put("/issuance/config", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(FiscalIssuanceService.configure(req.organizationId!, b, { enabled: b.enabled === true ? true : (b.enabled === false ? false : undefined) }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+router.post("/issuance/disconnect", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(FiscalIssuanceService.disconnect(req.organizationId!, actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+/** Emissão real — hoje LANÇA (aguardando homologação). Nunca finge emitir nota. */
+router.post("/issuance/issue", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  try { res.json(await FiscalIssuanceService.issue(req.organizationId!, req.body || {})); }
+  catch (e: any) { res.status(422).json({ error: e?.message || "erro" }); }
 });
 
 // ── F2 — Base de Referência Tributária CURADA (master-only) ──

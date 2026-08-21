@@ -878,6 +878,12 @@ export class Scheduler {
       import("./ProfessionalDemandService.js").then((m) => m.ProfessionalDemandService.pass())
         .catch((e) => console.error('[Scheduler] gap de demanda da rede falhou', e));
     } catch (e) { console.error('[Scheduler] pass de gap de demanda falhou', e); }
+    // Reconciliação de P&L — sinal advisory de sobreposição de receita (ADR-182 F4): só orgs
+    // com a ponte Fechamento→Faturamento ligada; hipótese, nunca inventa dinheiro. Best-effort.
+    try {
+      import("./PnlReconciliationService.js").then((m) => m.PnlReconciliationService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de sobreposição de P&L falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de sobreposição de P&L falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

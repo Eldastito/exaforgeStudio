@@ -438,9 +438,14 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
   invite_declined` na espinha da clínica. Autoriza pela identidade (vínculo dele + pending).
   Rotas `GET /api/public/professional/invites` + `POST /invites/:relId/{accept,decline}` +
   banner de convites no `ProfessionalPortalPage`. `test:professional-invite-response` (11).
-- **F11.2 — Geocoding pra match por raio (a fazer).** Passe best-effort que geocoda
-  cidade→lat/lng (reusa `geocode_cache`/`SupplyNetworkService`) → a descoberta casa por
-  distância, não só por estado.
+- **F11.2 — Geocoding pra match por raio (EM PR).** `ProfessionalDiscoveryService.geocodePass`
+  (best-effort, no Scheduler) preenche `professionals.base_lat/lng` + `organization_settings.
+  address_lat/lng` das entidades DESCOBRÍVEIS sem coords, reusando
+  `SupplyNetworkService.geocodeCity` + `geocode_cache` (Nominatim no miss, cache no hit).
+  Fora do caminho do match (síncrono); o `regionMatch` já prefere coords a estado, então a
+  descoberta passa a casar por DISTÂNCIA (raio em km). Idempotente (não regeocoda quem já
+  tem coords). `test:professional-geocode` (9) — passe preenche do cache (sem rede), raio
+  50km exclui a clínica longe do mesmo estado, raio grande inclui de novo.
 - **F11.3 — Envio do magic-link (a fazer).** Entregar o link de acesso do profissional por
   e-mail/WhatsApp (hoje a clínica copia e compartilha manual).
 

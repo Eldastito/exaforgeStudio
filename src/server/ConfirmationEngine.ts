@@ -40,6 +40,7 @@ import { BusinessSignalService } from "./BusinessSignalService.js";
 
 export const CONFIRMATION_METHODS = [
   "asaas_payment_webhook",
+  "gateway_payment_webhook",          // ADR-183 — cobrança de recebível pelo Eixo B (MP/Stone por-org)
   "retail_reconciliation",
   "channel_reply",
   "alterdata_sync",

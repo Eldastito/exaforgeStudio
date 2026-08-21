@@ -1,7 +1,7 @@
 # ADR-183 — Cobrança de recebível (PIX) no Eixo B correto + reconciliação (fecha o "F4b")
 
-**Estado:** **F0 MERGEADA (PR #1280)** · **F1 EM PR** — `chargeForReceivable`. Fatias seguintes
-fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1280)** · **F1 MERGEADA (PR #1281)** · **F2 EM PR (funde F2+F3)**
+— handlers roteiam Eixo B + reconciliação por webhook. Falta F4 (polling) + F5 (hardening).
 **Data:** 2026-08-21.
 **Contexto:** conclui o "F4b pendente" da ADR-152 (Execution Runtime / Receivable Collection MVP).
 Aditivo/reversível. Convenções: isolamento multi-tenant, money-critical fail-closed, webhook
@@ -95,13 +95,17 @@ precisa **criar** esse caminho, não só religar.
   — **NUNCA cai na chave de plataforma** (RN-COB-1/2); `pix_manual` sem `paymentId` (sem
   auto-baixa, honesto). `test:charge-for-receivable` (16, fetch stubado — prova roteamento MP
   por-org, reference/idem `rcv:`, idempotência, degradação, e **zero chamada ao ASAAS**).
-- **F2 — Handlers deixam de usar a chave de plataforma.** `RuntimeCommandHandlers.createPixCharge`
-  + `CollectionPlaybook.createPixCharge` passam a chamar `PaymentService.chargeForReceivable`
-  (mata o `AsaasService._req`); sem gateway → degradação honesta (não cobra na plataforma).
-  `test:receivable-pix-routing`.
-- **F3 — Reconciliação: ramo `rcv:` nos webhooks.** `syncMercadoPagoPayment`/`syncStonePayment`
-  reconhecem `rcv:<id>` → `FinancialLedgerService.receiveReceivable` (system-of-record) +
-  `ConfirmationEngine.confirm`. `test:receivable-webhook-reconciliation`.
+- **F2 (funde F2+F3) — Handlers roteiam Eixo B + reconciliação por webhook (EM PR).** Os dois
+  helpers `createPixCharge` (`RuntimeCommandHandlers` + `CollectionPlaybook`) passam a chamar
+  `PaymentService.chargeForReceivable` — **mata o `AsaasService._req`** (a chave de plataforma);
+  sem gateway → degradação honesta (`permission`/`external_unavailable`, nunca cobra na
+  plataforma). Confirmação armada com método novo `gateway_payment_webhook`. Reconciliação:
+  `syncMercadoPagoPayment`/`syncStonePayment` ganham ramo `rcv:<id>` → `PaymentService.
+  onReceivablePaid` = `FinancialLedgerService.receiveReceivable` (system-of-record, RN-COB-4) +
+  `ConfirmationEngine.confirm` pela externalRef (idempotente). **F2 e F3 vieram juntos** porque
+  o e2e acopla charge+confirmação (rotear sem reconciliar deixaria a cobrança sem baixa).
+  `test:receivable-pix-routing` (9) + `test:runtime-execute-e2e` reescrito pro fluxo Eixo B
+  (29, prova: cobra no MP do lojista/nunca ASAAS, webhook baixa o recebível + fecha a ação).
 - **F4 — Polling de fallback (webhook-perdido).** Pass no Scheduler re-consulta PIX de recebível
   pendentes e dá baixa quando o gateway confirma pago (espelha `billingDunningPass`).
   `test:receivable-reconciliation-poll`.

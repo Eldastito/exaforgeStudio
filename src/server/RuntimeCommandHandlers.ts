@@ -95,37 +95,36 @@ const AsaasPixChargeCommandHandler: CommandHandler = {
     const p = payloadOf(action);
     const amount = Number(p.amount ?? action.expected_impact);
     if (!(amount > 0)) throwHandler("non_retryable", "asaas_pix_charge exige amount > 0.");
-    // Nesta fatia, delegamos a criação real da cobrança pra AsaasService.
-    // Como o AsaasService atual expõe subscribe/getPayment (billing da
-    // plataforma), reusamos o cliente HTTP interno pra criar um pagamento
-    // avulso (`payments` endpoint) — o método concreto vive dentro do
-    // AsaasService pra centralizar autenticação/rate-limit. O executor não
-    // pinga a API sozinho.
+    // ADR-183 F2 — cobrança de recebível pelo Eixo B (gateway POR-ORG, nunca a chave de
+    // plataforma). A reference é o recebível (subject/payload), com fallback ao action.id.
+    const receivableId = String(p.receivableId || p.reference || action.subject_id || action.id);
     let paymentId: string | null = null;
     try {
-      paymentId = await createPixCharge(orgId, {
-        customerId: String(p.customer || p.customerId || ""),
-        amount,
+      const r = await createPixCharge(orgId, {
+        receivableId, amount,
+        contactId: String(p.contactId || p.customer || p.customerId || "") || undefined,
+        contactName: p.contactName || undefined,
         description: String(p.description || action.description || action.title || "").slice(0, 200),
-        dueDate: p.dueDate || null,
       });
-    } catch (e: any) { throwHandler(classifyAsaas(e), `Asaas falhou ao criar cobrança PIX: ${e?.message || e}`); }
-    if (!paymentId) throwHandler("external_unavailable", "Asaas devolveu resposta sem paymentId.");
+      paymentId = r.paymentId;
+    } catch (e: any) {
+      if (e?.errorClass) throw e;   // já classificado pelo helper (degradação honesta)
+      throwHandler(classifyAsaas(e), `Gateway falhou ao criar cobrança PIX: ${e?.message || e}`);
+    }
 
-    // Arma a confirmação por webhook antes de retornar. Se `expect` falhar,
-    // não removemos o payment (já criado externamente) — logamos e devolvemos
-    // o externalRef mesmo assim; o timeout/scanning pega depois.
-    try {
-      ConfirmationEngine.expect(orgId, {
-        actionId: action.id, method: "asaas_payment_webhook",
-        externalRef: paymentId,
-        // Deadline padrão: 30 dias (dueDate + margem). Handlers podem receber
-        // deadline explícito no payload — se não, calculamos aqui.
-        deadlineAt: p.confirmationDeadline || defaultConfirmationDeadline(p.dueDate),
-      });
-    } catch (e: any) { console.warn("[AsaasPixCharge] expect falhou (payment já criado):", e?.message || e); }
+    // Cobrança com auto-baixa (MP/Stone) → arma a confirmação por webhook (externalRef=paymentId,
+    // reconciliado na F3). `pix_manual` volta sem paymentId — cobrança manual, sem webhook.
+    if (paymentId) {
+      try {
+        ConfirmationEngine.expect(orgId, {
+          actionId: action.id, method: "gateway_payment_webhook",
+          externalRef: paymentId,
+          deadlineAt: p.confirmationDeadline || defaultConfirmationDeadline(p.dueDate),
+        });
+      } catch (e: any) { console.warn("[PixCharge] expect falhou (payment já criado):", e?.message || e); }
+    }
 
-    return { summary: `Cobrança PIX criada no Asaas (${paymentId})`, artifact: { kind: "asaas_pix_created", paymentId, amount, customer: p.customer || null, description: p.description || null }, effect: "pix_charge_created", externalRef: paymentId };
+    return { summary: paymentId ? `Cobrança PIX criada (${paymentId})` : "Cobrança PIX manual gerada", artifact: { kind: "pix_charge_created", paymentId, amount, customer: p.customer || null, description: p.description || null }, effect: "pix_charge_created", externalRef: paymentId || undefined };
   },
 };
 
@@ -231,29 +230,26 @@ function defaultConfirmationDeadline(dueDate?: string | null): string {
 }
 
 /**
- * Cria uma cobrança PIX avulsa no Asaas. Isolado aqui (não em AsaasService)
- * porque a cobrança lojista→cliente-final é escopo do Runtime — o
- * AsaasService atual foca em BILLING da plataforma (assinaturas ZappFlow →
- * lojista). Segue o mesmo cliente HTTP interno via `AsaasService._req` (fica
- * numa fatia futura extrair como método público, quando F4b consolidar o
- * fluxo). Nesta fatia, chamamos uma função reflection-safe: se
- * `_req`/`createPayment` não existir, marca `permission` (o Asaas não está
- * plumbed pra cobrança avulsa no repo atual — a F4b vai completar isso).
+ * ADR-183 F2 — Cobrança PIX de recebível pelo EIXO B (lojista → cliente): roteia SEMPRE pelo
+ * gateway POR-ORG via `PaymentService.chargeForReceivable` (token do lojista), NUNCA pela chave
+ * ASAAS de plataforma (RN-COB-1 — o `AsaasService._req` só serve o billing da plataforma). Sem
+ * gateway configurado → degrada HONESTO (`manual_required`/`not_enabled` → `permission`;
+ * `gateway_error` → `external_unavailable`); nunca finge nem cai na plataforma (RN-COB-2).
+ * Devolve `{ paymentId }` (null quando `pix_manual` — cobrança manual, sem auto-baixa).
  */
-async function createPixCharge(orgId: string, p: { customerId: string; amount: number; description: string; dueDate?: string | null }): Promise<string | null> {
-  const svc: any = AsaasService as any;
-  if (typeof svc.createPixCharge === "function") {
-    const r = await svc.createPixCharge(orgId, p);
-    return r?.id || r?.paymentId || null;
+async function createPixCharge(orgId: string, p: { receivableId: string; contactId?: string; contactName?: string; amount: number; description: string }): Promise<{ paymentId: string | null; provider?: string }> {
+  const { PaymentService } = await import("./PaymentService.js");
+  const r = await PaymentService.chargeForReceivable(orgId, {
+    receivableId: p.receivableId, amount: Number(p.amount),
+    contactId: p.contactId, contactName: p.contactName, description: p.description,
+  });
+  if (!r.ok) {
+    if (r.reason === "not_enabled" || r.reason === "manual_required") {
+      throwHandler("permission", "Configure um gateway de cobrança (Mercado Pago/Stone) para cobrar o cliente — o ZapFlow não usa a conta da plataforma.");
+    }
+    throwHandler("external_unavailable", `Gateway falhou ao criar cobrança PIX (${r.reason || "erro"}).`);
   }
-  if (typeof svc._req === "function") {
-    const body: any = { billingType: "PIX", value: Number(p.amount), description: p.description, dueDate: p.dueDate || new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) };
-    if (p.customerId) body.customer = p.customerId;
-    const r = await svc._req.call(svc, "POST", "/payments", body);
-    return r?.id || null;
-  }
-  throwHandler("permission", "Asaas não expõe createPixCharge/_req — plumbing PIX avulso pendente (fatia F4b Cobrança).");
-  return null; // unreachable
+  return { paymentId: r.paymentId || null, provider: r.provider };
 }
 
 export {

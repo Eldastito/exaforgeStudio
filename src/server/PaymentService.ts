@@ -327,6 +327,31 @@ export class PaymentService {
   }
 
   /**
+   * ADR-183 F3 — reconciliação de RECEBÍVEL pago (reference `rcv:<id>`). Dá baixa na
+   * system-of-record (`receivables.status='received'` via `receiveReceivable` — o que o
+   * `BusinessOutcomeResolver` lê, RN-COB-4) E confirma a expectativa do runtime pela externalRef
+   * (`gateway_payment_webhook` = o paymentId). Best-effort/idempotente (receiveReceivable ignora
+   * já-recebido; confirm de ação já done vira dismissed). Import dinâmico p/ quebrar ciclos.
+   */
+  static async onReceivablePaid(orgId: string, receivableId: string, paymentId: string, paidValue: number): Promise<void> {
+    try {
+      const { FinancialLedgerService } = await import("./FinancialLedgerService.js");
+      FinancialLedgerService.receiveReceivable(orgId, receivableId, { createdBy: "payment_webhook" });
+    } catch (e) { console.warn("[Cobrança] receiveReceivable falhou", e); }
+    try {
+      const { ConfirmationEngine } = await import("./ConfirmationEngine.js");
+      const match = ConfirmationEngine.findByExternalRef("gateway_payment_webhook", String(paymentId));
+      if (match) {
+        ConfirmationEngine.confirm(match.orgId, match.confirmation.action_id, {
+          evidence: { source: "gateway_payment_webhook", paymentId, receivableId, value: paidValue },
+          resultAmount: paidValue > 0 ? paidValue : null,
+          categoryOutcomes: paidValue > 0 ? { revenueRecovered: paidValue } : undefined,
+        });
+      }
+    } catch (e) { console.warn("[Cobrança] confirm da expectativa falhou", e); }
+  }
+
+  /**
    * Consulta um pagamento no Mercado Pago (usado pelo webhook, que recebe só o
    * id). Se aprovado, marca o pedido como pago. Retorna o status do MP.
    */
@@ -361,6 +386,9 @@ export class PaymentService {
             const mod = await import("./ComigoPixService.js");
             mod.ComigoPixService.confirmByReference(orgId, ref.slice(4), String(data.id));
           } catch (e) { /* noop */ }
+        } else if (ref.startsWith("rcv:")) {
+          // ADR-183 F3 — recebível pago (Eixo B): baixa na system-of-record + confirma o runtime.
+          await this.onReceivablePaid(orgId, ref.slice(4), String(data.id), Number(data.transaction_amount || 0));
         } else {
           this.markPaid(orgId, ref, { method: "mercadopago", externalId: String(data.id) });
         }
@@ -482,6 +510,7 @@ export class PaymentService {
       try { db.prepare(`UPDATE payment_charges SET status = 'paid' WHERE order_id = ? AND organization_id = ?`).run(String(ref), orgId); } catch (e) { /* noop */ }
       if (String(ref).startsWith("res:")) { try { ReservationService.markPaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
       else if (String(ref).startsWith("sub:")) { try { SubscriptionService.markInvoicePaid(orgId, String(ref).slice(4)); } catch (e) { /* noop */ } }
+      else if (String(ref).startsWith("rcv:")) { await this.onReceivablePaid(orgId, String(ref).slice(4), String(obj?.id || ""), Number(amountCents || 0) / 100); }
       else this.markPaid(orgId, String(ref), { method: "stone", externalId: String(obj?.id || "") });
       return "paid";
     } catch (e) {

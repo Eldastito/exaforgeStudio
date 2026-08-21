@@ -1,7 +1,7 @@
 # ADR-182 — Reconciliação dos dois rails de P&L (receita coerente e honesta)
 
-**Estado:** **F0 MERGEADA (PR #1274)** · **F1 MERGEADA (PR #1275)** · **F2 EM PR** — LossMargin
-delega. Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1274)** · **F1 MERGEADA (PR #1275)** · **F2 MERGEADA (PR #1276)**
+· **F3 EM PR** — coerência no snapshot. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto:** aditivo sobre ADR-128 (DRE gerencial), ADR-129 (Empresa×Proprietário), a Operação
 da Rede (`RetailStoreCostService`) e a ponte opt-in `RetailRevenueBridgeService`. Aditivo/
@@ -108,9 +108,13 @@ mexer).
   todos os consumidores (`SurvivalIndex`, `DecisionSimulator`, `BusinessHealth`, `SalesSnapshot`,
   `monthlySummary`) herdam a decomposição rastreável. `test:pnl-delegation` (6) + `test:loss-margin`
   segue 26/26.
-- **F3 — Coerência no snapshot executivo.** `BusinessSnapshotV2Service`/`FinanceSnapshotAdapter`
-  passam a rotular o ESCOPO (`dre.receitaLiquida` = core; `sales.receitaMes` = all-channels) e a
-  expor a decomposição, pro Diretor IA NUNCA somar/confundir os dois (RN-PNL-3).
+- **F3 — Coerência no snapshot executivo (EM PR).** `FinanceSnapshotAdapter.dre` ganha
+  `scope:"core"` + `scopeNote` (exclui fechamentos; não somar com sales); `SalesSnapshotAdapter.
+  receitaMes` ganha `scope:"all_channels"` + a decomposição da F1 (`segments`, `bridgeEnabled`,
+  `overlapRisk`, `reconNote`). Assim os dois números do snapshot que o Diretor IA narra ficam
+  AUTO-DESCRITOS: a divergência (receita de loja) é EXPLICADA, não misteriosa, e o LLM tem os
+  rótulos pra nunca somar/confundir (RN-PNL-3). Valor 0-regressão. `test:pnl-snapshot-coherence`
+  (12); `test:business-health`/`test:survival-index`/`test:snapshot-read-default` sem regressão.
 - **F4 — Sinal de sobreposição (advisory).** Quando `overlapRisk` é material, publica
   `business_signals` (`pnl_reconciliation/overlap_risk`, dedupe por org+período) pro dono
   conferir — honesto ("confira se uma venda não está contada em pedido E em fechamento");

@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { LossMarginService } from "./LossMarginService.js";
+import { PnlReconciliationService } from "./PnlReconciliationService.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { QuoteService } from "./QuoteService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
@@ -21,7 +22,12 @@ const fail = (source: string, e: any) => ({ available: false, source, error: Str
 export class SalesSnapshotAdapter {
   static build(orgId: string, period = new Date().toISOString().slice(0, 7)): any {
     try {
-      const revenue = safe(() => LossMarginService.monthlyRevenue(orgId, period), 0);
+      // ADR-182 F3 — receita RECONCILIADA e com ESCOPO explícito (all_channels): decompõe por
+      // segmento e carrega o overlapRisk, pra o Diretor IA nunca somar/confundir com o DRE
+      // (que é core-only). O `value` continua idêntico ao legado (LossMargin delega ao mesmo
+      // read-model — RN-PNL-3/6).
+      const recon = safe(() => PnlReconciliationService.monthlyRevenue(orgId, period), null as any);
+      const revenue = recon ? recon.total : safe(() => LossMarginService.monthlyRevenue(orgId, period), 0);
       const prof = safe(() => AnalyticsService.getProfit(orgId, { period: "month" } as any) as any, null);
       const conv = safe(() => QuoteService.conversionStats(orgId) as any, null);
       const rie = safe(() => RevenueIntelligenceService.getSnapshot(orgId) as any, null);
@@ -29,7 +35,11 @@ export class SalesSnapshotAdapter {
       const perdaTotal = round2(lossSources.reduce((a: number, s: any) => a + (Number(s?.amount) || 0), 0));
       return {
         available: true, source: "SalesSnapshotAdapter", period,
-        receitaMes: { value: round2(revenue), basis: "fact", source: "LossMarginService" },
+        receitaMes: {
+          value: round2(revenue), basis: "fact", source: "LossMarginService",
+          scope: "all_channels",   // pedidos core + Comigo + fechamentos de loja (se ponte on)
+          ...(recon ? { segments: recon.segments, bridgeEnabled: recon.bridgeEnabled, overlapRisk: recon.overlapRisk, reconNote: recon.note } : {}),
+        },
         margemPct: prof?.hasCostData ? { value: prof.margin, basis: "estimate", source: "AnalyticsService" } : null,
         conversaoOrcamentos: conv?.ratePct != null ? { ratePct: conv.ratePct, prevRatePct: conv.prevRatePct, signal: conv.signal, basis: "fact", source: "QuoteService" } : null,
         perdaEstimada: lossSources.length ? { total: perdaTotal, fontes: lossSources.length, basis: "estimate", source: "RevenueIntelligenceService" } : null,

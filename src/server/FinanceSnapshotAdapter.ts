@@ -51,6 +51,11 @@ export class FinanceSnapshotAdapter {
           margemBruta: L.margemBruta ?? null, margemPct: L.margemPct ?? null,
           resultadoOperacional: L.resultadoOperacional ?? null, retiradas: L.retiradas ?? null, sobra: L.sobra ?? null,
           basis: "estimate", source: "ManagerialDreService",
+          // ADR-182 F3 — ESCOPO explícito: o DRE gerencial é CORE-only (pedidos + Comigo) e
+          // NÃO inclui fechamentos de loja. Difere de `sales.receitaMes` (all_channels) pela
+          // receita das lojas — os dois NUNCA devem ser somados nem tratados como o mesmo número.
+          scope: "core",
+          scopeNote: "Receita líquida do DRE = canais core (pedidos + Comigo); exclui fechamentos de loja. Não somar com sales.receitaMes (all_channels).",
         } : { available: false },
         retiradas: owner ? {
           mes: Number(owner.retiradas) || 0, proLaboreSugerido: Number(owner.proLaboreSugerido) || 0,

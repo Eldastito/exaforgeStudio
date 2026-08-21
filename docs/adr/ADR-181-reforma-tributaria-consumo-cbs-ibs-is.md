@@ -2,7 +2,8 @@
 
 **Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
 · **F3 MERGEADA (PR #1267)** · **F4 MERGEADA (PR #1268)** · **F5 MERGEADA (PR #1269)** · **F6
-MERGEADA (PR #1270)** · **F7 EM PR** — projeção na DRE. Falta só F8 (hardening + runbook + UI).
+MERGEADA (PR #1270)** · **F7 MERGEADA (PR #1271)** · **F8 EM PR** — hardening + runbook
+(FECHA o backend do ADR-181). UI vira F8b (UI-only).
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -209,9 +210,14 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   o mesmo ônus, não some); regime regular → `operating_expense`. Honesto: sem regime →
   indisponível; alíquota não curada → amount null. Rota owner/admin `GET
   /api/fiscal/dre-projection`. `test:fiscal-dre-integration` (13).
-- **F8 — Hardening + runbook.** `test:fiscal-hardening` codifica RN-FISCAL-1..10 como
-  regressão + runbook `docs/runbook/fiscal-reforma-operacao.md`.
-- **UI:** perfil fiscal (owner/admin) + painel de curadoria de alíquotas (master).
+- **F8 — Hardening + runbook (EM PR; FECHA o backend).** `test:fiscal-hardening` (18) —
+  doc-of-record executável: (A) codifica RN-FISCAL-1..10 como regressão sobre os serviços reais
+  F1–F7 (nunca inventa · reviewedBy obrigatório · date-effective · honesto sem dado · base
+  GLOBAL sem org · não emite sem homologação · Simples default DAS · sem dupla contagem) + (B)
+  verifica fiação (rota montada, 8 testes wired, runbook/ADR presentes) + runbook
+  `docs/runbook/fiscal-reforma-operacao.md`.
+- **F8b (UI-only) — a fazer:** perfil fiscal (owner/admin) + painel de curadoria de alíquotas
+  (master) + breakdown/projeção na superfície.
 
 **Critério de sucesso:** com a base curada carregada da resolução oficial e o perfil da org
 preenchido, o ZapFlow **computa e mostra** CBS/IBS/IS corretos pela **data do fato gerador**,

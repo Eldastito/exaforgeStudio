@@ -111,4 +111,18 @@ router.post("/discovery/clinics/:orgId/request", requireProfessional, (req: Prof
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
+// F11.1 — o profissional ACEITA/RECUSA o convite de vínculo (mútuo consentimento).
+router.get("/invites", requireProfessional, (req: ProfReq, res: Response): any => {
+  try { res.json(ProfessionalSelfService.pendingInvites(req.professionalId!)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/invites/:relId/accept", requireProfessional, async (req: ProfReq, res: Response): Promise<any> => {
+  try { res.json(await ProfessionalSelfService.respondToInvite(req.professionalId!, String(req.params.relId), true)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+router.post("/invites/:relId/decline", requireProfessional, async (req: ProfReq, res: Response): Promise<any> => {
+  try { res.json(await ProfessionalSelfService.respondToInvite(req.professionalId!, String(req.params.relId), false, req.body?.reason)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
 export default router;

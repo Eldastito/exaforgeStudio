@@ -88,6 +88,8 @@ export function ProfessionalPortalPage() {
           <p className="mt-0.5 text-sm text-zinc-400">{prof.council} {prof.registrationNumber}{prof.specialties?.length ? ` · ${prof.specialties.join(', ')}` : ''}</p>
         </header>
 
+        <InvitesBanner api={api} />
+
         <nav className="flex gap-1.5 mb-5 border-b border-zinc-800">
           {([['agenda', 'Agenda', CalendarDays], ['finance', 'A receber', Wallet], ['availability', 'Disponibilidade', Clock], ['discover', 'Descobrir', Search]] as const).map(([k, label, Icon]) => (
             <button key={k} onClick={() => setTab(k)} className={`px-3 py-2 text-sm inline-flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${tab === k ? 'border-violet-500 text-violet-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
@@ -110,6 +112,36 @@ export function ProfessionalPortalPage() {
 }
 
 type Api = (path: string, init?: RequestInit) => Promise<any>;
+
+// ── Convites de vínculo pendentes (F11.1) — aceitar/recusar (mútuo consentimento) ──
+type Invite = { relationshipId: string; organizationId: string; clinicName: string | null; invitedAt: string | null };
+function InvitesBanner({ api }: { api: Api }) {
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const load = useCallback(async () => { try { const d = await api('/invites'); setInvites(Array.isArray(d) ? d : []); } catch { setInvites([]); } }, [api]);
+  useEffect(() => { load(); }, [load]);
+  const respond = async (relId: string, verb: 'accept' | 'decline') => {
+    if (verb === 'decline' && !window.confirm('Recusar este convite de vínculo?')) return;
+    setBusyId(relId);
+    try { await api(`/invites/${relId}/${verb}`, { method: 'POST', body: JSON.stringify({}) }); setInvites((v) => v.filter((x) => x.relationshipId !== relId)); }
+    catch { /* mantém na lista */ } finally { setBusyId(null); }
+  };
+  if (!invites.length) return null;
+  return (
+    <div className="mb-5 rounded-xl border border-violet-700/40 bg-violet-500/5 p-3 space-y-2">
+      <div className="text-sm font-semibold text-violet-200">Convites de vínculo ({invites.length})</div>
+      {invites.map((i) => (
+        <div key={i.relationshipId} className="flex items-center justify-between gap-2">
+          <span className="text-sm text-zinc-300 inline-flex items-center gap-1.5"><Building2 className="w-4 h-4 text-zinc-500" /> {i.clinicName || 'Clínica'} quer te vincular</span>
+          <div className="flex gap-1.5 shrink-0">
+            <button disabled={busyId === i.relationshipId} onClick={() => respond(i.relationshipId, 'accept')} className="text-[11px] px-2 py-1 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white inline-flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Aceitar</button>
+            <button disabled={busyId === i.relationshipId} onClick={() => respond(i.relationshipId, 'decline')} className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-rose-600/80 text-zinc-300 hover:text-white inline-flex items-center gap-1"><XCircle className="w-3 h-3" /> Recusar</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function AgendaTab({ api }: { api: Api }) {
   const [appts, setAppts] = useState<Appt[] | null>(null);

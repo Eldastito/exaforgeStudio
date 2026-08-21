@@ -10396,6 +10396,14 @@ const initDb = () => {
   try {
     try { db.exec(`ALTER TABLE organization_settings ADD COLUMN network_discoverable INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes de descoberta da clínica (ADR-180 F10.2)', e); }
+
+  // ── ADR-180 F11.1 — Aceite do vínculo PELO profissional (mútuo consentimento) ──
+  // professional_accepted_at: quando o PRÓPRIO profissional aceitou o vínculo pelo webapp
+  // (fecha o consentimento dos dois lados — RN-PN-11; antes só a clínica aceitava). Aditivo;
+  // legado/aceite-pela-clínica → null. Recusar não usa coluna: revoga (reusa revoke) + sinal.
+  try {
+    try { db.exec(`ALTER TABLE clinic_professional_relationships ADD COLUMN professional_accepted_at DATETIME`); } catch (e) { /* noop */ }
+  } catch (e) { console.error('[DB] Falha em ajustes de aceite do vínculo (ADR-180 F11.1)', e); }
 };
 
 initDb();

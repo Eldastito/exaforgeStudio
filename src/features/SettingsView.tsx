@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock, BarChart3 } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock, BarChart3, Landmark } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Button } from '@/src/components/ui/button';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -7,6 +7,7 @@ import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
 
 import { UsersSettingsView } from './UsersSettingsView';
+import { FiscalProfilePanel } from './settings/FiscalProfilePanel';
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState('empresa');
@@ -95,6 +96,9 @@ export function SettingsView() {
           </button>
           <button onClick={() => setActiveTab('radar')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'radar' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Crosshair className="w-4 h-4" /> Radar
+          </button>
+          <button onClick={() => setActiveTab('fiscal')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'fiscal' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
+            <Landmark className="w-4 h-4" /> Fiscal
           </button>
           <button onClick={() => setActiveTab('landing')} className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeTab === 'landing' ? 'bg-teal-500/10 text-teal-300 font-medium' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}>
             <Home className="w-4 h-4" /> Painel Padrão
@@ -227,6 +231,7 @@ export function SettingsView() {
           {activeTab === 'privacidade' && <LgpdPanel />}
           {activeTab === 'governanca' && <GovernancePanel />}
           {activeTab === 'radar' && <RadarSettingsPanel />}
+          {activeTab === 'fiscal' && <FiscalProfilePanel />}
           {activeTab === 'landing' && <DefaultLandingPanel />}
 
           {activeTab === 'usuarios' && (

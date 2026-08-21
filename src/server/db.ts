@@ -10427,6 +10427,36 @@ const initDb = () => {
     try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_municipality_ibge TEXT`); } catch (e) { /* noop */ }
     try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_municipality_name TEXT`); } catch (e) { /* noop */ }
   } catch (e) { console.error('[DB] Falha em ajustes do Perfil Fiscal (ADR-181 F1)', e); }
+
+  // ── ADR-181 F2 — Base de Referência Tributária CURADA (CBS/IBS/IS) ──
+  // GLOBAL (a lei é a mesma p/ todos — SEM organization_id), DATE-EFFECTIVE, escrita SÓ pelo
+  // admin master (molde labor_law_entries/ADR-178). NASCE VAZIA: o ZapFlow NUNCA inventa
+  // alíquota (RN-FISCAL-1) — o operador cura da fonte oficial quando a resolução sai. A alíquota
+  // efetiva vale pela DATA DO FATO GERADOR (RN-FISCAL-3): `effective_from`..`effective_to`
+  // (to NULL = em aberto). `applies_to` NULL = geral; valores como 'simples_das'/'mei' permitem
+  // o recorte por regime (MEI no DAS = 0,9% CBS + 0,1% IBS). `reviewed_by` obrigatório.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tax_reference_rates (
+        id TEXT PRIMARY KEY,
+        tribute TEXT NOT NULL,                             -- cbs | ibs | is
+        phase TEXT NOT NULL,                               -- rótulo da fase (ex.: teste_2026, cheia_2027)
+        rate_percent REAL NOT NULL,                        -- alíquota em % (0.9 = 0,9%)
+        applies_to TEXT,                                   -- NULL = geral; 'simples_das' | 'mei' | ...
+        effective_from TEXT NOT NULL,                      -- YYYY-MM-DD (início da vigência)
+        effective_to TEXT,                                 -- YYYY-MM-DD ou NULL (em aberto)
+        source TEXT,                                       -- origem oficial da curadoria
+        notes TEXT,
+        reviewed_by TEXT NOT NULL,                         -- QUEM curou/revisou (obrigatório)
+        status TEXT NOT NULL DEFAULT 'published',          -- published | archived
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_tax_reference_rates_lookup
+        ON tax_reference_rates (tribute, status, effective_from);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar tax_reference_rates (ADR-181 F2)', e); }
 };
 
 initDb();

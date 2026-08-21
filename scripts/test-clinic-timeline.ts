@@ -113,11 +113,16 @@ async function main() {
   const fakeSender = async () => ({ messages: [{ id: `wamid_${randomUUID().slice(0, 6)}` }] });
   await ClinicDocumentDeliveryService.send(A.orgId, "prescription", rx1.id, A.actorId, { sender: fakeSender });
 
-  // Consulta 2: futura, só agendada (sem prontuário ainda)
+  // Consulta 2: futura, só agendada (sem prontuário ainda). Data FUTURA relativa ao relógio
+  // real (~1 ano à frente): os addenda/notices usam CURRENT_TIMESTAMP real, então uma data
+  // fixa "de amanhã" deixaria de ser a mais recente assim que o relógio a ultrapassasse
+  // (era o bug que quebrava "primeiro item é o mais recente" quando a data rolava). As
+  // asserções abaixo são por id/janela, não pelo valor exato da data.
+  const apt2Start = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
   const apt2 = ClinicAgendaService.createAppointment(A.orgId, {
     contactId: A.patient,
     title: "Retorno",
-    scheduledStart: "2026-08-20T10:00:00-03:00",
+    scheduledStart: apt2Start,
     professionalId: draAna.id,
     durationMinutes: 30,
   }, A.actorId);

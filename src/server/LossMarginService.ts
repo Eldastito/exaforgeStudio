@@ -1,6 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
-import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
+import { PnlReconciliationService } from "./PnlReconciliationService.js";
 
 /**
  * Margem de Perda Aceitável (ADR-114) — indicador GLOBAL de perdas.
@@ -65,16 +65,14 @@ export class LossMarginService {
    * Faturamento do mês: vendas do core (orders) + do Comigo (comigo_orders) +,
    * quando a ponte Fechamento → Faturamento está ligada (opt-in), os fechamentos
    * diários de loja elegíveis (Operação da Rede).
+   *
+   * ADR-182 F2 — DELEGA ao read-model reconciliado (`PnlReconciliationService`), fonte ÚNICA
+   * dos segmentos de receita. O total é IDÊNTICO ao `a+b+c` legado (0-regressão provada em
+   * `test:pnl-reconciliation`); a diferença é que a decomposição por segmento e o `overlapRisk`
+   * (dobra possível quando core E loja têm receita) ficam rastreáveis por todos os consumidores.
    */
   static monthlyRevenue(orgId: string, period: string): number {
-    const a = (db.prepare(
-      "SELECT COALESCE(SUM(total_amount),0) s FROM orders WHERE organization_id = ? AND status IN ('pago','em_preparo','entregue','concluido') AND strftime('%Y-%m', created_at) = ?"
-    ).get(orgId, period) as any).s;
-    const b = (db.prepare(
-      "SELECT COALESCE(SUM(total),0) s FROM comigo_orders WHERE organization_id = ? AND status IN ('paid','done') AND strftime('%Y-%m', created_at) = ?"
-    ).get(orgId, period) as any).s;
-    const c = RetailRevenueBridgeService.isEnabled(orgId) ? RetailRevenueBridgeService.monthlyRevenue(orgId, period) : 0;
-    return round2(a + b + c);
+    return PnlReconciliationService.monthlyRevenueTotal(orgId, period);
   }
 
   static recordLoss(orgId: string, p: { driver: string; amount: number; period?: string; source?: string; isEstimate?: boolean; note?: string; createdBy?: string }) {

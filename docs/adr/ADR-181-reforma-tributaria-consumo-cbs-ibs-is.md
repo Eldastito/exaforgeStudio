@@ -1,7 +1,8 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
 **Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
-· **F3 EM PR** — Motor `ConsumptionTaxService`. Fatias seguintes fatia-por-PR.
+· **F3 MERGEADA (PR #1267)** · **F4 EM PR** — breakdown nos documentos. Fatias seguintes
+fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -174,8 +175,15 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   RN-FISCAL-1); `partial` sinaliza breakdown incompleto. IS só em item **seletivo** explícito
   (não presume). Rota owner/admin `POST /api/fiscal/compute` (dinheiro role-gated §73).
   `test:consumption-tax` (24).
-- **F4 — Wiring nos documentos.** Breakdown informativo no recibo/pedido, congelado no
-  snapshot. `test:fiscal-document-breakdown`.
+- **F4 — Wiring nos documentos (EM PR).** `FiscalDocumentBreakdownService` — camada fina/
+  reutilizável sobre o motor (F3) que produz um BLOCO serializável (`fiscal_breakdown_v1`, em
+  centavos) pronto pra CONGELAR no snapshot de qualquer documento + `renderLines` pro PDF.
+  Honesto: perfil incompleto → `applicable:false`; tributo sem alíquota → `unknownTributes`
+  (nunca R$ 0). Wired no `ClinicReceiptService.issue` (coluna aditiva
+  `clinical_receipts.fiscal_breakdown_snapshot`): o bloco congela junto do snapshot canônico
+  (convenção nº 3 — recurar alíquota depois NÃO muda o recibo emitido) + bloco informativo no
+  PDF. Best-effort (nunca bloqueia a emissão). `test:fiscal-document-breakdown` (17);
+  `test:clinic-receipt` segue 65/65.
 - **F5 — Advisor do Simples híbrido.** Comparação informativa DAS × regime regular (grounded,
   nunca decide/força — RN-FISCAL-9), grava a opção no perfil. `test:simples-hybrid-advisor`.
 - **F6 — Scaffold honesto de emissão** (`FiscalIssuanceService`, molde Sicredi/ADR-177):

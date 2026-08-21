@@ -263,6 +263,7 @@
     "test:fiscal-profile": "tsx scripts/test-fiscal-profile.ts",
     "test:tax-reference": "tsx scripts/test-tax-reference.ts",
     "test:consumption-tax": "tsx scripts/test-consumption-tax.ts",
+    "test:fiscal-document-breakdown": "tsx scripts/test-fiscal-document-breakdown.ts",
     "test:beauty-settings-toggle": "tsx scripts/test-beauty-settings-toggle.ts",
     "test:beauty-quickstart-pack": "tsx scripts/test-beauty-quickstart-pack.ts",
     "test:beauty-client-quickcreate": "tsx scripts/test-beauty-client-quickcreate.ts",

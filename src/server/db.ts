@@ -10457,6 +10457,12 @@ const initDb = () => {
         ON tax_reference_rates (tribute, status, effective_from);
     `);
   } catch (e) { console.error('[DB] Falha ao criar tax_reference_rates (ADR-181 F2)', e); }
+
+  // ── ADR-181 F4 — breakdown CBS/IBS/IS CONGELADO no snapshot do recibo ──
+  // fiscal_breakdown_snapshot: JSON do bloco (FiscalDocumentBreakdownService) gravado NO ISSUE
+  // (congela junto do resto do snapshot canônico — convenção nº 3; recurar alíquota depois NÃO
+  // muda o documento emitido). Aditivo; recibos legados/rascunho → null. Informativo (2026).
+  try { db.exec(`ALTER TABLE clinical_receipts ADD COLUMN fiscal_breakdown_snapshot TEXT`); } catch (e) { /* noop */ }
 };
 
 initDb();

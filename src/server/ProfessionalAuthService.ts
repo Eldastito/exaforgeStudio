@@ -35,7 +35,17 @@ function accessUrl(token: string): string { return `${APP_URL}/profissional/${to
 
 export interface ProfessionalSessionClaims { professionalId: string; scope: string; }
 
-export const deps: { randomToken: () => string } = { randomToken: () => randomBytes(32).toString("hex") };
+export const deps: {
+  randomToken: () => string;
+  /** Envio do magic-link (injetável nos testes). Best-effort/honesto; reusa o ÚNICO transporte da org. */
+  sendEmail: (orgId: string, to: string, subject: string, body: string) => Promise<{ sent: boolean; reason?: string }>;
+} = {
+  randomToken: () => randomBytes(32).toString("hex"),
+  sendEmail: async (orgId, to, subject, body) => {
+    const { FalaTuEmailService } = await import("./FalaTuEmailService.js");
+    return FalaTuEmailService.sendPlain(orgId, to, subject, body);
+  },
+};
 
 export class ProfessionalAuthService {
   /**
@@ -123,6 +133,40 @@ export class ProfessionalAuthService {
     const { professionalId, professionalName } = this.requireAcceptedRel(orgId, relationshipId);
     const { token, expiresAt } = this.generateToken(professionalId, { issuerOrgId: orgId, actorId });
     return { url: accessUrl(token), token, expiresAt, professionalName };
+  }
+
+  /**
+   * F11.3 — Emite E ENTREGA o magic-link ao e-mail da identidade GLOBAL do profissional,
+   * best-effort, pela clínica emissora (reusa o transporte da org — sem canal paralelo §184).
+   * A entrega NUNCA bloqueia a emissão: o token válido volta sempre; `delivery` conta o que
+   * aconteceu com HONESTIDADE (`no_destination` = profissional sem e-mail cadastrado;
+   * `no_channel` = a clínica não tem como enviar). O `token`/`url` seguem no retorno pra
+   * clínica compartilhar manualmente quando o envio automático não rolar. WhatsApp fica
+   * DEFERIDO (o profissional é identidade global, sem contato/consentimento por-org).
+   */
+  static async issueAndSend(orgId: string, relationshipId: string, actorId?: string): Promise<{ url: string; token: string; expiresAt: string; professionalName: string | null; delivery: { channel: "email"; to: string | null; sent: boolean; reason?: string } }> {
+    const issued = this.issueForRelationship(orgId, relationshipId, actorId);
+    const { professionalId } = this.requireAcceptedRel(orgId, relationshipId);
+    const to = String(ProfessionalService.getById(professionalId)?.email || "").trim() || null;
+    let delivery: { channel: "email"; to: string | null; sent: boolean; reason?: string };
+    if (!to) {
+      delivery = { channel: "email", to: null, sent: false, reason: "no_destination" };
+    } else {
+      const subject = "Seu acesso à Agenda Federada";
+      const body = [
+        `Olá${issued.professionalName ? `, ${issued.professionalName}` : ""}!`,
+        ``,
+        `Você recebeu acesso à sua agenda pela clínica. Abra o link abaixo pra ver seus horários, o que tem a receber e ajustar sua disponibilidade:`,
+        ``,
+        issued.url,
+        ``,
+        `O link é pessoal — não compartilhe. Ele expira em ${new Date(issued.expiresAt).toLocaleDateString("pt-BR")}.`,
+      ].join("\n");
+      const r = await deps.sendEmail(orgId, to, subject, body);
+      delivery = { channel: "email", to, sent: r.sent, reason: r.reason };
+    }
+    try { logAuthEvent(orgId, actorId || "system", professionalId, "PROF_AUTH_LINK_SENT", { channel: "email", sent: delivery.sent, reason: delivery.reason }); } catch { /* noop */ }
+    return { ...issued, delivery };
   }
 
   /** Status do link do profissional do vínculo (sem expor o token). Só vínculo da org. */

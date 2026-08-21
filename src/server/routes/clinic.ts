@@ -2455,10 +2455,16 @@ router.get("/professional-network/relationships/:id/access-link", requireRole("o
   try { res.json(ProfessionalAuthService.statusForRelationship(orgId, String(req.params.id))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
-router.post("/professional-network/relationships/:id/access-link", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/professional-network/relationships/:id/access-link", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = gatePN(req, res); if (!orgId) return;
-  try { res.json(ProfessionalAuthService.issueForRelationship(orgId, String(req.params.id), actor(req))); }
-  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+  // F11.3 — opt-in `send`: além de emitir, ENTREGA o link ao e-mail do profissional
+  // (best-effort/honesto). Sem `send`, mantém o comportamento antigo (só emite).
+  const send = req.body?.send === true || req.query?.send === "1";
+  try {
+    res.json(send
+      ? await ProfessionalAuthService.issueAndSend(orgId, String(req.params.id), actor(req))
+      : ProfessionalAuthService.issueForRelationship(orgId, String(req.params.id), actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 router.post("/professional-network/relationships/:id/access-link/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = gatePN(req, res); if (!orgId) return;

@@ -103,6 +103,27 @@ export class FalaTuEmailService {
     return null;
   }
 
+  /**
+   * Envio avulso, best-effort e HONESTO, reusando o ÚNICO transporte da org
+   * (Gmail da conexão ou remetente de plataforma) — sem canal paralelo (§184).
+   * Não lança pro caller: devolve `{ sent, reason }`. `no_channel` = a org não
+   * tem como enviar (config, não falha); `no_destination` = sem e-mail de destino.
+   * Usado por portas que precisam entregar um link avulso (ex.: magic-link do
+   * profissional, ADR-180 F11.3), não só o digest.
+   */
+  static async sendPlain(orgId: string, to: string, subject: string, body: string): Promise<{ sent: boolean; reason?: string }> {
+    const dest = String(to || "").trim();
+    if (!dest) return { sent: false, reason: "no_destination" };
+    const send = await this.resolveTransport(orgId);
+    if (!send) return { sent: false, reason: "no_channel" };
+    try {
+      await send(dest, subject, body);
+      return { sent: true };
+    } catch (e: any) {
+      return { sent: false, reason: `send_failed: ${String(e?.message || e).slice(0, 120)}` };
+    }
+  }
+
   /** Transporte 1: Gmail da conexão Google da org (molde da cobrança). */
   private static gmailTransport(orgId: string): EmailTransport {
     return async (to, subject, body) => {

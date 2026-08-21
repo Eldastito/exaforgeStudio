@@ -446,8 +446,20 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
   descoberta passa a casar por DISTÂNCIA (raio em km). Idempotente (não regeocoda quem já
   tem coords). `test:professional-geocode` (9) — passe preenche do cache (sem rede), raio
   50km exclui a clínica longe do mesmo estado, raio grande inclui de novo.
-- **F11.3 — Envio do magic-link (a fazer).** Entregar o link de acesso do profissional por
-  e-mail/WhatsApp (hoje a clínica copia e compartilha manual).
+- **F11.3 — Envio do magic-link (FECHADO).** A clínica pode ENTREGAR o link de acesso ao
+  e-mail da identidade GLOBAL do profissional, além de copiar/compartilhar manual.
+  `ProfessionalAuthService.issueAndSend(orgId, relId)` emite E entrega best-effort: reusa o
+  ÚNICO transporte de e-mail da org via `FalaTuEmailService.sendPlain` (Gmail da conexão ou
+  remetente de plataforma — sem canal paralelo §184), `deps.sendEmail` injetável nos testes.
+  A entrega NUNCA bloqueia a emissão — o `token`/`url` voltam sempre; `delivery { channel,
+  to, sent, reason }` é HONESTO (`no_destination` = profissional sem e-mail cadastrado;
+  `no_channel` = a clínica não tem canal; `send_failed` = erro do transporte). WhatsApp fica
+  DEFERIDO (o profissional é identidade global, sem contato/consentimento por-org — o modelo
+  de quiet-hours/consentimento é do contato da org, não cabe aqui). Rota: `POST
+  .../access-link` ganha opt-in `{ send: true }` (sem ele, só emite — 0-regressão); UI:
+  botão "Gerar e enviar" no `AccessLinkPanel` que reporta o resultado do envio.
+  `test:professional-access-link` estendido (17 checks — envia com URL no corpo, honesto sem
+  e-mail sem tentar enviar, honesto sem canal mas link segue utilizável).
 
 ## Reuso vs. novo (resumo)
 

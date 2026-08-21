@@ -56,6 +56,31 @@ async function main() {
   check("6.1 reemissão abre sessão de novo", AUTH.startSession(again.token).professional.id === pid);
   check("6.2 novo token ≠ antigo", again.token !== issued.token);
 
+  // 7. F11.3 — issueAndSend ENTREGA o link ao e-mail do profissional (best-effort, honesto).
+  const { deps } = await import("../src/server/ProfessionalAuthService.js");
+  const sent: { to: string; subject: string; body: string }[] = [];
+  deps.sendEmail = async (_org, to, subject, body) => { sent.push({ to, subject, body }); return { sent: true }; };
+
+  // 7a. Profissional COM e-mail → envia; o corpo carrega a URL e o token muda (0-regressão do emit).
+  db.prepare(`UPDATE professionals SET email = 'dra.vet@example.com' WHERE id = ?`).run(pid);
+  const s1 = await AUTH.issueAndSend(A, relA, "userA");
+  check("7.1 emitiu link válido junto do envio", AUTH.startSession(s1.token).professional.id === pid);
+  check("7.2 delivery marca enviado ao e-mail do profissional", s1.delivery.sent === true && s1.delivery.to === "dra.vet@example.com" && s1.delivery.channel === "email");
+  check("7.3 chamou o transporte 1x com a URL no corpo", sent.length === 1 && sent[0].to === "dra.vet@example.com" && sent[0].body.includes(s1.url));
+
+  // 7b. Profissional SEM e-mail → honesto (`no_destination`), NÃO chama o transporte, mas emite o token.
+  const pid2 = PRO.upsertIdentity({ name: "Dr. Sem Email", council: "CRMV-SP", registrationNumber: "77777" }, A).id;
+  const relC = REL.invite(A, { professionalId: pid2 }).id; REL.accept(A, relC);
+  const before = sent.length;
+  const s2 = await AUTH.issueAndSend(A, relC, "userA");
+  check("7.4 sem e-mail: honesto no_destination", s2.delivery.sent === false && s2.delivery.reason === "no_destination" && s2.delivery.to === null);
+  check("7.5 sem e-mail: não tenta enviar, mas emite token válido", sent.length === before && AUTH.startSession(s2.token).professional.id === pid2);
+
+  // 7c. Transporte falha (sem canal na org) → delivery honesto, token segue válido pra compartilhar manual.
+  deps.sendEmail = async () => ({ sent: false, reason: "no_channel" });
+  const s3 = await AUTH.issueAndSend(A, relA, "userA");
+  check("7.6 sem canal: delivery honesto, mas link continua utilizável", s3.delivery.sent === false && s3.delivery.reason === "no_channel" && AUTH.startSession(s3.token).professional.id === pid);
+
   const passed = results.filter((r) => r.ok).length;
   for (const r of results) if (!r.ok) console.log(`  ✗ ${r.name}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} professional-access-link: ${passed}/${results.length} checks`);

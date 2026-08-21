@@ -51,7 +51,7 @@ async function main() {
 
   // 2. hold → confirmBooking cria o agendamento federado.
   const h = BOOK.holdSlot(A, rel.id, { serviceId: svc, startISO: `${DATE}T09:00:00.000Z`, ttlMinutes: 1440, nowISO: NOW }, "userA");
-  const appt = BOOK.confirmBooking(A, { holdId: h.id, contactId: tutor, petId: pet, title: "Cirurgia no papagaio" }, "userA");
+  const appt = BOOK.confirmBooking(A, { holdId: h.id, contactId: tutor, petId: pet, title: "Cirurgia no papagaio", nowISO: NOW }, "userA");
   check("2.1 confirmBooking cria appointment confirmado", appt.status === "confirmed" && appt.scheduledStart === `${DATE}T09:00:00.000Z`);
   check("2.2 appointment amarrado ao vínculo da rede", appt.networkRelationshipId === rel.id && appt.slotHoldId === h.id);
   check("2.3 snapshot do nome do especialista (não é clinic_professional local)", appt.professionalName === "Dr. Aves");
@@ -61,7 +61,7 @@ async function main() {
   check("2.6 vaga agendada sai da disponibilidade", (await BOOK.getAvailability(A, rel.id, DATE, { serviceId: svc, nowISO: NOW })).every((s) => s.start !== `${DATE}T09:00:00.000Z`));
 
   // 3. Idempotência durável — 2ª confirmação do MESMO hold devolve o MESMO appointment.
-  const appt2 = BOOK.confirmBooking(A, { holdId: h.id, contactId: tutor, petId: pet }, "userA");
+  const appt2 = BOOK.confirmBooking(A, { holdId: h.id, contactId: tutor, petId: pet, nowISO: NOW }, "userA");
   check("3.1 confirmBooking idempotente (mesmo appointment)", appt2.id === appt.id);
   const count = db.prepare(`SELECT COUNT(*) n FROM appointments WHERE organization_id = ? AND slot_hold_id = ?`).get(A, h.id) as any;
   check("3.2 nunca 2 appointments para o mesmo hold", count.n === 1);

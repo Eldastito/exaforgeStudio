@@ -18,7 +18,7 @@
  * ATENDIDO (RN-PN-5): confirmar cria o agendamento; o comparecimento é outra etapa.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays, Link2, Copy } from 'lucide-react';
+import { Loader2, Plus, Trash2, UserPlus, CheckCircle2, XCircle, CalendarClock, Network, Clock, ListPlus, Bot, Wallet, TrendingUp, CalendarDays, Link2, Copy, Search } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -136,6 +136,70 @@ function ForecastPanel() {
   );
 }
 
+// ── Descoberta na rede (F10b, lado clínica) — achar especialistas + convidar ──
+type SpecialistMatch = { professionalId: string; name: string; council: string; registrationNumber: string; matchedSpecialties: string[]; baseCity: string | null; baseState: string | null; distanceKm: number | null };
+function ClinicDiscoveryPanel({ onInvited }: { onInvited: (relId: string | null) => void }) {
+  const [disc, setDisc] = useState<{ discoverable: boolean; soughtSpecialties: string[] } | null>(null);
+  const [matches, setMatches] = useState<SpecialistMatch[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    try { setDisc(await jread(`${NET}/discovery`)); } catch { setDisc(null); }
+  }, []);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const toggle = async () => {
+    if (!disc) return;
+    try { const d = await jread(`${NET}/discovery`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ discoverable: !disc.discoverable }) }); setDisc((s) => s ? { ...s, discoverable: d.discoverable } : s); }
+    catch (e: any) { toast.error(e?.message || 'Falha.'); }
+  };
+  const search = async () => {
+    setBusy(true);
+    try { const d = await jread(`${NET}/discovery/specialists`); setMatches(Array.isArray(d) ? d : []); }
+    catch (e: any) { toast.error(e?.message || 'Falha.'); setMatches([]); } finally { setBusy(false); }
+  };
+  const invite = async (pid: string) => {
+    try { const rel = await jread(`${NET}/discovery/specialists/${pid}/invite`, { method: 'POST' }); toast.success('Convite enviado (aguardando aceite).'); setMatches((m) => (m || []).filter((x) => x.professionalId !== pid)); onInvited(rel?.id ?? null); }
+    catch (e: any) { toast.error(e?.message || 'Falha ao convidar.'); }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
+      <div className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5"><Search className="w-4 h-4 text-cyan-400" /> Descobrir especialistas</div>
+      <label className="flex items-center gap-2 text-[11px] text-zinc-400 cursor-pointer">
+        <input type="checkbox" checked={!!disc?.discoverable} onChange={toggle} className="accent-cyan-500" />
+        Deixar minha clínica visível pra especialistas na rede
+      </label>
+      {disc?.soughtSpecialties?.length ? (
+        <div className="text-[11px] text-zinc-500">Você procura: <span className="text-zinc-300">{disc.soughtSpecialties.join(', ')}</span></div>
+      ) : (
+        <div className="text-[11px] text-zinc-600">Sua procura vem dos gaps de demanda (especialidade sem vaga). Sem gap, nada a buscar ainda.</div>
+      )}
+      <Button onClick={search} disabled={busy} className="bg-cyan-700 hover:bg-cyan-600 text-xs w-full justify-center">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />} Buscar na rede</Button>
+      {matches && (
+        matches.length === 0 ? (
+          <div className="text-[11px] text-zinc-600 text-center py-2">Nenhum especialista descobrível casa com a sua procura na região.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {matches.map((m) => (
+              <div key={m.professionalId} className="rounded border border-zinc-800 bg-zinc-950/50 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs text-zinc-200 truncate">{m.name}</div>
+                    <div className="text-[10px] text-zinc-500 truncate">{m.council} {m.registrationNumber}{m.baseState ? ` · ${m.baseCity ? m.baseCity + '/' : ''}${m.baseState}` : ''}{m.distanceKm != null ? ` · ${m.distanceKm} km` : ''}</div>
+                    <div className="text-[10px] text-cyan-300/80 truncate">{m.matchedSpecialties.join(', ')}</div>
+                  </div>
+                  <button onClick={() => invite(m.professionalId)} className="text-[11px] px-2 py-0.5 rounded bg-cyan-600/80 hover:bg-cyan-500 text-white shrink-0 inline-flex items-center gap-1"><UserPlus className="w-3 h-3" /> Convidar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // ── Gestor (rede ativa) ──
 function NetworkManager({ contacts, settings, onSettings }: { contacts: ContactLite[]; settings: { networkEnabled: boolean; autobookingEnabled: boolean }; onSettings: (s: any) => void }) {
   const [rels, setRels] = useState<Relationship[]>([]);
@@ -175,6 +239,7 @@ function NetworkManager({ contacts, settings, onSettings }: { contacts: ContactL
         <div className="space-y-3">
           <InvitePanel onInvited={(id) => { loadRels(); setSelId(id); }} />
           <RelationshipList rels={rels} loading={loading} selId={selId} onSelect={setSelId} onChanged={loadRels} />
+          <ClinicDiscoveryPanel onInvited={(id) => { loadRels(); if (id) setSelId(id); }} />
         </div>
         <div>
           {selected ? (

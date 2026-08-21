@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Stethoscope, Loader2, AlertTriangle, CalendarDays, Wallet, Clock, CheckCircle2, XCircle,
-  Building2, PawPrint, User, Plus, Trash2, Save,
+  Building2, PawPrint, User, Plus, Trash2, Save, Search,
 } from 'lucide-react';
 
 /**
@@ -41,7 +41,7 @@ export function ProfessionalPortalPage() {
   const [prof, setProf] = useState<Professional | null>(null);
   const [loading, setLoading] = useState(true);
   const [invalid, setInvalid] = useState(false);
-  const [tab, setTab] = useState<'agenda' | 'finance' | 'availability'>('agenda');
+  const [tab, setTab] = useState<'agenda' | 'finance' | 'availability' | 'discover'>('agenda');
 
   // Troca o magic-link por sessão.
   useEffect(() => {
@@ -89,7 +89,7 @@ export function ProfessionalPortalPage() {
         </header>
 
         <nav className="flex gap-1.5 mb-5 border-b border-zinc-800">
-          {([['agenda', 'Agenda', CalendarDays], ['finance', 'A receber', Wallet], ['availability', 'Disponibilidade', Clock]] as const).map(([k, label, Icon]) => (
+          {([['agenda', 'Agenda', CalendarDays], ['finance', 'A receber', Wallet], ['availability', 'Disponibilidade', Clock], ['discover', 'Descobrir', Search]] as const).map(([k, label, Icon]) => (
             <button key={k} onClick={() => setTab(k)} className={`px-3 py-2 text-sm inline-flex items-center gap-1.5 border-b-2 -mb-px transition-colors ${tab === k ? 'border-violet-500 text-violet-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
               <Icon className="w-4 h-4" /> {label}
             </button>
@@ -99,6 +99,7 @@ export function ProfessionalPortalPage() {
         {tab === 'agenda' && <AgendaTab api={api} />}
         {tab === 'finance' && <FinanceTab api={api} />}
         {tab === 'availability' && <AvailabilityTab api={api} />}
+        {tab === 'discover' && <DiscoverTab api={api} />}
 
         <footer className="mt-10 pt-5 border-t border-zinc-800 text-[11px] text-zinc-600">
           Seu acesso à agenda e aos repasses das clínicas onde você atende. As alterações valem só pra sua disponibilidade.
@@ -257,6 +258,81 @@ function ClinicWindows({ api, clinic }: { api: Api; clinic: ClinicLink }) {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Descobrir (F10b) — visibilidade + clínicas que procuram minha especialidade ──
+type ClinicMatch = { organizationId: string; businessName: string | null; city: string | null; state: string | null; matchedSpecialties: string[]; distanceKm: number | null };
+function DiscoverTab({ api }: { api: Api }) {
+  const [profile, setProfile] = useState<{ discoverable: boolean; baseCity: string | null; baseState: string | null; specialties: string[] } | null>(null);
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [clinics, setClinics] = useState<ClinicMatch[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [requested, setRequested] = useState<Record<string, boolean>>({});
+
+  const loadProfile = useCallback(async () => {
+    try { const p = await api('/discovery-profile'); setProfile(p); setCity(p.baseCity || ''); setState(p.baseState || ''); }
+    catch (e: any) { setErr(e?.message || 'Falha.'); }
+  }, [api]);
+  useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  const saveProfile = async (discoverable: boolean) => {
+    setBusy(true);
+    try { const p = await api('/discovery-profile', { method: 'PUT', body: JSON.stringify({ discoverable, baseCity: city.trim() || null, baseState: state.trim() || null }) }); setProfile(p); }
+    catch (e: any) { setErr(e?.message || 'Falha.'); } finally { setBusy(false); }
+  };
+  const search = async () => {
+    setBusy(true); setErr(null);
+    try { const d = await api('/discovery/clinics'); setClinics(Array.isArray(d) ? d : []); }
+    catch (e: any) { setErr(e?.message || 'Falha.'); setClinics([]); } finally { setBusy(false); }
+  };
+  const request = async (orgId: string) => {
+    try { await api(`/discovery/clinics/${orgId}/request`, { method: 'POST', body: JSON.stringify({}) }); setRequested((r) => ({ ...r, [orgId]: true })); }
+    catch (e: any) { setErr(e?.message || 'Falha.'); }
+  };
+
+  if (!profile) return err ? <ErrBox msg={err} /> : <Spin />;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-2">
+        <div className="text-sm font-semibold text-zinc-200">Minha visibilidade na rede</div>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <input type="checkbox" checked={profile.discoverable} onChange={(e) => saveProfile(e.target.checked)} disabled={busy} className="accent-violet-500" />
+          Deixar clínicas me encontrarem pela minha especialidade
+        </label>
+        <div className="flex items-end gap-2 text-xs">
+          <label className="flex flex-col gap-1"><span className="text-zinc-500">Cidade</span><input value={city} onChange={(e) => setCity(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm" /></label>
+          <label className="flex flex-col gap-1"><span className="text-zinc-500">UF</span><input value={state} onChange={(e) => setState(e.target.value)} maxLength={2} className="w-14 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-sm" /></label>
+          <button onClick={() => saveProfile(profile.discoverable)} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 inline-flex items-center gap-1"><Save className="w-3.5 h-3.5" /> Salvar região</button>
+        </div>
+        {profile.specialties?.length ? <div className="text-[11px] text-zinc-500">Suas especialidades: <span className="text-zinc-300">{profile.specialties.join(', ')}</span></div> : <div className="text-[11px] text-amber-400/80">Cadastre suas especialidades pra aparecer no match.</div>}
+      </div>
+
+      <button onClick={search} disabled={busy} className="w-full text-sm px-3 py-2 rounded bg-violet-600 hover:bg-violet-500 text-white inline-flex items-center justify-center gap-1.5">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} Clínicas que procuram minha especialidade</button>
+      {err && <ErrBox msg={err} />}
+      {clinics && (
+        clinics.length === 0 ? <Empty icon={Building2} msg="Nenhuma clínica descobrível procura sua especialidade na região." /> : (
+          <div className="space-y-2">
+            {clinics.map((c) => (
+              <div key={c.organizationId} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-zinc-100 inline-flex items-center gap-1.5"><Building2 className="w-4 h-4 text-zinc-500" /> {c.businessName || 'Clínica'}</h3>
+                  <div className="mt-1 text-[12px] text-zinc-400">{[c.city, c.state].filter(Boolean).join('/')}{c.distanceKm != null ? ` · ${c.distanceKm} km` : ''}</div>
+                  <div className="mt-0.5 text-[12px] text-violet-300/80">Procura: {c.matchedSpecialties.join(', ')}</div>
+                </div>
+                {requested[c.organizationId] ? (
+                  <span className="text-[11px] px-2 py-1 rounded bg-emerald-600/20 text-emerald-300 shrink-0">Interesse enviado</span>
+                ) : (
+                  <button onClick={() => request(c.organizationId)} className="text-[11px] px-2 py-1 rounded bg-violet-600/80 hover:bg-violet-500 text-white shrink-0">Tenho interesse</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

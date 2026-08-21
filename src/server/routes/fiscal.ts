@@ -7,6 +7,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole, requireMasterAdmin } from "../middleware/auth.js";
 import { FiscalProfileService, FISCAL_REGIMES } from "../FiscalProfileService.js";
 import { TaxReferenceService, TRIBUTES } from "../TaxReferenceService.js";
+import { ConsumptionTaxService } from "../ConsumptionTaxService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -38,6 +39,19 @@ router.put("/profile", requireRole("owner", "admin"), (req: AuthRequest, res): a
       municipalityName: b.municipalityName,
     }, actor(req));
     res.json({ profile, completeness: FiscalProfileService.completeness(orgId) });
+  } catch (e: any) { fail(res, e); }
+});
+
+// ── F3 — Motor de cálculo CBS/IBS/IS (owner/admin; valores de tributo = dinheiro §73) ──
+router.post("/compute", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(ConsumptionTaxService.compute(req.organizationId!, {
+      baseValue: Number(b.baseValue),
+      date: String(b.date || ""),
+      itemType: b.itemType,
+      selective: b.selective === true,
+    }));
   } catch (e: any) { fail(res, e); }
 });
 

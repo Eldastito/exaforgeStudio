@@ -1,7 +1,7 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
-**Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 EM PR** — Base de
-Referência Tributária curada. Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
+· **F3 EM PR** — Motor `ConsumptionTaxService`. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -165,9 +165,15 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   gerador** com precedência de recorte (específico > geral, vigência mais recente); **sem
   entrada → `null`** (RN-FISCAL-1, nunca inventa). Rotas master-only `/api/fiscal/reference/*`.
   `test:tax-reference` (27).
-- **F3 — Motor de cálculo `ConsumptionTaxService`.** `compute(orgId, {baseValue, date,
-  itemType})` → breakdown CBS/IBS/IS da fase vigente × perfil (Simples-DAS × regime regular);
-  determinístico; honesto sem base/perfil. `test:consumption-tax`.
+- **F3 — Motor de cálculo `ConsumptionTaxService` (EM PR).** `compute(orgId, {baseValue,
+  date, itemType, selective})` → breakdown CBS/IBS/IS da fase vigente (via `rateFor`) × perfil.
+  O regime decide recorte+modo+crédito: MEI→`mei`/DAS/sem-crédito, Simples→`simples_das`/DAS/
+  sem-crédito, híbrido & Presumido/Real→`geral`/por-fora/gera-crédito (LC 214 art. 47 §9).
+  Determinístico (aritmética pura). Honesto: sem regime → `profile_incomplete` (não calcula,
+  RN-FISCAL-4); tributo sem alíquota vigente → `unknown` (amount **null**, nunca 0 —
+  RN-FISCAL-1); `partial` sinaliza breakdown incompleto. IS só em item **seletivo** explícito
+  (não presume). Rota owner/admin `POST /api/fiscal/compute` (dinheiro role-gated §73).
+  `test:consumption-tax` (24).
 - **F4 — Wiring nos documentos.** Breakdown informativo no recibo/pedido, congelado no
   snapshot. `test:fiscal-document-breakdown`.
 - **F5 — Advisor do Simples híbrido.** Comparação informativa DAS × regime regular (grounded,

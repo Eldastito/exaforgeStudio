@@ -1,8 +1,8 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
 **Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 MERGEADA (PR #1266)**
-· **F3 MERGEADA (PR #1267)** · **F4 EM PR** — breakdown nos documentos. Fatias seguintes
-fatia-por-PR.
+· **F3 MERGEADA (PR #1267)** · **F4 MERGEADA (PR #1268)** · **F5 EM PR** — advisor Simples
+híbrido. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -184,8 +184,14 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   (convenção nº 3 — recurar alíquota depois NÃO muda o recibo emitido) + bloco informativo no
   PDF. Best-effort (nunca bloqueia a emissão). `test:fiscal-document-breakdown` (17);
   `test:clinic-receipt` segue 65/65.
-- **F5 — Advisor do Simples híbrido.** Comparação informativa DAS × regime regular (grounded,
-  nunca decide/força — RN-FISCAL-9), grava a opção no perfil. `test:simples-hybrid-advisor`.
+- **F5 — Advisor do Simples híbrido (EM PR).** `SimplesHybridAdvisorService.advise` — só pro
+  Simples (mei/presumido/real → `not_simples`); expõe os fatores ESTRUTURAIS dos dois caminhos
+  (DAS simples-sem-crédito × regime regular por-fora-com-crédito, LC 214 art. 47 §9), reflete a
+  escolha atual, aterra UM sinal real (`hasCreditableInputs` via `payables`) e é HONESTO sobre
+  o que NÃO sabe (`clientMixKnown:false` — mix PJ×consumidor). **NUNCA recomenda um lado nem
+  força** (RN-FISCAL-9); disclaimer cravado. `setChoice` só PERSISTE a decisão do dono (delega
+  ao `FiscalProfileService`; só Simples). Rotas owner/admin `GET /api/fiscal/simples-advisor` +
+  `POST /simples-advisor/choice`. `test:simples-hybrid-advisor` (17).
 - **F6 — Scaffold honesto de emissão** (`FiscalIssuanceService`, molde Sicredi/ADR-177):
   estado observável, `issue` LANÇA `fiscal_awaiting_homologation`. `test:fiscal-issuance-scaffold`.
 - **F7 — Integração DRE/financeiro** (quando efetivo): CBS/IBS como tributo na DRE gerencial,

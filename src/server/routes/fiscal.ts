@@ -8,6 +8,7 @@ import { AuthRequest, requireRole, requireMasterAdmin } from "../middleware/auth
 import { FiscalProfileService, FISCAL_REGIMES } from "../FiscalProfileService.js";
 import { TaxReferenceService, TRIBUTES } from "../TaxReferenceService.js";
 import { ConsumptionTaxService } from "../ConsumptionTaxService.js";
+import { SimplesHybridAdvisorService } from "../SimplesHybridAdvisorService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -53,6 +54,18 @@ router.post("/compute", requireRole("owner", "admin"), (req: AuthRequest, res): 
       selective: b.selective === true,
     }));
   } catch (e: any) { fail(res, e); }
+});
+
+// ── F5 — Advisor Simples híbrido (DAS × regime regular; informativo, nunca força) ──
+router.get("/simples-advisor", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(SimplesHybridAdvisorService.advise(req.organizationId!)); }
+  catch (e: any) { fail(res, e); }
+});
+
+/** Grava a ESCOLHA do dono (opt-in do regime regular). Só Simples. */
+router.post("/simples-advisor/choice", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(SimplesHybridAdvisorService.setChoice(req.organizationId!, req.body?.optIn === true, actor(req))); }
+  catch (e: any) { fail(res, e); }
 });
 
 // ── F2 — Base de Referência Tributária CURADA (master-only) ──

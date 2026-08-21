@@ -43,7 +43,10 @@ async function main() {
   const { ConfirmationEngine } = await import("../src/server/ConfirmationEngine.js");
   const { MessageProviderService } = await import("../src/server/MessageProviderService.js");
   const { AsaasService } = await import("../src/server/AsaasService.js");
+  const { PaymentService } = await import("../src/server/PaymentService.js");
+  const { EncryptionService } = await import("../src/server/EncryptionService.js");
   const { Scheduler } = await import("../src/server/Scheduler.js");
+  void AsaasService;
   // Side-effect: registra os 3 handlers concretos.
   await import("../src/server/RuntimeCommandHandlers.js");
 
@@ -54,15 +57,28 @@ async function main() {
     sentMessages.push({ channelId, to, text });
     return `msg_${randomUUID().slice(0, 8)}`;
   };
-  const createdPayments: Array<{ orgId: string; amount: number; description: string }> = [];
+  // ADR-183 F2/F3 — a cobrança de recebível vai pelo gateway POR-ORG (Mercado Pago), NUNCA pela
+  // chave ASAAS de plataforma. Stub do `fetch` do MP (criar POST + re-consultar GET). Se qualquer
+  // chamada bater no ASAAS, o teste falha (o `_req` NÃO deve mais ser usado).
+  const mpCalls: Array<{ method: string; url: string; body: any }> = [];
+  const mpPayments: Record<string, { ref: string; amount: number }> = {};
   let nextPaymentSeq = 1;
-  (AsaasService as any)._req = async (method: string, urlPath: string, body: any) => {
-    if (method === "POST" && urlPath === "/payments") {
-      const id = `pay_e2e_${nextPaymentSeq++}`;
-      createdPayments.push({ orgId: body?.__orgHint || "?", amount: Number(body?.value), description: String(body?.description || "") });
-      return { id, status: "PENDING", value: body?.value, dueDate: body?.dueDate };
+  (globalThis as any).fetch = async (url: string, init: any) => {
+    const method = String(init?.method || "GET").toUpperCase();
+    const u = String(url);
+    const body = init?.body ? JSON.parse(init.body) : null;
+    mpCalls.push({ method, url: u, body });
+    if (u.includes("api.mercadopago.com/v1/payments") && method === "POST") {
+      const id = `mp_e2e_${nextPaymentSeq++}`;
+      mpPayments[id] = { ref: body.external_reference, amount: Number(body.transaction_amount) };
+      return { ok: true, status: 201, json: async () => ({ id, status: "pending", external_reference: body.external_reference, point_of_interaction: { transaction_data: { qr_code: "QR", ticket_url: "http://t" } } }), text: async () => "" } as any;
     }
-    return null;
+    if (u.includes("api.mercadopago.com/v1/payments/") && method === "GET") {
+      const id = decodeURIComponent(u.split("/payments/")[1] || "");
+      const pay = mpPayments[id];
+      return { ok: true, status: 200, json: async () => ({ id, status: "approved", external_reference: pay?.ref || "", transaction_amount: pay?.amount ?? 0 }), text: async () => "" } as any;
+    }
+    return { ok: false, status: 404, json: async () => ({}), text: async () => "" } as any;
   };
   // orgByExternalIds retorna org da confirmação — pra teste, mockamos pra devolver a orgA:
   const orgAId = `org_${randomUUID().slice(0, 8)}`;
@@ -75,6 +91,15 @@ async function main() {
   // (o hook Runtime é chamado ANTES do return, mas só se orgId!=null). Solução:
   // gravamos external_customer_id + external_subscription_id + billing_status pra a orgA.
   db.prepare(`UPDATE organization_settings SET external_customer_id = 'cust_test_1', external_subscription_id = 'sub_test_1', billing_status = 'active' WHERE organization_id = ?`).run(orgAId);
+  // ADR-183 — orgA tem gateway POR-ORG (Mercado Pago) para cobrar o cliente dela (Eixo B).
+  db.prepare(`UPDATE organization_settings SET pay_enabled = 1, pay_provider = 'mercadopago', pay_gateway_token = ? WHERE organization_id = ?`).run(EncryptionService.encrypt("MP-TOKEN-ORG-A"), orgAId);
+  // Recebível em aberto que a cobrança PIX vai quitar (reference rcv:<id>).
+  const rcvId = `rcv_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO receivables (id, organization_id, description, amount, due_date, status) VALUES (?, ?, 'Fatura 4587', 4200, '2026-08-15', 'open')`).run(rcvId, orgAId);
+  // orgB também tem gateway próprio (isolamento cross-tenant no webhook).
+  db.prepare(`UPDATE organization_settings SET pay_enabled = 1, pay_provider = 'mercadopago', pay_gateway_token = ? WHERE organization_id = ?`).run(EncryptionService.encrypt("MP-TOKEN-ORG-B"), orgBId);
+  const rcvB = `rcv_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO receivables (id, organization_id, description, amount, due_date, status) VALUES (?, ?, 'b', 50, '2026-08-15', 'open')`).run(rcvB, orgBId);
 
   // Handler stub pra atender AlterdataFetch nesta suíte E2E (o Connector real
   // não roda em teste). O handler que a fatia registrou usa import dinâmico do
@@ -128,61 +153,52 @@ async function main() {
   try { await CommandExecutorService.execute(orgAId, a3); } catch { threw = true; }
   check("WhatsApp: sem channelId → recusa auditada", threw);
 
-  // ===== 4. AsaasPixCharge executa: cria payment + expect(asaas_payment_webhook) =====
+  // ===== 4. PixCharge executa pelo EIXO B (gateway por-org) + expect(gateway_payment_webhook) =====
   const a4 = mkApprovedAction(orgAId, {
     commandType: "asaas_pix_charge", expectedImpact: 4200,
-    payload: { customer: "cust_test_1", amount: 4200, description: "Fatura 4587", dueDate: "2026-08-15" },
+    payload: { receivableId: rcvId, contactId: "cust_test_1", amount: 4200, description: "Fatura 4587", dueDate: "2026-08-15" },
   });
   const r4 = await CommandExecutorService.execute(orgAId, a4);
   const paymentId = r4.result?.externalRef;
-  check("AsaasPix: execute cria payment e devolve externalRef", !!paymentId && paymentId.startsWith("pay_e2e_"));
-  check("AsaasPix: _req foi chamado com POST /payments", createdPayments.length === 1 && createdPayments[0].amount === 4200);
+  check("PixCharge: cria payment via gateway POR-ORG e devolve externalRef", !!paymentId && paymentId.startsWith("mp_e2e_"));
+  check("PixCharge: chamou o Mercado Pago (Eixo B), NUNCA o ASAAS", mpCalls.some((c) => c.method === "POST" && c.url.includes("mercadopago")) && !mpCalls.some((c) => c.url.includes("asaas")));
+  check("PixCharge: reference rcv:<id> + token do lojista", mpCalls[0].body.external_reference === `rcv:${rcvId}`);
   const conf4 = ConfirmationEngine.getForAction(orgAId, a4);
-  check("AsaasPix: cria action_confirmation pendente amarrada ao paymentId", conf4?.status === "pending" && conf4?.confirmation_method === "asaas_payment_webhook" && conf4?.external_ref === paymentId);
+  check("PixCharge: confirmação pendente método gateway_payment_webhook", conf4?.status === "pending" && conf4?.confirmation_method === "gateway_payment_webhook" && conf4?.external_ref === paymentId);
   const actionAfterExec = DecisionActionService.get(orgAId, a4);
-  check("AsaasPix: ação segue 'approved' após execute (aguardando webhook)", actionAfterExec.status === "approved" && !!actionAfterExec.executed_at);
+  check("PixCharge: ação segue 'approved' após execute (aguardando webhook)", actionAfterExec.status === "approved" && !!actionAfterExec.executed_at);
 
   // ===== 5. findByExternalRef retorna a confirmação viva =====
-  const found = ConfirmationEngine.findByExternalRef("asaas_payment_webhook", paymentId);
+  const found = ConfirmationEngine.findByExternalRef("gateway_payment_webhook", paymentId);
   check("findByExternalRef acha (org, confirmation) pela ref", found?.orgId === orgAId && found?.confirmation.action_id === a4);
-  check("findByExternalRef null quando ref não existe", ConfirmationEngine.findByExternalRef("asaas_payment_webhook", "nao_existe") === null);
+  check("findByExternalRef null quando ref não existe", ConfirmationEngine.findByExternalRef("gateway_payment_webhook", "nao_existe") === null);
 
-  // ===== 6. Webhook Asaas fecha a ação por notifyRuntimeConfirmation =====
-  // Mock getPayment pra devolver CONFIRMED.
-  (AsaasService as any).getPayment = async (id: string) => (id === paymentId ? { id, status: "CONFIRMED", value: 4200 } : null);
-  // Sem token configurado, handleWebhook passa (dev mode).
-  const w1 = await (AsaasService as any).handleWebhook({}, {
-    id: "evt_1", event: "PAYMENT_RECEIVED",
-    payment: { id: paymentId, status: "RECEIVED", value: 4200, subscription: "sub_test_1", customer: "cust_test_1", dueDate: "2026-08-15" },
-  });
-  check("webhook Asaas processa OK", w1.status === "ok");
-  // Espera um tick pra DecisionActionService.complete (import dinâmico do confirm).
+  // ===== 6. Webhook do gateway (MP) fecha a ação + dá baixa no recebível (F3) =====
+  const w1 = await PaymentService.syncMercadoPagoPayment(orgAId, paymentId);
+  check("webhook MP re-consulta e aprova", w1 === "approved");
   await new Promise((r) => setTimeout(r, 30));
   const closedAction = DecisionActionService.get(orgAId, a4);
   check("webhook fecha a ação (status='done')", closedAction.status === "done");
   check("webhook grava result_amount=4200", Number(closedAction.result_amount) === 4200);
   const closedConf = ConfirmationEngine.getForAction(orgAId, a4);
   check("webhook marca confirmação como 'confirmed' com evidência", closedConf?.status === "confirmed" && closedConf?.evidence?.paymentId === paymentId);
+  const rcvRow = db.prepare(`SELECT status FROM receivables WHERE id = ?`).get(rcvId) as any;
+  check("F3: recebível marcado 'received' (system-of-record)", rcvRow?.status === "received");
 
-  // ===== 7. Idempotência: webhook duplicado NÃO reabre =====
-  // Precisa usar novo eventId (o INSERT OR IGNORE dedupa por id de evento).
-  const w2 = await (AsaasService as any).handleWebhook({}, {
-    id: "evt_2_dup", event: "PAYMENT_RECEIVED",
-    payment: { id: paymentId, status: "RECEIVED", value: 4200, subscription: "sub_test_1", customer: "cust_test_1", dueDate: "2026-08-15" },
-  });
+  // ===== 7. Idempotência: re-sync do MESMO pagamento NÃO reabre =====
+  const w2 = await PaymentService.syncMercadoPagoPayment(orgAId, paymentId);
   await new Promise((r) => setTimeout(r, 30));
-  check("webhook duplicado (novo eventId) NÃO reabre ação", w2.status === "ok" && DecisionActionService.get(orgAId, a4).status === "done");
+  check("re-sync do webhook NÃO reabre ação", w2 === "approved" && DecisionActionService.get(orgAId, a4).status === "done");
 
   // ===== 8. Webhook com payment desconhecido (sem confirmação viva) é NO-OP =====
-  (AsaasService as any).getPayment = async (id: string) => ({ id, status: "CONFIRMED", value: 500 });
-  const w3 = await (AsaasService as any).handleWebhook({}, {
-    id: "evt_3", event: "PAYMENT_RECEIVED",
-    payment: { id: "pay_desconhecido_xyz", status: "RECEIVED", value: 500, subscription: "sub_test_1", customer: "cust_test_1" },
-  });
-  check("webhook com payment_id sem confirmação viva é NO-OP silencioso", w3.status === "ok");
+  mpPayments["mp_desconhecido"] = { ref: "rcv:nao_existe", amount: 500 };
+  const w3 = await PaymentService.syncMercadoPagoPayment(orgAId, "mp_desconhecido");
+  check("webhook com payment_id sem confirmação viva é NO-OP", w3 === "approved" && DecisionActionService.get(orgAId, a4).status === "done");
 
   // ===== 9. Scheduler.confirmationTimeoutPass fecha vencidas =====
-  const a9 = mkApprovedAction(orgAId, { commandType: "asaas_pix_charge", expectedImpact: 100, payload: { customer: "cust_test_1", amount: 100, description: "timeout test", confirmationDeadline: new Date(Date.now() - 60_000).toISOString() } });
+  const rcv9 = `rcv_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO receivables (id, organization_id, description, amount, due_date, status) VALUES (?, ?, 'timeout test', 100, '2026-08-15', 'open')`).run(rcv9, orgAId);
+  const a9 = mkApprovedAction(orgAId, { commandType: "asaas_pix_charge", expectedImpact: 100, payload: { receivableId: rcv9, contactId: "cust_test_1", amount: 100, description: "timeout test", confirmationDeadline: new Date(Date.now() - 60_000).toISOString() } });
   await CommandExecutorService.execute(orgAId, a9);
   const conf9before = ConfirmationEngine.getForAction(orgAId, a9);
   check("setup: confirmação criada com deadline vencido", conf9before?.status === "pending" && !!conf9before?.deadline_at);
@@ -217,10 +233,10 @@ async function main() {
   // ===== 14. Cross-tenant no webhook: confirmação da orgA não fecha se veio pra orgB =====
   // (o notifyRuntimeConfirmation resolve orgId da própria confirmação — impossível cross-fechar)
   // Verifica que sem external_ref na orgB, nada é fechado.
-  const bAction = mkApprovedAction(orgBId, { commandType: "asaas_pix_charge", expectedImpact: 50, payload: { customer: "cust_b", amount: 50, description: "b" } });
+  const bAction = mkApprovedAction(orgBId, { commandType: "asaas_pix_charge", expectedImpact: 50, payload: { receivableId: rcvB, contactId: "cust_b", amount: 50, description: "b" } });
   await CommandExecutorService.execute(orgBId, bAction);
   const bConf = ConfirmationEngine.getForAction(orgBId, bAction);
-  check("orgB tem confirmação viva separada da orgA", bConf?.status === "pending" && bConf?.external_ref?.startsWith("pay_e2e_"));
+  check("orgB tem confirmação viva separada da orgA", bConf?.status === "pending" && bConf?.external_ref?.startsWith("mp_e2e_"));
 
   // ===== Resultado =====
   console.log("\n=== ADR-152 Fatia 2.3 (handlers concretos + webhook Asaas + Scheduler) ===");

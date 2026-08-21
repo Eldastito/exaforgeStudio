@@ -423,6 +423,7 @@
     "test:retail-floor-replenishment": "tsx scripts/test-retail-floor-replenishment.ts",
     "test:sicredi-cobranca": "tsx scripts/test-sicredi-cobranca.ts",
     "test:charge-for-receivable": "tsx scripts/test-charge-for-receivable.ts",
+    "test:receivable-pix-routing": "tsx scripts/test-receivable-pix-routing.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

@@ -3,6 +3,7 @@ import { CashForecastService } from "./CashForecastService.js";
 import { ManagerialDreService } from "./ManagerialDreService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
+import { PnlCostReconciliationService } from "./PnlCostReconciliationService.js";
 
 /**
  * FinanceSnapshotAdapter (ADR-135, Enterprise Intelligence Kernel — Epic 1).
@@ -22,6 +23,7 @@ export class FinanceSnapshotAdapter {
       const sum = FinancialLedgerService.summary(orgId) as any;
       const fc = CashForecastService.forecast(orgId, { minCash: 0 }) as any;
       const dre = safe(() => ManagerialDreService.monthly(orgId, period) as any, null);
+      const cost = safe(() => PnlCostReconciliationService.monthlyCost(orgId, period) as any, null);
       const owner = safe(() => OwnerDrawService.summary(orgId, period) as any, null);
       const status = safe(() => (BusinessHealthService.status(orgId) as any)?.status, null);
       const L = dre?.linhas || {};
@@ -56,6 +58,19 @@ export class FinanceSnapshotAdapter {
           // receita das lojas — os dois NUNCA devem ser somados nem tratados como o mesmo número.
           scope: "core",
           scopeNote: "Receita líquida do DRE = canais core (pedidos + Comigo); exclui fechamentos de loja. Não somar com sales.receitaMes (all_channels).",
+          // ADR-184 F2 — COERÊNCIA DE CUSTO: a base do resultado é margem CORE − despesas
+          // ORG-WIDE; a confiança do CMV (cobertura de custo cadastrado) e o que o resultado
+          // IGNORA (perdas operacionais + custo de loja) ficam explícitos pro Diretor IA narrar
+          // sem fingir precisão. Deriva do read-model reconciliado; NÃO altera nenhuma linha.
+          costScope: cost ? cost.scope : null,
+          cmvCoverage: cost ? cost.segments?.cogs?.coverage ?? null : null,
+          unknownCostRisk: cost ? cost.unknownCostRisk : null,
+          excludedFromResultado: cost ? cost.excludedFromResultado : null,
+          costScopeNote: cost
+            ? "Base do resultado = margem dos canais core − despesas (payables) org-wide. " +
+              (cost.unknownCostRisk ? "A maioria da receita não tem custo cadastrado — o CMV está subestimado e a margem/lucro NÃO podem ser afirmados como fato. " : "") +
+              "Perdas operacionais e custos de loja NÃO estão nesta base (ver excludedFromResultado)."
+            : null,
         } : { available: false },
         retiradas: owner ? {
           mes: Number(owner.retiradas) || 0, proLaboreSugerido: Number(owner.proLaboreSugerido) || 0,

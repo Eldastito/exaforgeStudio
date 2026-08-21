@@ -451,6 +451,7 @@ export function AdminMasterView() {
       <RuntimePilotPanel />
 
       <LaborLawCurationPanel />
+      <TaxRateCurationPanel />
       <HelpCurationPanel />
 
       <AuditLogsPanel />
@@ -687,6 +688,106 @@ function LaborLawCurationPanel() {
                 <span>Revisado por: <span className="text-zinc-300">{e.reviewedBy}</span></span>
                 {e.citations?.length > 0 && <span>· {e.citations.map((c: any) => c.norma || c.ref || JSON.stringify(c)).join(', ')}</span>}
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ADR-181 F8b — Curadoria da Base de Referência Tributária (CBS/IBS/IS). A base é GLOBAL e
+ * nasce VAZIA; sem alíquota curada, o motor fiscal não calcula nada (RN-FISCAL-1). Aqui o
+ * master publica as alíquotas oficiais (fixadas por resolução) com vigência date-effective e
+ * `reviewed_by` obrigatório — na virada de fase, é só curar uma nova vigência (sem tocar código).
+ */
+function TaxRateCurationPanel() {
+  const [rates, setRates] = useState<any[]>([]);
+  const [status, setStatus] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ tribute: 'cbs', phase: '', ratePercent: '', appliesTo: '', effectiveFrom: '', effectiveTo: '', reviewedBy: '', source: '' });
+
+  const load = async () => {
+    try {
+      const [r, s] = await Promise.all([
+        apiFetch('/api/fiscal/reference/rates?includeArchived=1').then((x) => (x.ok ? x.json() : { rates: [] })),
+        apiFetch('/api/fiscal/reference/status').then((x) => (x.ok ? x.json() : null)),
+      ]);
+      setRates(Array.isArray(r?.rates) ? r.rates : []);
+      setStatus(s?.status || null);
+    } catch { /* noop */ }
+  };
+  useEffect(() => { load(); }, []);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const publish = async () => {
+    if (!form.phase.trim() || form.ratePercent === '' || !form.reviewedBy.trim() || !form.effectiveFrom.trim()) { toast.error('Fase, alíquota, "revisado por" e início de vigência são obrigatórios.'); return; }
+    setSaving(true);
+    try {
+      const body: any = {
+        tribute: form.tribute, phase: form.phase.trim(), ratePercent: Number(form.ratePercent), reviewedBy: form.reviewedBy.trim(),
+        effectiveFrom: form.effectiveFrom, effectiveTo: form.effectiveTo || undefined,
+        appliesTo: form.appliesTo.trim() || undefined, source: form.source.trim() || undefined,
+      };
+      const r = await apiFetch('/api/fiscal/reference/curate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao publicar');
+      toast.success('Alíquota publicada.');
+      setForm({ ...form, phase: '', ratePercent: '', appliesTo: '', effectiveFrom: '', effectiveTo: '', source: '' });
+      load();
+    } catch (e: any) { toast.error(e.message || 'Erro ao publicar'); }
+    finally { setSaving(false); }
+  };
+  const archive = async (id: string) => {
+    try { await apiFetch(`/api/fiscal/reference/rates/${id}/archive`, { method: 'POST' }); load(); }
+    catch { toast.error('Erro ao arquivar'); }
+  };
+
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-1"><DollarSign className="w-5 h-5 text-teal-400" /> Alíquotas da Reforma (CBS/IBS/IS)</h3>
+      <p className="text-xs text-zinc-500 mb-4">
+        Base GLOBAL de referência tributária (ADR-181). <strong className="text-zinc-300">Nasce vazia</strong> — sem alíquota curada, o motor fiscal não calcula (nunca inventa). Cada entrada exige vigência e quem revisou. Na virada de fase, publique uma nova vigência.
+        {status && <span className="ml-1">{status.empty ? 'Base vazia.' : `${status.total} alíquota(s) — CBS ${status.byTribute.cbs} · IBS ${status.byTribute.ibs} · IS ${status.byTribute.is}.`}</span>}
+      </p>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 mb-4 space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <select className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={form.tribute} onChange={(e) => set('tribute', e.target.value)}>
+            <option value="cbs">CBS</option><option value="ibs">IBS</option><option value="is">IS</option>
+          </select>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Alíquota % (ex.: 0.9)" value={form.ratePercent} onChange={(e) => set('ratePercent', e.target.value)} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Fase (ex.: teste_2026)" value={form.phase} onChange={(e) => set('phase', e.target.value)} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Recorte (geral | mei | simples_das)" value={form.appliesTo} onChange={(e) => set('appliesTo', e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <label className="text-[11px] text-zinc-500">Início<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={form.effectiveFrom} onChange={(e) => set('effectiveFrom', e.target.value)} /></label>
+          <label className="text-[11px] text-zinc-500">Fim (opcional)<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" value={form.effectiveTo} onChange={(e) => set('effectiveTo', e.target.value)} /></label>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 self-end" placeholder="Revisado por" value={form.reviewedBy} onChange={(e) => set('reviewedBy', e.target.value)} />
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 self-end" placeholder="Fonte (ex.: LC 214/2025)" value={form.source} onChange={(e) => set('source', e.target.value)} />
+        </div>
+        <div className="flex justify-end">
+          <button onClick={publish} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-50">
+            <Plus className="w-4 h-4" /> {saving ? 'Publicando…' : 'Publicar alíquota'}
+          </button>
+        </div>
+      </div>
+
+      {rates.length === 0 ? (
+        <p className="text-sm text-zinc-500">Nenhuma alíquota publicada — a base está vazia.</p>
+      ) : (
+        <div className="space-y-2">
+          {rates.map((r) => (
+            <div key={r.id} className={`rounded-xl border p-3 ${r.status === 'archived' ? 'border-zinc-800 bg-zinc-950/30 opacity-60' : 'border-zinc-800 bg-zinc-950/40'}`}>
+              <div className="flex items-center gap-2 flex-wrap text-sm">
+                <span className="rounded-full border border-zinc-700 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-300 uppercase">{r.tribute}</span>
+                <span className="font-medium text-zinc-100">{r.ratePercent}%</span>
+                <span className="text-zinc-400">{r.phase}{r.appliesTo ? ` · ${r.appliesTo}` : ''}</span>
+                <span className="text-[11px] text-zinc-500">vig. {r.effectiveFrom}{r.effectiveTo ? `..${r.effectiveTo}` : '..∞'}</span>
+                {r.status === 'archived' && <span className="text-[10px] text-zinc-600">arquivada</span>}
+                {r.status === 'published' && <button onClick={() => archive(r.id)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200"><Trash2 className="w-3 h-3" /> Arquivar</button>}
+              </div>
+              <div className="mt-1 text-[11px] text-zinc-500">Revisado por: <span className="text-zinc-300">{r.reviewedBy}</span>{r.source ? ` · ${r.source}` : ''}</div>
             </div>
           ))}
         </div>

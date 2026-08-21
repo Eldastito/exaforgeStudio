@@ -30,6 +30,7 @@ import PDFDocument from "pdfkit";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { LgpdService } from "./LgpdService.js";
+import { FiscalDocumentBreakdownService } from "./FiscalDocumentBreakdownService.js";
 import {
   verifyPin,
   drawSignatureBlock,
@@ -84,6 +85,8 @@ export interface Receipt {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Bloco CBS/IBS/IS congelado no issue (ADR-181 F4). Informativo; null em legado/rascunho. */
+  fiscalBreakdownSnapshot?: any | null;
 }
 
 function requireConsent(orgId: string, contactId: string) {
@@ -160,7 +163,14 @@ function hydrate(r: any): Receipt | null {
     createdBy: r.created_by ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    fiscalBreakdownSnapshot: parseFiscalBreakdown(r.fiscal_breakdown_snapshot),
   };
+}
+
+/** Bloco fiscal congelado (ADR-181 F4) — parse tolerante; legado/rascunho → null. */
+function parseFiscalBreakdown(raw: any): any | null {
+  if (!raw) return null;
+  try { return JSON.parse(String(raw)); } catch { return null; }
 }
 
 function normalizeAmountCents(input: any): number {
@@ -347,6 +357,15 @@ export class ClinicReceiptService {
       signedAt,
     }) : null;
 
+    // ADR-181 F4 — congela o breakdown CBS/IBS/IS junto do snapshot (convenção nº 3).
+    // Best-effort: NUNCA bloqueia a emissão do recibo (base/perfil incompletos → bloco honesto
+    // ou null). A data do fato gerador é a de emissão (hoje). Informativo (período de teste).
+    let fiscalBreakdownJson: string | null = null;
+    try {
+      const block = FiscalDocumentBreakdownService.build(orgId, { amountCents: before.amountCents, date: signedAt.slice(0, 10) });
+      fiscalBreakdownJson = JSON.stringify(block);
+    } catch { fiscalBreakdownJson = null; }
+
     db.prepare(
       `UPDATE clinical_receipts
          SET status = 'issued',
@@ -361,6 +380,7 @@ export class ClinicReceiptService {
              signed_with_pin = ?,
              signature_hash = ?,
              signature_timestamp = ?,
+             fiscal_breakdown_snapshot = ?,
              updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND organization_id = ?`
     ).run(
@@ -371,6 +391,7 @@ export class ClinicReceiptService {
       signedWithPin ? 1 : 0,
       signatureHash,
       signedWithPin ? signedAt : null,
+      fiscalBreakdownJson,
       id, orgId
     );
     logAuthEvent(orgId, actorId, before.contactId, "CLINIC_RECEIPT_ISSUED", {
@@ -453,6 +474,18 @@ export class ClinicReceiptService {
     const issuedIso = receipt.issuedAt || receipt.createdAt;
     doc.moveDown(0.8);
     doc.font("Helvetica").fontSize(11).text(`Data: ${longDateBR(issuedIso)}`, { align: "left" });
+
+    // ADR-181 F4 — bloco INFORMATIVO dos tributos da Reforma (só recibo emitido com breakdown
+    // congelado; nunca aparece se não houver bloco). Cinza, discreto — é informativo (2026).
+    const fiscalLines = receipt.status === "issued" && receipt.fiscalBreakdownSnapshot?.applicable
+      ? FiscalDocumentBreakdownService.renderLines(receipt.fiscalBreakdownSnapshot)
+      : null;
+    if (fiscalLines && fiscalLines.length) {
+      doc.moveDown(0.6);
+      doc.font("Helvetica").fontSize(8.5).fillColor("#6b7280");
+      for (const ln of fiscalLines) doc.text(ln, { align: "left" });
+      doc.fillColor("#111827");
+    }
 
     // Bloco de assinatura do profissional (papel)
     drawSignatureBlock(doc, receipt.professionalNameSnapshot, receipt.professionalCouncilSnapshot, receipt.professionalRegistrationSnapshot);

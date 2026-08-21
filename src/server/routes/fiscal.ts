@@ -10,6 +10,7 @@ import { TaxReferenceService, TRIBUTES } from "../TaxReferenceService.js";
 import { ConsumptionTaxService } from "../ConsumptionTaxService.js";
 import { SimplesHybridAdvisorService } from "../SimplesHybridAdvisorService.js";
 import { FiscalIssuanceService } from "../FiscalIssuanceService.js";
+import { FiscalDreProjectionService } from "../FiscalDreProjectionService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -67,6 +68,14 @@ router.get("/simples-advisor", requireRole("owner", "admin"), (req: AuthRequest,
 router.post("/simples-advisor/choice", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(SimplesHybridAdvisorService.setChoice(req.organizationId!, req.body?.optIn === true, actor(req))); }
   catch (e: any) { fail(res, e); }
+});
+
+// ── F7 — Projeção CBS/IBS na DRE gerencial (owner/admin; read-only, sem dupla contagem) ──
+router.get("/dre-projection", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const period = req.query.period ? String(req.query.period) : undefined;
+    res.json(FiscalDreProjectionService.project(req.organizationId!, period));
+  } catch (e: any) { fail(res, e); }
 });
 
 // ── F6 — Emissão fiscal NFS-e/NFC-e (scaffold honesto; owner/admin; segredos nunca voltam) ──

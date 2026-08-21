@@ -1,7 +1,7 @@
 # ADR-184 — Reconciliação do lado de CUSTO/DESPESA do P&L (resultado coerente e honesto)
 
-**Estado:** **F0 MERGEADA (PR #1285)** · **F1 EM PR** — `PnlCostReconciliationService.monthlyCost`.
-Plano F0–F5.
+**Estado:** **F0 MERGEADA (PR #1285)** · **F1 MERGEADA (PR #1286)** · **F2 EM PR** — coerência de
+custo no snapshot executivo. Plano F0–F5.
 **Data:** 2026-08-21.
 **Contexto:** companion do ADR-182 (que reconciliou os rails de RECEITA). Aditivo sobre ADR-128
 (DRE gerencial `ManagerialDreService`), ADR-114 (`LossMarginService`/`loss_events`), ADR-125
@@ -123,10 +123,13 @@ por loja/canal (sem dimensão — impossível hoje, honesto); inventar `avg_cost
   do DRE = `cogs + operatingExpenses` (perdas/loja SEPARADAS, não somadas — RN-PNL-C-1/3);
   `excludedFromResultado` torna explícito o que o resultado do DRE ignora.
   `test:pnl-cost-reconciliation` (24).
-- **F2 — Coerência de custo no snapshot executivo.** `FinanceSnapshotAdapter.dre` ganha
-  `costScope` + `costScopeNote` (margem core − payables org-wide; loja excluída dos dois lados) +
-  `cmvCoverage`/`unknownCostRisk` — pro Diretor IA narrar a base do resultado sem fingir precisão.
-  Valor 0-regressão. `test:pnl-cost-snapshot-coherence`.
+- **F2 — Coerência de custo no snapshot executivo (EM PR).** `FinanceSnapshotAdapter.dre` ganha
+  `costScope` + `costScopeNote` (base do resultado = margem core − payables org-wide; perdas e
+  loja fora) + `cmvCoverage` + `unknownCostRisk` + `excludedFromResultado` — derivados do read-model
+  da F1 pro Diretor IA narrar a base do resultado sem fingir precisão (quando `unknownCostRisk`, a
+  nota diz que margem/lucro NÃO são fato). **0-regressão**: só ADICIONA campos; as linhas do DRE e
+  o `scope`/`scopeNote` de receita (ADR-182 F3) ficam intactos. `test:pnl-cost-snapshot-coherence`
+  (12); `test:pnl-snapshot-coherence`/`test:business-health` sem regressão.
 - **F3 — Perdas operacionais na foto de custo.** Superfície das perdas puras (merma/quebra/furto/
   calote/divergencia) que o resultado do DRE ignora hoje — como decomposição (RN-PNL-C-5), sem
   mudar o resultado. `test:pnl-operational-losses`.

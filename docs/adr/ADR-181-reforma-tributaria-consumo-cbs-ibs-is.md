@@ -1,6 +1,7 @@
 # ADR-181 — Prontidão para a Reforma Tributária do Consumo (CBS / IBS / IS)
 
-**Estado:** **F0 MERGEADA (PR #1264)** · **F1 EM PR** — Perfil Fiscal da org. Fatias seguintes fatia-por-PR.
+**Estado:** **F0 MERGEADA (PR #1264)** · **F1 MERGEADA (PR #1265)** · **F2 EM PR** — Base de
+Referência Tributária curada. Fatias seguintes fatia-por-PR.
 **Data:** 2026-08-21.
 **Contexto legal:** EC 132/2023 + **LC 214/2025** (regulamentação). Substitui a ADR-nada
 (fiscal era **greenfield** — ver auditoria abaixo). Aditivo/reversível, opt-in por org.
@@ -155,10 +156,15 @@ tributário automático B2B; imposto sobre importação. Ficam como tracks futur
   derivado RN-004). Nada presumido (regime null sem declarar — RN-FISCAL-4); híbrido só liga
   no Simples (RN-FISCAL-9); CNPJ reflete `comigo_cnpj` (fonte única); UF reflete
   `address_state`. Rotas owner/admin `GET/PUT /api/fiscal/profile`. `test:fiscal-profile` (23).
-- **F2 — Base de Referência Tributária curada.** `tax_reference_rates` GLOBAL date-effective
-  (tributo, fase, alíquota, vigência, fonte, `reviewed_by`), **nasce vazia**, curadoria
-  master-only (molde ADR-178). `TaxReferenceService.rateFor(tributo, date)`. Sem vigência →
-  `no_rate_for_period`. `test:tax-reference`.
+- **F2 — Base de Referência Tributária curada (EM PR).** Tabela GLOBAL `tax_reference_rates`
+  (sem `organization_id`) date-effective — tributo (cbs/ibs/is), fase, alíquota, `applies_to`
+  (null=geral | mei | simples_das…), vigência `effective_from`..`effective_to`, fonte,
+  `reviewed_by` obrigatório, status published/archived. **NASCE VAZIA** (molde ADR-178);
+  curadoria master-only. `TaxReferenceService.curate`/`list`/`archive`/`status` +
+  `rateFor(tributo, date, {appliesTo})` — retorna a alíquota vigente **na data do fato
+  gerador** com precedência de recorte (específico > geral, vigência mais recente); **sem
+  entrada → `null`** (RN-FISCAL-1, nunca inventa). Rotas master-only `/api/fiscal/reference/*`.
+  `test:tax-reference` (27).
 - **F3 — Motor de cálculo `ConsumptionTaxService`.** `compute(orgId, {baseValue, date,
   itemType})` → breakdown CBS/IBS/IS da fase vigente × perfil (Simples-DAS × regime regular);
   determinístico; honesto sem base/perfil. `test:consumption-tax`.

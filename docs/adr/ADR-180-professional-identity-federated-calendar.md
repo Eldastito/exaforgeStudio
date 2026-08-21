@@ -10,9 +10,11 @@
   autoatendimento do profissional, COM escrita) FECHADO** (F7.1 auth passwordless + leitura
   #1247 · F7.2 magic-link emitido pela clínica #1248 · F7.3 escrita da disponibilidade #1249 ·
   F7.4 aceita/recusa #1250 · F7b página `/profissional/:token` #1251)**.** **Agora F9 — inteligência de demanda:
-  F9.1/F9.2 núcleo FECHADO (read-model #1252 + gap proativo #1253).** **Agora F10 —
-  rede/marketplace (descoberta cross-org): F10.0 (auditoria + design da fronteira de
-  privacidade, doc-only, EM PR).** Como F1–F3, cada
+  F9.1/F9.2 núcleo FECHADO (read-model #1252 + gap proativo #1253).** **F10 (rede/marketplace —
+  descoberta cross-org) FECHADO** (F10.0 design #1254 · F10.1 prof descobrível #1255 · F10.2
+  clínica descobrível #1256 · F10.3 descoberta bidirecional #1257 · F10.4 descoberta→convite
+  #1258 · F10b UI dos 2 lados, EM PR)**.** **ADR-180 completo — nenhuma fatia diferida
+  restante.** Como F1–F3, cada
   backend fecha primeiro com teste como contrato e a UI vem como fatia fina.
 - **Data:** 2026-08-20
 - **Contexto de origem:** dor real do cliente petshop/clínica veterinária — especialistas
@@ -415,7 +417,13 @@ especialista da rede sem contato manual, respeitando a disponibilidade real dele
     público (RN-PN-10). Rotas `POST /discovery/specialists/:professionalId/invite` (owner/
     admin) + `POST /api/public/professional/discovery/clinics/:orgId/request` (sessão).
     `test:professional-discovery-connect` (11).
-  - **F10b — UI dos dois lados** (aba "Rede" p/ a clínica; webapp do profissional p/ ele).
+  - **F10b — UI dos dois lados (EM PR). FECHA o F10.** Clínica: `ClinicDiscoveryPanel` na
+    aba "Rede" (`ProfessionalNetworkPanel`) — toggle de visibilidade + "buscar na rede"
+    (lista os especialistas do match F10.3 com distância/região) + Convidar (F10.4 →
+    pending). Profissional: aba "Descobrir" no `ProfessionalPortalPage` — visibilidade +
+    região (`PUT /discovery-profile`) + "clínicas que procuram minha especialidade" (F10.3)
+    + "Tenho interesse" (F10.4 → sinal). UI-only sobre os endpoints testados F10.1–F10.4;
+    tsc + build (vite) verdes.
   Guardrails RN-PN-9..11 codificados como teste em cada fatia. Auditoria completa em
   `docs/professional-network/f10-discovery-audit.md`.
 

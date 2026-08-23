@@ -97,6 +97,27 @@ router.post("/payables/:id/pay", (req: AuthRequest, res): any => {
   res.json(out);
 });
 
+// PUT /api/cash/payables/:id/cost-center — apropria (ou desapropria com null) a conta a um centro
+// de custo (ADR-185 F1). Tag explícita; valida centro ativo. Body: { costCenterId: string|null }.
+router.put("/payables/:id/cost-center", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const cc = req.body?.costCenterId;
+  const out = FinancialLedgerService.setPayableCostCenter(orgId, req.params.id, cc == null ? null : String(cc));
+  if (!out.ok) return res.status(out.error === "not_found" ? 404 : 400).json(out);
+  res.json(out);
+});
+
+// GET /api/cash/expenses/by-cost-center — despesa (payables) por centro de custo no período
+// (competência do vencimento). `unallocated` sempre visível (ADR-185 F1).
+router.get("/expenses/by-cost-center", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const from = typeof req.query?.from === "string" ? req.query.from : undefined;
+  const to = typeof req.query?.to === "string" ? req.query.to : undefined;
+  res.json(FinancialLedgerService.expensesByCostCenter(orgId, { from, to }));
+});
+
 // POST /api/cash/receivables — cadastra conta a receber.
 router.post("/receivables", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -84,13 +84,61 @@ export class FinancialLedgerService {
   }
 
   // ── Contas a pagar ────────────────────────────────────────────────────────
-  static addPayable(orgId: string, input: { description: string; amount: number; dueDate: string; category?: string; supplierName?: string; recurrence?: string; createdBy?: string; sourcePurchaseOrderId?: string | null }) {
+
+  /** ADR-185 — centro de custo válido = existe, é da org e está ATIVO (RN-CC-2). */
+  private static isValidCostCenter(orgId: string, costCenterId: string): boolean {
+    return !!db.prepare("SELECT 1 FROM cost_centers WHERE id = ? AND organization_id = ? AND active = 1").get(costCenterId, orgId);
+  }
+
+  static addPayable(orgId: string, input: { description: string; amount: number; dueDate: string; category?: string; supplierName?: string; recurrence?: string; createdBy?: string; sourcePurchaseOrderId?: string | null; costCenterId?: string | null }) {
     if (!input.description || !isDate(input.dueDate) || !(round2(input.amount) > 0)) return { ok: false as const, error: "invalid_payable" };
+    // ADR-185 F1 — apropriação opcional a centro de custo; se informado, valida (RN-CC-2).
+    const costCenterId = input.costCenterId ? String(input.costCenterId) : null;
+    if (costCenterId && !this.isValidCostCenter(orgId, costCenterId)) return { ok: false as const, error: "invalid_cost_center" };
     const id = randomUUID();
     const rec = ["none", "weekly", "monthly"].includes(String(input.recurrence)) ? input.recurrence : "none";
-    db.prepare(`INSERT INTO payables (id, organization_id, description, category, supplier_name, amount, due_date, recurrence, status, created_by, source_purchase_order_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
-      .run(id, orgId, String(input.description).slice(0, 160), input.category || null, input.supplierName || null, round2(input.amount), input.dueDate, rec, input.createdBy || null, input.sourcePurchaseOrderId || null);
+    db.prepare(`INSERT INTO payables (id, organization_id, description, category, supplier_name, amount, due_date, recurrence, status, created_by, source_purchase_order_id, cost_center_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+      .run(id, orgId, String(input.description).slice(0, 160), input.category || null, input.supplierName || null, round2(input.amount), input.dueDate, rec, input.createdBy || null, input.sourcePurchaseOrderId || null, costCenterId);
     return { ok: true as const, id };
+  }
+
+  /**
+   * ADR-185 F1 — apropria (ou desapropria) uma conta a um centro de custo. Tag EXPLÍCITA do
+   * operador — nunca inventa (RN-CC-1); `null` desapropria. Valida centro ativo (RN-CC-2).
+   */
+  static setPayableCostCenter(orgId: string, payableId: string, costCenterId: string | null): { ok: boolean; error?: string } {
+    const p = db.prepare("SELECT id FROM payables WHERE id = ? AND organization_id = ?").get(payableId, orgId) as any;
+    if (!p) return { ok: false, error: "not_found" };
+    const ccId = costCenterId ? String(costCenterId) : null;
+    if (ccId && !this.isValidCostCenter(orgId, ccId)) return { ok: false, error: "invalid_cost_center" };
+    db.prepare("UPDATE payables SET cost_center_id = ? WHERE id = ? AND organization_id = ?").run(ccId, payableId, orgId);
+    return { ok: true };
+  }
+
+  /**
+   * ADR-185 F1 — DESPESA (payables) por centro de custo, por competência do vencimento. Espelha
+   * `ConsumptionLedgerService.byCostCenter`. `unallocated` = despesa sem centro (SEMPRE visível —
+   * RN-CC-3, nunca esconde o que falta apropriar). Read-only/derivado (RN-004). R$ (não misturar
+   * com quantidade de consumo — RN-CC-4).
+   */
+  static expensesByCostCenter(orgId: string, opts: { from?: string; to?: string } = {}): { from: string; to: string; items: { costCenterId: string; name: string | null; total: number }[]; unallocated: number; total: number } {
+    const from = opts.from || `${new Date().toISOString().slice(0, 7)}-01`;
+    const to = opts.to || today();
+    const rows = db.prepare(`
+      SELECT p.cost_center_id AS ccId, cc.name AS name, COALESCE(SUM(p.amount), 0) AS total
+      FROM payables p
+      LEFT JOIN cost_centers cc ON cc.id = p.cost_center_id AND cc.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND p.status IN ('open','paid') AND p.due_date BETWEEN ? AND ?
+      GROUP BY p.cost_center_id`).all(orgId, from, to) as any[];
+    let unallocated = 0; const items: { costCenterId: string; name: string | null; total: number }[] = [];
+    for (const r of rows) {
+      const total = round2(r.total);
+      if (!r.ccId) { unallocated = total; continue; }
+      items.push({ costCenterId: r.ccId, name: r.name || null, total });
+    }
+    items.sort((a, b) => b.total - a.total);
+    const total = round2(items.reduce((a, i) => a + i.total, 0) + unallocated);
+    return { from, to, items, unallocated: round2(unallocated), total };
   }
 
   static listPayables(orgId: string, status = "open") {

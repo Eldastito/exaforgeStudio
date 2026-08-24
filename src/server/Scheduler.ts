@@ -896,6 +896,12 @@ export class Scheduler {
       import("./CostCenterExpenseSignalService.js").then((m) => m.CostCenterExpenseSignalService.pass())
         .catch((e) => console.error('[Scheduler] sinal de despesa não apropriada falhou', e));
     } catch (e) { console.error('[Scheduler] pass de despesa não apropriada falhou', e); }
+    // Resultado consolidado (ADR-186 F3): sinal advisory de dupla contagem de custo (payable↔loja).
+    // Só orgs com loja ativa; hipótese, nunca corrige sozinho. Best-effort.
+    try {
+      import("./ConsolidatedResultService.js").then((m) => m.ConsolidatedResultService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de dupla contagem falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de dupla contagem falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

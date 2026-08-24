@@ -1,7 +1,7 @@
 # ADR-186 — Resultado CONSOLIDADO (all-channels): o lucro real incluindo as lojas
 
-**Estado:** **F0 MERGEADA (PR #1296)** · **F1 MERGEADA (PR #1297)** · **F2 EM PR** — consolidado no
-snapshot executivo. Plano F0–F4.
+**Estado:** **F0 (#1296)** · **F1 (#1297)** · **F2 (#1298) MERGEADAS** · **F3 EM PR** — sinal
+advisory de dupla contagem. Falta só F4 (hardening + runbook). Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** capstone da reconciliação de P&L — fecha o **track futuro** do ADR-184 ("custo de loja
 folded no DRE"). Aditivo sobre ADR-128 (`ManagerialDreService`, DRE gerencial core-only), ADR-083
@@ -104,11 +104,14 @@ store-cost (sem chave — detecta e sinaliza, como o ADR-182 fez); ratear payabl
   all_channels rotulados). `partial`/`doubleCountRisk` propagados. Deriva por `safe()` (falha
   isolada não derruba o snapshot). `test:consolidated-snapshot` (10); `test:consolidated-result`/
   `test:pnl-cost-snapshot-coherence` sem regressão.
-- **F3 — Sinal advisory de dupla contagem.** `ConsolidatedResultService.publishDoubleCountSignal`
-  — quando o `doubleCountRisk` é material, publica `business_signals` (`consolidated_result/
-  double_count_risk`, `basis:hypothesis`, `impactAmount:null`, severity attention) pro dono conferir
-  se um custo de loja não está lançado 2×; nunca corrige sozinho. Self-healing; `pass()` no Scheduler
-  (só orgs com loja). `test:consolidated-double-count-signal`.
+- **F3 — Sinal advisory de dupla contagem (EM PR).** `ConsolidatedResultService.
+  publishDoubleCountSignal` — quando o `doubleCountRisk` existe (custo aparece como payable E como
+  custo fixo de loja), publica `business_signals` (`consolidated_result/double_count_risk`,
+  `basis:hypothesis`, `impactAmount:null`, severity attention) pro dono conferir se um custo de loja
+  não está lançado 2×; nunca corrige sozinho (zero `decision_action`). Self-healing (`resolveByDedupe`
+  quando some / `reopenByDedupe` quando recorre, respeita `dismissed` §65); dedupe por período.
+  `pass()` no Scheduler ao lado dos passes de P&L (só orgs com loja ativa).
+  `test:consolidated-double-count-signal` (10).
 - **F4 — Hardening + runbook (FECHA o ADR-186).** `test:consolidated-result-hardening` codifica
   RN-CR-1..7 + fiação + runbook `docs/runbook/resultado-consolidado-operacao.md`.
 

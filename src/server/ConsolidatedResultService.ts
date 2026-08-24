@@ -15,6 +15,7 @@
 import db from "./db.js";
 import { ManagerialDreService } from "./ManagerialDreService.js";
 import { RetailStoreCostService } from "./RetailStoreCostService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 function round2(n: number): number { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
 
@@ -86,6 +87,55 @@ export class ConsolidatedResultService {
       doubleCountCategories: categories,
       note: parts.join(" "),
     };
+  }
+
+  /**
+   * ADR-186 F3 — sinal ADVISORY de DUPLA CONTAGEM. Quando o `doubleCountRisk` do período existe
+   * (um custo — ex.: aluguel — aparece como payable E como custo fixo de loja → subtraído 2× no
+   * consolidado), publica um `business_signal` pro dono CONFERIR se não é o mesmo custo lançado
+   * duas vezes — nunca corrige sozinho (não há chave de prova). Hipótese (`basis:'hypothesis'`,
+   * `impactAmount:null`). Self-healing: risco some → `resolveByDedupe`; recorre → `reopenByDedupe`
+   * (respeita o `dismissed` humano §65). Dedupe por período. Best-effort. Espelha os demais publish.
+   */
+  static publishDoubleCountSignal(orgId: string, period: string): { published: boolean; resolved: boolean } {
+    const dedupeKey = `consolidated_double_count:${period}`;
+    let published = false, resolved = false;
+    try {
+      const r = this.monthly(orgId, period);
+      if (r.doubleCountRisk) {
+        BusinessSignalService.publish(orgId, {
+          domain: "consolidated_result",
+          signalType: "double_count_risk",
+          severity: "attention",
+          basis: "hypothesis",
+          confidence: 0.5,
+          impactAmount: null,             // nunca inventa dinheiro
+          sourceService: "ConsolidatedResultService",
+          evidence: {
+            period, categories: r.doubleCountCategories,
+            message: `O(s) custo(s) "${r.doubleCountCategories.join(", ")}" aparece(m) como conta a pagar E como custo fixo de loja. Se for o MESMO custo, ele está sendo contado duas vezes no lucro consolidado — confira.`,
+          },
+          dedupeKey,
+        });
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeKey); } catch { /* noop */ }
+        published = true;
+      } else {
+        try { const rr = BusinessSignalService.resolveByDedupe(orgId, dedupeKey); resolved = !!rr?.ok; } catch { /* noop */ }
+      }
+    } catch { /* best-effort */ }
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: só orgs com loja ativa (onde a dupla contagem payable↔store-cost é possível). */
+  static pass(): void {
+    let orgs: any[] = [];
+    const period = new Date().toISOString().slice(0, 7);
+    try { orgs = db.prepare(`SELECT DISTINCT organization_id FROM retail_stores WHERE active = 1`).all() as any[]; }
+    catch { return; }
+    for (const o of orgs) {
+      try { this.publishDoubleCountSignal(o.organization_id, period); }
+      catch (e) { console.error("[Consolidado] double-count pass falhou", o.organization_id, e); }
+    }
   }
 }
 

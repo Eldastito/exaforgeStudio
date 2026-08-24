@@ -91,6 +91,14 @@ export class BusinessGoalService {
     return Object.prototype.hasOwnProperty.call(this.METRICS, String(metric));
   }
 
+  /** Valor REAL do mês pra uma métrica conhecida (derivado por query, RN-004). null se desconhecida.
+   *  Público mínimo pra o Mission Layer (ADR-189 F6) comparar planned × actual — reusa, não duplica. */
+  static currentValue(orgId: string, metric: string): number | null {
+    const m = (this.METRICS as any)[String(metric)];
+    if (!m) return null;
+    try { return Math.round((m.derive(orgId)) * 100) / 100; } catch { return null; }
+  }
+
   // §14 — ciclo de vida + prioridade da meta rica. Vocabulário fechado; entrada
   // fora do conjunto é rejeitada (invariante de negócio, não inventa estado).
   private static readonly STATUSES = ["active", "achieved", "paused", "abandoned"] as const;

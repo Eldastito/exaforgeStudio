@@ -914,6 +914,12 @@ export class Scheduler {
       import("./ResultProjectionService.js").then((m) => m.ResultProjectionService.pass())
         .catch((e) => console.error('[Scheduler] sinal de projeção de resultado falhou', e));
     } catch (e) { console.error('[Scheduler] pass de projeção de resultado falhou', e); }
+    // Checkpoint de missões (ADR-189 F6): mission/at_risk quando a missão sai da trajetória. Só orgs
+    // com o Mission Layer ligado + missões em andamento com métrica/alvo/prazo. Advisory. Best-effort.
+    try {
+      import("./MissionCheckpointService.js").then((m) => m.MissionCheckpointService.pass())
+        .catch((e) => console.error('[Scheduler] checkpoint de missão falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de checkpoint de missão falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

@@ -1,6 +1,6 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **F0 #1311 · F1 #1312 · F2 #1313 · F3 #1314 · F4 #1315 MERGEADAS** · **F5 EM PR** — Mission Runtime. Plano F0–F12.
+**Estado:** **F0–F5 MERGEADAS (#1311–#1316)** · **F6 EM PR** — Checkpoint+Replan. Plano F0–F12.
 **Data:** 2026-08-24.
 **Natureza:** camada HORIZONTAL de orquestração de objetivos + simplificação de UX. **Não é expansão**
 do ZapFlow — é composição do que já existe. Convenções herdadas: isolamento multi-tenant, RN-004

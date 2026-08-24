@@ -1,7 +1,7 @@
 # ADR-187 — Prontidão Fiscal (Reforma Tributária): a camada de leitura pro operador
 
-**Estado:** **F0 MERGEADA (PR #1301)** · **F1 MERGEADA (PR #1302)** · **F2 EM PR** — sinal proativo
-de prontidão. Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1301)** · **F1 MERGEADA (PR #1302)** · **F2 MERGEADA (PR #1303)** ·
+**F3 EM PR** — card "Prontidão fiscal" no `FiscalProfilePanel`. Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** camada OPERADOR-FACING que faltava sobre a ADR-181 (FECHADA — motores CBS/IBS/IS +
 perfil fiscal + base curada + emissão-scaffold). A ADR-181 já cogitou um "aviso de perfil fiscal
@@ -86,9 +86,12 @@ mutar o DRE/cálculo (só leitura).
   (`resolveByDedupe` ao completar / `reopenByDedupe` ao recorrer, respeita `dismissed` §65); dedupe
   por org; NÃO sinaliza pendência de plataforma/Senado (não é do tenant). `pass()` no Scheduler só
   pras orgs FORMALIZADAS (com CNPJ). `test:fiscal-readiness-signal` (10).
-- **F3 — UI: card "Prontidão fiscal".** No `FiscalProfilePanel`, um card que mostra `readyPct` +
-  blockers/warnings + a linha do tempo (com o rótulo honesto "depende do Senado" em 2027).
-  UI-only sobre a rota F1; tsc+build verdes.
+- **F3 — UI: card "Prontidão fiscal" (EM PR).** No `FiscalProfilePanel`, um card que mostra
+  `readyPct` (barra + %) + o que "depende de você" (blockers/warnings, conta pro score) × "não
+  depende de você" (pendências de plataforma/Senado rotuladas, NÃO contam pro score) + a linha do
+  tempo factual da Reforma com o rótulo honesto "depende do Senado — ainda não definido" nas
+  entradas `defined:false` (2027). Consome `GET /api/fiscal/readiness` (F1) no `load()`; UI-only,
+  sem inventar número; tsc+build verdes.
 - **F4 — Hardening + runbook (FECHA o ADR-187).** `test:fiscal-readiness-hardening` codifica RN-FR-1..7
   + fiação + runbook `docs/runbook/prontidao-fiscal-operacao.md`.
 

@@ -4,7 +4,7 @@
  * backend diz (incompleto/aguardando alíquota), nunca inventa número.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { Landmark, Save, Loader2, Info, Calculator } from 'lucide-react';
+import { Landmark, Save, Loader2, Info, Calculator, ShieldCheck, Clock, Building2, Landmark as Gov } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 
@@ -20,6 +20,7 @@ const brl = (n: number | null | undefined) => n == null ? '—' : `R$ ${Number(n
 export function FiscalProfilePanel() {
   const [data, setData] = useState<any>(null);
   const [advice, setAdvice] = useState<any>(null);
+  const [readiness, setReadiness] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<any>({ regime: '', municipalityIbge: '', municipalityName: '', municipalRegistration: '', stateRegistration: '' });
   const [sim, setSim] = useState<{ base: string; date: string; result: any }>({ base: '1000', date: new Date().toISOString().slice(0, 10), result: null });
@@ -38,6 +39,8 @@ export function FiscalProfilePanel() {
       }
       const a = await apiFetch('/api/fiscal/simples-advisor');
       if (a.ok) setAdvice(await a.json());
+      const rd = await apiFetch('/api/fiscal/readiness');
+      if (rd.ok) setReadiness(await rd.json());
     } catch { /* noop */ }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -79,6 +82,78 @@ export function FiscalProfilePanel() {
         <h2 className="zf-page-title flex items-center gap-2"><Landmark className="w-5 h-5 text-teal-400" /> Perfil Fiscal — Reforma Tributária</h2>
         <p className="text-sm text-zinc-500 mt-1">Declare o regime e o município para o ZapFlow calcular CBS/IBS/IS pela data do fato gerador. Sem esses dados, o cálculo fica indisponível — o sistema nunca chuta.</p>
       </div>
+
+      {/* ADR-187 — Prontidão fiscal (o que depende de você × plataforma × Senado) */}
+      {readiness && (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-teal-400" /> Prontidão fiscal
+            </h3>
+            <span className="text-[11px] text-zinc-500">{readiness.currentPhase}</span>
+          </div>
+
+          {/* Score — só o que VOCÊ controla (RN-FR-4) */}
+          <div>
+            <div className="flex items-baseline justify-between mb-1">
+              <span className="text-[12px] text-zinc-400">Seu perfil fiscal</span>
+              <span className={`text-lg font-semibold ${readiness.readyPct >= 100 ? 'text-teal-300' : readiness.readyPct >= 50 ? 'text-amber-300' : 'text-red-300'}`}>{readiness.readyPct}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${readiness.readyPct >= 100 ? 'bg-teal-500' : readiness.readyPct >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${Math.max(0, Math.min(100, readiness.readyPct))}%` }} />
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-1.5">{readiness.note}</p>
+          </div>
+
+          {/* Depende de VOCÊ (conta pro score) */}
+          {(readiness.tenantBlockers?.length > 0 || readiness.tenantWarnings?.length > 0) && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="text-[12px] font-medium text-zinc-300 flex items-center gap-1.5 mb-1.5"><Building2 className="w-3.5 h-3.5 text-zinc-400" /> Depende de você</div>
+              <ul className="space-y-1">
+                {(readiness.tenantBlockers || []).map((b: string, i: number) => (
+                  <li key={`b${i}`} className="text-[12px] text-amber-200 flex items-start gap-1.5"><span className="text-amber-400 mt-0.5">•</span>{b}</li>
+                ))}
+                {(readiness.tenantWarnings || []).map((w: string, i: number) => (
+                  <li key={`w${i}`} className="text-[12px] text-zinc-400 flex items-start gap-1.5"><span className="text-zinc-500 mt-0.5">•</span>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* NÃO depende de você — rotulado com honestidade (RN-FR-1/4) */}
+          {(readiness.externalPending?.platform?.length > 0 || readiness.externalPending?.senate?.length > 0) && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="text-[12px] font-medium text-zinc-300 flex items-center gap-1.5 mb-1.5"><Gov className="w-3.5 h-3.5 text-zinc-400" /> Não depende de você <span className="text-[10px] text-zinc-600">(não conta pro seu score)</span></div>
+              <ul className="space-y-1">
+                {(readiness.externalPending?.platform || []).map((p: string, i: number) => (
+                  <li key={`p${i}`} className="text-[12px] text-zinc-400 flex items-start gap-1.5"><span className="text-[9px] text-sky-300/80 mt-0.5 rounded bg-sky-500/10 px-1 py-px shrink-0">plataforma</span>{p}</li>
+                ))}
+                {(readiness.externalPending?.senate || []).map((s: string, i: number) => (
+                  <li key={`s${i}`} className="text-[12px] text-zinc-400 flex items-start gap-1.5"><span className="text-[9px] text-violet-300/80 mt-0.5 rounded bg-violet-500/10 px-1 py-px shrink-0">Senado</span>{s}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Linha do tempo factual da Reforma */}
+          <div>
+            <div className="text-[12px] font-medium text-zinc-300 flex items-center gap-1.5 mb-2"><Clock className="w-3.5 h-3.5 text-zinc-400" /> Linha do tempo da Reforma</div>
+            <ol className="space-y-2">
+              {(readiness.timeline || []).map((t: any, i: number) => (
+                <li key={i} className="flex items-start gap-2.5">
+                  <span className={`text-[11px] font-semibold shrink-0 w-20 ${t.when.includes(String(new Date().getFullYear())) ? 'text-teal-300' : 'text-zinc-400'}`}>{t.when}</span>
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-zinc-400 leading-snug">{t.label}</p>
+                    {!t.defined && (
+                      <span className="inline-block mt-0.5 text-[10px] text-violet-300/90 rounded bg-violet-500/10 px-1.5 py-px">depende do Senado — ainda não definido</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      )}
 
       {/* Completeness */}
       {c && !c.complete && (

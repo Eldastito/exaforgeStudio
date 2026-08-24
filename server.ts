@@ -54,6 +54,7 @@ import healthCenterRoutes from "./src/server/routes/health.js";
 import { ProductionReadinessService } from "./src/server/ProductionReadinessService.js";
 import { HealthProbeService } from "./src/server/HealthProbeService.js";
 import dreRoutes from "./src/server/routes/dre.js";
+import missionsRoutes from "./src/server/routes/missions.js";
 import ownerRoutes from "./src/server/routes/owner.js";
 import aiGovernanceRoutes from "./src/server/routes/aiGovernance.js";
 import continuityRoutes from "./src/server/routes/continuity.js";
@@ -645,6 +646,7 @@ async function startServer() {
   protectedApi.use("/cash", cashRoutes);
   protectedApi.use("/health-center", healthCenterRoutes);
   protectedApi.use("/dre", dreRoutes);
+  protectedApi.use("/missions", missionsRoutes);
   protectedApi.use("/owner", ownerRoutes);
   protectedApi.use("/ai-governance", aiGovernanceRoutes);
   protectedApi.use("/continuity", continuityRoutes);

@@ -10489,6 +10489,48 @@ const initDb = () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_issuance_org ON fiscal_issuance_connections (organization_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar fiscal_issuance_connections (ADR-181 F6)', e); }
+
+  // ADR-189 F1 — Mission Contract (Mission OS). Uma MISSÃO é uma INICIATIVA de negócio
+  // limitada (estado final + prazo + critério), distinta do `business_goals` — que é
+  // SINGLETON por métrica (UNIQUE(org,metric)) e não comporta várias missões concorrentes.
+  // Por isso a Missão é uma ENTIDADE FINA PRÓPRIA que COMPÕE o registro de métricas do
+  // BusinessGoal pra medir (RN-MOL-1/2, correção de D1 do ADR-189 forçada pelo schema real):
+  // NÃO é uma linha de goal, e NÃO duplica o Goal (Goal = alvo permanente por métrica;
+  // Missão = iniciativa bounded que referencia opcionalmente uma métrica conhecida).
+  //   desired_state/baseline_state — texto do estado final × ponto de partida;
+  //   target_metric — métrica conhecida (BusinessGoalService.METRICS) OU null (missão qualitativa);
+  //   target_value/target_unit — alvo inline (o Mission carrega o próprio alvo, §7 do PRD);
+  //   autonomy_level — off|shadow|suggest|approval|autopilot (shadow-first, D6);
+  //   source — user|system_proposed|system_generated (§10);
+  //   mission_status — draft|planning|ready|running|at_risk|waiting_approval|blocked|achieved|failed|cancelled;
+  //   confidence — 0..1 (hipótese; null até haver evidência). Isolada por org; opt-in por flag.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS missions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        desired_state TEXT,
+        baseline_state TEXT,
+        target_metric TEXT,
+        target_value REAL,
+        target_unit TEXT,
+        deadline TEXT,
+        owner TEXT,
+        autonomy_level TEXT NOT NULL DEFAULT 'off',
+        source TEXT NOT NULL DEFAULT 'user',
+        mission_status TEXT NOT NULL DEFAULT 'draft',
+        confidence REAL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_missions_org_status ON missions (organization_id, mission_status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar missions (ADR-189 F1)', e); }
+  // Flag opt-in do Mission Layer (default 0 — 0-regressão; nada aparece até o dono ligar).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN mission_layer_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

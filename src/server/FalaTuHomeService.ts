@@ -31,12 +31,16 @@ import { FalaTuProactiveService } from "./FalaTuProactiveService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
+import { MissionService } from "./MissionService.js";
 
 function greetFor(hourSP: number): string {
   if (hourSP < 12) return "Bom dia";
   if (hourSP < 18) return "Boa tarde";
   return "Boa noite";
 }
+
+export interface MissionHomeItem { id: string; title: string; status: string; humanStatus: string }
+export interface MissionHomeBlock { inFlight: number; needsYou: number; atRisk: number; achievedRecently: number; line: string; items: MissionHomeItem[] }
 
 export class FalaTuHomeService {
   static home(orgId: string, user: any, opts: { now?: Date } = {}): {
@@ -50,6 +54,8 @@ export class FalaTuHomeService {
     attention: { decisionsNeedingYou: number; risksWatched: number; processesExecuting: number; hasCriticalException: boolean; todayLine: string };
     resolvedSinceYesterday: { count: number; valueRecovered: number | null; unit: "BRL" };
     goals: { total: number; offTrack: number; items: Array<{ metric: string; label: string; attainmentPct: number; paceStatus: string }> } | null;
+    // ── ADR-189 F7 (Mission OS) — bloco "Hoje" das missões, por EXCEÇÃO. null se a flag off (0-regressão) ──
+    missions: MissionHomeBlock | null;
     invisibleUxEnabled: boolean;
     generatedAt: string;
   } {
@@ -93,6 +99,7 @@ export class FalaTuHomeService {
       attention: { decisionsNeedingYou, risksWatched, processesExecuting, hasCriticalException, todayLine },
       resolvedSinceYesterday,
       goals,
+      missions: this.missionsBlock(orgId),
       invisibleUxEnabled: !!(inv && inv.e),
       generatedAt: new Date(now).toISOString(),
     };
@@ -114,6 +121,35 @@ export class FalaTuHomeService {
       valueRecovered = Math.round((Number(v?.v) || 0) * 100) / 100;
     }
     return { count, valueRecovered, unit: "BRL" };
+  }
+
+  /**
+   * ADR-189 F7 — bloco "Hoje" das missões, por EXCEÇÃO (§20/§22). null quando o Mission Layer está
+   * off (0-regressão). Compõe: em andamento / precisa de você (aprovação pendente) / em risco
+   * (sinal mission/at_risk aberto — derivado, RN-004) / concluídas na semana. `items` traz só as de
+   * EXCEÇÃO (aguardando você + em risco), até 3 — nunca um dashboard.
+   */
+  static missionsBlock(orgId: string): MissionHomeBlock | null {
+    if (!MissionService.isEnabled(orgId)) return null;
+    const byStatus = db.prepare(`SELECT mission_status s, COUNT(*) n FROM missions WHERE organization_id = ? GROUP BY mission_status`).all(orgId) as any[];
+    const count = (s: string) => Number(byStatus.find((r) => r.s === s)?.n || 0);
+    const inFlight = count("running") + count("waiting_approval");
+    const needsYou = count("waiting_approval");
+    const achievedRecently = Number((db.prepare(`SELECT COUNT(*) n FROM missions WHERE organization_id = ? AND mission_status = 'achieved' AND datetime(updated_at) >= datetime('now','-7 day')`).get(orgId) as any).n);
+    const atRisk = Number((db.prepare(`SELECT COUNT(*) n FROM business_signals WHERE organization_id = ? AND domain = 'mission' AND signal_type = 'at_risk' AND status = 'open'`).get(orgId) as any).n);
+
+    // Exceção primeiro: aguardando você + em risco (por sinal). Até 3.
+    const atRiskIds = (db.prepare(`SELECT DISTINCT json_extract(evidence_json,'$.missionId') mid FROM business_signals WHERE organization_id = ? AND domain='mission' AND signal_type='at_risk' AND status='open'`).all(orgId) as any[]).map((r) => r.mid).filter(Boolean);
+    const items: MissionHomeItem[] = [];
+    for (const m of MissionService.list(orgId, { status: "waiting_approval" })) { if (items.length < 3) items.push({ id: m.id, title: m.title, status: m.status, humanStatus: m.humanStatus }); }
+    for (const id of atRiskIds) { if (items.length >= 3) break; if (items.some((i) => i.id === id)) continue; const m = MissionService.get(orgId, id); if (m) items.push({ id: m.id, title: m.title, status: "at_risk", humanStatus: "⚠️ Em risco" }); }
+
+    const line = needsYou > 0 ? `${needsYou} ${needsYou > 1 ? "missões aguardando" : "missão aguardando"} você`
+      : atRisk > 0 ? `${atRisk} ${atRisk > 1 ? "missões em risco" : "missão em risco"}`
+      : inFlight > 0 ? `${inFlight} ${inFlight > 1 ? "missões em andamento" : "missão em andamento"}`
+      : "Nenhuma missão ativa.";
+
+    return { inFlight, needsYou, atRisk, achievedRecently, line, items };
   }
 
   /** Distância à meta (gestor) — reusa BusinessGoalService.progress; inerte sem metas. */

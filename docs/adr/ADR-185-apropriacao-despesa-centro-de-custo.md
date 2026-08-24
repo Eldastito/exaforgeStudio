@@ -1,6 +1,7 @@
 # ADR-185 — Apropriação de DESPESA a centro de custo (a dimensão de rateio que faltava)
 
-**Estado:** **F0 (ESTA, doc-only) EM PR.** Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1291)** · **F1 EM PR** — tag em `payables` + despesa por centro.
+Plano F0–F4.
 **Data:** 2026-08-22.
 **Contexto:** fecha o **track futuro** que a auditoria do ADR-184 apontou — "despesa org-wide **sem
 dimensão** de rateio". Aditivo sobre a **Controladoria (PRD-E)**: `cost_centers`+`CostCenterService`
@@ -63,13 +64,15 @@ DRE (o DRE gerencial segue org-wide; este é um corte GERENCIAL paralelo, 0-regr
 ## 5. Plano por fatias (fatia = 1 PR draft, com teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — TAG + relatório de despesa por centro.** `ALTER TABLE payables ADD COLUMN cost_center_id`
-  (nullable, aditive); `addPayable` aceita `costCenterId` (valida centro ativo da org — RN-CC-2) +
-  `setPayableCostCenter(orgId, payableId, costCenterId|null)` (apropria/desapropria, valida);
-  `FinancialLedgerService.expensesByCostCenter(orgId, {from,to})` → `{ items:[{costCenterId, name,
-  total}], unallocated, total }` (competência do vencimento, `unallocated` = payables sem centro,
-  RN-CC-3). Rota `GET /controler/expenses/by-cost-center` + `PUT /controler/payables/:id/cost-center`.
-  `test:cost-center-expense`.
+- **F1 — TAG + relatório de despesa por centro (EM PR).** `ALTER TABLE payables ADD COLUMN
+  cost_center_id` (nullable, aditive + índice); `addPayable` aceita `costCenterId` (valida centro
+  ATIVO da org — RN-CC-2) + `setPayableCostCenter(orgId, payableId, costCenterId|null)`
+  (apropria/desapropria, valida; `not_found`/`invalid_cost_center`);
+  `FinancialLedgerService.expensesByCostCenter(orgId, {from,to})` → `{ from, to, items:[{costCenterId,
+  name, total}] (desc), unallocated, total }` (competência do vencimento, `unallocated` = payables
+  sem centro SEMPRE visível — RN-CC-3, R$ nunca misturado com qtd de consumo — RN-CC-4). Rotas
+  `PUT /api/cash/payables/:id/cost-center` + `GET /api/cash/expenses/by-cost-center` (a rota de
+  criação já passa `costCenterId` pelo spread). `test:cost-center-expense` (19).
 - **F2 — Extrato do centro (consumo + despesa lado a lado).** `CostCenterStatementService.statement
   (orgId, costCenterId, {from,to})` COMPÕE despesa financeira (F1, R$) + consumo de material
   (`ConsumptionLedgerService.byCostCenter`, QTD) — SEM somar (RN-CC-4), cada um com sua unidade e

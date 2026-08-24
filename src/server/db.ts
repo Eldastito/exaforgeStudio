@@ -6480,6 +6480,11 @@ const initDb = () => {
   // manuais existentes.
   try { db.exec(`ALTER TABLE payables ADD COLUMN source_purchase_order_id TEXT`); } catch(e){}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_payables_po ON payables(organization_id, source_purchase_order_id) WHERE source_purchase_order_id IS NOT NULL`); } catch(e){}
+  // ADR-185 F1 — apropriação da DESPESA a um centro de custo (a dimensão de rateio que a
+  // Controladoria já tinha pro CONSUMO, mas não pra despesa financeira). Nullable/aditive: contas
+  // existentes ficam `unallocated` (RN-CC-1/3, nunca chuta centro). Índice p/ o relatório por centro.
+  try { db.exec(`ALTER TABLE payables ADD COLUMN cost_center_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_payables_cost_center ON payables(organization_id, cost_center_id)`); } catch(e){}
   // Conector Alterdata Fase 4 — 2º id de pessoa do caixa (investigação do
   // vendedor real; a tabela pode já existir sem a coluna).
   try { db.exec(`ALTER TABLE retail_pdv_sales ADD COLUMN usuario TEXT`); } catch(e){}

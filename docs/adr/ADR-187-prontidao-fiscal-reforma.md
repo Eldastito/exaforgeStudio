@@ -1,7 +1,7 @@
 # ADR-187 — Prontidão Fiscal (Reforma Tributária): a camada de leitura pro operador
 
-**Estado:** **F0 MERGEADA (PR #1301)** · **F1 EM PR** — `FiscalReadinessService.assess` + timeline.
-Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1301)** · **F1 MERGEADA (PR #1302)** · **F2 EM PR** — sinal proativo
+de prontidão. Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** camada OPERADOR-FACING que faltava sobre a ADR-181 (FECHADA — motores CBS/IBS/IS +
 perfil fiscal + base curada + emissão-scaffold). A ADR-181 já cogitou um "aviso de perfil fiscal
@@ -79,11 +79,13 @@ mutar o DRE/cálculo (só leitura).
   lei, com `defined:false`+`dependsOn:'senate'` na alíquota cheia de 2027 (RN-FR-1); `senate` pending
   SEMPRE (nunca gap do tenant); regime nunca presumido. Rota `GET /api/fiscal/readiness` (owner/admin).
   `test:fiscal-readiness` (15); `test:fiscal-profile`/`test:tax-reference` sem regressão.
-- **F2 — Sinal proativo de prontidão.** `FiscalReadinessService.publishReadinessSignal` — quando o
+- **F2 — Sinal proativo de prontidão (EM PR).** `FiscalReadinessService.publishReadinessSignal` — quando o
   tenant tem BLOCKER (perfil incompleto / regime não declarado), publica `business_signals`
   (`fiscal_readiness/incomplete`, `basis:hypothesis`, `impactAmount:null`, severity attention) pro
-  dono completar; nunca bloqueia nem decide (RN-FR-5, zero `decision_action`). Self-healing;
-  `pass()` no Scheduler. `test:fiscal-readiness-signal`.
+  dono completar; nunca bloqueia nem decide (RN-FR-5, zero `decision_action`). Self-healing
+  (`resolveByDedupe` ao completar / `reopenByDedupe` ao recorrer, respeita `dismissed` §65); dedupe
+  por org; NÃO sinaliza pendência de plataforma/Senado (não é do tenant). `pass()` no Scheduler só
+  pras orgs FORMALIZADAS (com CNPJ). `test:fiscal-readiness-signal` (10).
 - **F3 — UI: card "Prontidão fiscal".** No `FiscalProfilePanel`, um card que mostra `readyPct` +
   blockers/warnings + a linha do tempo (com o rótulo honesto "depende do Senado" em 2027).
   UI-only sobre a rota F1; tsc+build verdes.

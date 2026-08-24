@@ -902,6 +902,12 @@ export class Scheduler {
       import("./ConsolidatedResultService.js").then((m) => m.ConsolidatedResultService.pass())
         .catch((e) => console.error('[Scheduler] sinal de dupla contagem falhou', e));
     } catch (e) { console.error('[Scheduler] pass de dupla contagem falhou', e); }
+    // Prontidão fiscal (ADR-187 F2): nudge de perfil fiscal incompleto pra Reforma. Só orgs
+    // formalizadas (têm CNPJ); advisory, nunca decide regime. Best-effort.
+    try {
+      import("./FiscalReadinessService.js").then((m) => m.FiscalReadinessService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de prontidão fiscal falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de prontidão fiscal falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

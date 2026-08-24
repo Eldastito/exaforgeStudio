@@ -12,9 +12,11 @@
  * 3 (derivado/RN-004) · 4 (três origens separadas; só a do tenant conta pro score) · 5 (advisory) ·
  * 6 (isolado/determinístico/honesto) · 7 (reusa os motores ADR-181).
  */
+import db from "./db.js";
 import { FiscalProfileService } from "./FiscalProfileService.js";
 import { TaxReferenceService } from "./TaxReferenceService.js";
 import { FiscalIssuanceService } from "./FiscalIssuanceService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 const FIELD_LABEL: Record<string, string> = {
   cnpj: "CNPJ", regime: "Regime tributário", municipalityIbge: "Código IBGE do município", uf: "UF",
@@ -108,6 +110,54 @@ export class FiscalReadinessService {
       timeline: TIMELINE,
       note,
     };
+  }
+
+  /**
+   * ADR-187 F2 — sinal PROATIVO de prontidão. Quando o tenant tem BLOCKER (identidade fiscal
+   * incompleta — o que DEPENDE DELE), publica um `business_signal` pro dono completar o perfil
+   * antes da virada. Advisory: nunca bloqueia operação, nunca decide regime, nunca cria
+   * `decision_action` (RN-FR-5). Hipótese (`basis:'hypothesis'`, `impactAmount:null`). Self-healing:
+   * completou → `resolveByDedupe`; recorre → `reopenByDedupe` (respeita o `dismissed` humano §65).
+   * Dedupe por org. Best-effort. NÃO sinaliza pendência de plataforma/Senado (não é do tenant).
+   */
+  static publishReadinessSignal(orgId: string): { published: boolean; resolved: boolean } {
+    const dedupeKey = "fiscal_readiness:incomplete";
+    let published = false, resolved = false;
+    try {
+      const r = this.assess(orgId);
+      if (r.tenantBlockers.length > 0) {
+        BusinessSignalService.publish(orgId, {
+          domain: "fiscal_readiness",
+          signalType: "incomplete",
+          severity: "attention",
+          basis: "hypothesis",
+          confidence: 0.5,
+          impactAmount: null,            // nunca inventa dinheiro
+          sourceService: "FiscalReadinessService",
+          evidence: {
+            readyPct: r.readyPct, blockers: r.tenantBlockers,
+            message: `Seu perfil fiscal está ${r.readyPct}% completo. Falta: ${r.tenantBlockers.join("; ")}. Complete pra ficar pronto pra Reforma Tributária — a alíquota cheia de 2027 depende do Senado, mas a sua identidade fiscal depende de você.`,
+          },
+          dedupeKey,
+        });
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeKey); } catch { /* noop */ }
+        published = true;
+      } else {
+        try { const rr = BusinessSignalService.resolveByDedupe(orgId, dedupeKey); resolved = !!rr?.ok; } catch { /* noop */ }
+      }
+    } catch { /* best-effort */ }
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: só orgs FORMALIZADAS (têm CNPJ) — antes disso a Reforma não é acionável. */
+  static pass(): void {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE comigo_cnpj IS NOT NULL AND status = 'active'`).all() as any[]; }
+    catch { return; }
+    for (const o of orgs) {
+      try { this.publishReadinessSignal(o.organization_id); }
+      catch (e) { console.error("[Fiscal] readiness pass falhou", o.organization_id, e); }
+    }
   }
 }
 

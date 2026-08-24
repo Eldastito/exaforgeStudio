@@ -1,7 +1,7 @@
 # ADR-185 — Apropriação de DESPESA a centro de custo (a dimensão de rateio que faltava)
 
-**Estado:** **F0 MERGEADA (PR #1291)** · **F1 MERGEADA (PR #1292)** · **F2 EM PR** — extrato do
-centro (consumo + despesa). Plano F0–F4.
+**Estado:** **F0 (#1291)** · **F1 (#1292)** · **F2 (#1293) MERGEADAS** · **F3 EM PR** — sinal
+advisory de despesa não apropriada. Falta só F4 (hardening + runbook). Plano F0–F4.
 **Data:** 2026-08-22.
 **Contexto:** fecha o **track futuro** que a auditoria do ADR-184 apontou — "despesa org-wide **sem
 dimensão** de rateio". Aditivo sobre a **Controladoria (PRD-E)**: `cost_centers`+`CostCenterService`
@@ -80,11 +80,14 @@ DRE (o DRE gerencial segue org-wide; este é um corte GERENCIAL paralelo, 0-regr
   procedência + `note` explícito. Centro inexistente/de outra org → null (isolamento). Honesto
   (sem dado → 0/[]). Rota `GET /api/controler/cost-centers/:id/statement`. `test:cost-center-statement`
   (10); `test:cost-center-expense`/`test:controler-consumption` sem regressão.
-- **F3 — Sinal advisory de despesa não apropriada.** `CostCenterExpenseSignalService`/método —
-  quando a fração `unallocated` da despesa do mês passa de um limiar, publica `business_signals`
-  (`cost_center/unallocated_expense`, `basis:hypothesis`, `impactAmount:null`, severity attention)
-  pro operador apropriar; nunca apropria sozinho (RN-CC-1). Self-healing (`resolveByDedupe` quando
-  cai / `reopenByDedupe`); `pass()` no Scheduler (só orgs com centro de custo). `test:cost-center-signal`.
+- **F3 — Sinal advisory de despesa não apropriada (EM PR).** `CostCenterExpenseSignalService.
+  publishUnallocatedExpenseSignal` — quando a org tem centro ativo E a MAIORIA da despesa do mês
+  está solta (`unallocated/total > 0.5`) E o valor solto é material (`>= R$100`), publica
+  `business_signals` (`cost_center/unallocated_expense`, `basis:hypothesis`, `impactAmount:null`,
+  severity attention) pro operador apropriar; nunca apropria sozinho (RN-CC-1, zero `decision_action`).
+  Self-healing (`resolveByDedupe` quando a fração cai / `reopenByDedupe` quando recorre, respeita
+  `dismissed` §65); dedupe por período; org SEM centro nunca sinaliza (a dimensão não foi adotada).
+  `pass()` no Scheduler ao lado dos passes de P&L. `test:cost-center-signal` (11).
 - **F4 — Hardening + runbook (FECHA o ADR-185).** `test:cost-center-hardening` codifica RN-CC-1..7
   + fiação + runbook `docs/runbook/centro-de-custo-operacao.md`.
 

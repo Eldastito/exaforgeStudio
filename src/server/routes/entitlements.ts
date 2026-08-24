@@ -14,6 +14,7 @@ import { EntitlementService, type EntitlementAction } from "../EntitlementServic
 import { NavigationManifestService } from "../NavigationManifestService.js";
 import { PermissionService } from "../PermissionService.js";
 import { FalaTuService } from "../FalaTuService.js";
+import { MissionService } from "../MissionService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import db from "../db.js";
 
@@ -36,6 +37,7 @@ router.get("/me", (req: AuthRequest, res): any => {
       isMasterAdmin: !!(req.user.email && req.user.email === MASTER_ADMIN_EMAIL),
       hasProfile: PermissionService.hasProfile(orgId, req.user),
       falatuEnabled: FalaTuService.orgEnabled(orgId),
+      missionLayerEnabled: MissionService.isEnabled(orgId),   // ADR-189 F13 — mostra "Missões" no menu
       vertical: org.vertical || null,
       planId: org.plan_id || null,
       defaultLandingView: org.default_landing_view || null,

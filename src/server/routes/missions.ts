@@ -12,6 +12,7 @@ import { MissionReversePlanner } from "../MissionReversePlanner.js";
 import { MissionReadinessService } from "../MissionReadinessService.js";
 import { MissionRuntimeService } from "../MissionRuntimeService.js";
 import { MissionCheckpointService } from "../MissionCheckpointService.js";
+import { MissionDebriefService } from "../MissionDebriefService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -119,6 +120,18 @@ router.get("/:id/checkpoint", (req: AuthRequest, res): any => {
 /** Propõe um REPLAN governado (nunca executa direto). */
 router.post("/:id/replan", (req: AuthRequest, res): any => {
   try { res.json(MissionCheckpointService.proposeReplan(req.organizationId!, String(req.params.id), { reason: req.body?.reason, actor: actor(req) })); }
+  catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F10 — Debrief da missão (read-model). */
+router.get("/:id/debrief", (req: AuthRequest, res): any => {
+  try { res.json(MissionDebriefService.debrief(req.organizationId!, String(req.params.id))); }
+  catch (e: any) { fail(res, e); }
+});
+
+/** Alimenta o motor único a partir da missão terminada (só achieved/failed; idempotente). */
+router.post("/:id/learn", (req: AuthRequest, res): any => {
+  try { res.json(MissionDebriefService.learn(req.organizationId!, String(req.params.id), actor(req))); }
   catch (e: any) { fail(res, e); }
 });
 

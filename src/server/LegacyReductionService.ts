@@ -26,6 +26,9 @@ const REPLACEMENTS: Array<{ legacy: string; replacement: string; label: string }
   { legacy: "dashboard", replacement: "resultados", label: "Dashboard → Resultados" },
   { legacy: "diretor", replacement: "resultados", label: "Diretor IA → Resultados" },
   { legacy: "tarefas", replacement: "executando", label: "Tarefas → Executando" },
+  // ADR-189 F9 (§25) — "Executando" pode sair do 1º nível QUANDO a telemetria provar que "Missões"
+  // o substitui (adoção real da nova × resíduo da legada). Advisório; nunca remove sozinho (§112).
+  { legacy: "executando", replacement: "missoes", label: "Executando → Missões" },
 ];
 
 // Limiares de substituição (determinísticos; conservadores por §112).

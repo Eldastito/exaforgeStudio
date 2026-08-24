@@ -1,6 +1,7 @@
 # ADR-187 — Prontidão Fiscal (Reforma Tributária): a camada de leitura pro operador
 
-**Estado:** **F0 (ESTA, doc-only) EM PR.** Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1301)** · **F1 EM PR** — `FiscalReadinessService.assess` + timeline.
+Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** camada OPERADOR-FACING que faltava sobre a ADR-181 (FECHADA — motores CBS/IBS/IS +
 perfil fiscal + base curada + emissão-scaffold). A ADR-181 já cogitou um "aviso de perfil fiscal
@@ -68,15 +69,16 @@ mutar o DRE/cálculo (só leitura).
 ## 5. Plano por fatias (fatia = 1 PR draft, com teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — `FiscalReadinessService.assess(orgId, {asOf?})` + linha do tempo.** Read-model:
+- **F1 — `FiscalReadinessService.assess(orgId, {asOf?})` + linha do tempo (EM PR).** Read-model:
   `{ readyPct, tenantBlockers[], tenantWarnings[], dimensions:{ identity, referenceBase, regime,
   issuance }, externalPending:{ platform[], senate[] }, timeline:[{ when, label, defined, dependsOn }],
   note }`. `identity` reusa `completeness` (blocker se incompleto); `referenceBase` chama `rateFor`
   pros tributos do período corrente (curado × `awaiting_curation` — pendência de PLATAFORMA, não do
   tenant); `regime` = declarado? + decisão Simples pendente (warning); `issuance` = estado do
   scaffold (informativo). `readyPct` = só o que o tenant controla (RN-FR-4). `timeline` factual da
-  lei, com `defined:false`+`dependsOn:'senate'` na alíquota cheia de 2027 (RN-FR-1). Rota
-  `GET /api/fiscal/readiness`. `test:fiscal-readiness`.
+  lei, com `defined:false`+`dependsOn:'senate'` na alíquota cheia de 2027 (RN-FR-1); `senate` pending
+  SEMPRE (nunca gap do tenant); regime nunca presumido. Rota `GET /api/fiscal/readiness` (owner/admin).
+  `test:fiscal-readiness` (15); `test:fiscal-profile`/`test:tax-reference` sem regressão.
 - **F2 — Sinal proativo de prontidão.** `FiscalReadinessService.publishReadinessSignal` — quando o
   tenant tem BLOCKER (perfil incompleto / regime não declarado), publica `business_signals`
   (`fiscal_readiness/incomplete`, `basis:hypothesis`, `impactAmount:null`, severity attention) pro

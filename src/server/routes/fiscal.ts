@@ -11,6 +11,7 @@ import { ConsumptionTaxService } from "../ConsumptionTaxService.js";
 import { SimplesHybridAdvisorService } from "../SimplesHybridAdvisorService.js";
 import { FiscalIssuanceService } from "../FiscalIssuanceService.js";
 import { FiscalDreProjectionService } from "../FiscalDreProjectionService.js";
+import { FiscalReadinessService } from "../FiscalReadinessService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -25,6 +26,15 @@ router.get("/profile", requireRole("owner", "admin"), (req: AuthRequest, res): a
       completeness: FiscalProfileService.completeness(orgId),
       regimes: FISCAL_REGIMES,
     });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-187 — PRONTIDÃO fiscal agregada (o que depende do tenant × plataforma × Senado). */
+router.get("/readiness", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const orgId = req.organizationId!;
+    const asOf = typeof req.query?.asOf === "string" ? req.query.asOf : undefined;
+    res.json(FiscalReadinessService.assess(orgId, { asOf }));
   } catch (e: any) { fail(res, e); }
 });
 

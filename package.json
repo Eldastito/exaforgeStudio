@@ -443,6 +443,7 @@
     "test:fiscal-readiness-signal": "tsx scripts/test-fiscal-readiness-signal.ts",
     "test:fiscal-readiness-hardening": "tsx scripts/test-fiscal-readiness-hardening.ts",
     "test:result-projection": "tsx scripts/test-result-projection.ts",
+    "test:result-projection-signal": "tsx scripts/test-result-projection-signal.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

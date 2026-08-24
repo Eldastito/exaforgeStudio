@@ -908,6 +908,12 @@ export class Scheduler {
       import("./FiscalReadinessService.js").then((m) => m.FiscalReadinessService.pass())
         .catch((e) => console.error('[Scheduler] sinal de prontidão fiscal falhou', e));
     } catch (e) { console.error('[Scheduler] pass de prontidão fiscal falhou', e); }
+    // Projeção de resultado (ADR-188 F2): nudge quando o mês projeta abaixo do equilíbrio. Só orgs
+    // com receita no mês; advisory, nunca corta custo. Best-effort.
+    try {
+      import("./ResultProjectionService.js").then((m) => m.ResultProjectionService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de projeção de resultado falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de projeção de resultado falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

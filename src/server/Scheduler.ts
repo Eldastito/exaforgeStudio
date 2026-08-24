@@ -890,6 +890,12 @@ export class Scheduler {
       import("./PnlCostReconciliationService.js").then((m) => m.PnlCostReconciliationService.pass())
         .catch((e) => console.error('[Scheduler] sinal de custo incoerente falhou', e));
     } catch (e) { console.error('[Scheduler] pass de custo incoerente falhou', e); }
+    // Controladoria (ADR-185 F3): sinal advisory de despesa não apropriada a centro de custo.
+    // Só orgs com centro ativo; hipótese, nunca apropria sozinho. Best-effort.
+    try {
+      import("./CostCenterExpenseSignalService.js").then((m) => m.CostCenterExpenseSignalService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de despesa não apropriada falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de despesa não apropriada falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

@@ -8,6 +8,7 @@ import { ChatPanel } from '@/src/features/ChatPanel';
 import { ChannelsPanel } from '@/src/features/ChannelsPanel';
 import { DashboardPanel } from '@/src/features/DashboardPanel';
 import { ReportsPanel } from '@/src/features/ReportsPanel';
+import { MissionsView } from '@/src/features/MissionsView';
 import { ReservasView } from '@/src/features/ReservasView';
 import { AssinaturasView } from '@/src/features/AssinaturasView';
 import { ProcurementView } from '@/src/features/ProcurementView';
@@ -467,6 +468,7 @@ export default function App() {
              {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
              {viewMode === 'reports' && 'Relatórios'}
+             {viewMode === 'missoes' && 'Missões'}
              {viewMode === 'juridico' && 'Consultora Jurídica'}
              {viewMode === 'caixa' && 'Caixa'}
              {viewMode === 'saude' && 'Central de Saúde'}
@@ -592,6 +594,7 @@ export default function App() {
           {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}
           {viewMode === 'reports' && <ReportsPanel />}
+          {viewMode === 'missoes' && <MissionsView />}
           {viewMode === 'juridico' && <LegalAdvisorView />}
           {viewMode === 'caixa' && <CashView />}
           {viewMode === 'saude' && <HealthCenterView />}

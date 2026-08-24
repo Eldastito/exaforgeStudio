@@ -1,11 +1,11 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, vertical } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, missionLayerEnabled, vertical } = useStore();
   const { user, logout } = useAuth();
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
@@ -45,6 +45,7 @@ export function Sidebar() {
           <nav className="space-y-1">
              {canAccessModule('saude_negocio') && <NavItem icon={<HeartPulse />} label="Central de Saúde" active={viewMode === 'saude'} onClick={() => setViewMode('saude')} />}
              <NavItem icon={<Lightbulb />} label="Insights" active={viewMode === 'insights'} onClick={() => setViewMode('insights')} />
+             {missionLayerEnabled && <NavItem icon={<Rocket />} label="Missões" active={viewMode === 'missoes'} onClick={() => setViewMode('missoes')} />}
              <NavItem icon={<MessageSquare />} label="Atendimento" active={viewMode === 'kanban'} onClick={() => setViewMode('kanban')} />
              {mod('rie') && <NavItem icon={<Gauge />} label="Revenue Intelligence" active={viewMode === 'rie'} onClick={() => setViewMode('rie')} />}
              {mod('estudio') && <NavItem icon={<Wand2 />} label="Estúdio de Criação" active={viewMode === 'studio'} onClick={() => setViewMode('studio')} />}

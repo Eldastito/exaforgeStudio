@@ -70,7 +70,7 @@ export type Ticket = {
   slaSegment?: string | null;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'beauty' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights' | 'falatu' | 'ai_usage' | 'production_readiness' | 'niche_intel' | 'radar_health';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'beauty' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights' | 'falatu' | 'ai_usage' | 'production_readiness' | 'niche_intel' | 'radar_health' | 'missoes';
 
 export type EvolutionConfig = {
   baseUrl: string;
@@ -143,6 +143,7 @@ type AppState = {
   hasProfile: boolean;                         // usuário tem perfil atribuído?
   isMasterAdmin: boolean;                      // operador da plataforma (ADR-106) — controla o menu só-plataforma
   falatuEnabled: boolean;                      // org ligou o FalaTu? (flag opt-in ADR-151 Fatia 2)
+  missionLayerEnabled: boolean;                // org ligou o Mission Layer? (flag opt-in ADR-189)
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -321,6 +322,7 @@ export const useStore = create<AppState>((set, get) => ({
         hasProfile: !!meta.hasProfile,
         isMasterAdmin: !!meta.isMasterAdmin,
         falatuEnabled: !!meta.falatuEnabled,
+        missionLayerEnabled: !!meta.missionLayerEnabled,
       });
       const landing = meta.defaultLandingView;
       if (landing && !localStorage.getItem('zappflow_view')) {
@@ -349,6 +351,7 @@ export const useStore = create<AppState>((set, get) => ({
   hasProfile: false,
   isMasterAdmin: false,
   falatuEnabled: false,
+  missionLayerEnabled: false,
   loadPermissions: async () => {
     // Delegado — /api/entitlements/me já traz `meta.permissions` + hasProfile
     // + isMasterAdmin + falatuEnabled em uma única chamada. Mantido pra não

@@ -1,7 +1,7 @@
 # ADR-186 — Resultado CONSOLIDADO (all-channels): o lucro real incluindo as lojas
 
-**Estado:** **F0 (#1296)** · **F1 (#1297)** · **F2 (#1298) MERGEADAS** · **F3 EM PR** — sinal
-advisory de dupla contagem. Falta só F4 (hardening + runbook). Plano F0–F4.
+**Estado:** **FECHADO.** F0 (#1296) · F1 (#1297) · F2 (#1298) · F3 (#1299) MERGEADAS · **F4 EM PR**
+— hardening (`test:consolidated-result-hardening`, RN-CR-1..7) + runbook. Plano F0–F4 completo.
 **Data:** 2026-08-24.
 **Contexto:** capstone da reconciliação de P&L — fecha o **track futuro** do ADR-184 ("custo de loja
 folded no DRE"). Aditivo sobre ADR-128 (`ManagerialDreService`, DRE gerencial core-only), ADR-083
@@ -112,8 +112,13 @@ store-cost (sem chave — detecta e sinaliza, como o ADR-182 fez); ratear payabl
   quando some / `reopenByDedupe` quando recorre, respeita `dismissed` §65); dedupe por período.
   `pass()` no Scheduler ao lado dos passes de P&L (só orgs com loja ativa).
   `test:consolidated-double-count-signal` (10).
-- **F4 — Hardening + runbook (FECHA o ADR-186).** `test:consolidated-result-hardening` codifica
-  RN-CR-1..7 + fiação + runbook `docs/runbook/resultado-consolidado-operacao.md`.
+- **F4 — Hardening + runbook (EM PR; FECHA o ADR-186).** `test:consolidated-result-hardening` (11)
+  — doc-of-record executável: (A) codifica RN-CR-1..7 como regressão sobre os serviços reais F1–F3
+  (não muta o core · escopo rotulado · custo de loja honesto-null/partial · dupla contagem detectada
+  + advisory/zero decision_action · read-only · sem loja→consolidado=core) + (B) fiação (`pass` no
+  Scheduler, snapshot expõe o bloco `consolidated`, 4 testes wired, runbook/ADR presentes) + runbook
+  `docs/runbook/resultado-consolidado-operacao.md` (mapa dos serviços, os números, o sinal,
+  guardrails RN-CR, troubleshooting, **track futuro**: folded no DRE + rateio por loja).
 
 **Critério de sucesso:** o dono vê o lucro REAL (core + lojas) ao lado do core, escopo-rotulado,
 parcial-e-honesto onde o custo de loja é incomputável, com a dupla contagem DETECTADA e sinalizada

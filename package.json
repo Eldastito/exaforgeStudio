@@ -441,6 +441,7 @@
     "test:consolidated-result-hardening": "tsx scripts/test-consolidated-result-hardening.ts",
     "test:fiscal-readiness": "tsx scripts/test-fiscal-readiness.ts",
     "test:fiscal-readiness-signal": "tsx scripts/test-fiscal-readiness-signal.ts",
+    "test:fiscal-readiness-hardening": "tsx scripts/test-fiscal-readiness-hardening.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

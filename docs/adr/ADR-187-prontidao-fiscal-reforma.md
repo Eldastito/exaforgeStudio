@@ -1,7 +1,7 @@
 # ADR-187 — Prontidão Fiscal (Reforma Tributária): a camada de leitura pro operador
 
-**Estado:** **F0 MERGEADA (PR #1301)** · **F1 MERGEADA (PR #1302)** · **F2 MERGEADA (PR #1303)** ·
-**F3 EM PR** — card "Prontidão fiscal" no `FiscalProfilePanel`. Plano F0–F4.
+**Estado:** **FECHADO — F0–F4 em produção** (F0 #1301 · F1 #1302 · F2 #1303 · F3 #1304 · **F4 EM PR** —
+hardening `test:fiscal-readiness-hardening` + runbook). Plano F0–F4 concluído.
 **Data:** 2026-08-24.
 **Contexto:** camada OPERADOR-FACING que faltava sobre a ADR-181 (FECHADA — motores CBS/IBS/IS +
 perfil fiscal + base curada + emissão-scaffold). A ADR-181 já cogitou um "aviso de perfil fiscal
@@ -92,8 +92,12 @@ mutar o DRE/cálculo (só leitura).
   tempo factual da Reforma com o rótulo honesto "depende do Senado — ainda não definido" nas
   entradas `defined:false` (2027). Consome `GET /api/fiscal/readiness` (F1) no `load()`; UI-only,
   sem inventar número; tsc+build verdes.
-- **F4 — Hardening + runbook (FECHA o ADR-187).** `test:fiscal-readiness-hardening` codifica RN-FR-1..7
-  + fiação + runbook `docs/runbook/prontidao-fiscal-operacao.md`.
+- **F4 — Hardening + runbook (FECHA o ADR-187, EM PR).** `test:fiscal-readiness-hardening` (18) —
+  doc-of-record executável de dupla função: (A) codifica RN-FR-1..7 como regressão sobre os serviços
+  REAIS F1–F3 com a base tributária VAZIA (o estado real de hoje — nunca inventa alíquota); (B) verifica
+  a fiação de produção (`pass` no Scheduler, rota `GET /readiness` montada, card na UI, testes wired,
+  runbook/ADR presentes). Runbook `docs/runbook/prontidao-fiscal-operacao.md` (mapa dos serviços, os
+  números, o sinal, guardrails RN-FR, troubleshooting, track futuro).
 
 **Critério de sucesso:** o operador vê, num lugar só, quão pronto está pra Reforma — o que depende
 DELE (e conta pro score), o que depende da plataforma/Senado (rotulado, nunca inventado) e o que

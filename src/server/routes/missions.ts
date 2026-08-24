@@ -9,6 +9,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { MissionService } from "../MissionService.js";
 import { MissionIntentService } from "../MissionIntentService.js";
 import { MissionReversePlanner } from "../MissionReversePlanner.js";
+import { MissionReadinessService } from "../MissionReadinessService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -69,6 +70,19 @@ router.post("/:id/plan", (req: AuthRequest, res): any => {
       contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
       baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
       leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
+    }));
+  } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F4 — Prontidão + risco da missão (compõe; Pre-Mortem light). Premissas do plano opcionais. */
+router.post("/:id/readiness", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(MissionReadinessService.assess(req.organizationId!, String(req.params.id), {
+      avgTicket: b.avgTicket != null ? Number(b.avgTicket) : undefined,
+      saleConversionRate: b.saleConversionRate != null ? Number(b.saleConversionRate) : undefined,
+      contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
+      baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
     }));
   } catch (e: any) { fail(res, e); }
 });

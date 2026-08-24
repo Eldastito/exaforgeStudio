@@ -1,6 +1,7 @@
 # ADR-186 — Resultado CONSOLIDADO (all-channels): o lucro real incluindo as lojas
 
-**Estado:** **F0 (ESTA, doc-only) EM PR.** Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1296)** · **F1 EM PR** — `ConsolidatedResultService.monthly`.
+Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** capstone da reconciliação de P&L — fecha o **track futuro** do ADR-184 ("custo de loja
 folded no DRE"). Aditivo sobre ADR-128 (`ManagerialDreService`, DRE gerencial core-only), ADR-083
@@ -85,13 +86,17 @@ store-cost (sem chave — detecta e sinaliza, como o ADR-182 fez); ratear payabl
 ## 5. Plano por fatias (fatia = 1 PR draft, com teste/rollback)
 
 - **F0 — auditoria + ADR (ESTA, doc-only).**
-- **F1 — `ConsolidatedResultService.monthly(orgId, period)`.** Read-model derivado:
-  `{ core:{resultadoOperacional, scope:'core'}, stores:{resultado, faturamento, storesWithResult,
-  storesTotal}, consolidated:{resultadoOperacional|null, partial, scope:'all_channels'},
-  doubleCountRisk, note }`. `consolidated = core + stores.resultado` (null-honesto: se alguma loja
-  material não tem resultado computável, `partial:true`); `doubleCountRisk` = payables com categoria
-  de custo-de-loja (aluguel/energia/folha/…) coexistindo com `retail_store_fixed_costs`. Reusa
-  `ManagerialDreService`/`RetailStoreCostService`. `test:consolidated-result`.
+- **F1 — `ConsolidatedResultService.monthly(orgId, period)` (EM PR).** Read-model derivado:
+  `{ core:{resultadoOperacional, scope:'core'}, stores:{resultado, faturamento, storesTotal,
+  storesWithResult, materialMissing}, consolidated:{resultadoOperacional, partial,
+  scope:'all_channels'}, doubleCountRisk, doubleCountCategories, note }`. `consolidated = core +
+  stores.resultado` (só soma resultados de loja não-null); `partial:true` quando ≥1 loja tem
+  faturamento mas resultado null (sem margem/`avg_cost`) — NÃO inventa lucro de loja (RN-CR-3/6);
+  `doubleCountRisk` = categoria de `retail_store_fixed_costs` que também aparece em `payables` do mês
+  (heurística `contains`, hipótese — RN-CR-4). Core INTACTO (0-regressão comprovada vs
+  `ManagerialDreService`). Reusa `ManagerialDreService.monthly`/`RetailStoreCostService.
+  allStoresResult`. `test:consolidated-result` (16); `test:managerial-dre`/`test:retail-store-result`
+  sem regressão.
 - **F2 — Consolidado no snapshot executivo.** `FinanceSnapshotAdapter.dre` ganha um bloco
   `consolidated` (all_channels) AO LADO do resultado core (que fica intacto — 0-regressão) +
   `doubleCountRisk`/`partial`/`scopeNote` — pro Diretor IA narrar o lucro REAL sem confundir escopos.

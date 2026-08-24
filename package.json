@@ -435,6 +435,7 @@
     "test:cost-center-statement": "tsx scripts/test-cost-center-statement.ts",
     "test:cost-center-signal": "tsx scripts/test-cost-center-signal.ts",
     "test:cost-center-hardening": "tsx scripts/test-cost-center-hardening.ts",
+    "test:consolidated-result": "tsx scripts/test-consolidated-result.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

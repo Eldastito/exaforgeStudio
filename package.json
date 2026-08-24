@@ -447,6 +447,7 @@
     "test:result-projection-hardening": "tsx scripts/test-result-projection-hardening.ts",
     "test:mission-contract": "tsx scripts/test-mission-contract.ts",
     "test:mission-intent": "tsx scripts/test-mission-intent.ts",
+    "test:mission-reverse-plan": "tsx scripts/test-mission-reverse-plan.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

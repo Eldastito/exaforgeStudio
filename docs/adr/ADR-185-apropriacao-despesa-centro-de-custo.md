@@ -1,7 +1,7 @@
 # ADR-185 — Apropriação de DESPESA a centro de custo (a dimensão de rateio que faltava)
 
-**Estado:** **F0 (#1291)** · **F1 (#1292)** · **F2 (#1293) MERGEADAS** · **F3 EM PR** — sinal
-advisory de despesa não apropriada. Falta só F4 (hardening + runbook). Plano F0–F4.
+**Estado:** **FECHADO.** F0 (#1291) · F1 (#1292) · F2 (#1293) · F3 (#1294) MERGEADAS · **F4 EM PR**
+— hardening (`test:cost-center-hardening`, RN-CC-1..7) + runbook. Plano F0–F4 completo.
 **Data:** 2026-08-22.
 **Contexto:** fecha o **track futuro** que a auditoria do ADR-184 apontou — "despesa org-wide **sem
 dimensão** de rateio". Aditivo sobre a **Controladoria (PRD-E)**: `cost_centers`+`CostCenterService`
@@ -88,8 +88,14 @@ DRE (o DRE gerencial segue org-wide; este é um corte GERENCIAL paralelo, 0-regr
   Self-healing (`resolveByDedupe` quando a fração cai / `reopenByDedupe` quando recorre, respeita
   `dismissed` §65); dedupe por período; org SEM centro nunca sinaliza (a dimensão não foi adotada).
   `pass()` no Scheduler ao lado dos passes de P&L. `test:cost-center-signal` (11).
-- **F4 — Hardening + runbook (FECHA o ADR-185).** `test:cost-center-hardening` codifica RN-CC-1..7
-  + fiação + runbook `docs/runbook/centro-de-custo-operacao.md`.
+- **F4 — Hardening + runbook (EM PR; FECHA o ADR-185).** `test:cost-center-hardening` (15) —
+  doc-of-record executável: (A) codifica RN-CC-1..7 como regressão sobre os serviços reais F1–F3
+  (tag explícita não inventada · centro validado · unallocated visível · consumo×despesa nunca
+  somados · read-only · advisory/zero decision_action · isolado/honesto) + (B) fiação (`pass` no
+  Scheduler, rotas de tag/relatório/extrato montadas, 4 testes wired, runbook/ADR presentes) +
+  runbook `docs/runbook/centro-de-custo-operacao.md` (mapa dos serviços, como usar, guardrails
+  RN-CC, troubleshooting, **track futuro**: rateio automático, orçamento por centro, custo de loja
+  no DRE).
 
 **Critério de sucesso:** a despesa financeira ganha a mesma dimensão que o consumo — dá pra ver
 "quanto cada centro custou" (R$) com a fatia não apropriada sempre honesta; consumo e despesa nunca

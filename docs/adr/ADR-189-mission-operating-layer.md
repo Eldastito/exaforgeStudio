@@ -1,7 +1,7 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FASE 0 — auditoria + decisões arquiteturais (EM PR, doc-only).** Nenhum código de
-produção antes do merge/aprovação desta F0 (gate do PRD §66).
+**Estado:** **F0 MERGEADA (#1311)** · **F1 EM PR** — Mission Contract (`missions` + `MissionService`).
+Plano F0–F12.
 **Data:** 2026-08-24.
 **Natureza:** camada HORIZONTAL de orquestração de objetivos + simplificação de UX. **Não é expansão**
 do ZapFlow — é composição do que já existe. Convenções herdadas: isolamento multi-tenant, RN-004
@@ -41,12 +41,20 @@ ramos** — exatamente o anti-padrão que o PRD §31 combate, e o substituto (re
 
 ## 2. Decisões arquiteturais
 
-### D1 — Missão ESTENDE `BusinessGoal`; **não** cria tabela `missions` (PRD §7, RN-004)
-Uma Missão é uma meta (`business_goals`) + colunas aditivas (`desired_state`, `baseline_state`,
-`autonomy_level`, `source`, `confidence`, `mission_status`) + um **read-model de plano/eventos**
-derivado. Nada de segunda entidade que sobreponha Goal. O `mission_status` (DRAFT…ACHIEVED) é um campo
-aditivo; o `status` legado de goal permanece intacto (0-regressão). **Alternativa rejeitada:** tabela
-`missions` separada referenciando goal — reabre a duplicação de entidade que o §7 proíbe.
+### D1 — Missão é uma ENTIDADE FINA PRÓPRIA que COMPÕE `BusinessGoal` (PRD §7, RN-004)
+**CORRIGIDO na F1** (o schema real forçou a revisão, e é honesto documentar): a F0 propôs "Missão =
+linha estendida de `business_goals`", mas `business_goals` tem **`UNIQUE(organization_id, metric)`** —
+é SINGLETON por métrica, e não comporta várias missões concorrentes (ex.: duas iniciativas tocando
+`revenue`). Estender ali exigiria dropar o UNIQUE, alto risco de regressão (o `BusinessGoalService.set`
+faz upsert por (org,metric) e `.progress` itera um-por-métrica).
+Decisão final: a Missão é uma **tabela fina nova `missions`** (id próprio, N por org) que **COMPÕE** o
+registro de métricas do `BusinessGoal` (`isKnownMetric` + `progress`) pra medir — NÃO é uma linha de
+goal e NÃO duplica o Goal: **Goal = alvo permanente por métrica; Missão = iniciativa bounded** (§6).
+Isso É fiel ao §7 ("não duplicar entidades já representadas em Goal/DecisionAction/ProcessInstance") —
+a Missão é uma entidade genuinamente distinta das três, que compõe as outras (mede via Goal, executa
+via DecisionAction/Runtime, planeja via SkillOS). Colunas: `desired_state`, `baseline_state`,
+`target_metric` (opcional, conhecida), `target_value`/`target_unit` (alvo inline), `deadline`, `owner`,
+`autonomy_level`, `source`, `mission_status`, `confidence`. Aditivo, opt-in (`mission_layer_enabled`).
 
 ### D2 — A orquestração COMPÕE SkillOS; nenhum motor novo (PRD §5/§31/§32/§71)
 - Capability Registry = `SkillOsRegistryService` (existe).

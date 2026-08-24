@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -156,6 +156,7 @@ export function ReportsPanel() {
       )}
 
       <DreSection />
+      <ResultProjectionCard />
       <OwnerSection />
       <LossMarginSection />
     </div>
@@ -274,6 +275,65 @@ function DreSection() {
       )}
       <p className="mt-1 text-[11px] text-zinc-500">{d.notas?.despesas}</p>
       <p className="mt-2 text-[11px] text-amber-200/70 border-t border-zinc-800 pt-2">{d.disclaimer}</p>
+    </div>
+  );
+}
+
+// ── Projeção do mês & ponto de equilíbrio pleno (ADR-188) ────────────────────
+const CONF_LABEL: Record<string, string> = {
+  high: 'confiança alta', medium: 'confiança média',
+  insufficient_elapsed: 'poucos dias — confiança baixa', actual: 'mês fechado',
+  no_revenue: 'sem receita ainda', not_started: 'mês não começou',
+};
+function ResultProjectionCard() {
+  const [p, setP] = useState<any | null>(null);
+  useEffect(() => { apiFetch('/api/dre/result-projection').then((r) => r.json()).then((x: any) => { if (x?.period) setP(x); }).catch(() => {}); }, []);
+  if (!p) return null;
+  const proj = p.projected?.resultado;
+  const hasProjection = proj != null;
+  const onTrack = p.onTrack === true;
+  // Barra: % da receita projetada sobre o ponto de equilíbrio (100% = zera o resultado).
+  const pct = p.pctToBreakEven != null ? Math.max(0, Math.min(100, p.pctToBreakEven)) : null;
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <h3 className="text-zinc-100 font-semibold flex items-center gap-2"><Gauge className="w-5 h-5 text-teal-300" /> Projeção do mês <span className="text-xs font-normal text-zinc-500">· {p.period}</span></h3>
+        <span className="text-[11px] rounded-full border border-zinc-700 bg-zinc-800/60 text-zinc-400 px-2.5 py-1">{CONF_LABEL[p.confidence] || p.confidence}</span>
+      </div>
+
+      {hasProjection ? (
+        <div className="max-w-md space-y-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[13px] text-zinc-400">Resultado projetado {p.confidence !== 'actual' && <span className="text-zinc-600">(fim do mês)</span>}</span>
+            <span className={`text-lg font-semibold tabular-nums ${onTrack ? 'text-emerald-300' : 'text-red-300'}`}>{brl(proj)}</span>
+          </div>
+
+          {p.breakEvenRevenue != null && (
+            <div>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[12px] text-zinc-500 flex items-center gap-1"><Target className="w-3.5 h-3.5" /> Ponto de equilíbrio</span>
+                <span className="text-[12px] text-zinc-300 tabular-nums">{brl(p.breakEvenRevenue)}</span>
+              </div>
+              {pct != null && (
+                <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${onTrack ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
+                </div>
+              )}
+              <div className="flex justify-between text-[11px] text-zinc-600 mt-1">
+                <span>receita projetada {p.projected?.receita != null ? brl(p.projected.receita) : '—'}</span>
+                <span>{p.elapsedDays}/{p.totalDays} dias</span>
+              </div>
+            </div>
+          )}
+
+          <p className={`text-[12px] ${onTrack ? 'text-zinc-400' : 'text-amber-200'}`}>{p.note}</p>
+          {Array.isArray(p.assumptions) && p.assumptions.length > 0 && (
+            <p className="text-[11px] text-zinc-600 border-t border-zinc-800 pt-2">Premissas: {p.assumptions.join(' ')}</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-[12px] text-zinc-500 max-w-md">{p.note}</p>
+      )}
     </div>
   );
 }

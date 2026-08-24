@@ -7,6 +7,7 @@
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { MissionService } from "../MissionService.js";
+import { MissionIntentService } from "../MissionIntentService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -34,6 +35,16 @@ router.get("/", (req: AuthRequest, res): any => {
 router.post("/", (req: AuthRequest, res): any => {
   try { res.json(MissionService.create(req.organizationId!, req.body || {}, actor(req))); }
   catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F2 — Intenção → Missão (shadow). Detecta objetivo de negócio e PROPÕE uma missão.
+ * ?persist=1 (ou body.persist) grava um rascunho system_proposed (nunca executa). */
+router.post("/intent", (req: AuthRequest, res): any => {
+  try {
+    const text = String(req.body?.text || "");
+    const persist = req.body?.persist === true || req.query?.persist === "1";
+    res.json(MissionIntentService.propose(req.organizationId!, text, { persist, actor: actor(req) }));
+  } catch (e: any) { fail(res, e); }
 });
 
 /** Detalhe de uma missão. */

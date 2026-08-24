@@ -10,6 +10,7 @@ import { MissionService } from "../MissionService.js";
 import { MissionIntentService } from "../MissionIntentService.js";
 import { MissionReversePlanner } from "../MissionReversePlanner.js";
 import { MissionReadinessService } from "../MissionReadinessService.js";
+import { MissionRuntimeService } from "../MissionRuntimeService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -85,6 +86,25 @@ router.post("/:id/readiness", (req: AuthRequest, res): any => {
       baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
     }));
   } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F5 — propõe um efeito da missão como AÇÃO GOVERNADA (nunca executa direto). */
+router.post("/:id/actions", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(MissionRuntimeService.proposeAction(req.organizationId!, String(req.params.id), {
+      domain: String(b.domain || ""), actionType: String(b.actionType || ""), title: String(b.title || ""),
+      description: b.description ?? null, commandType: b.commandType ?? null, commandPayload: b.commandPayload,
+      expectedImpact: b.expectedImpact != null ? Number(b.expectedImpact) : null, impactUnit: b.impactUnit ?? null,
+      basis: b.basis, confidence: b.confidence != null ? Number(b.confidence) : null,
+    }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Visão de execução da missão (ações governadas + contagens). Read-only. */
+router.get("/:id/runtime", (req: AuthRequest, res): any => {
+  try { res.json(MissionRuntimeService.runtime(req.organizationId!, String(req.params.id))); }
+  catch (e: any) { fail(res, e); }
 });
 
 /** Patch parcial do contrato (não muda status). */

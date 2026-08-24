@@ -8,6 +8,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { MissionService } from "../MissionService.js";
 import { MissionIntentService } from "../MissionIntentService.js";
+import { MissionReversePlanner } from "../MissionReversePlanner.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -53,6 +54,22 @@ router.get("/:id", (req: AuthRequest, res): any => {
     const m = MissionService.get(req.organizationId!, String(req.params.id));
     if (!m) return res.status(404).json({ error: "Missão não encontrada." });
     res.json(m);
+  } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F3 — Planejamento reverso: meta → eventos → gap vs base + gargalo + último momento seguro.
+ * Premissas opcionais no body (avgTicket, saleConversionRate, contactConversionRate, baseAvailable,
+ * leadTimeDays); sem elas, deriva do dado real ou marca `unknown` (nunca inventa). Read-only. */
+router.post("/:id/plan", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(MissionReversePlanner.plan(req.organizationId!, String(req.params.id), {
+      avgTicket: b.avgTicket != null ? Number(b.avgTicket) : undefined,
+      saleConversionRate: b.saleConversionRate != null ? Number(b.saleConversionRate) : undefined,
+      contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
+      baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
+      leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
+    }));
   } catch (e: any) { fail(res, e); }
 });
 

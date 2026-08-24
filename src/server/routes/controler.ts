@@ -15,6 +15,7 @@ import { InventoryLocationService } from "../InventoryLocationService.js";
 import { OperationalItemService } from "../OperationalItemService.js";
 import { MaterialRequestService } from "../MaterialRequestService.js";
 import { ConsumptionLedgerService } from "../ConsumptionLedgerService.js";
+import { CostCenterStatementService } from "../CostCenterStatementService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -81,6 +82,18 @@ router.post("/cost-centers/:id/active", requireRole("owner", "admin"), (req: Aut
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(CostCenterService.setActive(orgId, req.params.id, !!req.body?.active, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/controler/cost-centers/:id/statement — EXTRATO do centro (ADR-185 F2): despesa
+// financeira (R$) + consumo de material (quantidade por produto), lado a lado, NUNCA somados.
+router.get("/cost-centers/:id/statement", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const from = typeof req.query?.from === "string" ? req.query.from : undefined;
+  const to = typeof req.query?.to === "string" ? req.query.to : undefined;
+  const st = CostCenterStatementService.statement(orgId, req.params.id, { from, to });
+  if (!st) return res.status(404).json({ error: "cost_center_not_found" });
+  res.json(st);
 });
 
 // ─── Localizações de estoque (Fatia 1b) ─────────────────────────────────────────

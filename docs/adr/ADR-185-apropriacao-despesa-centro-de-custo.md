@@ -1,7 +1,7 @@
 # ADR-185 — Apropriação de DESPESA a centro de custo (a dimensão de rateio que faltava)
 
-**Estado:** **F0 MERGEADA (PR #1291)** · **F1 EM PR** — tag em `payables` + despesa por centro.
-Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1291)** · **F1 MERGEADA (PR #1292)** · **F2 EM PR** — extrato do
+centro (consumo + despesa). Plano F0–F4.
 **Data:** 2026-08-22.
 **Contexto:** fecha o **track futuro** que a auditoria do ADR-184 apontou — "despesa org-wide **sem
 dimensão** de rateio". Aditivo sobre a **Controladoria (PRD-E)**: `cost_centers`+`CostCenterService`
@@ -73,10 +73,13 @@ DRE (o DRE gerencial segue org-wide; este é um corte GERENCIAL paralelo, 0-regr
   sem centro SEMPRE visível — RN-CC-3, R$ nunca misturado com qtd de consumo — RN-CC-4). Rotas
   `PUT /api/cash/payables/:id/cost-center` + `GET /api/cash/expenses/by-cost-center` (a rota de
   criação já passa `costCenterId` pelo spread). `test:cost-center-expense` (19).
-- **F2 — Extrato do centro (consumo + despesa lado a lado).** `CostCenterStatementService.statement
-  (orgId, costCenterId, {from,to})` COMPÕE despesa financeira (F1, R$) + consumo de material
-  (`ConsumptionLedgerService.byCostCenter`, QTD) — SEM somar (RN-CC-4), cada um com sua unidade e
-  procedência. Rota `GET /controler/cost-centers/:id/statement`. `test:cost-center-statement`.
+- **F2 — Extrato do centro (consumo + despesa lado a lado) (EM PR).** `CostCenterStatementService.
+  statement(orgId, costCenterId, {from,to})` COMPÕE despesa financeira (F1, R$ de `payables`) +
+  consumo de material (QTD **por produto+UoM**, de `consumption_events` — cada item na sua unidade,
+  nunca soma kg+unidade+litro num total) — SEM somar as duas dimensões (RN-CC-4), cada uma com sua
+  procedência + `note` explícito. Centro inexistente/de outra org → null (isolamento). Honesto
+  (sem dado → 0/[]). Rota `GET /api/controler/cost-centers/:id/statement`. `test:cost-center-statement`
+  (10); `test:cost-center-expense`/`test:controler-consumption` sem regressão.
 - **F3 — Sinal advisory de despesa não apropriada.** `CostCenterExpenseSignalService`/método —
   quando a fração `unallocated` da despesa do mês passa de um limiar, publica `business_signals`
   (`cost_center/unallocated_expense`, `basis:hypothesis`, `impactAmount:null`, severity attention)

@@ -1,7 +1,7 @@
 # ADR-188 — Projeção de Resultado do Mês & Ponto de Equilíbrio pleno (forward-looking)
 
-**Estado:** **F0 #1306 · F1 #1307 · F2 #1308 MERGEADAS** · **F3 EM PR** — card "Projeção do mês" no
-`ReportsPanel`. Plano F0–F4.
+**Estado:** **FECHADO — F0–F4 em produção** (F0 #1306 · F1 #1307 · F2 #1308 · F3 #1309 · **F4 EM PR** —
+hardening `test:result-projection-hardening` + runbook). Plano F0–F4 concluído.
 **Data:** 2026-08-24.
 **Contexto:** capstone FORWARD do arco de reconciliação de P&L (ADR-182 receita → ADR-184 custo por
 natureza → ADR-185 despesa por centro de custo → ADR-186 resultado consolidado). Todo esse arco é
@@ -97,8 +97,13 @@ constante, declarada); mutar o DRE (só leitura); decidir/executar corte de cust
 - **F3 — UI: card "Projeção do mês".** Na view de finanças/DRE, um card que mostra
   `resultadoProjetado` + `breakEvenRevenue` + `pctToBreakEven` (barra) + premissas/confiança
   honestas. UI-only sobre a rota F1; tsc+build verdes.
-- **F4 — Hardening + runbook (FECHA o ADR-188).** `test:result-projection-hardening` codifica
-  RN-RP-1..7 + fiação + runbook `docs/runbook/projecao-resultado-operacao.md`.
+- **F4 — Hardening + runbook (FECHA o ADR-188, EM PR).** `test:result-projection-hardening` (16) —
+  doc-of-record executável de dupla função: (A) codifica RN-RP-1..7 como regressão sobre os serviços
+  REAIS F1–F3 (com destaque à ASSIMETRIA fixo × variável: dobrar os dias muda a receita projetada mas
+  NÃO escalona o custo fixo); (B) verifica a fiação de produção (`pass` no Scheduler, rota `GET
+  /result-projection` montada, card na UI, testes wired, runbook/ADR presentes). Runbook
+  `docs/runbook/projecao-resultado-operacao.md` (mapa dos serviços, a conta, o sinal, guardrails RN-RP,
+  troubleshooting, track futuro).
 
 **Critério de sucesso:** no meio do mês, o dono vê — num lugar só — o resultado que o mês PROJETA no
 ritmo atual, quão longe está do ponto de equilíbrio pleno (custo fixo × variável reais do DRE) e um

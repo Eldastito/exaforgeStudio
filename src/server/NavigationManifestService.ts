@@ -20,6 +20,7 @@
 import db from "./db.js";
 import { EntitlementService } from "./EntitlementService.js";
 import { ModuleService } from "./ModuleService.js";
+import { MissionService } from "./MissionService.js";
 
 // Módulos CORE que pertencem a "Empresa" (config estratégica), não a "Explorar".
 const COMPANY_MODULES = new Set(["configuracoes"]);
@@ -36,6 +37,7 @@ export interface NavExploreItem { key: string; label: string; desc: string; stat
 export interface NavigationManifest {
   generatedAt: string;
   simplifiedNavEnabled: boolean;
+  missionsNav: boolean;  // ADR-189 F8 (§25) — "Executando" fundiu em "Missões" (só com o Mission Layer)
   primary: NavPrimaryItem[];
   explore: NavExploreItem[];
   moreInPlan: number;   // recursos DO PLANO ainda desligados — contagem, não itens (§56)
@@ -57,7 +59,12 @@ export class NavigationManifestService {
     const isManager = role === "owner" || role === "admin";
     const primary: NavPrimaryItem[] = [{ key: "hoje", label: "Hoje", section: "today", available: true }];
     if (org.falatu) primary.push({ key: "falatu", label: "Fala Tu", section: "falatu", available: true });
-    primary.push({ key: "executando", label: "Executando", section: "executing", available: true });
+    // ADR-189 F8 (§25) — quando o Mission Layer está ligado, "Executando" FUNDE em "Missões" (o
+    // "Executando/Resultados" vira o estado das missões — §25). Não é item NOVO (net-zero, §83):
+    // substitui o "Executando", nada some (ExecutionResultsService segue por baixo). Reversível.
+    const missionsNav = MissionService.isEnabled(orgId);
+    if (missionsNav) primary.push({ key: "missoes", label: "Missões", section: "missions", available: true });
+    else primary.push({ key: "executando", label: "Executando", section: "executing", available: true });
     primary.push({ key: "resultados", label: "Resultados", section: "results", available: true });
     // "Empresa" = config estratégica (objetivos/autonomia/equipe/integrações) — gestor.
     if (isManager) primary.push({ key: "empresa", label: "Empresa", section: "company", available: true });
@@ -82,6 +89,7 @@ export class NavigationManifestService {
     return {
       generatedAt: new Date().toISOString(),
       simplifiedNavEnabled: !!org.simplified,
+      missionsNav,
       primary,
       explore,
       moreInPlan,

@@ -432,6 +432,7 @@
     "test:pnl-cost-coherence-signal": "tsx scripts/test-pnl-cost-coherence-signal.ts",
     "test:pnl-cost-reconciliation-hardening": "tsx scripts/test-pnl-cost-reconciliation-hardening.ts",
     "test:cost-center-expense": "tsx scripts/test-cost-center-expense.ts",
+    "test:cost-center-statement": "tsx scripts/test-cost-center-statement.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

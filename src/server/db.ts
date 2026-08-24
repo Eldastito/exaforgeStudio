@@ -10531,6 +10531,9 @@ const initDb = () => {
   } catch (e) { console.error('[DB] Falha ao criar missions (ADR-189 F1)', e); }
   // Flag opt-in do Mission Layer (default 0 — 0-regressão; nada aparece até o dono ligar).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN mission_layer_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-189 F11 — postura de missões PROATIVAS (off|shadow|suggest). Shadow-first: default off; NUNCA
+  // 'auto'/autopilot (missão proativa é sempre PROPOSTA, nunca executa sozinha).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN mission_proactive_mode TEXT DEFAULT 'off'`); } catch(e){}
 };
 
 initDb();

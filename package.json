@@ -455,6 +455,7 @@
     "test:mission-nav": "tsx scripts/test-mission-nav.ts",
     "test:mission-legacy-reduction": "tsx scripts/test-mission-legacy-reduction.ts",
     "test:mission-debrief": "tsx scripts/test-mission-debrief.ts",
+    "test:mission-proactive": "tsx scripts/test-mission-proactive.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

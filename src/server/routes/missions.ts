@@ -13,6 +13,7 @@ import { MissionReadinessService } from "../MissionReadinessService.js";
 import { MissionRuntimeService } from "../MissionRuntimeService.js";
 import { MissionCheckpointService } from "../MissionCheckpointService.js";
 import { MissionDebriefService } from "../MissionDebriefService.js";
+import { MissionProactiveService } from "../MissionProactiveService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -50,6 +51,22 @@ router.post("/intent", (req: AuthRequest, res): any => {
     const persist = req.body?.persist === true || req.query?.persist === "1";
     res.json(MissionIntentService.propose(req.organizationId!, text, { persist, actor: actor(req) }));
   } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F11 — Missões proativas (§34). Preview (read-only) do que os sinais proporiam. */
+router.get("/proactive/scan", (req: AuthRequest, res): any => {
+  try { res.json({ mode: MissionProactiveService.mode(req.organizationId!), proposals: MissionProactiveService.scan(req.organizationId!) }); }
+  catch (e: any) { fail(res, e); }
+});
+/** Define a postura (off|shadow|suggest — nunca 'auto'). */
+router.post("/proactive/mode", (req: AuthRequest, res): any => {
+  try { res.json(MissionProactiveService.setMode(req.organizationId!, String(req.body?.mode || ""), actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+/** Roda a materialização conforme a postura (suggest grava rascunhos; nunca executa). */
+router.post("/proactive/run", (req: AuthRequest, res): any => {
+  try { res.json(MissionProactiveService.run(req.organizationId!, { actor: actor(req) })); }
+  catch (e: any) { fail(res, e); }
 });
 
 /** Detalhe de uma missão. */

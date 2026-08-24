@@ -11,6 +11,7 @@ import { MissionIntentService } from "../MissionIntentService.js";
 import { MissionReversePlanner } from "../MissionReversePlanner.js";
 import { MissionReadinessService } from "../MissionReadinessService.js";
 import { MissionRuntimeService } from "../MissionRuntimeService.js";
+import { MissionCheckpointService } from "../MissionCheckpointService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -104,6 +105,20 @@ router.post("/:id/actions", (req: AuthRequest, res): any => {
 /** Visão de execução da missão (ações governadas + contagens). Read-only. */
 router.get("/:id/runtime", (req: AuthRequest, res): any => {
   try { res.json(MissionRuntimeService.runtime(req.organizationId!, String(req.params.id))); }
+  catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F6 — Checkpoint (planejado × realizado × tempo → on_track/at_risk/off_track). Read-only. */
+router.get("/:id/checkpoint", (req: AuthRequest, res): any => {
+  try {
+    const asOf = typeof req.query?.asOf === "string" ? req.query.asOf : undefined;
+    res.json(MissionCheckpointService.checkpoint(req.organizationId!, String(req.params.id), { asOf }));
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Propõe um REPLAN governado (nunca executa direto). */
+router.post("/:id/replan", (req: AuthRequest, res): any => {
+  try { res.json(MissionCheckpointService.proposeReplan(req.organizationId!, String(req.params.id), { reason: req.body?.reason, actor: actor(req) })); }
   catch (e: any) { fail(res, e); }
 });
 

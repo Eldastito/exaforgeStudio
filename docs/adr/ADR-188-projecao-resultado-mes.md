@@ -1,6 +1,7 @@
 # ADR-188 — Projeção de Resultado do Mês & Ponto de Equilíbrio pleno (forward-looking)
 
-**Estado:** **F0 MERGEADA (PR #1306)** · **F1 EM PR** — `ResultProjectionService.project` + rota. Plano F0–F4.
+**Estado:** **F0 MERGEADA (#1306)** · **F1 MERGEADA (#1307)** · **F2 EM PR** — sinal proativo abaixo do
+equilíbrio. Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** capstone FORWARD do arco de reconciliação de P&L (ADR-182 receita → ADR-184 custo por
 natureza → ADR-185 despesa por centro de custo → ADR-186 resultado consolidado). Todo esse arco é

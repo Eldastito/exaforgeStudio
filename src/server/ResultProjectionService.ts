@@ -20,7 +20,9 @@
  * 2 (premissa + confiança explícitas) · 3 (assimetria fixo × variável) · 4 (derivado/RN-004) ·
  * 5 (advisory — não corta custo, F2) · 6 (isolado/determinístico — asOf explícito) · 7 (reusa o DRE).
  */
+import db from "./db.js";
 import { ManagerialDreService } from "./ManagerialDreService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -131,6 +133,69 @@ export class ResultProjectionService {
       projected: { receita: projReceita, resultado: projResultado },
       pctToBreakEven, onTrack, confidence, assumptions, note,
     };
+  }
+
+  /**
+   * ADR-188 F2 — sinal PROATIVO "o mês projeta abaixo do equilíbrio". Publica um `business_signal`
+   * quando, com dias DECORRIDOS suficientes (confiança média/alta — nunca no ruído de poucos dias,
+   * RN-RP-2), o resultado PROJETADO do mês é NEGATIVO — cedo o bastante pro dono reagir. Advisory:
+   * nunca bloqueia, nunca corta custo, nunca cria `decision_action` (RN-RP-5). Hipótese
+   * (`basis:'hypothesis'`, `impactAmount:null` — o número projetado vai na evidência, não inventa
+   * dinheiro medido, RN-RP-1). Self-healing: volta pro azul → `resolveByDedupe`; recorre →
+   * `reopenByDedupe` (respeita o `dismissed` humano §65). Dedupe rolante (sempre reflete o mês
+   * corrente). Best-effort.
+   */
+  static publishResultProjectionSignal(orgId: string, opts: { period?: string; asOf?: string } = {}): { published: boolean; resolved: boolean } {
+    const dedupeKey = "result_projection:below_breakeven";
+    let published = false, resolved = false;
+    try {
+      const r = this.project(orgId, { period: opts.period, asOf: opts.asOf });
+      const actionable = (r.confidence === "medium" || r.confidence === "high")
+        && r.projected.resultado != null && r.projected.resultado < 0;
+      if (actionable) {
+        const brl = (n: number) => `R$ ${n.toFixed(2).replace(".", ",")}`;
+        const faltam = r.totalDays - r.elapsedDays;
+        BusinessSignalService.publish(orgId, {
+          domain: "result_projection",
+          signalType: "below_breakeven",
+          severity: "attention",
+          basis: "hypothesis",
+          confidence: r.confidence === "high" ? 0.6 : 0.5,
+          impactAmount: null,             // nunca inventa dinheiro medido (RN-RP-1)
+          sourceService: "ResultProjectionService",
+          evidence: {
+            period: r.period, elapsedDays: r.elapsedDays, totalDays: r.totalDays,
+            projectedResultado: r.projected.resultado, breakEvenRevenue: r.breakEvenRevenue,
+            projectedReceita: r.projected.receita, pctToBreakEven: r.pctToBreakEven,
+            message: `No ritmo atual (${r.elapsedDays}/${r.totalDays} dias), o mês projeta prejuízo de ${brl(Math.abs(r.projected.resultado!))}. Ainda dá pra reagir — faltam ${faltam} dias e o ponto de equilíbrio é ${r.breakEvenRevenue != null ? brl(r.breakEvenRevenue) : "—"}.`,
+          },
+          dedupeKey,
+        });
+        try { BusinessSignalService.reopenByDedupe(orgId, dedupeKey); } catch { /* noop */ }
+        published = true;
+      } else {
+        try { const rr = BusinessSignalService.resolveByDedupe(orgId, dedupeKey); resolved = !!rr?.ok; } catch { /* noop */ }
+      }
+    } catch { /* best-effort */ }
+    return { published, resolved };
+  }
+
+  /** Passe do Scheduler: só orgs com RECEITA no mês corrente (senão a projeção é `no_revenue`). */
+  static pass(): void {
+    const period = new Date().toISOString().slice(0, 7);
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT DISTINCT o.organization_id AS organization_id
+        FROM orders o
+        WHERE strftime('%Y-%m', o.created_at) = ?
+          AND o.status IN ('pago','em_preparo','entregue','concluido')
+      `).all(period) as any[];
+    } catch { return; }
+    for (const o of orgs) {
+      try { this.publishResultProjectionSignal(o.organization_id); }
+      catch (e) { console.error("[ResultProjection] pass falhou", o.organization_id, e); }
+    }
   }
 }
 

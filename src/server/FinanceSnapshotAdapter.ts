@@ -4,6 +4,7 @@ import { ManagerialDreService } from "./ManagerialDreService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
 import { PnlCostReconciliationService } from "./PnlCostReconciliationService.js";
+import { ConsolidatedResultService } from "./ConsolidatedResultService.js";
 
 /**
  * FinanceSnapshotAdapter (ADR-135, Enterprise Intelligence Kernel — Epic 1).
@@ -24,6 +25,7 @@ export class FinanceSnapshotAdapter {
       const fc = CashForecastService.forecast(orgId, { minCash: 0 }) as any;
       const dre = safe(() => ManagerialDreService.monthly(orgId, period) as any, null);
       const cost = safe(() => PnlCostReconciliationService.monthlyCost(orgId, period) as any, null);
+      const consolidated = safe(() => ConsolidatedResultService.monthly(orgId, period) as any, null);
       const owner = safe(() => OwnerDrawService.summary(orgId, period) as any, null);
       const status = safe(() => (BusinessHealthService.status(orgId) as any)?.status, null);
       const L = dre?.linhas || {};
@@ -74,6 +76,21 @@ export class FinanceSnapshotAdapter {
               (cost.unknownCostRisk ? "A maioria da receita não tem custo cadastrado — o CMV está subestimado e a margem/lucro NÃO podem ser afirmados como fato. " : "") +
               "Perdas operacionais e custos de loja NÃO estão nesta base (ver excludedFromResultado)."
             : null,
+          // ADR-186 F2 — RESULTADO CONSOLIDADO (all_channels = core + lojas) AO LADO do
+          // `resultadoOperacional` core acima (que fica INTACTO — 0-regressão). É o lucro REAL do
+          // dono de varejo, com `partial` (loja sem resultado computável → não inventa lucro) e
+          // `doubleCountRisk` (mesmo custo lançado como payable E custo de loja) explícitos. O
+          // resultado core acima segue CORE — nunca confundir com o consolidado (escopos rotulados).
+          consolidated: consolidated ? {
+            resultadoOperacional: consolidated.consolidated?.resultadoOperacional ?? null,
+            scope: "all_channels",
+            partial: consolidated.consolidated?.partial ?? false,
+            coreResult: consolidated.core?.resultadoOperacional ?? null,
+            storesResult: consolidated.stores?.resultado ?? null,
+            doubleCountRisk: consolidated.doubleCountRisk ?? false,
+            doubleCountCategories: consolidated.doubleCountCategories ?? [],
+            note: consolidated.note ?? null,
+          } : null,
         } : { available: false },
         retiradas: owner ? {
           mes: Number(owner.retiradas) || 0, proLaboreSugerido: Number(owner.proLaboreSugerido) || 0,

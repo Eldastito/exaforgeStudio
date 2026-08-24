@@ -1,7 +1,7 @@
 # ADR-186 — Resultado CONSOLIDADO (all-channels): o lucro real incluindo as lojas
 
-**Estado:** **F0 MERGEADA (PR #1296)** · **F1 EM PR** — `ConsolidatedResultService.monthly`.
-Plano F0–F4.
+**Estado:** **F0 MERGEADA (PR #1296)** · **F1 MERGEADA (PR #1297)** · **F2 EM PR** — consolidado no
+snapshot executivo. Plano F0–F4.
 **Data:** 2026-08-24.
 **Contexto:** capstone da reconciliação de P&L — fecha o **track futuro** do ADR-184 ("custo de loja
 folded no DRE"). Aditivo sobre ADR-128 (`ManagerialDreService`, DRE gerencial core-only), ADR-083
@@ -97,10 +97,13 @@ store-cost (sem chave — detecta e sinaliza, como o ADR-182 fez); ratear payabl
   `ManagerialDreService`). Reusa `ManagerialDreService.monthly`/`RetailStoreCostService.
   allStoresResult`. `test:consolidated-result` (16); `test:managerial-dre`/`test:retail-store-result`
   sem regressão.
-- **F2 — Consolidado no snapshot executivo.** `FinanceSnapshotAdapter.dre` ganha um bloco
-  `consolidated` (all_channels) AO LADO do resultado core (que fica intacto — 0-regressão) +
-  `doubleCountRisk`/`partial`/`scopeNote` — pro Diretor IA narrar o lucro REAL sem confundir escopos.
-  `test:consolidated-snapshot`.
+- **F2 — Consolidado no snapshot executivo (EM PR).** `FinanceSnapshotAdapter.dre` ganha um bloco
+  `consolidated` (`{resultadoOperacional, scope:'all_channels', partial, coreResult, storesResult,
+  doubleCountRisk, doubleCountCategories, note}`) AO LADO do `resultadoOperacional` core (que fica
+  INTACTO — 0-regressão) — pro Diretor IA narrar o lucro REAL sem confundir escopos (core ×
+  all_channels rotulados). `partial`/`doubleCountRisk` propagados. Deriva por `safe()` (falha
+  isolada não derruba o snapshot). `test:consolidated-snapshot` (10); `test:consolidated-result`/
+  `test:pnl-cost-snapshot-coherence` sem regressão.
 - **F3 — Sinal advisory de dupla contagem.** `ConsolidatedResultService.publishDoubleCountSignal`
   — quando o `doubleCountRisk` é material, publica `business_signals` (`consolidated_result/
   double_count_risk`, `basis:hypothesis`, `impactAmount:null`, severity attention) pro dono conferir

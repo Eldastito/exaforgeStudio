@@ -920,6 +920,12 @@ export class Scheduler {
       import("./MissionCheckpointService.js").then((m) => m.MissionCheckpointService.pass())
         .catch((e) => console.error('[Scheduler] checkpoint de missão falhou', e));
     } catch (e) { console.error('[Scheduler] pass de checkpoint de missão falhou', e); }
+    // Missões proativas (ADR-189 F11): traduz sinais abertos em PROPOSTAS de missão. Shadow-first
+    // (só orgs com postura shadow/suggest); nunca executa. Best-effort.
+    try {
+      import("./MissionProactiveService.js").then((m) => m.MissionProactiveService.pass())
+        .catch((e) => console.error('[Scheduler] missões proativas falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de missões proativas falhou', e); }
     // Agenda Federada — geocoding das entidades descobríveis (ADR-180 F11.2): preenche
     // lat/lng (best-effort, cache) pra descoberta casar por RAIO. Só quem optou por aparecer.
     try {

@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F8 FECHADAS** (#1341–#1349) + **F9 (Fala Tu + bloco "Hoje") EM PR.** Camada
+**Estado:** **F0–F9 FECHADAS** (#1341–#1350) + **F10 (golden path) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,24 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · **F9 Fala Tu + bloco "Hoje" (EM PR)** ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · **F10 golden path (EM PR)** ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 14. F10 — Golden path (esta fatia)
+
+`test:ceo-golden-path` (20) prova o North Star (§4) PONTA-A-PONTA compondo os serviços
+REAIS F1–F9 (nada novo): o dono pergunta *"Como está minha empresa?"* e a cadeia responde
+para um cenário de clínica (meta de receita atrasada + desvio financeiro crítico + recebível
+vencido): snapshot 3 pilares com financeiro CRÍTICO + visão (F4) → pior pilar + restrição
+HIPÓTESE que ameaça a meta (F5) → missão SUGERIDA (nunca criada) pra recuperar a receita (F6)
+→ financeiro rico com inadimplência 40% real (F7) → Diretor NARRA a Visão Executiva (F8) →
+"Hoje" por exceção (F9). Guardrails ponta-a-ponta: dinheiro role-gated (redação), null≠zero
+(cash sem fonte), sugerir≠criar (0 missões escritas), isolamento multi-tenant. 0-regressão.
 
 ## 13. F9 — Fala Tu intents + bloco "Hoje" (esta fatia)
 

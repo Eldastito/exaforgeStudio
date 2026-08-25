@@ -815,7 +815,8 @@
     "test:executive-mission-bridge": "tsx scripts/test-executive-mission-bridge.ts",
     "test:executive-finance": "tsx scripts/test-executive-finance.ts",
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
-    "test:executive-today-block": "tsx scripts/test-executive-today-block.ts"
+    "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",
+    "test:ceo-golden-path": "tsx scripts/test-ceo-golden-path.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

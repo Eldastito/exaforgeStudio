@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F7 FECHADAS** (#1341–#1348) + **F8 (briefing executivo) EM PR.** Camada
+**Estado:** **F0–F8 FECHADAS** (#1341–#1349) + **F9 (Fala Tu + bloco "Hoje") EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,27 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · **F8 briefing (EM PR)** ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · **F9 Fala Tu + bloco "Hoje" (EM PR)** ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 13. F9 — Fala Tu intents + bloco "Hoje" (esta fatia)
+
+Duas superfícies do Fala Tu passam a responder *"Como está minha empresa?"*: (1) a
+INTENT de negócio (via `/ask` do Diretor) já é atendida pela F8 — o mesmo panorama
+carrega a Visão Executiva; (2) o bloco **"Hoje"** (`FalaTuHomeService.home`) ganha
+`executiveToday` — leitura executiva por EXCEÇÃO (§115/ADR-163 — invisible UX, SEM menu
+novo): pior pilar + restrição nº1 (hipótese) + saúde dos 3 pilares + linha humana. COMPÕE
+a F5 (`ExecutiveConstraintService.assess`, que já compõe o snapshot F4) — sem motor, sem
+tabela, sem rota nova. Role-scoped (§73/RN-CEO-13): só quem tem **visão completa** do negócio
+recebe (com dinheiro); vendedor → `null`. Honesto: sem desvio → `worstPillar`/`constraint`
+null + linha calma ("Tudo sob controle nos 3 pilares"). Import estático com uso em tempo de
+CHAMADA quebra o ciclo com o snapshot (padrão convenção nº 11). `test:executive-today-block`
+(9); 0-regressão verificada (`test:falatu-home`/`falatu-home-today`/`mission-home` verdes).
 
 ## 12. F8 — Briefing executivo (esta fatia)
 

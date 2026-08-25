@@ -811,7 +811,8 @@
     "test:executive-metrics-sources": "tsx scripts/test-executive-metrics-sources.ts",
     "test:executive-vision": "tsx scripts/test-executive-vision.ts",
     "test:executive-snapshot": "tsx scripts/test-executive-snapshot.ts",
-    "test:executive-constraint": "tsx scripts/test-executive-constraint.ts"
+    "test:executive-constraint": "tsx scripts/test-executive-constraint.ts",
+    "test:executive-mission-bridge": "tsx scripts/test-executive-mission-bridge.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

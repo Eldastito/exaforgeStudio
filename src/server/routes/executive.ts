@@ -4,6 +4,7 @@ import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
 import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
 import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotService.js";
 import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
+import { ExecutiveMissionBridgeService } from "../ExecutiveMissionBridgeService.js";
 
 const router = Router();
 
@@ -74,6 +75,15 @@ router.get("/constraint", requireRole("owner", "admin"), (req: AuthRequest, res)
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ExecutiveConstraintService.assess(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190 F6) — Mission Bridge ──
+// Sugere (NUNCA cria — RN-CEO-06) missões pros desvios que ameaçam metas. Owner/admin.
+router.get("/mission-suggestions", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExecutiveMissionBridgeService.suggest(orgId)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

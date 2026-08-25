@@ -1,7 +1,13 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F21 em produção** (#1311–#1332) + tela "Missões" (`MissionsView`).
-**F22 (plano reverso de AGENDA — cross-vertical) EM PR** — o Mission OS é HORIZONTAL (zero gate de
+**Estado:** **FECHADO — F0–F22 em produção** (#1311–#1333) + tela "Missões" (`MissionsView`).
+**F23 (golden-path de AGENDA — paridade cross-vertical) EM PR** — `test:mission-golden-path-agenda`
+roda o MESMO ciclo do golden-path de varejo (receita) ponta a ponta pra uma CLÍNICA (métrica
+`appointments`): intenção "encher a agenda com 200 atendimentos" → missão → plano reverso de agenda
+(comparecimento derivado → agendamentos → contatos → gap) → prontidão → execução governada (correlation
+`mission:<id>`, impacto em atendimentos) → trajetória `at_risk` → superfícies "Hoje"/nav → resultado
+assegurado → aprendizado no motor único → debrief → isolamento. Crava a paridade receita×agenda como
+regressão permanente (17 checks). **F22 = plano reverso de AGENDA (cross-vertical) — o Mission OS é HORIZONTAL (zero gate de
 vertical; a flag/toggle é universal e o detector de intenção já cobre encher-agenda/cobrar/reduzir-
 estoque/etc.), mas o plano reverso (F3) só montava a cadeia completa pra `revenue`. A F22 estende à
 métrica `appointments` (encher a agenda): alvo de atendimentos → agendamentos (via COMPARECIMENTO

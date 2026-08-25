@@ -1,7 +1,14 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F22 em produção** (#1311–#1333) + tela "Missões" (`MissionsView`).
-**F23 (golden-path de AGENDA — paridade cross-vertical) EM PR** — `test:mission-golden-path-agenda`
+**Estado:** **FECHADO — F0–F23 em produção** (#1311–#1334) + tela "Missões" (`MissionsView`).
+**F24 (premissas do plano na UI) EM PR** — fecha uma lacuna de usabilidade: o detalhe da missão
+chamava plano/prontidão/próximo-passo com corpo vazio, então as premissas de conversão nunca eram
+coletadas e a cadeia parava em "premissa faltante" (via UI o próximo passo virava sempre "registre a
+premissa"). Agora há uma seção **"Premissas do plano"** (opcional, colapsável) que envia, por métrica:
+receita → ticket/oportunidade→venda %/contato→oportunidade %; agenda → comparecimento %/contato→
+agendamento %. Vazio = derivado do histórico (honesto). Com as taxas preenchidas, o plano completa e o
+próximo passo vira a alavanca de campanha real. UI-only sobre endpoints já testados (tsc+build verdes).
+**F23 = golden-path de AGENDA (paridade cross-vertical) — `test:mission-golden-path-agenda`
 roda o MESMO ciclo do golden-path de varejo (receita) ponta a ponta pra uma CLÍNICA (métrica
 `appointments`): intenção "encher a agenda com 200 atendimentos" → missão → plano reverso de agenda
 (comparecimento derivado → agendamentos → contatos → gap) → prontidão → execução governada (correlation

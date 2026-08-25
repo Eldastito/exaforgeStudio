@@ -89,6 +89,14 @@ async function main() {
   const nsRow = db.prepare(`SELECT * FROM decision_actions WHERE id=? AND organization_id=?`).get(nsProp.action.id, A) as any;
   check("F15 propose delega ao caminho GOVERNADO (correlation mission:<id>, nunca 'done')", !!nsRow && nsRow.correlation_id === `mission:${mNext.id}` && nsRow.status !== "done");
 
+  // ── F22 CROSS-VERTICAL: agenda (appointments) tem cadeia própria (não é só receita).
+  const { MissionReversePlanner: RP2 } = await import("../src/server/MissionReversePlanner.js");
+  for (let i = 0; i < 8; i++) db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, status, scheduled_start) VALUES (?, ?, 'ct', 'C', 'completed', '2026-07-10 09:00:00')`).run(randomUUID(), A);
+  for (let i = 0; i < 2; i++) db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, status, scheduled_start) VALUES (?, ?, 'ct', 'C', 'no_show', '2026-07-10 09:00:00')`).run(randomUUID(), A);
+  const mAgenda = M.create(A, { title: "100 atendimentos", targetMetric: "appointments", targetValue: 100, targetUnit: "count" });
+  const planAg = RP2.plan(A, mAgenda.id, { bookingConversionRate: 0.25 });
+  check("F22 agenda é applicable (cross-vertical) + comparecimento derivado (0.8)", planAg.applicable === true && planAg.assumptions.showRate === 0.8 && planAg.chain.some((s: any) => s.stage === "bookings" && s.value === 125));
+
   // ── (B) FIAÇÃO DE PRODUÇÃO ──
   const scheduler = fs.readFileSync(path.join(ROOT, "src/server/Scheduler.ts"), "utf8");
   check("wiring: MissionCheckpointService.pass + MissionProactiveService.pass no Scheduler", scheduler.includes("MissionCheckpointService.pass") && scheduler.includes("MissionProactiveService.pass"));
@@ -99,8 +107,8 @@ async function main() {
   const dbsrc = fs.readFileSync(path.join(ROOT, "src/server/db.ts"), "utf8");
   check("wiring: flags/colunas (mission_layer_enabled + mission_proactive_mode + tabela missions)", dbsrc.includes("mission_layer_enabled") && dbsrc.includes("mission_proactive_mode") && dbsrc.includes("CREATE TABLE IF NOT EXISTS missions"));
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  const needed = ["test:mission-contract", "test:mission-intent", "test:mission-reverse-plan", "test:mission-readiness", "test:mission-runtime", "test:mission-checkpoint", "test:mission-home", "test:mission-nav", "test:mission-legacy-reduction", "test:mission-debrief", "test:mission-proactive", "test:mission-next-step", "test:mission-golden-path", "test:mission-hardening"];
-  check("wiring: 14 testes mission wired", needed.every((t) => pkg.scripts[t]));
+  const needed = ["test:mission-contract", "test:mission-intent", "test:mission-reverse-plan", "test:mission-readiness", "test:mission-runtime", "test:mission-next-step", "test:mission-checkpoint", "test:mission-home", "test:mission-nav", "test:mission-legacy-reduction", "test:mission-debrief", "test:mission-proactive", "test:mission-enablement", "test:mission-metrics", "test:mission-appointments-plan", "test:mission-golden-path", "test:mission-golden-path-agenda", "test:mission-hardening"];
+  check("wiring: 18 testes mission wired", needed.every((t) => pkg.scripts[t]));
   check("wiring: runbook presente", fs.existsSync(path.join(ROOT, "docs/runbook/mission-operacao.md")));
   check("wiring: ADR-189 presente", fs.existsSync(path.join(ROOT, "docs/adr/ADR-189-mission-operating-layer.md")));
 

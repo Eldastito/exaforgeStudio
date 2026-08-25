@@ -1,7 +1,11 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F23 em produção** (#1311–#1334) + tela "Missões" (`MissionsView`).
-**F24 (premissas do plano na UI) EM PR** — fecha uma lacuna de usabilidade: o detalhe da missão
+**Estado:** **FECHADO — F0–F24 em produção** (#1311–#1335) + tela "Missões" (`MissionsView`).
+**F25 (hardening em dia — trava a regressão cross-vertical) EM PR** — o `test:mission-hardening`
+afirmava "14 testes mission wired" mas 4 novos (`enablement`/`metrics`/`appointments-plan`/`golden-
+path-agenda`) tinham ficado de fora do doc-of-record; agora são 18, e o hardening ganha a REGRESSÃO
+cross-vertical (F22): missão de agenda tem cadeia própria (`applicable`, comparecimento derivado). 28
+checks. **F24 = premissas do plano na UI (destrava a profundidade) — fecha uma lacuna de usabilidade: o detalhe da missão
 chamava plano/prontidão/próximo-passo com corpo vazio, então as premissas de conversão nunca eram
 coletadas e a cadeia parava em "premissa faltante" (via UI o próximo passo virava sempre "registre a
 premissa"). Agora há uma seção **"Premissas do plano"** (opcional, colapsável) que envia, por métrica:

@@ -6,6 +6,7 @@ import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotSe
 import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
 import { ExecutiveMissionBridgeService } from "../ExecutiveMissionBridgeService.js";
 import { ExecutiveFinanceService } from "../ExecutiveFinanceService.js";
+import { KeyPersonDependencyService } from "../KeyPersonDependencyService.js";
 
 const router = Router();
 
@@ -98,6 +99,15 @@ router.get("/finance", requireRole("owner", "admin"), (req: AuthRequest, res): a
     const period = typeof req.query.period === "string" ? req.query.period : undefined;
     res.json(ExecutiveFinanceService.read(orgId, { period }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190 §38) — risco de concentração (key-person) ──
+// Read-only; o alerta HIGH já flui pra espinha via detect/Scheduler. Owner/admin (§73).
+router.get("/key-person", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(KeyPersonDependencyService.assess(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

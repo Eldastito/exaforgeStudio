@@ -890,6 +890,13 @@ export class Scheduler {
       import("./PnlCostReconciliationService.js").then((m) => m.PnlCostReconciliationService.pass())
         .catch((e) => console.error('[Scheduler] sinal de custo incoerente falhou', e));
     } catch (e) { console.error('[Scheduler] pass de custo incoerente falhou', e); }
+    // Risco de concentração (ADR-190 §38): sinal advisory de key-person dependency
+    // (receita num vendedor / atendimentos num responsável). Hipótese, nunca inventa
+    // dinheiro; só orgs com fonte; self-healing quando a concentração alivia. Best-effort.
+    try {
+      import("./KeyPersonDependencyService.js").then((m) => m.KeyPersonDependencyService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de key-person falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de key-person falhou', e); }
     // Controladoria (ADR-185 F3): sinal advisory de despesa não apropriada a centro de custo.
     // Só orgs com centro ativo; hipótese, nunca apropria sozinho. Best-effort.
     try {

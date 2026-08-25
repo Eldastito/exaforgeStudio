@@ -33,7 +33,7 @@ async function main() {
   check("2.1 pilares = commercial/operations/finance", EXECUTIVE_PILLARS.length === 3 && EXECUTIVE_PILLARS.includes("finance"));
   const byP = BG.metricsByPillar();
   check("2.2 metricsByPillar agrupa (commercial tem revenue; finance tem receivables)", byP.commercial.some((d: any) => d.metricKey === "revenue") && byP.finance.some((d: any) => d.metricKey === "receivables"));
-  check("2.3 catálogo executivo completo (5 métricas atuais)", BG.executiveCatalog().length === 5);
+  check("2.3 catálogo executivo completo (≥5 métricas)", BG.executiveCatalog().length >= 5);
 
   // ── 3. Availability: fonte interna presente → available ──
   check("3.1 receivables available (fonte interna)", BG.availability(A, "receivables") === "available");

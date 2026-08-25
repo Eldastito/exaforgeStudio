@@ -1,6 +1,7 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0 (auditoria) FECHADA** (#1341) + **F1 (Executive Metric Registry) EM PR.** Camada
+**Estado:** **F0 (auditoria) + F1 (registry) FECHADAS** (#1341/#1342) + **F2 (métricas com fonte real)
+EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -55,7 +56,20 @@ Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orde
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
 
-## 5. F1 — Executive Metric Registry (esta fatia)
+## 6. F2 — Métricas executivas com fonte real (esta fatia)
+
+Adiciona ao registro (F1) os indicadores dos 7 executivos (§7) + §11 que faltavam, cada um sobre
+system-of-record REAL, com `availability` honesta (RN-CEO-11/§31-33): COMERCIAL `sales_count`,
+`new_customers` (1ª compra paga — §37), `average_ticket`; OPERAÇÕES `cancellations` (por tipo, `down`;
+churn como TAXA fica `unknown` §36), `customer_satisfaction` (CSAT %; NPS `unknown` — só há CSAT);
+FINANCEIRO `operating_cost` (`PnlCostReconciliationService`), `cash_balance` (`FinancialLedgerService.
+cashOnHand`, fact; **não infere de receita** §32), `overdue_receivables` (fact), `default_rate`
+(vencido÷a-receber, %). As financeiras só ficam `available` quando a fonte existe (payables/cash_accounts/
+receivables) — sem fonte → `measure()` devolve `value:null`, nunca 0. `unit` widened p/ `percent`.
+`catalog()` (metas) passa a filtrar só métricas `up` (não se define "meta" de aumentar inadimplência);
+`executiveCatalog()` mantém todas. `test:executive-metrics-sources` (15). 0-regressão.
+
+## 5. F1 — Executive Metric Registry
 
 ESTENDE `BusinessGoalService.METRICS` (D3) com os descritores executivos, sem registry paralelo e sem
 regressão (as 5 métricas existentes — revenue/appointments/content_revenue/content_leads/receivables —

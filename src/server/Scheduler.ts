@@ -897,6 +897,13 @@ export class Scheduler {
       import("./KeyPersonDependencyService.js").then((m) => m.KeyPersonDependencyService.pass())
         .catch((e) => console.error('[Scheduler] sinal de key-person falhou', e));
     } catch (e) { console.error('[Scheduler] pass de key-person falhou', e); }
+    // Briefing executivo proativo (ADR-190): digest SEMANAL por exceção (pior pilar /
+    // restrição / metas fora do ritmo) na espinha, de onde flui pras superfícies proativas.
+    // Só quando há algo estratégico; gate 7d; money-free. Best-effort.
+    try {
+      import("./ExecutiveProactiveService.js").then((m) => m.ExecutiveProactiveService.pass())
+        .catch((e) => console.error('[Scheduler] briefing executivo falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de briefing executivo falhou', e); }
     // Controladoria (ADR-185 F3): sinal advisory de despesa não apropriada a centro de custo.
     // Só orgs com centro ativo; hipótese, nunca apropria sozinho. Best-effort.
     try {

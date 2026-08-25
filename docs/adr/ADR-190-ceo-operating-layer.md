@@ -49,11 +49,26 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
 F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · F10 golden path (FECHADA) ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
-**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Aditivo pós-fechamento:** key-person dependency (§38) ENTREGUE. **Diferidas restantes:** briefing proativo · evidence-UI.
+**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Aditivo pós-fechamento:** key-person dependency (§38) + briefing proativo ENTREGUES. **Diferida restante:** evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 17. Briefing proativo (diferida, agora entregue)
+
+O dono não precisa nem perguntar: `ExecutiveProactiveService` publica um DIGEST EXECUTIVO
+SEMANAL, POR EXCEÇÃO (§115), na ESPINHA (`business_signals`, convenção nº 12) — de onde flui
+SOZINHO pras superfícies proativas que já existem (Smart Inbox / "Hoje" / push do
+`FalaTuProactiveService`, que honra quiet-hours + limiar da ADR-163). NÃO é 2º motor proativo:
+é um publisher que COMPÕE a leitura executiva (F5) + o progresso das metas, molde exato do
+`HelpKnowledgeService.publishLearnOne`. Anti-ruído: só publica quando há algo estratégico
+(pior pilar, restrição ou meta fora do ritmo); negócio calmo → NÃO publica (o dono não é
+incomodado). Gate de 7 dias (idempotente por semana via dedupe `executive_briefing:<segunda>`),
+TTL de 7 dias (o `attention()` filtra expirados), severidade `info` (digest, não alarme).
+Money-free (RN-CEO-13): o resumo é QUALITATIVO (pior pilar, restrição textual, contagem de
+metas atrasadas) — nunca R$. Rota `GET /api/executive/proactive-briefing` (preview) owner/admin;
+`pass()` no Scheduler. `test:executive-proactive-briefing` (15). Aditivo/reversível; 0-regressão.
 
 ## 16. Key-Person Dependency (§38 / D9 — diferida, agora entregue)
 

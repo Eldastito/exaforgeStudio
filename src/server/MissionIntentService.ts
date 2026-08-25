@@ -39,7 +39,7 @@ const PATTERNS: IntentPattern[] = [
   {
     id: "collect_receivable",
     test: /(cobran|cobrar|inadimpl|em atraso|atrasad|d[ií]vida|receber.*atrasad|quem (me )?deve)/i,
-    metric: null, unit: "BRL",
+    metric: "receivables", unit: "BRL",
     desiredState: "recuperar valores em atraso",
     titleFor: (v) => v ? `Recuperar ${brl(v)} de inadimplência` : "Recuperar valores em atraso",
   },

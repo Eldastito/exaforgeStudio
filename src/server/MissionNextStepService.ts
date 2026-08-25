@@ -83,6 +83,30 @@ export class MissionNextStepService {
       reason: "", autonomyReady, lever: null, ...extra,
     });
 
+    // COBRANÇA (métrica receivables): não é funil — é ativar a cobrança dos valores em aberto.
+    // Alavanca direta = command handler `collection` (que já existe). Impacto = o que falta recuperar.
+    if (mission.targetMetric === "receivables") {
+      const commandType = "collection";
+      if (!CommandExecutorService.canHandle(commandType)) return base({ reason: "Nenhum comando de cobrança registrado — faça a cobrança manualmente." });
+      let expectedImpact: number | null = null;
+      if (mission.targetValue != null) {
+        const cur = BusinessGoalService.currentValue(orgId, "receivables");
+        expectedImpact = round2(Math.max(0, mission.targetValue - (cur ?? 0)));
+      }
+      return {
+        missionId, suggestable: true, criticalStage: "receivables", planNote: plan.note,
+        reason: "Próximo passo: ativar a cobrança dos valores em aberto.", autonomyReady,
+        lever: {
+          commandType, domain: "finance", actionType: "mission_collection",
+          title: "Ativar cobrança dos valores em aberto",
+          description: "Cobrar os recebíveis em atraso para recuperar o valor da meta.",
+          expectedImpact, impactUnit: "BRL", basis: "hypothesis",
+          rationale: "Recuperação medida pelos recebíveis quitados no mês (system-of-record).",
+          commandPayload: { missionId },
+        },
+      };
+    }
+
     // Sem cadeia numérica (qualitativa / sem alvo) → acompanhamento por marcos, não alavanca automática.
     if (!plan.applicable) {
       return base({ reason: plan.targetMetric === "revenue"

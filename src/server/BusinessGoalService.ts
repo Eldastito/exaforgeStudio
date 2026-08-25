@@ -80,6 +80,19 @@ export class BusinessGoalService {
         } catch { return 0; }
       },
     },
+    // Cobrança/inadimplência (família de vertical: qualquer negócio que fatura). Valor RECUPERADO no
+    // mês — soma dos recebíveis quitados (system-of-record `receivables`, não LLM; RN-004). Mede a
+    // missão "recuperar R$ X de inadimplência" (planned recovery × recuperado de fato no checkpoint).
+    receivables: {
+      label: "Valores recuperados (mês)",
+      unit: "BRL",
+      derive: (orgId: string) => {
+        try {
+          const r = db.prepare("SELECT COALESCE(SUM(amount),0) AS v FROM receivables WHERE organization_id = ? AND status = 'received' AND strftime('%Y-%m', received_at) = strftime('%Y-%m','now')").get(orgId) as any;
+          return Number(r?.v) || 0;
+        } catch { return 0; }
+      },
+    },
   };
 
   /** Catálogo das métricas que o dono pode definir como meta (para a UI). */

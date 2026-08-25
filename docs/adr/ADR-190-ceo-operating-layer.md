@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F9 FECHADAS** (#1341–#1350) + **F10 (golden path) EM PR.** Camada
+**Estado:** **FECHADO — F0–F11 em produção** (#1341–#1351 + F11). Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,26 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · **F10 golden path (EM PR)** ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · F10 golden path (FECHADA) ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
-F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
+**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 15. F11 — Hardening + runbook (esta fatia — FECHA o ADR-190)
+
+`test:ceo-hardening` (18) é doc-of-record executável de dupla função: **(A)** CODIFICA os
+guardrails RN-CEO-01..15 como REGRESSÃO tocando os serviços REAIS F1–F10 — composição não
+motor (zero tabela `executive_%`/`ceo_%`), null≠zero (`cash_balance` sem fonte → null), fato≠
+hipótese (restrição `hypothesis`, basis do desvio `fact`), sugerir≠criar (0 missões escritas +
+visão nunca inventada), dinheiro role-gated (snapshot/finance redigidos), IA não calcula KPI
+(bloco determinístico), isolamento; **(B)** verifica a FIAÇÃO de produção — 8 serviços
+importáveis com métodos-chave, 5 rotas montadas no router `/api/executive`, 10 testes wired no
+`package.json`, runbook presente. Runbook `docs/runbook/ceo-layer-operacao.md` (mapa dos serviços,
+rotas, fluxo "Como está minha empresa?", guardrails, rollout, troubleshooting, como adicionar
+indicador). **FECHA o ADR-190.** 0-regressão.
 
 ## 14. F10 — Golden path (esta fatia)
 

@@ -1,11 +1,14 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F18 em produção** (#1311–#1329) + tela "Missões" (`MissionsView`).
-**F19 (UI do toggle do piloto) EM PR** — seção **"Missões (piloto)"** na aba Módulos (Configurações,
-sempre visível) consome `GET/PUT /api/missions/enablement`; ligar faz a nav "Missões" aparecer na hora
-(recarrega entitlements), desligar guarda as missões (honesto sobre o nº guardado). Fecha o loop de UX
-do piloto pro dono não-técnico (a nav some quando OFF, então o botão de LIGAR mora fora dela). UI-only
-sobre endpoints testados (tsc+build verdes). **F18 = `MissionService.setEnabled/settings` + rotas `GET/PUT
+**Estado:** **FECHADO — F0–F19 em produção** (#1311–#1330) + tela "Missões" (`MissionsView`).
+**F20 (`MissionMetricsService` — KPIs do piloto) EM PR** — todo PRD grande fecha com métricas
+(DecisionMetrics/OutcomeAssuranceMetrics/LearningMetrics); o Mission OS ganha o seu. KPIs DERIVADOS por
+query (RN-004): total · byStatus · inFlight · achieved/failed/cancelled/atRisk · `achievedRatePct`
+(concluídas ÷ terminais, cancelada FORA do denominador; null sem desfecho) · bySource · byAutonomy ·
+`withGovernedAction`/`governedActionRatePct` (missões que viraram ação pelo fio `mission:<id>`) ·
+`avgConfidence` (só as que declararam; null ≠ 0). Honesto: percentual sem denominador é null, nunca 0.
+Rota `GET /api/missions/metrics`; `test:mission-metrics` 11. **F19 = seção "Missões (piloto)" na aba
+Módulos (liga/desliga a flag; nav reage na hora); UI-only sobre endpoints testados.** **F18 = `MissionService.setEnabled/settings` + rotas `GET/PUT
 /api/missions/enablement` (antes do gate `requireMissionLayer` — bootstrapping); reversível, desligar
 NUNCA apaga missões (convenção nº 9); runbook `docs/runbook/mission-piloto.md`; `test:mission-enablement` 10.** **F17 = `test:mission-hardening` (27 checks) codificando
 F15/F16 como REGRESSÃO dos RN-MOL: shadow (suggest não escreve `decision_action`) · grounding (alavanca

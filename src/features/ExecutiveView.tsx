@@ -7,7 +7,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { useStore } from '@/src/store/useStore';
 
 type Msg = { role: 'user' | 'ai'; text: string };
-type Tab = 'conversar' | 'decidir' | 'plano' | 'funciona' | 'operacoes' | 'recuperacao';
+type Tab = 'empresa' | 'conversar' | 'decidir' | 'plano' | 'funciona' | 'operacoes' | 'recuperacao';
 
 const DOMAIN_LABEL: Record<string, string> = {
   finance: 'Finanças', production: 'Produção', procurement: 'Compras', inventory: 'Estoque',
@@ -24,7 +24,7 @@ const SUGESTOES = [
 ];
 
 export function ExecutiveView() {
-  const [tab, setTab] = useState<Tab>('conversar');
+  const [tab, setTab] = useState<Tab>('empresa');
   // ADR-152 F3.2 — aba Operações só pra quem tem permissão do módulo `runtime`
   // (RBAC granular ADR-095) OU o operador da plataforma. Cosmético; segurança
   // real é o runtimeGate + enforceModulePermission no backend (retorna 403).
@@ -40,6 +40,7 @@ export function ExecutiveView() {
         </h2>
         <p className="text-sm text-zinc-400 mt-1">Pergunte qualquer coisa sobre o seu negócio, ou acompanhe o plano de ação — tudo com dados reais do sistema, nada inventado.</p>
         <div className="flex gap-2 mt-4">
+          <TabButton active={tab === 'empresa'} onClick={() => setTab('empresa')} icon={<Activity className="h-4 w-4" />} label="Minha empresa" />
           <TabButton active={tab === 'conversar'} onClick={() => setTab('conversar')} icon={<MessageSquare className="h-4 w-4" />} label="Conversar" />
           <TabButton active={tab === 'decidir'} onClick={() => setTab('decidir')} icon={<Target className="h-4 w-4" />} label="Analisar decisão" />
           <TabButton active={tab === 'plano'} onClick={() => setTab('plano')} icon={<ListChecks className="h-4 w-4" />} label="Plano de Ação" />
@@ -48,7 +49,7 @@ export function ExecutiveView() {
           {showOperacoes && <TabButton active={tab === 'recuperacao'} onClick={() => setTab('recuperacao')} icon={<Handshake className="h-4 w-4" />} label="Recuperação" />}
         </div>
       </div>
-      {tab === 'conversar' ? <ConversarTab /> : tab === 'decidir' ? <DecidirTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : tab === 'recuperacao' ? <RecuperacaoTab /> : <FuncionaTab />}
+      {tab === 'empresa' ? <MinhaEmpresaTab /> : tab === 'conversar' ? <ConversarTab /> : tab === 'decidir' ? <DecidirTab /> : tab === 'plano' ? <PlanoDeAcaoTab /> : tab === 'operacoes' ? <OperacoesTab /> : tab === 'recuperacao' ? <RecuperacaoTab /> : <FuncionaTab />}
     </div>
   );
 }
@@ -58,6 +59,105 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
     <button onClick={onClick} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${active ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
       {icon} {label}
     </button>
+  );
+}
+
+// ===== Aba: Minha empresa (CEO Operating Layer, ADR-190) =====
+// "Como está minha empresa?" — 3 pilares + saúde + indicadores + pior pilar +
+// restrição (hipótese) + visão. Consome os endpoints /snapshot e /constraint (já
+// testados no backend). A IA não entra aqui — é leitura determinística do snapshot.
+const PILLAR_PT_UI: Record<string, string> = { commercial: 'Comercial', operations: 'Operações', finance: 'Financeiro' };
+const HEALTH_UI: Record<string, { label: string; cls: string; dot: string }> = {
+  critical: { label: 'Crítico', cls: 'text-red-300 border-red-700 bg-red-950/40', dot: 'bg-red-500' },
+  attention: { label: 'Atenção', cls: 'text-amber-300 border-amber-700 bg-amber-950/40', dot: 'bg-amber-500' },
+  ok: { label: 'OK', cls: 'text-emerald-300 border-emerald-700 bg-emerald-950/40', dot: 'bg-emerald-500' },
+  unknown: { label: 'Sem dados', cls: 'text-zinc-400 border-zinc-700 bg-zinc-900', dot: 'bg-zinc-600' },
+};
+const fmtIndicator = (v: number | null, unit: string) => {
+  if (v === null || v === undefined) return '—';
+  if (unit === 'BRL') return `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (unit === 'percent') return `${v}%`;
+  return String(v);
+};
+
+function MinhaEmpresaTab() {
+  const [snap, setSnap] = useState<any | null>(null);
+  const [con, setCon] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      apiFetch('/api/executive/snapshot').then(r => r.json()).catch(() => null),
+      apiFetch('/api/executive/constraint').then(r => r.json()).catch(() => null),
+    ]).then(([s, c]) => { setSnap(s); setCon(c); }).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><RefreshCw className="h-5 w-5 animate-spin mr-2" /> Lendo sua empresa…</div>;
+  if (!snap?.pillars) return <div className="flex-1 flex items-center justify-center text-zinc-500">Não consegui ler o panorama agora.</div>;
+
+  const pillars = ['commercial', 'operations', 'finance'].map(k => snap.pillars[k]).filter(Boolean);
+  const worst = con?.worstPillar;
+  const constraint = con?.constraint;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      {/* Visão declarada */}
+      {snap.vision?.defined && snap.vision?.statement && (
+        <div className="rounded-xl border border-indigo-800 bg-indigo-950/30 px-4 py-3">
+          <div className="text-xs uppercase tracking-wide text-indigo-300 flex items-center gap-1"><Target className="h-3.5 w-3.5" /> Visão</div>
+          <div className="text-sm text-zinc-100 mt-1">{snap.vision.statement}</div>
+        </div>
+      )}
+
+      {/* Onde focar: pior pilar + restrição nº1 (hipótese) */}
+      {(worst || constraint) ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <div className="text-xs uppercase tracking-wide text-zinc-400 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5 text-amber-400" /> Onde focar</div>
+          {worst && <div className="text-sm text-zinc-200 mt-1">Pilar em pior forma: <span className="font-semibold">{PILLAR_PT_UI[worst.pillar] || worst.pillar}</span> <span className="text-zinc-500">({worst.criticalCount} crítico(s), {worst.riskCount} risco(s))</span></div>}
+          {constraint && (
+            <div className="text-sm text-zinc-300 mt-1.5">
+              <span className="inline-block text-[11px] px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-800 text-amber-300 mr-1.5">hipótese</span>
+              Prioridade nº1: <span className="text-zinc-100">{constraint.fact}</span> → {constraint.recommendedAction}
+              {constraint.threatensGoal && <span className="text-zinc-500"> (ameaça a meta “{constraint.threatensGoal.label}”, gap {constraint.threatensGoal.gapPct}%)</span>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-emerald-800 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-200 flex items-center gap-2"><CheckCircle2 className="h-4 w-4" /> Tudo sob controle nos 3 pilares — nenhuma exceção estratégica agora.</div>
+      )}
+
+      {/* Os 3 pilares */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {pillars.map((p: any) => {
+          const h = HEALTH_UI[p.health] || HEALTH_UI.unknown;
+          const inds = (p.indicators || []).filter((i: any) => i.availability === 'available' && i.value !== null).slice(0, 4);
+          return (
+            <div key={p.pillar} className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-zinc-100">{PILLAR_PT_UI[p.pillar] || p.pillar}</div>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border flex items-center gap-1 ${h.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${h.dot}`} /> {h.label}</span>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                {inds.length ? inds.map((i: any) => (
+                  <div key={i.metricKey} className="flex items-center justify-between text-sm">
+                    <span className="text-zinc-400">{i.label}</span>
+                    <span className="text-zinc-100 tabular-nums">{fmtIndicator(i.value, i.unit)}</span>
+                  </div>
+                )) : <div className="text-xs text-zinc-500">Sem indicadores com fonte ainda.</div>}
+              </div>
+              {(p.exceptions?.length > 0) && <div className="mt-3 text-xs text-amber-400/90">{p.exceptions.length} exceção(ões) aberta(s)</div>}
+              {(p.goals?.length > 0) && <div className="mt-1 text-xs text-zinc-500">{p.goals.length} meta(s) neste pilar</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={load} className="border-zinc-700 text-zinc-300"><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Atualizar</Button>
+      </div>
+    </div>
   );
 }
 

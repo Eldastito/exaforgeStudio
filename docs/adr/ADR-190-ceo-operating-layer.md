@@ -49,11 +49,22 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
 F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · F10 golden path (FECHADA) ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
-**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Aditivo pós-fechamento:** key-person dependency (§38) + briefing proativo ENTREGUES. **Diferida restante:** evidence-UI.
+**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Aditivo pós-fechamento:** key-person dependency (§38) + briefing proativo + evidence-UI ENTREGUES. **ADR-190 100% COMPLETO — nenhuma diferida restante.**
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 18. Evidence-UI (diferida, agora entregue — FECHA todas as diferidas)
+
+A tela executiva responde *"Como está minha empresa?"* visualmente: aba **"Minha empresa"**
+(primeira aba do `ExecutiveView`/Diretor IA) consome os endpoints JÁ TESTADOS `/api/executive/
+snapshot` + `/constraint` e renderiza os **3 pilares** (Comercial/Operações/Financeiro) com badge de
+saúde (crítico/atenção/ok/sem-dados) + indicadores disponíveis, o card **"Onde focar"** (pior
+pilar + restrição nº1 rotulada HIPÓTESE + meta ameaçada) e a **visão** declarada. Honesto:
+indicador sem fonte → "—" (nunca 0); negócio calmo → "Tudo sob controle nos 3 pilares"; a IA
+NÃO entra (leitura determinística do snapshot). UI-only sobre backend testado (padrão F4b/F8b);
+`tsc` + `vite build` verdes. Aditivo/reversível; 0-regressão (só adiciona uma aba).
 
 ## 17. Briefing proativo (diferida, agora entregue)
 

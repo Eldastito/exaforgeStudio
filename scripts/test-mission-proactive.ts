@@ -46,6 +46,8 @@ async function main() {
   const rG = P.run(A);
   check("4.1 suggest → cria missão system_generated draft/off", rG.created.length === 1 && rG.created[0].source === "system_generated" && rG.created[0].status === "draft" && rG.created[0].autonomyLevel === "off");
   check("4.2 zero decision_action (nunca executa)", (db.prepare(`SELECT COUNT(*) n FROM decision_actions WHERE organization_id=?`).get(A) as any).n === 0);
+  // F27: cobrança proativa é MEDÍVEL (métrica receivables, alinhado à F26) + herda o alvo do impacto do sinal.
+  check("4.3 cobrança proativa medível: métrica receivables + alvo herdado (12400)", rG.created[0].targetMetric === "receivables" && rG.created[0].targetValue === 12400 && rG.created[0].targetUnit === "BRL");
 
   // 5. Dedup por signal:<id> — rodar de novo não duplica.
   const rG2 = P.run(A);

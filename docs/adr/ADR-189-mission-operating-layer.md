@@ -1,7 +1,13 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F25 em produção** (#1311–#1336) + tela "Missões" (`MissionsView`).
-**F26 (terceira família cross-vertical — COBRANÇA) EM PR** — estende a tese "todas as verticais" à
+**Estado:** **FECHADO — F0–F26 em produção** (#1311–#1337) + tela "Missões" (`MissionsView`).
+**F27 (proatividade alinhada às 3 famílias medíveis) EM PR** — o `MissionProactiveService` (que traduz
+`business_signals` em PROPOSTAS de missão) estava desatualizado: mapeava cobrança com `targetMetric:null`
+(qualitativa) mesmo depois da F26 tornar cobrança medível, e nunca herdava um alvo. Agora: (1)
+`collect_receivable` proativo → `targetMetric:'receivables'` (medível, consistente com a missão manual);
+(2) quando o sinal traz `impact_amount` e a métrica é em R$, ele vira o ALVO da proposta — missão
+proativa já nasce MENSURÁVEL (checkpoint mede na hora). Determinístico, shadow-first intacto. `test:
+mission-proactive` 12. **F26 = terceira família cross-vertical (COBRANÇA) — estende a tese "todas as verticais" à
 família **cobrança/inadimplência** (qualquer negócio que fatura): (1) nova métrica `receivables` no
 `BusinessGoalService` = valor RECUPERADO no mês (soma dos recebíveis quitados no system-of-record
 `receivables`, RN-004, nunca LLM); (2) o intent `collect_receivable` deixa de ser qualitativo e passa a

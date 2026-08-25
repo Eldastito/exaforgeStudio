@@ -17,20 +17,25 @@ import { MissionService, Mission } from "./MissionService.js";
 
 export type ProactiveMode = "off" | "shadow" | "suggest";
 
-interface MissionShape { intentId: string; title: string; targetMetric: string | null; targetUnit: "BRL" | "count" | null; desiredState: string }
+interface MissionShape { intentId: string; title: string; targetMetric: string | null; targetUnit: "BRL" | "count" | null; targetValue: number | null; desiredState: string }
 
-/** Mapa DETERMINÍSTICO sinal→missão. Só domínios/tipos conhecidos viram proposta (nunca força). */
+/** Mapa DETERMINÍSTICO sinal→missão. Só domínios/tipos conhecidos viram proposta (nunca força).
+ *  Alinhado com as métricas medíveis (F22 agenda, F26 cobrança). Quando o sinal traz o valor em jogo
+ *  (`impact_amount`) e a métrica é monetária, ele vira o ALVO da missão — proposta já mensurável. */
 function shapeForSignal(domain: string, signalType: string, impact: number | null): MissionShape | null {
   const d = String(domain || "").toLowerCase(), t = String(signalType || "").toLowerCase();
   const money = impact && impact > 0 ? ` (~R$ ${Number(impact).toLocaleString("pt-BR")})` : "";
+  // Só herda o impacto como alvo quando a métrica é em R$ (impact_amount é dinheiro, não contagem).
+  const brlTarget = impact && impact > 0 ? Math.round(impact) : null;
+  const mk = (s: Omit<MissionShape, "targetValue">): MissionShape => ({ ...s, targetValue: s.targetUnit === "BRL" ? brlTarget : null });
   if (/recovery|churn|reten|inativ/.test(d) || /inactive|dormant|churn|inativ/.test(t))
-    return { intentId: "recover_customer", title: `Recuperar clientes inativos${money}`, targetMetric: null, targetUnit: "count", desiredState: "recuperar clientes inativos" };
+    return mk({ intentId: "recover_customer", title: `Recuperar clientes inativos${money}`, targetMetric: null, targetUnit: "count", desiredState: "recuperar clientes inativos" });
   if (/collection|cobran|receiv|inadimpl/.test(d) || /overdue|inadimpl|atras/.test(t))
-    return { intentId: "collect_receivable", title: `Recuperar valores em atraso${money}`, targetMetric: null, targetUnit: "BRL", desiredState: "recuperar valores em atraso" };
+    return mk({ intentId: "collect_receivable", title: `Recuperar valores em atraso${money}`, targetMetric: "receivables", targetUnit: "BRL", desiredState: "recuperar valores em atraso" });
   if (/vacancy|agenda|schedul/.test(d) || /vacancy|ocios|vago/.test(t))
-    return { intentId: "fill_schedule", title: "Preencher a agenda", targetMetric: "appointments", targetUnit: "count", desiredState: "preencher a agenda" };
+    return mk({ intentId: "fill_schedule", title: "Preencher a agenda", targetMetric: "appointments", targetUnit: "count", desiredState: "preencher a agenda" });
   if (/result_projection|cash|revenue/.test(d) || /below_breakeven|rupture|queda/.test(t))
-    return { intentId: "grow_revenue", title: "Recuperar o ritmo de faturamento", targetMetric: "revenue", targetUnit: "BRL", desiredState: "aumentar a receita" };
+    return mk({ intentId: "grow_revenue", title: "Recuperar o ritmo de faturamento", targetMetric: "revenue", targetUnit: "BRL", desiredState: "aumentar a receita" });
   return null;
 }
 
@@ -86,7 +91,7 @@ export class MissionProactiveService {
         if (p.alreadyExists) continue;
         const m = MissionService.create(orgId, {
           title: p.shape.title, desiredState: p.shape.desiredState,
-          targetMetric: p.shape.targetMetric, targetUnit: p.shape.targetUnit,
+          targetMetric: p.shape.targetMetric, targetUnit: p.shape.targetUnit, targetValue: p.shape.targetValue,
           baselineState: `signal:${p.signalId}`,   // marcador de dedup (sem coluna nova)
           source: "system_generated",
         }, opts.actor);

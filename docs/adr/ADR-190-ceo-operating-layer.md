@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F5 FECHADAS** (#1341–#1346) + **F6 (Mission Bridge) EM PR.** Camada
+**Estado:** **F0–F6 FECHADAS** (#1341–#1347) + **F7 (financeiro executivo) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,29 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · **F6 Mission Bridge (EM PR)** ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · **F7 financeiro executivo (EM PR)** ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 11. F7 — Executive Finance (esta fatia)
+
+O pilar financeiro RICO projetado na moldura executiva: **liquidez** (caixa `fact` +
+sobrevivência + 1ª ruptura `estimate`), **recebíveis** (a receber + vencido + `overdueCount`
++ inadimplência `default_rate` %), **rentabilidade** (margem + resultado CORE e CONSOLIDADO
+com `scope` explícito + `unknownCostRisk`), **retiradas**. É COMPOSIÇÃO PURA sobre o
+`FinanceSnapshotAdapter` (que já deriva tudo e rotula `basis`/`scope`/`source`) +
+`default_rate` (F2). Confirma o achado F0: o financeiro é o braço MAIS consolidado (§30 do
+PRD desatualizado) — F7 não recalcula nada, não persiste, zero tabela nova. Honestidade
+(RN-CEO-08/11): `basis`/`scope` fluem intactos (caixa `fact`, previsão/DRE `estimate`);
+bloco sem fonte → `available:false`/`null`, nunca 0; `caveats[]` carrega as notas de escopo
+do adapter (core × all_channels nunca somados; custo desconhecido → margem não afirmável).
+Dinheiro role-gated (§73): `includeMoney:false` redige os valores BRL, PRESERVA
+%/contagens/dias (não são dinheiro). Rota `GET /api/executive/finance` owner/admin.
+`test:executive-finance` (16). 0-regressão.
 
 ## 10. F6 — Executive → Mission Bridge (esta fatia)
 

@@ -1,7 +1,11 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F19 em produção** (#1311–#1330) + tela "Missões" (`MissionsView`).
-**F20 (`MissionMetricsService` — KPIs do piloto) EM PR** — todo PRD grande fecha com métricas
+**Estado:** **FECHADO — F0–F20 em produção** (#1311–#1331) + tela "Missões" (`MissionsView`).
+**F21 (faixa de KPIs na tela de Missões) EM PR** — a `MissionsView` consome `GET /api/missions/metrics`
+(F20) e mostra uma faixa de 6 KPIs (missões · em andamento · concluídas · em risco · taxa de conclusão ·
+% que virou ação), honesta (`—` quando a taxa é null; só aparece com ≥1 missão). Completa o loop de
+medição do piloto (backend F20 → visível). UI-only sobre endpoint testado (tsc+build verdes).
+**F20 = `MissionMetricsService` — todo PRD grande fecha com métricas
 (DecisionMetrics/OutcomeAssuranceMetrics/LearningMetrics); o Mission OS ganha o seu. KPIs DERIVADOS por
 query (RN-004): total · byStatus · inFlight · achieved/failed/cancelled/atRisk · `achievedRatePct`
 (concluídas ÷ terminais, cancelada FORA do denominador; null sem desfecho) · bySource · byAutonomy ·

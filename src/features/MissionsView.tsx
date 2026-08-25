@@ -23,6 +23,7 @@ const clsFor = (s: string) => STATUS_CLS[s] || 'text-zinc-300 bg-zinc-500/10 bor
 
 export function MissionsView() {
   const [missions, setMissions] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<any | null>(null);
   const [selected, setSelected] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<any>({ title: '', targetMetric: '', targetValue: '', deadline: '' });
@@ -31,6 +32,10 @@ export function MissionsView() {
     try {
       const r = await apiFetch('/api/missions');
       if (r.ok) setMissions((await r.json()).missions || []);
+    } catch { /* noop */ }
+    try {
+      const r = await apiFetch('/api/missions/metrics');
+      if (r.ok) setMetrics(await r.json());
     } catch { /* noop */ }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -61,6 +66,17 @@ export function MissionsView() {
           <Plus className="w-4 h-4" /> Nova missão
         </button>
       </div>
+
+      {metrics && metrics.total > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <Kpi label="Missões" value={String(metrics.total)} />
+          <Kpi label="Em andamento" value={String(metrics.inFlight)} tone="teal" />
+          <Kpi label="Concluídas" value={String(metrics.achieved)} tone="emerald" />
+          <Kpi label="Em risco" value={String(metrics.atRisk)} tone={metrics.atRisk > 0 ? 'red' : 'zinc'} />
+          <Kpi label="Taxa de conclusão" value={metrics.achievedRatePct == null ? '—' : `${metrics.achievedRatePct}%`} />
+          <Kpi label="Viraram ação" value={metrics.governedActionRatePct == null ? '—' : `${metrics.governedActionRatePct}%`} />
+        </div>
+      )}
 
       {creating && (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 space-y-3">
@@ -237,6 +253,19 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Chip de KPI do piloto (F21). Honesto: valor "—" quando a métrica é null (sem denominador).
+function Kpi({ label, value, tone = 'zinc' }: { label: string; value: string; tone?: 'zinc' | 'teal' | 'emerald' | 'red' }) {
+  const cls: Record<string, string> = {
+    zinc: 'text-zinc-100', teal: 'text-teal-300', emerald: 'text-emerald-300', red: 'text-red-300',
+  };
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2.5">
+      <p className={`text-lg font-semibold tabular-nums ${cls[tone]}`}>{value}</p>
+      <p className="text-[11px] text-zinc-500 mt-0.5">{label}</p>
     </div>
   );
 }

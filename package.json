@@ -458,6 +458,7 @@
     "test:mission-proactive": "tsx scripts/test-mission-proactive.ts",
     "test:mission-hardening": "tsx scripts/test-mission-hardening.ts",
     "test:mission-golden-path": "tsx scripts/test-mission-golden-path.ts",
+    "test:mission-golden-path-agenda": "tsx scripts/test-mission-golden-path-agenda.ts",
     "test:mission-next-step": "tsx scripts/test-mission-next-step.ts",
     "test:mission-enablement": "tsx scripts/test-mission-enablement.ts",
     "test:mission-metrics": "tsx scripts/test-mission-metrics.ts",

@@ -1512,9 +1512,60 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
               estúdio, mas o Simulador de Cabelo em si é um sub-recurso IA que
               o dono liga sob demanda). Só aparece pra org com vertical=beleza. */}
           <BeautyRecursosSection />
+
+          {/* ADR-189 F19 — toggle do PILOTO do Mission OS. A nav "Missões" só aparece com a flag
+              ligada (gate na Sidebar), então o botão de LIGAR precisa morar aqui, numa tela sempre
+              visível. Consome GET/PUT /api/missions/enablement (owner/admin; F18, alcançável com a
+              flag OFF). Só renderiza pra quem pode togglar — non-owner/admin recebe 403 → null. */}
+          <MissionPilotSection />
         </div>
       )}
     </>
+  );
+}
+
+// ADR-189 F19 — seção "Missões (piloto)" na aba Módulos. Liga/desliga `mission_layer_enabled`
+// (opt-in, reversível — desligar NUNCA apaga missões, só some da navegação). Após o toggle,
+// recarrega os entitlements pra a nav "Missões" aparecer/sumir na hora. Honesto: 403 → null.
+function MissionPilotSection() {
+  const loadEntitlements = useStore(s => s.loadEntitlements);
+  const [state, setState] = useState<{ enabled: boolean; missionCount: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const load = () => apiFetch('/api/missions/enablement')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => setState(d ? { enabled: !!d.enabled, missionCount: Number(d.missionCount) || 0 } : null))
+    .catch(() => setState(null));
+  useEffect(() => { load(); }, []);
+  if (state === null) return null;
+
+  const toggle = async () => {
+    setSaving(true);
+    const next = !state.enabled;
+    try {
+      const r = await apiFetch('/api/missions/enablement', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível alterar.'); return; }
+      setState(s => s ? { ...s, enabled: !!d.enabled } : s);
+      await loadEntitlements(); // a nav "Missões" aparece/some na hora
+      toast.success(d.enabled ? 'Missões ativado — veja no menu lateral.' : 'Missões desativado (suas missões ficam guardadas).');
+    } catch { toast.error('Erro ao salvar.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      <p className="text-sm font-semibold text-teal-300 mb-2 flex items-center gap-2"><Rocket className="w-4 h-4" /> Missões (piloto)</p>
+      <div className="flex items-center justify-between rounded-xl border border-teal-800/40 bg-teal-950/10 p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium text-zinc-100">Camada de Missões</p>
+          <p className="text-xs text-zinc-500">Você escolhe o resultado; o ZappFlow planeja o caminho, verifica a prontidão e acompanha — pedindo você só quando precisa. Reversível: desligar não apaga nada{state.missionCount > 0 ? ` (${state.missionCount} missão(ões) guardada(s))` : ''}.</p>
+        </div>
+        <button onClick={toggle} disabled={saving}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${state.enabled ? 'bg-emerald-600' : 'bg-zinc-700'} ${saving ? 'opacity-60' : ''}`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${state.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    </div>
   );
 }
 

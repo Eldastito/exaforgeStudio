@@ -15,6 +15,7 @@ import { MissionCheckpointService } from "../MissionCheckpointService.js";
 import { MissionDebriefService } from "../MissionDebriefService.js";
 import { MissionProactiveService } from "../MissionProactiveService.js";
 import { MissionNextStepService } from "../MissionNextStepService.js";
+import { MissionMetricsService } from "../MissionMetricsService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -79,6 +80,11 @@ router.post("/proactive/mode", (req: AuthRequest, res): any => {
 router.post("/proactive/run", (req: AuthRequest, res): any => {
   try { res.json(MissionProactiveService.run(req.organizationId!, { actor: actor(req) })); }
   catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F20 — KPIs do piloto (derivados por query; honestos, null sem denominador). Read-only. */
+router.get("/metrics", (req: AuthRequest, res): any => {
+  try { res.json(MissionMetricsService.metrics(req.organizationId!)); } catch (e: any) { fail(res, e); }
 });
 
 /** Detalhe de uma missão. */

@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import db from "./db.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { AnalyticsService } from "./AnalyticsService.js";
+import { FinancialLedgerService } from "./FinancialLedgerService.js";
+import { PnlCostReconciliationService } from "./PnlCostReconciliationService.js";
 
 // ── CEO Operating Layer (ADR-190) — taxonomia executiva do registro de métricas ──
 export const EXECUTIVE_PILLARS = ["commercial", "operations", "finance"] as const;
@@ -13,7 +15,7 @@ export type MetricAvailability = "available" | "unavailable";
 
 export interface ExecutiveMetricDef {
   label: string;
-  unit: "BRL" | "count";
+  unit: "BRL" | "count" | "percent";
   derive: (orgId: string) => number;
   pillar: ExecutivePillar;
   basis: MetricBasis;                 // basis do valor QUANDO disponível
@@ -24,7 +26,7 @@ export interface ExecutiveMetricDef {
 
 /** Descritor executivo de uma métrica (sem o `derive`), pro catálogo/UI. */
 export interface ExecutiveMetricDescriptor {
-  metricKey: string; pillar: ExecutivePillar; label: string; unit: "BRL" | "count";
+  metricKey: string; pillar: ExecutivePillar; label: string; unit: "BRL" | "count" | "percent";
   basis: MetricBasis; source: string; betterDirection: "up" | "down";
 }
 /** Leitura executiva HONESTA de uma métrica: valor + procedência + disponibilidade. */
@@ -134,11 +136,105 @@ export class BusinessGoalService {
         } catch { return 0; }
       },
     },
+
+    // ══ CEO Operating Layer (ADR-190 F2) — indicadores executivos com FONTE REAL + availability honesta ══
+    // Fonte interna sempre presente → available (0 é valor legítimo). Métricas financeiras dependem de
+    // integração/registro (caixa/custo/recebível): sem fonte → availability 'unavailable' → measure()
+    // devolve value:null (RN-CEO-11, §31/§32/§33 — nunca inventa 0).
+
+    // COMERCIAL
+    sales_count: {
+      label: "Vendas do mês", unit: "count", pillar: "commercial", basis: "fact",
+      source: "Fechamentos de venda (ticket_closures)", betterDirection: "up",
+      derive: (orgId: string) => { try { return Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.salesCount) || 0; } catch { return 0; } },
+    },
+    new_customers: {
+      label: "Novos clientes (mês)", unit: "count", pillar: "commercial", basis: "derived",
+      source: "1ª compra paga (orders)", betterDirection: "up",
+      // Cliente NOVO = contato cuja 1ª compra PAGA caiu no mês corrente (não confundir com lead — §37).
+      derive: (orgId: string) => {
+        try {
+          const r = db.prepare(`
+            SELECT COUNT(*) AS v FROM (
+              SELECT contact_id, MIN(date(created_at)) AS first
+              FROM orders WHERE organization_id = ? AND contact_id IS NOT NULL
+                AND status IN ('pago','em_preparo','entregue','concluido')
+              GROUP BY contact_id
+              HAVING strftime('%Y-%m', first) = strftime('%Y-%m','now')
+            )`).get(orgId) as any;
+          return Number(r?.v) || 0;
+        } catch { return 0; }
+      },
+    },
+    average_ticket: {
+      label: "Ticket médio", unit: "BRL", pillar: "commercial", basis: "derived",
+      source: "Pedidos pagos (orders)", betterDirection: "up",
+      derive: (orgId: string) => { try { return Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.averageOrderValue) || 0; } catch { return 0; } },
+    },
+
+    // OPERAÇÕES
+    cancellations: {
+      label: "Cancelamentos (mês)", unit: "count", pillar: "operations", basis: "fact",
+      source: "Pedidos + agenda cancelados", betterDirection: "down",
+      // Contagem por TIPO consolidada (pedido cancelado + atendimento cancelado). Churn como TAXA fica
+      // `unknown` até definirmos a regra por vertical (§36) — aqui é a contagem honesta do mês.
+      derive: (orgId: string) => {
+        try {
+          const o = db.prepare("SELECT COUNT(*) v FROM orders WHERE organization_id = ? AND status = 'cancelado' AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").get(orgId) as any;
+          let a = { v: 0 } as any;
+          try { a = db.prepare("SELECT COUNT(*) v FROM appointments WHERE organization_id = ? AND status = 'cancelled' AND strftime('%Y-%m', COALESCE(cancelled_at, scheduled_start)) = strftime('%Y-%m','now')").get(orgId) as any; } catch { /* org sem agenda */ }
+          return (Number(o?.v) || 0) + (Number(a?.v) || 0);
+        } catch { return 0; }
+      },
+    },
+    customer_satisfaction: {
+      label: "Satisfação (CSAT %)", unit: "percent", pillar: "operations", basis: "derived",
+      source: "Pesquisas CSAT (satisfaction_surveys)", betterDirection: "up",
+      // Só há CSAT no repo (NPS real é `unknown` — não fabricamos 0–10). Sem respostas → unavailable.
+      availability: (orgId: string) => { try { return (Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.csat?.responses) || 0) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      derive: (orgId: string) => { try { return Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.csat?.satisfactionPct) || 0; } catch { return 0; } },
+    },
+
+    // FINANCEIRO — dependem de registro/integração; availability honesta (§31/§32/§33)
+    operating_cost: {
+      label: "Custo/despesa (mês)", unit: "BRL", pillar: "finance", basis: "estimate",
+      source: "Reconciliação de custo/despesa (payables)", betterDirection: "down",
+      availability: (orgId: string) => { try { return Number((db.prepare("SELECT COUNT(*) n FROM payables WHERE organization_id = ?").get(orgId) as any)?.n) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      derive: (orgId: string) => { try { return Number(PnlCostReconciliationService.monthlyCostTotal(orgId, new Date().toISOString().slice(0, 7))) || 0; } catch { return 0; } },
+    },
+    cash_balance: {
+      label: "Caixa (saldo)", unit: "BRL", pillar: "finance", basis: "fact",
+      source: "Contas de caixa (cash_accounts)", betterDirection: "up",
+      // NÃO inferir caixa de receita (§32): só fato quando há conta de caixa registrada.
+      availability: (orgId: string) => { try { return Number((db.prepare("SELECT COUNT(*) n FROM cash_accounts WHERE organization_id = ?").get(orgId) as any)?.n) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      derive: (orgId: string) => { try { return Number(FinancialLedgerService.cashOnHand(orgId)) || 0; } catch { return 0; } },
+    },
+    overdue_receivables: {
+      label: "A receber vencido", unit: "BRL", pillar: "finance", basis: "fact",
+      source: "Recebíveis vencidos (receivables)", betterDirection: "down",
+      availability: (orgId: string) => { try { return Number((db.prepare("SELECT COUNT(*) n FROM receivables WHERE organization_id = ?").get(orgId) as any)?.n) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      derive: (orgId: string) => { try { return Number(FinancialLedgerService.overdueReceivables(orgId)?.amount) || 0; } catch { return 0; } },
+    },
+    default_rate: {
+      label: "Inadimplência (%)", unit: "percent", pillar: "finance", basis: "derived",
+      source: "Vencido ÷ total a receber", betterDirection: "down",
+      availability: (orgId: string) => { try { return Number((db.prepare("SELECT COUNT(*) n FROM receivables WHERE organization_id = ? AND status = 'open'").get(orgId) as any)?.n) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      // vencido ÷ total a receber em aberto (mesma base do SurvivalIndexService). % com 1 casa.
+      derive: (orgId: string) => {
+        try {
+          const overdue = Number(FinancialLedgerService.overdueReceivables(orgId)?.amount) || 0;
+          const total = Number((db.prepare("SELECT COALESCE(SUM(amount),0) v FROM receivables WHERE organization_id = ? AND status = 'open'").get(orgId) as any)?.v) || 0;
+          return total > 0 ? Math.round((overdue / total) * 1000) / 10 : 0;
+        } catch { return 0; }
+      },
+    },
   };
 
-  /** Catálogo das métricas que o dono pode definir como meta (para a UI). */
-  static catalog(): { metric: string; label: string; unit: "BRL" | "count" }[] {
-    return Object.entries(this.METRICS).map(([metric, m]) => ({ metric, label: m.label, unit: m.unit }));
+  /** Catálogo das métricas que o dono pode definir como META (para a UI). Só métricas "up"
+   *  (maior é melhor): não faz sentido definir "meta" de aumentar cancelamentos/inadimplência —
+   *  essas são indicadores executivos (`executiveCatalog`), não alvos. 0-regressão (as 5 antigas são up). */
+  static catalog(): { metric: string; label: string; unit: "BRL" | "count" | "percent" }[] {
+    return Object.entries(this.METRICS).filter(([, m]) => m.betterDirection === "up").map(([metric, m]) => ({ metric, label: m.label, unit: m.unit }));
   }
 
   static isKnownMetric(metric: string): boolean {
@@ -208,7 +304,7 @@ export class BusinessGoalService {
   /** Metas vigentes do negócio (o ALVO definido pelo dono, por métrica). Inclui os
    *  metadados ricos (§14). Retorna TODAS (qualquer status) — a gestão vê o ciclo
    *  de vida completo; `progress()` é quem filtra as ativas por padrão. */
-  static list(orgId: string): { metric: string; label: string; unit: "BRL" | "count"; target: number; updatedAt: string; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string }[] {
+  static list(orgId: string): { metric: string; label: string; unit: "BRL" | "count" | "percent"; target: number; updatedAt: string; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string }[] {
     const rows = db.prepare("SELECT metric, target_amount, updated_at, title, baseline, deadline, priority, owner, status FROM business_goals WHERE organization_id = ? ORDER BY metric").all(orgId) as any[];
     return rows
       .filter((r) => this.isKnownMetric(r.metric)) // ignora métrica retirada do registro (defensivo)
@@ -228,7 +324,7 @@ export class BusinessGoalService {
    * valores existentes são PRESERVADOS (não zera o que o dono já definiu). Retorna
    * a meta gravada (com os campos ricos vigentes).
    */
-  static set(orgId: string, input: { metric: string; targetAmount: number; actor?: string; title?: string | null; baseline?: number | null; deadline?: string | null; priority?: string | null; owner?: string | null; status?: string | null }): { metric: string; label: string; unit: "BRL" | "count"; target: number; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string } {
+  static set(orgId: string, input: { metric: string; targetAmount: number; actor?: string; title?: string | null; baseline?: number | null; deadline?: string | null; priority?: string | null; owner?: string | null; status?: string | null }): { metric: string; label: string; unit: "BRL" | "count" | "percent"; target: number; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string } {
     const metric = String(input?.metric || "").trim();
     if (!this.isKnownMetric(metric)) throw new Error(`metric_desconhecida: ${metric}`);
     const target = Number(input?.targetAmount);
@@ -278,7 +374,7 @@ export class BusinessGoalService {
    */
   static progress(orgId: string, opts?: { asOf?: string; includeInactive?: boolean }): {
     generatedAt: string; period: string;
-    goals: { metric: string; label: string; unit: "BRL" | "count"; target: number; current: number; remaining: number; attainmentPct: number; reached: boolean; expectedByNow: number; paceStatus: "reached" | "on_track" | "behind"; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string; attainmentFromBaselinePct: number | null }[];
+    goals: { metric: string; label: string; unit: "BRL" | "count" | "percent"; target: number; current: number; remaining: number; attainmentPct: number; reached: boolean; expectedByNow: number; paceStatus: "reached" | "on_track" | "behind"; title: string | null; baseline: number | null; deadline: string | null; priority: string | null; owner: string | null; status: string; attainmentFromBaselinePct: number | null }[];
   } {
     const now = opts?.asOf ? new Date(opts.asOf) : new Date();
     const period = now.toISOString().slice(0, 7);

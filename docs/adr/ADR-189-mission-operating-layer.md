@@ -1,7 +1,15 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F20 em produção** (#1311–#1331) + tela "Missões" (`MissionsView`).
-**F21 (faixa de KPIs na tela de Missões) EM PR** — a `MissionsView` consome `GET /api/missions/metrics`
+**Estado:** **FECHADO — F0–F21 em produção** (#1311–#1332) + tela "Missões" (`MissionsView`).
+**F22 (plano reverso de AGENDA — cross-vertical) EM PR** — o Mission OS é HORIZONTAL (zero gate de
+vertical; a flag/toggle é universal e o detector de intenção já cobre encher-agenda/cobrar/reduzir-
+estoque/etc.), mas o plano reverso (F3) só montava a cadeia completa pra `revenue`. A F22 estende à
+métrica `appointments` (encher a agenda): alvo de atendimentos → agendamentos (via COMPARECIMENTO
+DERIVADO do histórico de `appointments`, RN-004; sem histórico → unknown, nunca inventa taxa) →
+contatos (via conversão contato→agendamento) → gap vs base — tornando clínica/petshop/beleza/serviços
+primeira-classe (prontidão + próximo passo passam a funcionar pra elas). Determinístico; receita 0-
+regressão. Rotas encaminham `showRate`/`bookingConversionRate`; `test:mission-appointments-plan` 13.
+**F21 = faixa de KPIs na tela de Missões — a `MissionsView` consome `GET /api/missions/metrics`
 (F20) e mostra uma faixa de 6 KPIs (missões · em andamento · concluídas · em risco · taxa de conclusão ·
 % que virou ação), honesta (`—` quando a taxa é null; só aparece com ≥1 missão). Completa o loop de
 medição do piloto (backend F20 → visível). UI-only sobre endpoint testado (tsc+build verdes).

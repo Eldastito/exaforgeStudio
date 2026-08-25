@@ -26,6 +26,9 @@ export interface ReversePlanOpts {
   contactConversionRate?: number | null;  // contato → oportunidade (0..1)
   baseAvailable?: number | null;          // contatos disponíveis (senão derivado de contacts)
   leadTimeDays?: number | null;           // antecedência mínima da 1ª ação (p/ Último Momento Seguro)
+  // Missões de AGENDA (métrica appointments — clínica/petshop/beleza/serviços):
+  showRate?: number | null;               // comparecimento (0..1); senão derivado do histórico de appointments
+  bookingConversionRate?: number | null;  // contato → agendamento (0..1)
   asOf?: string;
 }
 
@@ -45,7 +48,7 @@ export interface ReversePlan {
   criticalStage: string | null;           // o gargalo
   lastSafeMoment: { date: string; leadTimeDays: number } | null;
   confidence: "low" | "medium" | "high";
-  assumptions: { avgTicket: number | null; avgTicketSource: string; saleConversionRate: number | null; contactConversionRate: number | null };
+  assumptions: { avgTicket: number | null; avgTicketSource: string; saleConversionRate: number | null; contactConversionRate: number | null; showRate?: number | null; showRateSource?: string; bookingConversionRate?: number | null };
   note: string;
 }
 
@@ -66,11 +69,32 @@ export class MissionReversePlanner {
     catch { return null; }
   }
 
+  /** Taxa de comparecimento derivada do histórico (completados ÷ que deveriam ter ocorrido).
+   *  Conservador: cancelado+faltou contam como não-ocorreu (inflam o nº de agendamentos preciso).
+   *  null se não há histórico suficiente (nunca inventa taxa). */
+  private static deriveShowRate(orgId: string): number | null {
+    try {
+      const r = db.prepare(`
+        SELECT SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) done,
+               SUM(CASE WHEN status IN ('completed','no_show','cancelled') THEN 1 ELSE 0 END) total
+        FROM appointments WHERE organization_id = ?
+      `).get(orgId) as any;
+      const total = Number(r?.total) || 0;
+      if (total <= 0) return null;
+      const rate = Number(r.done) / total;
+      return rate > 0 ? round2(rate) : null;
+    } catch { return null; }
+  }
+
   static plan(orgId: string, missionId: string, opts: ReversePlanOpts = {}): ReversePlan {
     const mission = MissionService.get(orgId, missionId);
     if (!mission) throw new Error("Missão não encontrada.");
     const target = mission.targetValue;
     const isRevenue = mission.targetMetric === "revenue";
+    const isAppointments = mission.targetMetric === "appointments";
+
+    // Missões de AGENDA (encher a agenda) têm cadeia própria — verticais de agendamento.
+    if (isAppointments && target != null && target > 0) return this.planAppointments(orgId, mission, target, opts);
 
     const avgTicketSource = opts.avgTicket != null ? "provided" : "orders";
     const avgTicket = opts.avgTicket != null ? Number(opts.avgTicket) : this.deriveAvgTicket(orgId);
@@ -88,7 +112,7 @@ export class MissionReversePlanner {
         chain: [], base: { available: base, source: baseSource }, gap: null, criticalStage: null,
         lastSafeMoment: this.lastSafeMoment(mission, opts),
         confidence: "low", assumptions,
-        note: isRevenue ? "Defina o valor-alvo (R$) da missão para o planejamento reverso." : "Planejamento reverso completo hoje só para missões de receita; esta missão é acompanhada por marcos.",
+        note: isRevenue ? "Defina o valor-alvo (R$) da missão para o planejamento reverso." : isAppointments ? "Defina o alvo de atendimentos para o planejamento reverso da agenda." : "Planejamento reverso completo hoje para missões de receita e de agenda (atendimentos); esta missão é acompanhada por marcos.",
       };
     }
 
@@ -135,6 +159,54 @@ export class MissionReversePlanner {
 
     return {
       missionId, applicable: true, targetMetric: mission.targetMetric, targetValue: round2(target),
+      chain, base: { available: base, source: baseSource }, gap, criticalStage,
+      lastSafeMoment: this.lastSafeMoment(mission, opts), confidence, assumptions, note,
+    };
+  }
+
+  /** Cadeia reversa da AGENDA (métrica appointments): alvo de atendimentos → agendamentos (via
+   *  comparecimento) → contatos (via conversão contato→agendamento) → gap vs base. Mesma honestidade
+   *  do caminho de receita: sem premissa, o estágio fica `unknown` e a cadeia PARA (nunca inventa taxa). */
+  private static planAppointments(orgId: string, mission: Mission, target: number, opts: ReversePlanOpts): ReversePlan {
+    const showRateSource = opts.showRate != null ? "provided" : "history";
+    const showRate = opts.showRate != null ? Number(opts.showRate) : this.deriveShowRate(orgId);
+    const bookingRate = opts.bookingConversionRate != null ? Number(opts.bookingConversionRate) : null;
+    const base = opts.baseAvailable != null ? Number(opts.baseAvailable) : this.deriveBase(orgId);
+    const baseSource: "contacts" | "provided" | "unknown" = opts.baseAvailable != null ? "provided" : (base != null ? "contacts" : "unknown");
+    const assumptions = { avgTicket: null, avgTicketSource: "n/a", saleConversionRate: null, contactConversionRate: null, showRate: showRate ?? null, showRateSource, bookingConversionRate: bookingRate };
+
+    const chain: PlanStage[] = [{ stage: "appointments", label: "Atendimentos alvo", value: Math.round(target), unit: "count", basis: "target" }];
+
+    // Atendimentos ÷ comparecimento → agendamentos necessários
+    let bookingsNeeded: number | null = null;
+    if (showRate && showRate > 0) { bookingsNeeded = Math.ceil(target / showRate); chain.push({ stage: "bookings", label: "Agendamentos necessários", value: bookingsNeeded, unit: "count", basis: showRateSource === "provided" ? "assumed" : "derived", assumption: `comparecimento ${Math.round(showRate * 100)}%` }); }
+    else chain.push({ stage: "bookings", label: "Agendamentos necessários", value: null, unit: "count", basis: "unknown", assumption: "taxa de comparecimento desconhecida (sem histórico de atendimentos)" });
+
+    // Agendamentos ÷ conversão contato→agendamento → contatos necessários
+    let contactsNeeded: number | null = null;
+    if (bookingsNeeded != null && bookingRate && bookingRate > 0) { contactsNeeded = Math.ceil(bookingsNeeded / bookingRate); chain.push({ stage: "contacts", label: "Contatos necessários", value: contactsNeeded, unit: "count", basis: "assumed", assumption: `conversão contato→agendamento ${Math.round(bookingRate * 100)}%` }); }
+    else if (bookingsNeeded != null) chain.push({ stage: "contacts", label: "Contatos necessários", value: null, unit: "count", basis: "unknown", assumption: "taxa de conversão contato→agendamento não informada" });
+
+    let gap: ReversePlan["gap"] = null;
+    let criticalStage: string | null = null;
+    if (contactsNeeded != null && base != null) {
+      const missing = Math.max(0, contactsNeeded - base);
+      gap = { stage: "contacts", needed: contactsNeeded, available: base, missing };
+      if (missing > 0) criticalStage = "contacts";
+    }
+    if (!criticalStage) { const fu = chain.find((s) => s.basis === "unknown"); if (fu) criticalStage = fu.stage; }
+
+    const knownStages = chain.filter((s) => s.value != null).length;
+    const confidence: ReversePlan["confidence"] = knownStages >= 3 ? (showRateSource === "history" ? "high" : "medium") : knownStages >= 2 ? "medium" : "low";
+
+    const note = criticalStage === "contacts" && gap && gap.missing > 0
+      ? `Com o comparecimento atual, sua base (${gap.available}) não sustenta a agenda — faltam ~${gap.missing} contatos para gerar os agendamentos. Gere demanda ou reduza as faltas.`
+      : gap && gap.missing === 0
+        ? `Sua base atual (${gap.available}) comporta a agenda com as taxas informadas.`
+        : `Faltam premissas para completar a cadeia (${criticalStage || "—"}). Informe ${chain.find((s) => s.basis === "unknown")?.assumption || "as taxas"}.`;
+
+    return {
+      missionId: mission.id, applicable: true, targetMetric: mission.targetMetric, targetValue: Math.round(target),
       chain, base: { available: base, source: baseSource }, gap, criticalStage,
       lastSafeMoment: this.lastSafeMoment(mission, opts), confidence, assumptions, note,
     };

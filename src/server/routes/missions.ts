@@ -108,6 +108,8 @@ router.post("/:id/plan", (req: AuthRequest, res): any => {
       contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
       baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
       leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
+      showRate: b.showRate != null ? Number(b.showRate) : undefined,
+      bookingConversionRate: b.bookingConversionRate != null ? Number(b.bookingConversionRate) : undefined,
     }));
   } catch (e: any) { fail(res, e); }
 });
@@ -121,6 +123,8 @@ router.post("/:id/readiness", (req: AuthRequest, res): any => {
       saleConversionRate: b.saleConversionRate != null ? Number(b.saleConversionRate) : undefined,
       contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
       baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
+      showRate: b.showRate != null ? Number(b.showRate) : undefined,
+      bookingConversionRate: b.bookingConversionRate != null ? Number(b.bookingConversionRate) : undefined,
     }));
   } catch (e: any) { fail(res, e); }
 });
@@ -149,6 +153,8 @@ router.post("/:id/next-step", (req: AuthRequest, res): any => {
       contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
       baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
       leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
+      showRate: b.showRate != null ? Number(b.showRate) : undefined,
+      bookingConversionRate: b.bookingConversionRate != null ? Number(b.bookingConversionRate) : undefined,
     }));
   } catch (e: any) { fail(res, e); }
 });

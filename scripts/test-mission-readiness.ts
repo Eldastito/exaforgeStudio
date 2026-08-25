@@ -51,6 +51,16 @@ async function main() {
   check("3.1 risco aberto surfaçado + dimensão risk não-pronta", rB2.risks.length === 1 && dim(rB2, "risk").ready === false);
   check("3.2 nota menciona risco", /risco/i.test(rB2.note));
 
+  // 3b. AGENDA (F29): a dimensão "data" é POR MÉTRICA — clínica fica pronta por COMPARECIMENTO,
+  // sem exigir ticket médio (antes o dado revenue-cêntrico dava falso "falta ticket" na agenda).
+  const CL = mkOrg();
+  db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'whatsapp', 'wa', '5511', 'connected')`).run(randomUUID(), CL);
+  for (let i = 0; i < 40; i++) db.prepare(`INSERT INTO appointments (id, organization_id, contact_id, title, status, scheduled_start) VALUES (?, ?, 'ct', 'C', ?, '2026-07-10 09:00:00')`).run(randomUUID(), CL, i < 32 ? "completed" : "no_show");
+  for (let i = 0; i < 100; i++) db.prepare(`INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, 'ch', 'C', ?)`).run(randomUUID(), CL, `c${i}`);
+  const mCL = M.create(CL, { title: "200 atendimentos", targetMetric: "appointments", targetValue: 200, targetUnit: "count", deadline: "2026-12-31" });
+  const rCL = R.assess(CL, mCL.id, { bookingConversionRate: 0.3 });
+  check("3b.1 agenda: data pronto por COMPARECIMENTO (não exige ticket)", dim(rCL, "data").ready === true && /comparecimento/i.test(dim(rCL, "data").detail));
+
   // 4. Missão qualitativa: plan/data = n/a (não penaliza o score).
   const mQ = M.create(B, { title: "reduzir tempo de resposta" });
   const rQ = R.assess(B, mQ.id, {});

@@ -1,7 +1,11 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F27 em produção** (#1311–#1338) + tela "Missões" (`MissionsView`).
-**F28 (pré-check do piloto real) EM PR** — de-risca o piloto numa org REAL: `MissionPilotReadinessService`
+**Estado:** **FECHADO — F0–F28 em produção** (#1311–#1339) + tela "Missões" (`MissionsView`).
+**F29 (prontidão ciente da métrica — aspereza achada no dry-run TOULON clínica) EM PR** — o dry-run do
+piloto de agenda numa clínica revelou que a dimensão "Dados pra planejar" da prontidão só checava
+`avgTicket` (revenue-cêntrico), dando falso "falta ticket médio" numa clínica que tem comparecimento+base.
+Agora é POR MÉTRICA: agenda usa comparecimento (`showRate`), receita usa ticket; mensagem honesta por
+caso. `test:mission-readiness` 17. **F28 = pré-check do piloto real — de-risca o piloto numa org REAL: `MissionPilotReadinessService`
 DERIVA (RN-004, read-only) por família (receita/agenda/cobrança) se o dado da org sustenta uma missão
 ÚTIL — pra o operador escolher a 1ª missão certa e não bater em "premissa faltante". Reporta `ready` +
 `facts` (transparência) + `reasons` (o que falta) + missão sugerida; honesto (nunca inventa prontidão).

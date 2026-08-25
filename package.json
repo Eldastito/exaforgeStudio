@@ -806,7 +806,8 @@
     "test:falatu-solo-whatsapp": "tsx scripts/test-falatu-solo-whatsapp.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",
     "test:falatu-embeddings": "tsx scripts/test-falatu-embeddings.ts",
-    "test:falatu-rag": "tsx scripts/test-falatu-rag.ts"
+    "test:falatu-rag": "tsx scripts/test-falatu-rag.ts",
+    "test:executive-metric-registry": "tsx scripts/test-executive-metric-registry.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

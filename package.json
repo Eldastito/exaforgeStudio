@@ -810,7 +810,8 @@
     "test:executive-metric-registry": "tsx scripts/test-executive-metric-registry.ts",
     "test:executive-metrics-sources": "tsx scripts/test-executive-metrics-sources.ts",
     "test:executive-vision": "tsx scripts/test-executive-vision.ts",
-    "test:executive-snapshot": "tsx scripts/test-executive-snapshot.ts"
+    "test:executive-snapshot": "tsx scripts/test-executive-snapshot.ts",
+    "test:executive-constraint": "tsx scripts/test-executive-constraint.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

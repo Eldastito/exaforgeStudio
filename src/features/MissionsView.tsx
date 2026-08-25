@@ -139,12 +139,30 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
   const [checkpoint, setCheckpoint] = useState<any | null>(null);
   const [debrief, setDebrief] = useState<any | null>(null);
   const [nextStep, setNextStep] = useState<any | null>(null);
+  const [premises, setPremises] = useState<any>({});
   const [busy, setBusy] = useState<string | null>(null);
 
-  const call = async (key: string, url: string, method = 'GET') => {
+  const isAgenda = mission.targetMetric === 'appointments';
+  // Converte % (ex.: 25) em fração (0.25); vazio → não envia (o backend deriva ou marca honesto).
+  const pctToFrac = (v: any) => { const n = Number(v); return v !== '' && v != null && Number.isFinite(n) && n > 0 ? Math.min(1, n / 100) : undefined; };
+  const numOrU = (v: any) => { const n = Number(v); return v !== '' && v != null && Number.isFinite(n) && n > 0 ? n : undefined; };
+  const premisesBody = () => {
+    const b: any = {};
+    if (isAgenda) {
+      const sr = pctToFrac(premises.showRate); if (sr !== undefined) b.showRate = sr;
+      const bc = pctToFrac(premises.bookingConversionRate); if (bc !== undefined) b.bookingConversionRate = bc;
+    } else {
+      const at = numOrU(premises.avgTicket); if (at !== undefined) b.avgTicket = at;
+      const sc = pctToFrac(premises.saleConversionRate); if (sc !== undefined) b.saleConversionRate = sc;
+      const cc = pctToFrac(premises.contactConversionRate); if (cc !== undefined) b.contactConversionRate = cc;
+    }
+    return b;
+  };
+
+  const call = async (key: string, url: string, method = 'GET', body?: any) => {
     setBusy(key);
     try {
-      const r = await apiFetch(url, method === 'POST' ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' } : undefined);
+      const r = await apiFetch(url, method === 'POST' ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) } : undefined);
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Falha');
       return j;
@@ -165,13 +183,35 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
 
         {mission.desiredState && <p className="text-sm text-zinc-400">Estado desejado: {mission.desiredState}</p>}
 
+        {/* Premissas do plano (opcionais) — vazio = derivado do seu histórico ou marcado honesto.
+            Preenchê-las deixa o plano/próximo passo completos (senão a cadeia para na premissa). */}
+        {mission.targetMetric && (
+          <details className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <summary className="text-[13px] text-zinc-300 cursor-pointer">Premissas do plano <span className="text-zinc-500">(opcional — vazio = estimado do histórico)</span></summary>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {isAgenda ? (
+                <>
+                  <label className="text-[11px] text-zinc-400">Comparecimento %<input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" placeholder="ex.: 80" value={premises.showRate ?? ''} onChange={(e) => setPremises({ ...premises, showRate: e.target.value })} /></label>
+                  <label className="text-[11px] text-zinc-400">Contato → agendamento %<input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" placeholder="ex.: 25" value={premises.bookingConversionRate ?? ''} onChange={(e) => setPremises({ ...premises, bookingConversionRate: e.target.value })} /></label>
+                </>
+              ) : (
+                <>
+                  <label className="text-[11px] text-zinc-400">Ticket médio R$<input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" placeholder="derivado das vendas" value={premises.avgTicket ?? ''} onChange={(e) => setPremises({ ...premises, avgTicket: e.target.value })} /></label>
+                  <label className="text-[11px] text-zinc-400">Oportunidade → venda %<input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" placeholder="ex.: 25" value={premises.saleConversionRate ?? ''} onChange={(e) => setPremises({ ...premises, saleConversionRate: e.target.value })} /></label>
+                  <label className="text-[11px] text-zinc-400">Contato → oportunidade %<input className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" placeholder="ex.: 40" value={premises.contactConversionRate ?? ''} onChange={(e) => setPremises({ ...premises, contactConversionRate: e.target.value })} /></label>
+                </>
+              )}
+            </div>
+          </details>
+        )}
+
         {/* Ações de análise */}
         <div className="flex flex-wrap gap-2">
-          <button onClick={async () => setPlan(await call('plan', `/api/missions/${mission.id}/plan`, 'POST'))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'plan' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Target className="w-3.5 h-3.5" />} Plano</button>
-          <button onClick={async () => setReady(await call('ready', `/api/missions/${mission.id}/readiness`, 'POST'))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'ready' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />} Prontidão</button>
+          <button onClick={async () => setPlan(await call('plan', `/api/missions/${mission.id}/plan`, 'POST', premisesBody()))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'plan' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Target className="w-3.5 h-3.5" />} Plano</button>
+          <button onClick={async () => setReady(await call('ready', `/api/missions/${mission.id}/readiness`, 'POST', premisesBody()))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'ready' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />} Prontidão</button>
           <button onClick={async () => setCheckpoint(await call('cp', `/api/missions/${mission.id}/checkpoint`))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'cp' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <TrendingUp className="w-3.5 h-3.5" />} Trajetória</button>
           <button onClick={async () => setDebrief(await call('deb', `/api/missions/${mission.id}/debrief`))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'deb' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flag className="w-3.5 h-3.5" />} Debrief</button>
-          <button onClick={async () => setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST'))} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600/20 border border-teal-600/40 px-3 py-1.5 text-[13px] text-teal-200 hover:bg-teal-600/30">{busy === 'next' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lightbulb className="w-3.5 h-3.5" />} O que eu faço agora?</button>
+          <button onClick={async () => setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST', premisesBody()))} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600/20 border border-teal-600/40 px-3 py-1.5 text-[13px] text-teal-200 hover:bg-teal-600/30">{busy === 'next' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lightbulb className="w-3.5 h-3.5" />} O que eu faço agora?</button>
         </div>
 
         {/* Plano reverso */}
@@ -240,8 +280,8 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
                 {nextStep.autonomyReady ? (
                   <button
                     onClick={async () => {
-                      const r = await call('propose', `/api/missions/${mission.id}/next-step/propose`, 'POST');
-                      if (r) { toast.success('Ação proposta — aguardando sua aprovação.'); setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST')); }
+                      const r = await call('propose', `/api/missions/${mission.id}/next-step/propose`, 'POST', premisesBody());
+                      if (r) { toast.success('Ação proposta — aguardando sua aprovação.'); setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST', premisesBody())); }
                     }}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-teal-500"
                   >{busy === 'propose' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRight className="w-3.5 h-3.5" />} Propor ação (governada)</button>

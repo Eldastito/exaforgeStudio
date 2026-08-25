@@ -1,10 +1,18 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F13 em produção** (#1311–#1324) + tela "Missões" (`MissionsView`).
-**F14 (prova de integração ponta a ponta) EM PR** — `test:mission-golden-path` compõe os serviços reais
-F1–F11 num único fluxo (intenção → plano reverso → prontidão → execução governada → trajetória `at_risk`
-→ superfícies "Hoje"/nav → resultado assegurado → aprendizado no motor único → debrief → isolamento),
-provando que o fio (`correlation_id = mission:<id>`) se costura de ponta a ponta sem motor novo (CA-18).
+**Estado:** **FECHADO — F0–F14 em produção** (#1311–#1325) + tela "Missões" (`MissionsView`).
+**F15 (`MissionNextStepService` — a ponte gargalo→ação governada sugerida) EM PR.** Fecha o elo que
+faltava entre o plano reverso (F3, que acha o gargalo) e o runtime (F5, que propõe ação DADO um efeito):
+`suggest()` deriva do caminho crítico um PRÓXIMO PASSO governado, aterrado só em command handlers que
+**realmente existem** (`CommandExecutorService.canHandle` — grounding); premissa faltante → tarefa
+governada (`create_task`), gap quantitativo real → campanha (`prepare_campaign`) com impacto = alvo
+restante (`BusinessGoalService.currentValue`, nunca inventa dinheiro); shadow (read-only, não escreve).
+`propose()` encaminha pelo caminho GOVERNADO existente (`MissionRuntimeService.proposeAction` — recusa
+`off`, nunca executa direto). Composição pura (§184 — sem planner/executor novo). É o norte do PRD
+(CA-01: "identifica gap e caminho crítico, executa pelo Runtime existente"). `test:mission-next-step` 14.
+F14 = `test:mission-golden-path` (17) — compõe F1–F11 num único fluxo (intenção → plano reverso →
+prontidão → execução governada → trajetória `at_risk` → superfícies "Hoje"/nav → resultado assegurado →
+aprendizado no motor único → debrief → isolamento), provando o fio ponta a ponta sem motor novo (CA-18).
 Mission Layer completo, atrás da flag `mission_layer_enabled` (default OFF, 0-regressão).
 **Data:** 2026-08-24.
 **Natureza:** camada HORIZONTAL de orquestração de objetivos + simplificação de UX. **Não é expansão**

@@ -458,6 +458,7 @@
     "test:mission-proactive": "tsx scripts/test-mission-proactive.ts",
     "test:mission-hardening": "tsx scripts/test-mission-hardening.ts",
     "test:mission-golden-path": "tsx scripts/test-mission-golden-path.ts",
+    "test:mission-next-step": "tsx scripts/test-mission-next-step.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

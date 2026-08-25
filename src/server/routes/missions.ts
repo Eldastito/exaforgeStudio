@@ -14,6 +14,7 @@ import { MissionRuntimeService } from "../MissionRuntimeService.js";
 import { MissionCheckpointService } from "../MissionCheckpointService.js";
 import { MissionDebriefService } from "../MissionDebriefService.js";
 import { MissionProactiveService } from "../MissionProactiveService.js";
+import { MissionNextStepService } from "../MissionNextStepService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -116,6 +117,35 @@ router.post("/:id/actions", (req: AuthRequest, res): any => {
       description: b.description ?? null, commandType: b.commandType ?? null, commandPayload: b.commandPayload,
       expectedImpact: b.expectedImpact != null ? Number(b.expectedImpact) : null, impactUnit: b.impactUnit ?? null,
       basis: b.basis, confidence: b.confidence != null ? Number(b.confidence) : null,
+    }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F15 — Próximo passo: deriva do gargalo uma ação governada sugerida (shadow, read-only).
+ * Premissas do plano opcionais no body (mesmas do /plan). Não escreve nada. */
+router.post("/:id/next-step", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(MissionNextStepService.suggest(req.organizationId!, String(req.params.id), {
+      avgTicket: b.avgTicket != null ? Number(b.avgTicket) : undefined,
+      saleConversionRate: b.saleConversionRate != null ? Number(b.saleConversionRate) : undefined,
+      contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
+      baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
+      leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
+    }));
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Encaminha o próximo passo sugerido pelo caminho GOVERNADO (nunca executa direto; recusa 'off'). */
+router.post("/:id/next-step/propose", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    res.json(MissionNextStepService.propose(req.organizationId!, String(req.params.id), {
+      avgTicket: b.avgTicket != null ? Number(b.avgTicket) : undefined,
+      saleConversionRate: b.saleConversionRate != null ? Number(b.saleConversionRate) : undefined,
+      contactConversionRate: b.contactConversionRate != null ? Number(b.contactConversionRate) : undefined,
+      baseAvailable: b.baseAvailable != null ? Number(b.baseAvailable) : undefined,
+      leadTimeDays: b.leadTimeDays != null ? Number(b.leadTimeDays) : undefined,
     }, actor(req)));
   } catch (e: any) { fail(res, e); }
 });

@@ -49,11 +49,28 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
 F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · F8 briefing (FECHADA) · F9 Fala Tu + bloco "Hoje" (FECHADA) · F10 golden path (FECHADA) ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
-**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
+**F11 hardening+runbook (FECHADA).** ADR-190 COMPLETO. **Aditivo pós-fechamento:** key-person dependency (§38) ENTREGUE. **Diferidas restantes:** briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 16. Key-Person Dependency (§38 / D9 — diferida, agora entregue)
+
+Detector de RISCO DE CONCENTRAÇÃO (single-point-of-failure) — o "desvio" ESTRUTURAL que
+o §38 previu e a D9 tinha deferido. `KeyPersonDependencyService` mede, read-only por query
+(RN-004, janela de 90 dias — concentração é estrutural, mensal seria ruído), a fração que
+UMA pessoa carrega: **receita** por vendedor (`orders.seller_user_id`, pedidos pagos) e
+**atendimentos** por responsável (`appointments.assigned_to`, concluídos). NÃO é motor: quando
+uma dimensão passa de `high` (topo ≥60% com ≥2 participantes e volume ≥5), `detect`/`pass`
+publica `key_person_risk` na ESPINHA (`business_signals`, convenção nº 12) — de onde flui
+SOZINHO pro snapshot (F4) e pra restrição (F5), sem superfície nova. Zero tabela. Honesto
+(RN-CEO-11): sem dado / 1 pessoa / volume insuficiente → `insufficient_data` (um negócio de 1
+dono NÃO é dependência a sinalizar). A concentração é FATO (`basis:'fact'`); o sinal nasce
+advisory (`estimate`, impacto `null` — nunca inventa dinheiro). Self-healing (concentração
+alivia → `resolveByDedupe`). Dinheiro role-gated (§73): o share % sempre aparece; os R$ só com
+`includeMoney`. Rota `GET /api/executive/key-person` owner/admin; `pass()` no Scheduler (só orgs
+com fonte). `test:key-person-dependency` (18). Aditivo/reversível; 0-regressão.
 
 ## 15. F11 — Hardening + runbook (esta fatia — FECHA o ADR-190)
 

@@ -817,7 +817,8 @@
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
     "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",
     "test:ceo-golden-path": "tsx scripts/test-ceo-golden-path.ts",
-    "test:ceo-hardening": "tsx scripts/test-ceo-hardening.ts"
+    "test:ceo-hardening": "tsx scripts/test-ceo-hardening.ts",
+    "test:key-person-dependency": "tsx scripts/test-key-person-dependency.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

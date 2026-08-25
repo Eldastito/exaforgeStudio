@@ -5,6 +5,7 @@ import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
 import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotService.js";
 import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
 import { ExecutiveMissionBridgeService } from "../ExecutiveMissionBridgeService.js";
+import { ExecutiveFinanceService } from "../ExecutiveFinanceService.js";
 
 const router = Router();
 
@@ -85,6 +86,18 @@ router.get("/mission-suggestions", requireRole("owner", "admin"), (req: AuthRequ
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(ExecutiveMissionBridgeService.suggest(orgId)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190 F7) — financeiro executivo ──
+// Liquidez + recebíveis + rentabilidade + retiradas (projeção do FinanceSnapshotAdapter).
+// Owner/admin (§73 — dinheiro).
+router.get("/finance", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const period = typeof req.query.period === "string" ? req.query.period : undefined;
+    res.json(ExecutiveFinanceService.read(orgId, { period }));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

@@ -1,7 +1,13 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F26 em produção** (#1311–#1337) + tela "Missões" (`MissionsView`).
-**F27 (proatividade alinhada às 3 famílias medíveis) EM PR** — o `MissionProactiveService` (que traduz
+**Estado:** **FECHADO — F0–F27 em produção** (#1311–#1338) + tela "Missões" (`MissionsView`).
+**F28 (pré-check do piloto real) EM PR** — de-risca o piloto numa org REAL: `MissionPilotReadinessService`
+DERIVA (RN-004, read-only) por família (receita/agenda/cobrança) se o dado da org sustenta uma missão
+ÚTIL — pra o operador escolher a 1ª missão certa e não bater em "premissa faltante". Reporta `ready` +
+`facts` (transparência) + `reasons` (o que falta) + missão sugerida; honesto (nunca inventa prontidão).
+Rota `GET /api/missions/pilot-readiness` (alcançável com a flag OFF — você checa ANTES de ligar). Runbook
+do piloto atualizado (§0.5). `test:mission-pilot-readiness` 10. **F27 = proatividade alinhada às 3
+famílias medíveis — o `MissionProactiveService` (que traduz
 `business_signals` em PROPOSTAS de missão) estava desatualizado: mapeava cobrança com `targetMetric:null`
 (qualitativa) mesmo depois da F26 tornar cobrança medível, e nunca herdava um alvo. Agora: (1)
 `collect_receivable` proativo → `targetMetric:'receivables'` (medível, consistente com a missão manual);

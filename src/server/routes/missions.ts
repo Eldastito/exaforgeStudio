@@ -16,6 +16,7 @@ import { MissionDebriefService } from "../MissionDebriefService.js";
 import { MissionProactiveService } from "../MissionProactiveService.js";
 import { MissionNextStepService } from "../MissionNextStepService.js";
 import { MissionMetricsService } from "../MissionMetricsService.js";
+import { MissionPilotReadinessService } from "../MissionPilotReadinessService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -38,6 +39,12 @@ router.get("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res)
 router.put("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(MissionService.setEnabled(req.organizationId!, req.body?.enabled === true || req.body?.enabled === 1, actor(req))); }
   catch (e: any) { fail(res, e); }
+});
+
+/** ADR-189 F28 — pré-check do piloto: por família (receita/agenda/cobrança), o dado sustenta uma
+ * missão útil? Read-only, alcançável com a flag OFF (você checa ANTES de ligar). */
+router.get("/pilot-readiness", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(MissionPilotReadinessService.check(req.organizationId!)); } catch (e: any) { fail(res, e); }
 });
 
 router.use(requireRole("owner", "admin"), requireMissionLayer);

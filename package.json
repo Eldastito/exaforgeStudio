@@ -808,7 +808,8 @@
     "test:falatu-embeddings": "tsx scripts/test-falatu-embeddings.ts",
     "test:falatu-rag": "tsx scripts/test-falatu-rag.ts",
     "test:executive-metric-registry": "tsx scripts/test-executive-metric-registry.ts",
-    "test:executive-metrics-sources": "tsx scripts/test-executive-metrics-sources.ts"
+    "test:executive-metrics-sources": "tsx scripts/test-executive-metrics-sources.ts",
+    "test:executive-vision": "tsx scripts/test-executive-vision.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

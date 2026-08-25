@@ -1,7 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0 (auditoria) + F1 (registry) FECHADAS** (#1341/#1342) + **F2 (métricas com fonte real)
-EM PR.** Camada
+**Estado:** **F0–F2 FECHADAS** (#1341–#1343) + **F3 (Business Vision) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -56,7 +55,17 @@ Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orde
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
 
-## 6. F2 — Métricas executivas com fonte real (esta fatia)
+## 7. F3 — Business Vision (esta fatia)
+
+A VISÃO é intenção HUMANA (§12): `ExecutiveVisionService.get/save` grava SÓ o que o dono escreveu
+(nunca inventa; patch parcial; string vazia limpa; sem dado → campos null + `defined:false`).
+Persistência mínima em **5 colunas aditivas** de `organization_settings` (D6 — sem tabela nova;
+`vision_statement`/`vision_horizon`/`strategic_priority`/`vision_updated_at`/`vision_updated_by`);
+snapshots derivados NUNCA moram aqui. Rotas `GET/PUT /api/executive/vision` ADICIONADAS ao router
+`/api/executive` que JÁ EXISTE (prior art: briefing/effectiveness/ask via `ExecutiveAdvisorService` —
+reuso pras futuras F8/F9), com `requireRole('owner','admin')` (§50). `test:executive-vision` (7).
+
+## 6. F2 — Métricas executivas com fonte real
 
 Adiciona ao registro (F1) os indicadores dos 7 executivos (§7) + §11 que faltavam, cada um sobre
 system-of-record REAL, com `availability` honesta (RN-CEO-11/§31-33): COMERCIAL `sales_count`,

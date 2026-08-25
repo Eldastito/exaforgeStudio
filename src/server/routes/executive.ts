@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
+import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
 
 const router = Router();
 
@@ -28,6 +29,28 @@ router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   try {
     res.json({ text: await ExecutiveAdvisorService.ask(orgId, req.body?.question) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CEO Operating Layer (ADR-190 F3) — VISÃO estratégica (owner/admin; §50 role gating) ──
+// A visão é intenção HUMANA: a IA nunca a inventa — só grava o que o dono escreveu.
+const visionActor = (req: any) => req.user?.userId || req.user?.id;
+
+// GET /api/executive/vision — lê a visão (sem dado → campos null + defined:false).
+router.get("/vision", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExecutiveVisionService.get(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// PUT /api/executive/vision — grava (patch parcial: statement/horizon/strategicPriority).
+router.put("/vision", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(ExecutiveVisionService.save(orgId, { statement: b.statement, horizon: b.horizon, strategicPriority: b.strategicPriority }, visionActor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

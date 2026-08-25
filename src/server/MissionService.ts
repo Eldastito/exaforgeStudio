@@ -105,6 +105,22 @@ export class MissionService {
     } catch { return false; }
   }
 
+  /** Liga/desliga o Mission Layer pra org (decisão do dono — habilitação do piloto). Reversível,
+   *  aditivo, 0-regressão: desligar NUNCA apaga missões (histórico preservado, convenção nº 9),
+   *  só some da navegação/superfícies. Idempotente. */
+  static setEnabled(orgId: string, enabled: boolean, _actor?: string): { enabled: boolean } {
+    db.prepare(`UPDATE organization_settings SET mission_layer_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+    return { enabled: this.isEnabled(orgId) };
+  }
+
+  /** Estado de habilitação + postura proativa (pro painel de configuração/piloto). Read-only. */
+  static settings(orgId: string): { enabled: boolean; proactiveMode: string; missionCount: number } {
+    let proactiveMode = "off"; let missionCount = 0;
+    try { const r = db.prepare(`SELECT mission_proactive_mode AS m FROM organization_settings WHERE organization_id = ?`).get(orgId) as any; if (r?.m) proactiveMode = String(r.m); } catch { /* coluna pode não existir em legado */ }
+    try { missionCount = Number((db.prepare(`SELECT COUNT(*) n FROM missions WHERE organization_id = ?`).get(orgId) as any).n); } catch { /* noop */ }
+    return { enabled: this.isEnabled(orgId), proactiveMode, missionCount };
+  }
+
   static humanStatus(status: string): string {
     return HUMAN_STATUS[(status as MissionStatus)] || status;
   }

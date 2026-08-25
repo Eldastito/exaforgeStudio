@@ -1,7 +1,12 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F16 em produção** (#1311–#1327) + tela "Missões" (`MissionsView`).
-**F17 (hardening do Próximo Passo) EM PR** — `test:mission-hardening` sobe pra 27 checks, codificando
+**Estado:** **FECHADO — F0–F17 em produção** (#1311–#1328) + tela "Missões" (`MissionsView`).
+**F18 (habilitação do piloto) EM PR** — `MissionService.setEnabled/settings` + rotas `GET/PUT
+/api/missions/enablement` que ficam **antes** do gate `requireMissionLayer` (senão o dono nunca
+alcançaria a rota pra ligar a flag — ovo-e-galinha); ligar/desligar é reversível e desligar NUNCA apaga
+missões (histórico preservado, convenção nº 9). Runbook do piloto em `docs/runbook/mission-piloto.md`
+(ligar → declarar objetivo → plano → prontidão → próximo passo → aprovar → trajetória → concluir/aprender
+→ rollback). `test:mission-enablement` 10. **F17 = `test:mission-hardening` (27 checks) codificando
 F15/F16 como REGRESSÃO dos RN-MOL: shadow (suggest não escreve `decision_action`) · grounding (alavanca
 só se o comando EXISTE de fato, `canHandle`) · determinístico · premissa faltante → tarefa (nunca
 campanha no escuro / dinheiro inventado) · qualitativa → honesto · propose recusa `off` e delega ao

@@ -28,6 +28,17 @@ function requireMissionLayer(req: AuthRequest, res: any, next: any): any {
   next();
 }
 
+/** ADR-189 F18 — HABILITAÇÃO DO PILOTO. Estas 2 rotas ficam ANTES do gate `requireMissionLayer`
+ * (senão o dono nunca alcançaria a rota pra ligar a flag — ovo-e-galinha). Ainda owner/admin.
+ * GET = estado atual (habilitado? postura proativa? nº de missões). PUT = liga/desliga (reversível). */
+router.get("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(MissionService.settings(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+router.put("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(MissionService.setEnabled(req.organizationId!, req.body?.enabled === true || req.body?.enabled === 1, actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+
 router.use(requireRole("owner", "admin"), requireMissionLayer);
 
 /** Lista as missões (opcional ?status=). */

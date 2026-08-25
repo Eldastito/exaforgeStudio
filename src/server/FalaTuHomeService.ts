@@ -32,6 +32,10 @@ import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { MissionService } from "./MissionService.js";
+// ADR-190 F9 — leitura executiva no "Hoje". Ciclo com ExecutiveBusinessSnapshotService
+// (que importa este service p/ missionsBlock): seguro porque só é ACESSADO em tempo de
+// CHAMADA (dentro de executiveToday), nunca no load — binding vivo do ESM já populado.
+import { ExecutiveConstraintService } from "./ExecutiveConstraintService.js";
 
 function greetFor(hourSP: number): string {
   if (hourSP < 12) return "Bom dia";
@@ -41,6 +45,12 @@ function greetFor(hourSP: number): string {
 
 export interface MissionHomeItem { id: string; title: string; status: string; humanStatus: string }
 export interface MissionHomeBlock { inFlight: number; needsYou: number; atRisk: number; achievedRecently: number; line: string; items: MissionHomeItem[] }
+export interface ExecutiveTodayBlock {
+  worstPillar: { pillar: string; health: string; criticalCount: number; riskCount: number } | null;
+  constraint: { fact: string; recommendedAction: string; basis: string; pillar: string; threatensGoal: { metric: string; label: string; gapPct: number } | null } | null;
+  pillarsHealth: Array<{ pillar: string; label: string; health: string }>;
+  line: string;
+}
 
 export class FalaTuHomeService {
   static home(orgId: string, user: any, opts: { now?: Date } = {}): {
@@ -56,6 +66,9 @@ export class FalaTuHomeService {
     goals: { total: number; offTrack: number; items: Array<{ metric: string; label: string; attainmentPct: number; paceStatus: string }> } | null;
     // ── ADR-189 F7 (Mission OS) — bloco "Hoje" das missões, por EXCEÇÃO. null se a flag off (0-regressão) ──
     missions: MissionHomeBlock | null;
+    // ── ADR-190 F9 (CEO Layer) — leitura executiva "Como está minha empresa?" por EXCEÇÃO.
+    // Só pra visão COMPLETA do negócio (§73/RN-CEO-13); vendedor não recebe (null). ──
+    executive: ExecutiveTodayBlock | null;
     invisibleUxEnabled: boolean;
     generatedAt: string;
   } {
@@ -100,9 +113,35 @@ export class FalaTuHomeService {
       resolvedSinceYesterday,
       goals,
       missions: this.missionsBlock(orgId),
+      // §73: só quem tem visão completa recebe a leitura executiva (com dinheiro). Senão null.
+      executive: fullVisibility ? this.executiveToday(orgId, { includeMoney: true }) : null,
       invisibleUxEnabled: !!(inv && inv.e),
       generatedAt: new Date(now).toISOString(),
     };
+  }
+
+  /**
+   * ADR-190 F9 — leitura executiva "Como está minha empresa?" no "Hoje", por EXCEÇÃO
+   * (§115/ADR-163 — invisible UX, sem menu novo). COMPÕE a restrição/pior-pilar (F5,
+   * `ExecutiveConstraintService.assess`, que já compõe o snapshot F4). Honesto: sem
+   * desvio → `worstPillar`/`constraint` null e a linha fica calma ("Tudo sob controle").
+   * A restrição é HIPÓTESE (basis). Dinheiro role-gated pelo caller (só visão completa).
+   */
+  static executiveToday(orgId: string, opts: { includeMoney?: boolean } = {}): ExecutiveTodayBlock {
+    try {
+      const a = ExecutiveConstraintService.assess(orgId, { includeMoney: opts.includeMoney !== false });
+      const PT: Record<string, string> = { commercial: "Comercial", operações: "Operações", operations: "Operações", finance: "Financeiro" };
+      const pillarsHealth = (a.pillarsRanked || []).map((p) => ({ pillar: p.pillar, label: PT[p.pillar] || p.pillar, health: p.health }));
+      const constraint = a.constraint
+        ? { fact: a.constraint.fact, recommendedAction: a.constraint.recommendedAction, basis: a.constraint.basis, pillar: a.constraint.pillar, threatensGoal: a.constraint.threatensGoal }
+        : null;
+      const line = a.worstPillar
+        ? `${PT[a.worstPillar.pillar] || a.worstPillar.pillar} pede atenção${constraint ? `: ${constraint.fact}` : ""}.`
+        : "Tudo sob controle nos 3 pilares.";
+      return { worstPillar: a.worstPillar, constraint, pillarsHealth, line };
+    } catch {
+      return { worstPillar: null, constraint: null, pillarsHealth: [], line: "Tudo sob controle nos 3 pilares." };
+    }
   }
 
   /** Resolvido nas últimas 24h + valor recuperado (R$ só pra visão completa — §73). */

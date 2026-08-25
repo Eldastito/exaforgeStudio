@@ -3,6 +3,37 @@ import db from "./db.js";
 import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 
+// ── CEO Operating Layer (ADR-190) — taxonomia executiva do registro de métricas ──
+export const EXECUTIVE_PILLARS = ["commercial", "operations", "finance"] as const;
+export type ExecutivePillar = (typeof EXECUTIVE_PILLARS)[number];
+/** `basis` do VALOR quando ele existe (fato > derivado > estimativa); `unknown` = sem fonte/valor. */
+export type MetricBasis = "fact" | "derived" | "estimate" | "unknown";
+/** A FONTE (system-of-record) existe pra esta org? `unavailable` → valor NULL, nunca 0 (RN-CEO-11). */
+export type MetricAvailability = "available" | "unavailable";
+
+export interface ExecutiveMetricDef {
+  label: string;
+  unit: "BRL" | "count";
+  derive: (orgId: string) => number;
+  pillar: ExecutivePillar;
+  basis: MetricBasis;                 // basis do valor QUANDO disponível
+  source: string;                     // system-of-record legível
+  betterDirection: "up" | "down";     // "up" = maior é melhor; "down" = menor é melhor (ex.: inadimplência)
+  availability?: (orgId: string) => MetricAvailability; // default 'available' (fonte interna presente)
+}
+
+/** Descritor executivo de uma métrica (sem o `derive`), pro catálogo/UI. */
+export interface ExecutiveMetricDescriptor {
+  metricKey: string; pillar: ExecutivePillar; label: string; unit: "BRL" | "count";
+  basis: MetricBasis; source: string; betterDirection: "up" | "down";
+}
+/** Leitura executiva HONESTA de uma métrica: valor + procedência + disponibilidade. */
+export interface ExecutiveMetricReading extends ExecutiveMetricDescriptor {
+  value: number | null;              // null quando availability='unavailable' (nunca 0 — RN-CEO-11)
+  availability: MetricAvailability;
+  measuredAt: string;
+}
+
 /**
  * Business Goals (ADR-160 D4 / Onda A F4) — modelo de OBJETIVOS/METAS do negócio
  * + DISTÂNCIA À META.
@@ -30,11 +61,21 @@ import { AnalyticsService } from "./AnalyticsService.js";
  *     avaliado e descartado (assunto diferente — varejo por loja/vendedor).
  */
 export class BusinessGoalService {
-  /** Registro de métricas suportadas. Cada uma sabe LER seu valor real do mês. */
-  private static readonly METRICS: Record<string, { label: string; unit: "BRL" | "count"; derive: (orgId: string) => number }> = {
+  /**
+   * Registro de métricas suportadas. Cada uma sabe LER seu valor real do mês.
+   *
+   * CEO Operating Layer (ADR-190 F1): o registro ganha os descritores executivos — `pillar`
+   * (comercial/operações/financeiro), `basis` (fato/derivado/estimativa QUANDO há valor), `source`
+   * (system-of-record legível), `betterDirection` (up/down) e `availability(orgId)` (a FONTE existe?
+   * `available`/`unavailable` — sem fonte, o valor é NULL, nunca 0; RN-CEO-11). Isto ESTENDE o registro
+   * único (D3 da auditoria F0), não cria um `ExecutiveMetricRegistry` paralelo (§9/§62). As 5 métricas
+   * existentes vêm de fontes internas do SQLite → `available` por padrão; métricas que dependem de
+   * integração externa (caixa/custo) definirão sua própria `availability` nas fatias seguintes.
+   */
+  private static readonly METRICS: Record<string, ExecutiveMetricDef> = {
     revenue: {
-      label: "Receita do mês",
-      unit: "BRL",
+      label: "Receita do mês", unit: "BRL", pillar: "commercial", basis: "fact",
+      source: "Reconciliação de receita (P&L / snapshot)", betterDirection: "up",
       // D2: consome o snapshot PERSISTIDO (cache TTL'd quando o Evidence Layer
       // está ligado; fresco caso contrário). basis "fact" (LossMarginService).
       derive: (orgId: string) => {
@@ -45,8 +86,8 @@ export class BusinessGoalService {
       },
     },
     appointments: {
-      label: "Atendimentos do mês",
-      unit: "count",
+      label: "Atendimentos do mês", unit: "count", pillar: "commercial", basis: "derived",
+      source: "Analytics (agenda)", betterDirection: "up",
       // O snapshot não expõe contagem de atendimentos → deriva do Analytics
       // (mesma fonte do painel), escopo mês corrente, exclui cancelados.
       derive: (orgId: string) => {
@@ -61,8 +102,8 @@ export class BusinessGoalService {
     // RECEITA ou os LEADS que o CONTEÚDO gerou (F7/F8), medidos por query no mês corrente.
     // `content_revenue` soma só `fact` (RN-CG-03 — não mistura estimate; não inventa dinheiro).
     content_revenue: {
-      label: "Receita de conteúdo (mês)",
-      unit: "BRL",
+      label: "Receita de conteúdo (mês)", unit: "BRL", pillar: "commercial", basis: "fact",
+      source: "Atribuição de conteúdo (venda)", betterDirection: "up",
       derive: (orgId: string) => {
         try {
           const r = db.prepare("SELECT COALESCE(SUM(revenue),0) AS v FROM content_sale_attributions WHERE organization_id = ? AND revenue_basis = 'fact' AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").get(orgId) as any;
@@ -71,8 +112,8 @@ export class BusinessGoalService {
       },
     },
     content_leads: {
-      label: "Leads de conteúdo (mês)",
-      unit: "count",
+      label: "Leads de conteúdo (mês)", unit: "count", pillar: "commercial", basis: "derived",
+      source: "Atribuição de conteúdo (lead)", betterDirection: "up",
       derive: (orgId: string) => {
         try {
           const r = db.prepare("SELECT COUNT(*) AS v FROM content_lead_attributions WHERE organization_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").get(orgId) as any;
@@ -84,8 +125,8 @@ export class BusinessGoalService {
     // mês — soma dos recebíveis quitados (system-of-record `receivables`, não LLM; RN-004). Mede a
     // missão "recuperar R$ X de inadimplência" (planned recovery × recuperado de fato no checkpoint).
     receivables: {
-      label: "Valores recuperados (mês)",
-      unit: "BRL",
+      label: "Valores recuperados (mês)", unit: "BRL", pillar: "finance", basis: "fact",
+      source: "Recebíveis (system-of-record)", betterDirection: "up",
       derive: (orgId: string) => {
         try {
           const r = db.prepare("SELECT COALESCE(SUM(amount),0) AS v FROM receivables WHERE organization_id = ? AND status = 'received' AND strftime('%Y-%m', received_at) = strftime('%Y-%m','now')").get(orgId) as any;
@@ -110,6 +151,51 @@ export class BusinessGoalService {
     const m = (this.METRICS as any)[String(metric)];
     if (!m) return null;
     try { return Math.round((m.derive(orgId)) * 100) / 100; } catch { return null; }
+  }
+
+  // ══ CEO Operating Layer (ADR-190 F1) — descritores executivos do registro ══
+
+  /** Descritor executivo de uma métrica (pillar/basis/source/betterDirection). null se desconhecida. */
+  static describe(metric: string): ExecutiveMetricDescriptor | null {
+    const m = (this.METRICS as any)[String(metric)] as ExecutiveMetricDef | undefined;
+    if (!m) return null;
+    return { metricKey: String(metric), pillar: m.pillar, label: m.label, unit: m.unit, basis: m.basis, source: m.source, betterDirection: m.betterDirection };
+  }
+
+  /** A FONTE da métrica existe pra esta org? `available`/`unavailable` (default available p/ fonte
+   *  interna). null se a métrica é desconhecida. Sem fonte → o valor será NULL, nunca 0 (RN-CEO-11). */
+  static availability(orgId: string, metric: string): MetricAvailability | null {
+    const m = (this.METRICS as any)[String(metric)] as ExecutiveMetricDef | undefined;
+    if (!m) return null;
+    try { return m.availability ? m.availability(orgId) : "available"; } catch { return "unavailable"; }
+  }
+
+  /** Leitura executiva HONESTA: valor + basis + availability + procedência. Sem fonte → value:null,
+   *  basis:'unknown' (nunca inventa 0). Base do Executive Snapshot/Accountability (F4/F5). */
+  static measure(orgId: string, metric: string): ExecutiveMetricReading | null {
+    const desc = this.describe(metric);
+    if (!desc) return null;
+    const availability = this.availability(orgId, metric) || "unavailable";
+    const measuredAt = new Date().toISOString();
+    if (availability === "unavailable") {
+      return { ...desc, value: null, basis: "unknown", availability, measuredAt };
+    }
+    const value = this.currentValue(orgId, metric);
+    // Se a derivação falhou (null) apesar da fonte existir, seja honesto (unknown), não 0.
+    if (value == null) return { ...desc, value: null, basis: "unknown", availability, measuredAt };
+    return { ...desc, value, availability, measuredAt };
+  }
+
+  /** Catálogo executivo completo (todos os descritores). Pra UI/registry executivo. */
+  static executiveCatalog(): ExecutiveMetricDescriptor[] {
+    return Object.keys(this.METRICS).map((k) => this.describe(k)!).filter(Boolean);
+  }
+
+  /** Métricas agrupadas por pilar (comercial/operações/financeiro). */
+  static metricsByPillar(): Record<ExecutivePillar, ExecutiveMetricDescriptor[]> {
+    const out = { commercial: [], operations: [], finance: [] } as Record<ExecutivePillar, ExecutiveMetricDescriptor[]>;
+    for (const d of this.executiveCatalog()) out[d.pillar].push(d);
+    return out;
   }
 
   // §14 — ciclo de vida + prioridade da meta rica. Vocabulário fechado; entrada

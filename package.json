@@ -813,7 +813,8 @@
     "test:executive-snapshot": "tsx scripts/test-executive-snapshot.ts",
     "test:executive-constraint": "tsx scripts/test-executive-constraint.ts",
     "test:executive-mission-bridge": "tsx scripts/test-executive-mission-bridge.ts",
-    "test:executive-finance": "tsx scripts/test-executive-finance.ts"
+    "test:executive-finance": "tsx scripts/test-executive-finance.ts",
+    "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

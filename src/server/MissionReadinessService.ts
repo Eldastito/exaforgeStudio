@@ -66,8 +66,18 @@ export class MissionReadinessService {
     if (plan.applicable) {
       const hasUnknown = plan.chain.some((s) => s.basis === "unknown");
       dims.push({ key: "plan", label: "Plano reverso", ready: !hasUnknown, detail: hasUnknown ? `Faltam premissas (${plan.criticalStage || "—"}).` : "Cadeia completa até a base." });
-      const dataReady = plan.assumptions.avgTicket != null && plan.base.available != null;
-      dims.push({ key: "data", label: "Dados pra planejar", ready: dataReady, detail: dataReady ? "Ticket médio e base conhecidos." : "Falta ticket médio ou base de contatos." });
+      // Dado-base é POR MÉTRICA (F29): receita usa ticket médio; agenda usa comparecimento — não
+      // exigir ticket de uma clínica (era revenue-cêntrico e dava falso "falta ticket" na agenda).
+      const isAgenda = mission.targetMetric === "appointments";
+      const baseOk = plan.base.available != null;
+      const drift = isAgenda ? plan.assumptions.showRate != null : plan.assumptions.avgTicket != null;
+      const dataReady = drift && baseOk;
+      const detail = dataReady
+        ? (isAgenda ? "Comparecimento e base conhecidos." : "Ticket médio e base conhecidos.")
+        : !baseOk ? "Falta base de contatos."
+        : isAgenda ? "Falta histórico de atendimentos (comparecimento)."
+        : "Falta ticket médio (sem vendas registradas).";
+      dims.push({ key: "data", label: "Dados pra planejar", ready: dataReady, detail });
     } else {
       dims.push({ key: "plan", label: "Plano reverso", ready: null, detail: "Missão acompanhada por marcos (sem cadeia de receita)." });
       dims.push({ key: "data", label: "Dados pra planejar", ready: null, detail: "Não aplicável a esta missão." });

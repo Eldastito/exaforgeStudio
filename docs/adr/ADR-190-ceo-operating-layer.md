@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F2 FECHADAS** (#1341–#1343) + **F3 (Business Vision) EM PR.** Camada
+**Estado:** **F0–F3 FECHADAS** (#1341–#1344) + **F4 (Executive Business Snapshot) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,31 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision · F4 `ExecutiveBusinessSnapshotService` · F5 exceções+constraint · F6 Mission Bridge ·
+F3 Business Vision (FECHADA) · **F4 `ExecutiveBusinessSnapshotService` (EM PR)** · F5 exceções+constraint · F6 Mission Bridge ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 8. F4 — Executive Business Snapshot (esta fatia)
+
+A PRIMITIVA CENTRAL (D1) que responde ao North Star (§4): *"Como está minha empresa?"* →
+**3 pilares** (comercial/operações/financeiro), cada um com **indicadores** (via `measure()` da
+F1/F2 — sem fonte → `value:null`, nunca 0, RN-CEO-11) + **metas** (agrupadas pela procedência de
+pilar do próprio metric) + **exceções** (do feed `BusinessSignalService.attention`) + **prioridades**
+(`ImpactPrioritizationService.prioritize` ≤3), mais **missões** (`FalaTuHomeService.missionsBlock`)
+e a **visão** (F3). `ExecutiveBusinessSnapshotService.read` é FINO, READ-ONLY, composição PURA — não
+persiste, não cacheia de novo (o `BusinessSnapshotV2.read` já cacheia por baixo), zero tabela nova.
+Mapa DETERMINÍSTICO `domain→pillar` (D2, conservador: só o claramente comercial/financeiro sai de
+`operations`; não mapeado → `operations` mas nada some do bloco global de atenção). **Saúde
+QUALITATIVA** por pilar = rollup determinístico de FATOS já derivados (crítico se há exceção
+`critical`; atenção se `risk`/meta `behind`; `ok` se há sinal sem exceção; **`unknown`** se o pilar
+não tem indicador disponível, meta nem exceção — null≠zero também na saúde). Dinheiro role-gated
+(§73/RN-CEO-13): rota `GET /api/executive/snapshot` é owner/admin; `includeMoney:false` REDIGE
+valores BRL (indicador/meta/impacto) pra superfícies de menor privilégio reusarem a primitiva.
+`test:executive-snapshot` (19). 0-regressão.
 
 ## 7. F3 — Business Vision (esta fatia)
 

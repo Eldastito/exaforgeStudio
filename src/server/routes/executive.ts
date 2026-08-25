@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
 import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
+import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotService.js";
 
 const router = Router();
 
@@ -50,6 +51,19 @@ router.put("/vision", requireRole("owner", "admin"), (req: AuthRequest, res): an
   try {
     const b = req.body || {};
     res.json(ExecutiveVisionService.save(orgId, { statement: b.statement, horizon: b.horizon, strategicPriority: b.strategicPriority }, visionActor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190 F4) — Executive Business Snapshot ──
+// "Como está minha empresa?" (§4): 3 pilares + indicadores + metas + exceções +
+// prioridades + missões + visão. Read-only, composição pura. Owner/admin (§73 —
+// carrega valores em R$; a rota gateia o dinheiro).
+router.get("/snapshot", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const period = typeof req.query.period === "string" ? req.query.period : undefined;
+    res.json(ExecutiveBusinessSnapshotService.read(orgId, { period }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

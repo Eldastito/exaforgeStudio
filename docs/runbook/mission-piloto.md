@@ -16,6 +16,20 @@ ao "medir resultado", de forma reversível e sem risco pra base existente.
   (Outcome Assurance) — nunca porque "a ação foi enviada".
 - **Nunca inventa.** Sem dado, o sistema é honesto (`premissa faltante`, `—`), não fabrica número.
 
+## 0.5. Pré-check de prontidão (antes de ligar)
+
+Antes de ligar a flag numa org real, rode o pré-check pra saber QUAL família de objetivo o dado da org
+já sustenta (senão o plano reverso bate em "premissa faltante"):
+
+```
+GET /api/missions/pilot-readiness   → { families:[{family,ready,facts,reasons,suggestion}], readyFamilies, note }
+```
+
+Por família (receita/agenda/cobrança) ele diz `ready` + os `facts` que embasam + o que falta (`reasons`)
++ a 1ª missão sugerida. Regra: escolha a primeira missão numa família **pronta**. Ex.: clínica com
+histórico de atendimentos + base + canal → **Agenda pronta** → comece com "encher a agenda com N".
+Alcançável com a flag OFF (você checa ANTES de ligar). Read-only, não altera nada.
+
 ## 1. Ligar o Mission Layer (habilitação)
 
 A rota de habilitação fica **antes** do gate da flag (senão o dono nunca alcançaria a rota) — owner/admin:

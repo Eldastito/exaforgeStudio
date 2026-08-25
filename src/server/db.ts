@@ -10534,6 +10534,14 @@ const initDb = () => {
   // ADR-189 F11 — postura de missões PROATIVAS (off|shadow|suggest). Shadow-first: default off; NUNCA
   // 'auto'/autopilot (missão proativa é sempre PROPOSTA, nunca executa sozinha).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN mission_proactive_mode TEXT DEFAULT 'off'`); } catch(e){}
+  // ADR-190 F3 (CEO Operating Layer) — VISÃO estratégica do negócio (§12/§56). Intenção HUMANA:
+  // a IA pode ajudar a estruturar, mas NUNCA inventa a visão. 3 colunas aditivas (sem tabela nova, D6);
+  // snapshots derivados NUNCA persistem aqui. Vazias por padrão (0-regressão; recurso dormente).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_statement TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_horizon TEXT`); } catch(e){}         // ex.: "36 meses"
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN strategic_priority TEXT`); } catch(e){}     // commercial|operations|finance|growth|... (texto livre curto)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_updated_at TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_updated_by TEXT`); } catch(e){}
 };
 
 initDb();

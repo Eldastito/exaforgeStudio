@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F6 FECHADAS** (#1341–#1347) + **F7 (financeiro executivo) EM PR.** Camada
+**Estado:** **F0–F7 FECHADAS** (#1341–#1348) + **F8 (briefing executivo) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,27 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · **F7 financeiro executivo (EM PR)** ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · F6 Mission Bridge (FECHADA) · F7 financeiro executivo (FECHADA) · **F8 briefing (EM PR)** ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 12. F8 — Briefing executivo (esta fatia)
+
+O Diretor IA (`ExecutiveAdvisorService`, rotas `/briefing` e `/ask` que JÁ EXISTEM)
+passa a CONSUMIR a inteligência executiva (D7): `executiveBlock` injeta no panorama
+o Executive Snapshot (F4) + a restrição (F5) como TEXTO DETERMINÍSTICO — 3 pilares
+com saúde + indicadores, o pilar em pior forma e a restrição nº1 (rotulada HIPÓTESE).
+A IA passa a NARRAR pilares/desvios/constraint, mas os NÚMEROS já vêm derivados daqui
+(RN-CEO-04: a IA nunca calcula KPI — §43). Honesto: indicador sem fonte NÃO entra (não
+vira 0); restrição só quando existe (não inventa). Mudança MÍNIMA e aditiva — só compõe
+mais um bloco no `buildPanorama` (reuso das rotas/serviço existentes; sem rota nova, sem
+tabela). O bloco herda a audiência da superfície do Diretor que já existe; a garantia de
+dinheiro role-gated vale nas rotas executivas dedicadas (snapshot/finance/constraint).
+`test:executive-briefing-block` (10 — o construtor determinístico, sem LLM). 0-regressão.
 
 ## 11. F7 — Executive Finance (esta fatia)
 

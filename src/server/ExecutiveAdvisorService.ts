@@ -10,6 +10,8 @@ import { RetailCommissionService } from "./RetailCommissionService.js";
 import { UpgradeRecommendationService } from "./UpgradeRecommendationService.js";
 import { PlanService } from "./PlanService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
+import { ExecutiveBusinessSnapshotService } from "./ExecutiveBusinessSnapshotService.js";
+import { ExecutiveConstraintService } from "./ExecutiveConstraintService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -39,7 +41,7 @@ REGRAS:
    */
   static buildPanorama(orgId: string): string {
     const base = ContextEngineService.render(orgId);
-    return base + this.goalsBlock(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+    return base + this.executiveBlock(orgId) + this.goalsBlock(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
   }
 
   /**
@@ -58,6 +60,46 @@ REGRAS:
         return `- ${g.label}: meta ${fmt(g.target, g.unit)} · realizado ${fmt(g.current, g.unit)} (${g.attainmentPct}%) · falta ${fmt(g.remaining, g.unit)} · esperado até hoje ${fmt(g.expectedByNow, g.unit)} → ${pace}`;
       });
       return `\n\n=== METAS DO NEGÓCIO — distância à meta do mês (fatos derivados; NUNCA invente número) ===\n${lines.join("\n")}`;
+    } catch { return ""; }
+  }
+
+  /**
+   * VISÃO EXECUTIVA (ADR-190 F8 / D7): injeta no panorama o Executive Snapshot
+   * DETERMINÍSTICO (F4) + a restrição (F5) como TEXTO — 3 pilares (comercial/
+   * operações/financeiro) com saúde + indicadores, o pilar em pior forma e a
+   * restrição nº1 (hipótese). A IA passa a NARRAR pilares/desvios/constraint, mas
+   * os NÚMEROS já vêm derivados daqui (RN-CEO-04: a IA nunca calcula KPI; §43).
+   * Honesto: indicador sem fonte NÃO entra (não vira 0). Bloco best-effort — falha
+   * na composição não derruba o panorama.
+   */
+  static executiveBlock(orgId: string): string {
+    try {
+      const snap = ExecutiveBusinessSnapshotService.read(orgId);
+      const con = ExecutiveConstraintService.assess(orgId);
+      const PILLAR_PT: Record<string, string> = { commercial: "Comercial", operations: "Operações", finance: "Financeiro" };
+      const HEALTH_PT: Record<string, string> = { critical: "CRÍTICO", attention: "atenção", ok: "ok", unknown: "sem dado" };
+      const fmt = (v: number, unit: string) => (unit === "BRL" ? `R$ ${Number(v).toFixed(2)}` : unit === "percent" ? `${v}%` : `${v}`);
+
+      const lines: string[] = [];
+      for (const key of ["commercial", "operations", "finance"] as const) {
+        const p = snap.pillars?.[key];
+        if (!p) continue;
+        // Só indicadores COM valor (available + não-null) entram — nunca inventa 0.
+        const inds = (p.indicators || [])
+          .filter((i: any) => i.availability === "available" && i.value != null)
+          .slice(0, 4)
+          .map((i: any) => `${i.label} ${fmt(i.value, i.unit)}`);
+        const exc = (p.exceptions || []).length;
+        lines.push(`- Pilar ${PILLAR_PT[key]}: saúde ${HEALTH_PT[p.health] || p.health}${exc ? ` · ${exc} exceção(ões) aberta(s)` : ""}${inds.length ? ` · ${inds.join(" · ")}` : ""}`);
+      }
+      if (con.worstPillar) lines.push(`- Pilar em PIOR forma: ${PILLAR_PT[con.worstPillar.pillar] || con.worstPillar.pillar} (${con.worstPillar.criticalCount} crítico(s), ${con.worstPillar.riskCount} risco(s))`);
+      if (con.constraint) {
+        const g = con.constraint.threatensGoal ? ` — ameaça a meta "${con.constraint.threatensGoal.label}" (gap ${con.constraint.threatensGoal.gapPct}%)` : "";
+        lines.push(`- RESTRIÇÃO nº1 (HIPÓTESE — o desvio a resolver primeiro): "${con.constraint.fact}" → ${con.constraint.recommendedAction}${g}`);
+      }
+      if (snap.vision?.defined && snap.vision?.statement) lines.push(`- Visão declarada pelo dono: ${snap.vision.statement}`);
+      if (!lines.length) return "";
+      return `\n\n=== VISÃO EXECUTIVA — pilares, desvios e restrição (fatos derivados; NUNCA invente número; restrição é HIPÓTESE) ===\n${lines.join("\n")}`;
     } catch { return ""; }
   }
 

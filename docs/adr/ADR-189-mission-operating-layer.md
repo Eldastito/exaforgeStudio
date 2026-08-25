@@ -1,7 +1,11 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F14 em produção** (#1311–#1325) + tela "Missões" (`MissionsView`).
-**F15 (`MissionNextStepService` — a ponte gargalo→ação governada sugerida) EM PR.** Fecha o elo que
+**Estado:** **FECHADO — F0–F15 em produção** (#1311–#1326) + tela "Missões" (`MissionsView`).
+**F16 (UI do Próximo Passo) EM PR** — botão **"O que eu faço agora?"** no detalhe da missão consome
+`/next-step` (mostra a alavanca sugerida, o gargalo e o impacto restante) e **"Propor ação (governada)"**
+chama `/next-step/propose`; quando a autonomia está `off`, orienta a ligá-la (a ação nunca executa
+sozinha). UI-only sobre endpoints já testados (tsc+build verdes; sem tabela/flag nova).
+**F15 (`MissionNextStepService` — a ponte gargalo→ação governada sugerida) em produção.** Fecha o elo que
 faltava entre o plano reverso (F3, que acha o gargalo) e o runtime (F5, que propõe ação DADO um efeito):
 `suggest()` deriva do caminho crítico um PRÓXIMO PASSO governado, aterrado só em command handlers que
 **realmente existem** (`CommandExecutorService.canHandle` — grounding); premissa faltante → tarefa

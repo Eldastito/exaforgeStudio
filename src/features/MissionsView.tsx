@@ -4,7 +4,7 @@
  * trajetória, debrief), nunca inventa número. Só aparece com o Mission Layer ligado (gate server-side).
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { Rocket, Plus, Target, Gauge, TrendingUp, Loader2, Flag, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import { Rocket, Plus, Target, Gauge, TrendingUp, Loader2, Flag, AlertTriangle, CheckCircle2, X, Lightbulb, ArrowRight } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -122,6 +122,7 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
   const [ready, setReady] = useState<any | null>(null);
   const [checkpoint, setCheckpoint] = useState<any | null>(null);
   const [debrief, setDebrief] = useState<any | null>(null);
+  const [nextStep, setNextStep] = useState<any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const call = async (key: string, url: string, method = 'GET') => {
@@ -154,6 +155,7 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
           <button onClick={async () => setReady(await call('ready', `/api/missions/${mission.id}/readiness`, 'POST'))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'ready' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Gauge className="w-3.5 h-3.5" />} Prontidão</button>
           <button onClick={async () => setCheckpoint(await call('cp', `/api/missions/${mission.id}/checkpoint`))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'cp' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <TrendingUp className="w-3.5 h-3.5" />} Trajetória</button>
           <button onClick={async () => setDebrief(await call('deb', `/api/missions/${mission.id}/debrief`))} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-[13px] text-zinc-200 hover:bg-zinc-700">{busy === 'deb' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flag className="w-3.5 h-3.5" />} Debrief</button>
+          <button onClick={async () => setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST'))} className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600/20 border border-teal-600/40 px-3 py-1.5 text-[13px] text-teal-200 hover:bg-teal-600/30">{busy === 'next' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lightbulb className="w-3.5 h-3.5" />} O que eu faço agora?</button>
         </div>
 
         {/* Plano reverso */}
@@ -204,6 +206,34 @@ function MissionDetail({ mission, onClose }: { mission: any; onClose: () => void
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
             <div className="text-[13px] font-medium text-zinc-200 mb-1">Debrief</div>
             <ul className="list-disc pl-4 space-y-0.5 text-[12px] text-zinc-400">{debrief.lessons.map((l: string, i: number) => <li key={i}>{l}</li>)}</ul>
+          </div>
+        )}
+
+        {/* Próximo passo (F15/F16) — alavanca sugerida a partir do gargalo, encaminhada pelo caminho governado */}
+        {nextStep && (
+          <div className="rounded-xl border border-teal-800/40 bg-teal-950/20 p-4">
+            <div className="text-[13px] font-medium text-teal-200 mb-1 flex items-center gap-1.5"><Lightbulb className="w-3.5 h-3.5" /> Próximo passo</div>
+            {nextStep.suggestable && nextStep.lever ? (
+              <div className="space-y-2">
+                <p className="text-[13px] text-zinc-200">{nextStep.lever.title}</p>
+                <p className="text-[12px] text-zinc-400">{nextStep.lever.rationale}</p>
+                <div className="text-[11px] text-zinc-500 flex flex-wrap gap-x-3">
+                  {nextStep.criticalStage && <span>Gargalo: {nextStep.criticalStage}</span>}
+                  {nextStep.lever.expectedImpact != null && <span>Impacto p/ a meta: {nextStep.lever.impactUnit === 'BRL' ? brl(nextStep.lever.expectedImpact) : num(nextStep.lever.expectedImpact)}</span>}
+                </div>
+                {nextStep.autonomyReady ? (
+                  <button
+                    onClick={async () => {
+                      const r = await call('propose', `/api/missions/${mission.id}/next-step/propose`, 'POST');
+                      if (r) { toast.success('Ação proposta — aguardando sua aprovação.'); setNextStep(await call('next', `/api/missions/${mission.id}/next-step`, 'POST')); }
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-teal-500"
+                  >{busy === 'propose' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowRight className="w-3.5 h-3.5" />} Propor ação (governada)</button>
+                ) : (
+                  <p className="text-[11px] text-amber-200/80">Ligue a autonomia da missão (ao menos "sugerir") para propor esta ação — ela nunca executa sozinha.</p>
+                )}
+              </div>
+            ) : <p className="text-[12px] text-zinc-500">{nextStep.reason}</p>}
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 # ADR-190 — CEO Operating Layer (Executive Business Operating System)
 
-**Estado:** **F0–F4 FECHADAS** (#1341–#1345) + **F5 (Constraint & Worst-Pillar) EM PR.** Camada
+**Estado:** **F0–F5 FECHADAS** (#1341–#1346) + **F6 (Mission Bridge) EM PR.** Camada
 TRANSVERSAL de gestão executiva — composição sobre o que já existe, sem motores paralelos.
 **Data:** 2026-08-25.
 **Natureza:** aditiva, composicional, governada, orientada por exceção. **Não** é dashboard/BI novo.
@@ -47,13 +47,28 @@ sem sinal/executor/mission/learning paralelo. Codificados como regressão no har
 ## 4. Plano de fatias (18 do PRD → 11)
 
 F0 auditoria (FECHADA) · **F1 Executive Metric Registry (EM PR)** · F2 métricas faltantes honestas ·
-F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · **F5 exceções+constraint (EM PR)** · F6 Mission Bridge ·
+F3 Business Vision (FECHADA) · F4 `ExecutiveBusinessSnapshotService` (FECHADA) · F5 exceções+constraint (FECHADA) · **F6 Mission Bridge (EM PR)** ·
 F7 financeiro executivo · F8 briefing · F9 Fala Tu intents + bloco "Hoje" · F10 golden path ·
 F11 hardening+runbook. **Diferidas:** key-person dependency · briefing proativo · evidence-UI.
 
 Defaults honestos adotados (dono delegou): `new_customers` = 1ª compra em `orders`; `default_rate` =
 vencido ÷ total a receber; `churn_rate` = `unknown` + `cancellations` por tipo; visão = 3 colunas em
 `organization_settings`; NPS = `unknown` (só há CSAT).
+
+## 10. F6 — Executive → Mission Bridge (esta fatia)
+
+Liga a camada executiva (desvios priorizados, F4/F5) às MISSÕES (ADR-189):
+`ExecutiveMissionBridgeService.suggest` — de um desvio que AMEAÇA UMA META declarada
+(`affectedGoal` do scoring), devolve o RASCUNHO da missão que a endereça (mesmo shape
+que `MissionService.create` aceita). **SUGERIR ≠ CRIAR** (RN-CEO-06/§5): READ-ONLY,
+nunca cria — o dono confirma pela UI de missões que já existe. **Não inventa objetivo**
+(RN-CEO-11): `targetMetric`/`targetValue` vêm da META REAL; desvio sem meta mapeável →
+sugestão SEM rascunho (`draft:null`), não fabrica alvo. `source:'system_proposed'`
+(origem válida em `MISSION_SOURCES` — o dono cria direto). Missão VIVA (status não-terminal)
+pra aquela métrica → `alreadyCovered` (não duplica). `basis:'hypothesis'` (a missão é a
+aposta, não causa provada). Reusa `MissionService`/`ImpactPrioritizationService`/
+`BusinessGoalService` — sem motor, sem tabela. Rota `GET /api/executive/mission-suggestions`
+owner/admin. `test:executive-mission-bridge` (12). 0-regressão.
 
 ## 9. F5 — Executive Constraint & Worst-Pillar (esta fatia)
 

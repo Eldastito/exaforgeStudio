@@ -63,6 +63,8 @@ const STAGE_LABEL: Record<string, string> = {
   sales: "vendas",
   opportunities: "oportunidades",
   contacts: "contatos/base",
+  appointments: "atendimentos",
+  bookings: "agendamentos",
 };
 
 export class MissionNextStepService {

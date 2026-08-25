@@ -463,6 +463,7 @@
     "test:mission-enablement": "tsx scripts/test-mission-enablement.ts",
     "test:mission-metrics": "tsx scripts/test-mission-metrics.ts",
     "test:mission-appointments-plan": "tsx scripts/test-mission-appointments-plan.ts",
+    "test:mission-receivables": "tsx scripts/test-mission-receivables.ts",
     "test:labor-law-advisor": "tsx scripts/test-labor-law-advisor.ts",
     "pilot:retail-floor": "tsx scripts/pilot-retail-floor.cli.ts",
     "pilot:retail-floor:prod": "node dist/pilot-retail-floor.cjs",

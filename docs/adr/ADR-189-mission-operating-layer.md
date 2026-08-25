@@ -1,7 +1,15 @@
 # ADR-189 — Mission Operating Layer & Simplificação Radical (PRD "Mission OS")
 
-**Estado:** **FECHADO — F0–F24 em produção** (#1311–#1335) + tela "Missões" (`MissionsView`).
-**F25 (hardening em dia — trava a regressão cross-vertical) EM PR** — o `test:mission-hardening`
+**Estado:** **FECHADO — F0–F25 em produção** (#1311–#1336) + tela "Missões" (`MissionsView`).
+**F26 (terceira família cross-vertical — COBRANÇA) EM PR** — estende a tese "todas as verticais" à
+família **cobrança/inadimplência** (qualquer negócio que fatura): (1) nova métrica `receivables` no
+`BusinessGoalService` = valor RECUPERADO no mês (soma dos recebíveis quitados no system-of-record
+`receivables`, RN-004, nunca LLM); (2) o intent `collect_receivable` deixa de ser qualitativo e passa a
+`metric:'receivables'` → missão MEDÍVEL (checkpoint mede o recuperado real); (3) próximo passo ganha
+alavanca DIRETA de cobrança (`collection`, command handler que já existe — não é funil) com impacto =
+alvo − recuperado (BRL, nunca inventa); (4) opção "Cobrança recuperada" no formulário. `test:mission-
+receivables` 9; golden-paths/intent/business-goals 0-regressão. **F25 = hardening em dia (18 testes) +
+trava a regressão cross-vertical — o `test:mission-hardening`
 afirmava "14 testes mission wired" mas 4 novos (`enablement`/`metrics`/`appointments-plan`/`golden-
 path-agenda`) tinham ficado de fora do doc-of-record; agora são 18, e o hardening ganha a REGRESSÃO
 cross-vertical (F22): missão de agenda tem cadeia própria (`applicable`, comparecimento derivado). 28

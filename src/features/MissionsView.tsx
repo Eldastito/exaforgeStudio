@@ -89,6 +89,7 @@ export function MissionsView() {
                 <option value="">— qualitativa —</option>
                 <option value="revenue">Receita (R$)</option>
                 <option value="appointments">Atendimentos</option>
+                <option value="receivables">Cobrança recuperada (R$)</option>
               </select>
             </label>
             <label className="text-sm text-zinc-400">Alvo

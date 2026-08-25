@@ -20,6 +20,8 @@ async function main() {
   const { MissionService: M } = await import("../src/server/MissionService.js");
   const { MissionReversePlanner: RP } = await import("../src/server/MissionReversePlanner.js");
   const { MissionRuntimeService: RT } = await import("../src/server/MissionRuntimeService.js");
+  const { MissionNextStepService: NS } = await import("../src/server/MissionNextStepService.js");
+  const { CommandExecutorService } = await import("../src/server/CommandExecutorService.js");
   const { MissionCheckpointService: CP } = await import("../src/server/MissionCheckpointService.js");
   const { MissionProactiveService: PRO } = await import("../src/server/MissionProactiveService.js");
   const { NavigationManifestService: NAV } = await import("../src/server/NavigationManifestService.js");
@@ -68,16 +70,37 @@ async function main() {
   // ── RN-MOL-8: isolamento — get cross-org null.
   check("RN-8 isolamento (get cross-org null)", M.get(B, m.id) === null);
 
+  // ── F15/F16 Próximo Passo: a ponte gargalo→ação só sugere alavanca REAL, é shadow, e nunca inventa dinheiro.
+  const mNext = M.create(A, { title: "R$50 mil", targetMetric: "revenue", targetValue: 50000, targetUnit: "BRL", deadline: `${new Date().getUTCFullYear() + 1}-06-30` });
+  const gapOpts = { avgTicket: 500, saleConversionRate: 0.25, contactConversionRate: 0.4, baseAvailable: 100 };
+  const nsBefore = (db.prepare(`SELECT COUNT(*) n FROM decision_actions WHERE organization_id=?`).get(A) as any).n;
+  const sug = NS.suggest(A, mNext.id, gapOpts);
+  const nsAfter = (db.prepare(`SELECT COUNT(*) n FROM decision_actions WHERE organization_id=?`).get(A) as any).n;
+  check("F15 next-step é SHADOW (suggest não escreve decision_action)", nsBefore === nsAfter);
+  check("F15 grounding: alavanca só se o comando EXISTE de fato (canHandle)", sug.suggestable === true && !!sug.lever && CommandExecutorService.canHandle(sug.lever.commandType));
+  check("F15 determinístico (suggest reproduzível)", JSON.stringify(sug) === JSON.stringify(NS.suggest(A, mNext.id, gapOpts)));
+  const sugPremise = NS.suggest(A, mNext.id, {}); // sem taxas/ticket → premissa faltante
+  check("F15 premissa faltante → tarefa, nunca campanha no escuro/dinheiro inventado", sugPremise.lever?.commandType === "create_task" && sugPremise.lever?.expectedImpact === null);
+  const sugQual = NS.suggest(A, M.create(A, { title: "qualitativa" }).id, {});
+  check("F15 qualitativa → honesto (sem alavanca)", sugQual.suggestable === false && sugQual.lever === null);
+  check("F16/shadow-first: propose recusa missão 'off'", throws(() => NS.propose(A, mOff.id, gapOpts)));
+  M.setAutonomy(A, mNext.id, "suggest");
+  const nsProp = NS.propose(A, mNext.id, gapOpts);
+  const nsRow = db.prepare(`SELECT * FROM decision_actions WHERE id=? AND organization_id=?`).get(nsProp.action.id, A) as any;
+  check("F15 propose delega ao caminho GOVERNADO (correlation mission:<id>, nunca 'done')", !!nsRow && nsRow.correlation_id === `mission:${mNext.id}` && nsRow.status !== "done");
+
   // ── (B) FIAÇÃO DE PRODUÇÃO ──
   const scheduler = fs.readFileSync(path.join(ROOT, "src/server/Scheduler.ts"), "utf8");
   check("wiring: MissionCheckpointService.pass + MissionProactiveService.pass no Scheduler", scheduler.includes("MissionCheckpointService.pass") && scheduler.includes("MissionProactiveService.pass"));
   const server = fs.readFileSync(path.join(ROOT, "server.ts"), "utf8");
   check("wiring: rota /missions montada", server.includes('"/missions", missionsRoutes') || server.includes("'/missions', missionsRoutes"));
+  const missionsRoute = fs.readFileSync(path.join(ROOT, "src/server/routes/missions.ts"), "utf8");
+  check("wiring: rotas /next-step + /next-step/propose (F15/F16)", missionsRoute.includes('"/:id/next-step"') && missionsRoute.includes('"/:id/next-step/propose"'));
   const dbsrc = fs.readFileSync(path.join(ROOT, "src/server/db.ts"), "utf8");
   check("wiring: flags/colunas (mission_layer_enabled + mission_proactive_mode + tabela missions)", dbsrc.includes("mission_layer_enabled") && dbsrc.includes("mission_proactive_mode") && dbsrc.includes("CREATE TABLE IF NOT EXISTS missions"));
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-  const needed = ["test:mission-contract", "test:mission-intent", "test:mission-reverse-plan", "test:mission-readiness", "test:mission-runtime", "test:mission-checkpoint", "test:mission-home", "test:mission-nav", "test:mission-legacy-reduction", "test:mission-debrief", "test:mission-proactive", "test:mission-hardening"];
-  check("wiring: 12 testes mission wired", needed.every((t) => pkg.scripts[t]));
+  const needed = ["test:mission-contract", "test:mission-intent", "test:mission-reverse-plan", "test:mission-readiness", "test:mission-runtime", "test:mission-checkpoint", "test:mission-home", "test:mission-nav", "test:mission-legacy-reduction", "test:mission-debrief", "test:mission-proactive", "test:mission-next-step", "test:mission-golden-path", "test:mission-hardening"];
+  check("wiring: 14 testes mission wired", needed.every((t) => pkg.scripts[t]));
   check("wiring: runbook presente", fs.existsSync(path.join(ROOT, "docs/runbook/mission-operacao.md")));
   check("wiring: ADR-189 presente", fs.existsSync(path.join(ROOT, "docs/adr/ADR-189-mission-operating-layer.md")));
 

@@ -7,6 +7,7 @@ import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
 import { ExecutiveMissionBridgeService } from "../ExecutiveMissionBridgeService.js";
 import { ExecutiveFinanceService } from "../ExecutiveFinanceService.js";
 import { KeyPersonDependencyService } from "../KeyPersonDependencyService.js";
+import { ExecutiveProactiveService } from "../ExecutiveProactiveService.js";
 
 const router = Router();
 
@@ -107,6 +108,15 @@ router.get("/key-person", requireRole("owner", "admin"), (req: AuthRequest, res)
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(KeyPersonDependencyService.assess(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190) — briefing proativo (preview do digest da semana) ──
+// Read-only; o push real flui pela espinha/FalaTuProactiveService. Owner/admin.
+router.get("/proactive-briefing", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExecutiveProactiveService.briefing(orgId)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

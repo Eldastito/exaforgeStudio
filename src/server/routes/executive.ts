@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
 import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
 import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotService.js";
+import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
 
 const router = Router();
 
@@ -65,6 +66,15 @@ router.get("/snapshot", requireRole("owner", "admin"), (req: AuthRequest, res): 
     const period = typeof req.query.period === "string" ? req.query.period : undefined;
     res.json(ExecutiveBusinessSnapshotService.read(orgId, { period }));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── CEO Operating Layer (ADR-190 F5) — pilar em pior forma + restrição nº1 ──
+// Company-level "onde focar" sobre o snapshot (F4). Owner/admin (§73 — impacto R$).
+router.get("/constraint", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExecutiveConstraintService.assess(orgId)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

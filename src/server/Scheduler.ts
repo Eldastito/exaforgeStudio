@@ -911,6 +911,12 @@ export class Scheduler {
       import("./LegalDeadlineService.js").then((m) => m.LegalDeadlineService.pass())
         .catch((e) => console.error('[Scheduler] sinal de prazo processual falhou', e));
     } catch (e) { console.error('[Scheduler] pass de prazo processual falhou', e); }
+
+    // ADR-191 F6 — audiências/reuniões próximas (sinal na espinha; missar audiência = revelia).
+    try {
+      import("./LegalHearingService.js").then((m) => m.LegalHearingService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de audiência falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de audiência falhou', e); }
     // Controladoria (ADR-185 F3): sinal advisory de despesa não apropriada a centro de custo.
     // Só orgs com centro ativo; hipótese, nunca apropria sozinho. Best-effort.
     try {

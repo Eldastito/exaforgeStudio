@@ -10620,6 +10620,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN strategic_priority TEXT`); } catch(e){}     // commercial|operations|finance|growth|... (texto livre curto)
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_updated_at TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN vision_updated_by TEXT`); } catch(e){}
+  // ADR-191 F6 — Audiências/reuniões da vertical Advocacia: REUSA a agenda (`appointments`)
+  // amarrada ao processo (`legal_cases`), espelhando `care_episode_id` da clínica (D1, sem
+  // tabela nova). `legal_case_id` liga o compromisso ao processo; `hearing_type` distingue
+  // audiência/perícia/sustentação/reunião/julgamento. Aditivas, nullable (0-regressão).
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN legal_case_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE appointments ADD COLUMN hearing_type TEXT`); } catch(e){}
 };
 
 initDb();

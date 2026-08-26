@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { LegalPracticeService } from "../LegalPracticeService.js";
 import { LegalCaseService } from "../LegalCaseService.js";
 import { LegalDeadlineService } from "../LegalDeadlineService.js";
+import { LegalHearingService } from "../LegalHearingService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -186,6 +187,59 @@ router.post("/deadlines/:id/cancel", requireRole("owner", "admin"), (req: AuthRe
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(LegalDeadlineService.cancel(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Audiências/reuniões (ADR-191 F6 — reuso da agenda amarrada ao processo) ──
+router.get("/hearings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const upcoming = req.query.upcoming === "1";
+  res.json({ hearings: LegalHearingService.list(orgId, { status, caseId, upcoming }) });
+});
+
+router.get("/hearings/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const h = LegalHearingService.get(orgId, req.params.id);
+  if (!h) return res.status(404).json({ error: "not_found" });
+  res.json(h);
+});
+
+router.post("/hearings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalHearingService.schedule(orgId, {
+      caseId: b.caseId, title: b.title, hearingType: b.hearingType, start: b.start,
+      durationMinutes: b.durationMinutes, lawyerId: b.lawyerId, location: b.location, force: !!b.force,
+    }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro", code: e?.code, conflicts: e?.conflicts }); }
+});
+
+router.post("/hearings/:id/reschedule", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalHearingService.reschedule(orgId, req.params.id, b.start, b.durationMinutes, actor(req), !!b.force));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro", code: e?.code, conflicts: e?.conflicts }); }
+});
+
+router.post("/hearings/:id/complete", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalHearingService.complete(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/hearings/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalHearingService.cancel(orgId, req.params.id, req.body?.reason ?? null, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

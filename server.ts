@@ -41,6 +41,7 @@ import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
 import radarB2BRoutes from "./src/server/routes/radarB2B.js";
 import clinicRoutes from "./src/server/routes/clinic.js";
+import advocaciaRoutes from "./src/server/routes/advocacia.js";
 import escolaRoutes from "./src/server/routes/escola.js";
 import retailOpsRoutes from "./src/server/routes/retailops.js";
 import retailFloorRoutes from "./src/server/routes/retailFloor.js";
@@ -635,6 +636,7 @@ async function startServer() {
   protectedApi.use("/prospect", prospectRoutes);
   protectedApi.use("/radar-b2b", radarB2BRoutes);
   protectedApi.use("/clinic", clinicRoutes);
+  protectedApi.use("/advocacia", advocaciaRoutes);
   protectedApi.use("/escola", escolaRoutes);
   protectedApi.use("/retailops", retailOpsRoutes);
   protectedApi.use("/retail-floor", retailFloorRoutes);

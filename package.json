@@ -234,6 +234,7 @@
     "test:advocacia-vertical": "tsx scripts/test-advocacia-vertical.ts",
     "test:clinic-terms": "tsx scripts/test-clinic-terms.ts",
     "test:legal-terms": "tsx scripts/test-legal-terms.ts",
+    "test:legal-practice-areas": "tsx scripts/test-legal-practice-areas.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",

@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0–F1 FECHADAS (#1358–#1359). F2 (terminologia) EM PR.**
+**Estado:** **F0–F2 FECHADAS (#1358–#1360). F3 (áreas + advogados) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -62,7 +62,7 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 - **F0** auditoria + ADR (**esta fatia**, doc-only).
 - **F1 (EM PR)** vertical `advocacia`: chave em `verticals.ts` (`VerticalKey` + preset prestador-de-serviço `agenda/vendas/pagamentos/campanhas/cadencias/areas/integracoes/assinaturas/diretor/rie/execucao` — sem varejo, sem `clinica`) + `CONSENT_BY_VERTICAL['advocacia']` = `dados_pessoais/comunicacoes/sigilo_profissional` (sigilo NÃO é `dados_sensiveis` — base é exercício de direitos + EOAB Art.34; gate na F9). Features legais são GATED pela vertical, não por módulo novo (padrão petshop). `test:advocacia-vertical` (15).
 - **F2 (EM PR)** terminologia (`src/lib/legalTerms.ts`, função PURA espelhando `clinicTerms`): cliente/advogado/área do direito/processo/encerramento/prazo/audiência + gate `isLegal` (só `advocacia` ativa as features legais nas views, como `clinicTerms.isPet`). Só rótulos, 0 comportamento. `test:legal-terms` (14).
-- **F3** áreas do direito (reuso `clinic_specialties`) + advogados (reuso `clinic_professionals`, OAB campo). `test:legal-practice-areas`.
+- **F3 (EM PR)** `LegalPracticeService` — COMPOSIÇÃO PURA (zero tabela nova): áreas do direito reusam `clinic_specialties` (via `ClinicSpecialtyService`, + seed de 8 áreas comuns idempotente) e advogados reusam `clinic_professionals` (via `ClinicAgendaService`) — a OAB cabe nas colunas `council`+`registration_number` já existentes (`council='OAB'`), VALIDADA (UF+número), nunca inventada; vínculo advogado↔área reusa o N:N `clinic_professional_specialties`. Rotas em `/api/advocacia/*` (namespace próprio — o `/api/legal` é a Consultora CDC/Trabalhista). `test:legal-practice-areas` (13).
 - **F4** `legal_cases` (processo): número CNJ + validação + área + advogado responsável + status/fase + parte contrária + vara/comarca; `LegalCaseService` (abrir/transferir/encerrar/listar). `test:legal-case`.
 - **F5** **Prazos** (borda crítica): `legal_holidays` (calendário forense) + `LegalDeadlineService` (contagem em dias úteis a partir de publicação/intimação) → materializa `tasks` + lembrete + `business_signals` no prazo fatal. `test:legal-deadline`.
 - **F6** audiências/reuniões (reuso agenda) amarradas ao processo. `test:legal-hearing`.

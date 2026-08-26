@@ -308,6 +308,26 @@ export class ClinicPetService {
     const orgs = db.prepare(`SELECT DISTINCT organization_id AS org FROM clinic_pets WHERE status = 'active'`).all() as any[];
     for (const o of orgs) { try { await this.publishTreatmentReminders(o.org); } catch { /* noop */ } }
   }
+
+  // ── Petshop F9 — visão consolidada "Próximos cuidados" (pipeline de recompra) ──
+  // COMPÕE read-only os três fluxos que já existem (vacina + vermífugo/antipulga +
+  // retorno de banho & tosa) numa lista única ordenada por vencimento. Sem motor
+  // novo; não inventa (só o que cada detector já devolve). Determinístico (nowISO).
+  static async upcomingCare(orgId: string, opts?: { withinDays?: number; nowISO?: string }): Promise<Array<{ kind: "vaccine" | "treatment" | "grooming"; petId: string; petName: string; tutorContactId: string; label: string; nextDueAt: string; status: "due" | "overdue" }>> {
+    const TREAT_LABEL: Record<string, string> = { vermifugo: "Vermífugo", antipulga: "Antipulgas", carrapaticida: "Carrapaticida", outro: "Tratamento" };
+    const out: Array<{ kind: "vaccine" | "treatment" | "grooming"; petId: string; petName: string; tutorContactId: string; label: string; nextDueAt: string; status: "due" | "overdue" }> = [];
+    for (const v of this.dueVaccinations(orgId, opts)) out.push({ kind: "vaccine", petId: v.petId, petName: v.petName, tutorContactId: v.tutorContactId, label: `Vacina ${v.vaccine}`, nextDueAt: v.nextDueAt, status: v.status });
+    for (const t of this.dueTreatments(orgId, opts)) out.push({ kind: "treatment", petId: t.petId, petName: t.petName, tutorContactId: t.tutorContactId, label: TREAT_LABEL[t.treatmentType] || "Tratamento", nextDueAt: t.nextDueAt, status: t.status });
+    try {
+      const { ClinicGroomingService } = await import("./ClinicGroomingService.js");
+      for (const g of ClinicGroomingService.dueGroomingReturns(orgId, opts)) out.push({ kind: "grooming", petId: g.petId, petName: g.petName, tutorContactId: g.tutorContactId, label: g.serviceName, nextDueAt: g.nextDueAt, status: g.status });
+    } catch { /* best-effort */ }
+    // Atrasados primeiro, depois por data de vencimento crescente.
+    return out.sort((a, b) => {
+      if (a.status !== b.status) return a.status === "overdue" ? -1 : 1;
+      return a.nextDueAt.localeCompare(b.nextDueAt);
+    });
+  }
 }
 
 export default ClinicPetService;

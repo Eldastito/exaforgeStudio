@@ -256,6 +256,7 @@
     "test:advocacia-federation-hardening": "tsx scripts/test-advocacia-federation-hardening.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-pet-treatment": "tsx scripts/test-clinic-pet-treatment.ts",
+    "test:clinic-pet-care-upcoming": "tsx scripts/test-clinic-pet-care-upcoming.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-grooming-return": "tsx scripts/test-clinic-grooming-return.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",

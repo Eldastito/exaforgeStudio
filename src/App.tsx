@@ -25,6 +25,7 @@ import { ProspectView } from '@/src/features/ProspectView';
 import { RadarB2BView } from '@/src/features/RadarB2BView';
 import { ClinicAgendaView } from '@/src/features/ClinicAgendaView';
 import { AdvocaciaView } from '@/src/features/AdvocaciaView';
+import { EscolaView } from '@/src/features/EscolaView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
 import { RadarConsultantView } from '@/src/features/RadarConsultantView';
@@ -254,7 +255,7 @@ export default function App() {
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
-      vision: 'vms', radar: 'radar', clinica: 'clinica', prospect: 'prospect', radar_b2b: 'prospect',
+      vision: 'vms', radar: 'radar', clinica: 'clinica', escola: 'escola', prospect: 'prospect', radar_b2b: 'prospect',
       retailops: 'retail', retailfloor: 'retail_floor', comigo: 'copiloto',
     };
     const mod = map[viewMode];
@@ -488,6 +489,7 @@ export default function App() {
              {viewMode === 'radar_b2b' && 'Radar B2B'}
              {viewMode === 'clinica' && 'Agenda Clínica'}
              {viewMode === 'advocacia' && 'Advocacia'}
+             {viewMode === 'escola' && 'Escola'}
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
@@ -615,6 +617,7 @@ export default function App() {
           {viewMode === 'radar_b2b' && <RadarB2BView />}
           {viewMode === 'clinica' && <ClinicAgendaView />}
           {viewMode === 'advocacia' && <AdvocaciaView />}
+          {viewMode === 'escola' && <EscolaView />}
           {viewMode === 'vision' && <VisionVmsView />}
           {viewMode === 'radar' && <RadarView />}
           {viewMode === 'radar_consultant' && <RadarConsultantView />}

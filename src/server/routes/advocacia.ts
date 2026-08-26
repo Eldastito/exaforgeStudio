@@ -6,6 +6,7 @@ import { LegalDeadlineService } from "../LegalDeadlineService.js";
 import { LegalHearingService } from "../LegalHearingService.js";
 import { LegalDocumentService } from "../LegalDocumentService.js";
 import { LegalFeeService } from "../LegalFeeService.js";
+import { LegalPrivilegeService } from "../LegalPrivilegeService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -259,9 +260,14 @@ router.get("/documents", (req: AuthRequest, res): any => {
 router.get("/documents/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const d = LegalDocumentService.get(orgId, req.params.id);
-  if (!d) return res.status(404).json({ error: "not_found" });
-  res.json(d);
+  try {
+    const d = LegalDocumentService.get(orgId, req.params.id);
+    if (!d) return res.status(404).json({ error: "not_found" });
+    res.json(d);
+  } catch (e: any) {
+    if (e?.code === "SIGILO_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e?.message || "erro" });
+  }
 });
 
 router.post("/documents", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -304,7 +310,10 @@ router.get("/documents/:id/pdf", async (req: AuthRequest, res): Promise<any> => 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(pdf);
-  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+  } catch (e: any) {
+    if (e?.code === "SIGILO_REQUIRED") return res.status(403).json({ error: e.message, code: e.code });
+    res.status(400).json({ error: e?.message || "erro" });
+  }
 });
 
 // ── Honorários (ADR-191 F8 — fixo→receivable, avença→subscription). Dinheiro role-gated (§73). ──
@@ -356,6 +365,38 @@ router.post("/fees/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(LegalFeeService.cancel(orgId, req.params.id, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Sigilo profissional (ADR-191 F9 — gate LGPD opt-in nos documentos do caso) ──
+router.get("/privilege", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: LegalPrivilegeService.isEnabled(orgId) });
+});
+
+router.post("/privilege/enable", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LegalPrivilegeService.setEnabled(orgId, !!req.body?.enabled, actor(req)));
+});
+
+router.get("/clients/:contactId/sigilo", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LegalPrivilegeService.status(orgId, req.params.contactId));
+});
+
+router.post("/clients/:contactId/sigilo/grant", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalPrivilegeService.grant(orgId, req.params.contactId, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/clients/:contactId/sigilo/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(LegalPrivilegeService.revoke(orgId, req.params.contactId, actor(req)));
 });
 
 export default router;

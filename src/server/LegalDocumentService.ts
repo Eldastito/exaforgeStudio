@@ -6,6 +6,7 @@ import {
   verifyPin, computeDocumentHash, longDateBR,
   drawSignatureBlock, drawElectronicSignatureFooter,
 } from "./ClinicDocumentsService.js";
+import { LegalPrivilegeService } from "./LegalPrivilegeService.js";
 
 /**
  * Legal Document (ADR-191 F7) — DOCUMENTOS jurídicos (petição/contrato/procuração).
@@ -48,8 +49,18 @@ export interface LegalDocInput {
 }
 
 export class LegalDocumentService {
-  static get(orgId: string, id: string): any {
+  /** Leitura CRUA (sem gate) — uso interno por issue/update/cancel (operações do escritório). */
+  private static getRaw(orgId: string, id: string): any {
     return db.prepare(`SELECT * FROM legal_documents WHERE organization_id = ? AND id = ?`).get(orgId, id) || null;
+  }
+
+  /** Leitura de CONTEÚDO — gated por sigilo (F9). Com o gate ligado e sem consentimento
+   *  do cliente, LANÇA SIGILO_REQUIRED (o conteúdo é sigiloso). Gate off → 0-regressão. */
+  static get(orgId: string, id: string): any {
+    const d = this.getRaw(orgId, id);
+    if (!d) return null;
+    LegalPrivilegeService.assertAccess(orgId, d.contact_id);
+    return d;
   }
 
   static list(orgId: string, opts: { caseId?: string; contactId?: string; docType?: string; status?: string } = {}): any[] {
@@ -58,7 +69,11 @@ export class LegalDocumentService {
     if (opts.contactId) { clauses.push(`contact_id = ?`); args.push(opts.contactId); }
     if (opts.docType) { clauses.push(`doc_type = ?`); args.push(opts.docType); }
     if (opts.status) { clauses.push(`status = ?`); args.push(opts.status); }
-    return db.prepare(`SELECT * FROM legal_documents WHERE ${clauses.join(" AND ")} ORDER BY (status = 'cancelled') ASC, created_at DESC`).all(...args) as any[];
+    const rows = db.prepare(`SELECT * FROM legal_documents WHERE ${clauses.join(" AND ")} ORDER BY (status = 'cancelled') ASC, created_at DESC`).all(...args) as any[];
+    // F9: com o gate ligado, REDIGE o corpo (conteúdo sigiloso) dos clientes sem consentimento —
+    // metadados seguem visíveis pra gestão; o conteúdo, não (nunca vaza o sigiloso).
+    if (!LegalPrivilegeService.isEnabled(orgId)) return rows;
+    return rows.map((r) => LegalPrivilegeService.hasConsent(orgId, r.contact_id) ? r : { ...r, body: null, sigilo_redacted: 1 });
   }
 
   /** Cria um documento em RASCUNHO. Cliente vem do processo (se houver) ou do contactId. */
@@ -88,12 +103,12 @@ export class LegalDocumentService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)`
     ).run(id, orgId, input.caseId || null, contactId, professionalId, docType, title, input.body ? String(input.body) : null, actorId);
     logAuthEvent(orgId, actorId, contactId, "LEGAL_DOCUMENT_CREATED", { documentId: id, docType, caseId: input.caseId || null });
-    return this.get(orgId, id);
+    return this.getRaw(orgId, id);
   }
 
-  /** Edita o RASCUNHO. RN-ADV-06: documento emitido é imutável. */
+  /** Edita o RASCUNHO. RN-ADV-06: documento emitido é imutável. Operação do escritório (ungated). */
   static update(orgId: string, id: string, patch: { title?: string; body?: string | null; professionalId?: string | null }, actorId: string | null = null): any {
-    const d = this.get(orgId, id);
+    const d = this.getRaw(orgId, id);
     if (!d) throw new Error("Documento não encontrado.");
     if (d.status !== "draft") throw new Error("Documento emitido é imutável — só rascunho pode ser editado.");
     const title = patch.title !== undefined ? String(patch.title || "").trim() : d.title;
@@ -105,12 +120,12 @@ export class LegalDocumentService {
     }
     db.prepare(`UPDATE legal_documents SET title = ?, body = ?, professional_id = ?, updated_at = ? WHERE organization_id = ? AND id = ?`)
       .run(title, patch.body !== undefined ? (patch.body ? String(patch.body) : null) : d.body, professionalId, nowISO(), orgId, id);
-    return this.get(orgId, id);
+    return this.getRaw(orgId, id);
   }
 
   /** EMITE o documento: congela snapshots + hash canônico + assinatura por PIN (RN-ADV-06). */
   static issue(orgId: string, id: string, actorId: string | null = null, opts: { pin?: string } = {}): any {
-    const d = this.get(orgId, id);
+    const d = this.getRaw(orgId, id);
     if (!d) throw new Error("Documento não encontrado.");
     if (d.status === "issued") return d;
     if (d.status === "cancelled") throw new Error("Documento cancelado não pode ser emitido.");
@@ -142,21 +157,21 @@ export class LegalDocumentService {
     ).run(actorId, signedAt, clientSnap, bizSnap, nameSnap, regSnap, councilSnap,
       signedWithPin ? 1 : 0, signatureHash, signedWithPin ? signedAt : null, signedAt, orgId, id);
     logAuthEvent(orgId, actorId, d.contact_id, "LEGAL_DOCUMENT_ISSUED", { documentId: id, docType: d.doc_type, signedWithPin, signatureHash });
-    return this.get(orgId, id);
+    return this.getRaw(orgId, id);
   }
 
-  /** Cancela (retenção: nunca DELETE). */
+  /** Cancela (retenção: nunca DELETE). Operação do escritório (ungated). */
   static cancel(orgId: string, id: string, reason: string | null = null, actorId: string | null = null): any {
-    const d = this.get(orgId, id);
+    const d = this.getRaw(orgId, id);
     if (!d) throw new Error("Documento não encontrado.");
     if (d.status === "cancelled") return d;
     db.prepare(`UPDATE legal_documents SET status = 'cancelled', cancelled_at = ?, cancelled_reason = ?, updated_at = ? WHERE organization_id = ? AND id = ?`)
       .run(nowISO(), reason || null, nowISO(), orgId, id);
     logAuthEvent(orgId, actorId, d.contact_id, "LEGAL_DOCUMENT_CANCELLED", { documentId: id, reason });
-    return this.get(orgId, id);
+    return this.getRaw(orgId, id);
   }
 
-  /** PDF do documento. Emitido re-lê snapshots imutáveis; rascunho usa dados live + marca-d'água. */
+  /** PDF do documento — CONTEÚDO gated por sigilo (F9). Emitido re-lê snapshots imutáveis. */
   static renderPdf(orgId: string, id: string): Promise<Buffer> {
     const d = this.get(orgId, id);
     if (!d) throw new Error("Documento não encontrado.");

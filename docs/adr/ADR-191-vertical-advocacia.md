@@ -86,7 +86,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **OAB-F2 (EM PR)** ofertas + janelas do advogado FEDERADO — `LegalProfessionalScheduleService`, COMPOSIÇÃO PURA (§184): traduz `lawyerId`→`relationshipId` (exige federação OAB-F1) e DELEGA ao `ProfessionalScheduleConfigService` da ADR-180. Ofertas = serviços jurídicos do catálogo (`products_services type='service'`, mesmo gate — não inventa serviço); janelas = disponibilidade semanal + buffer (replace-all). Defederar tira a configuração de vista (vínculo revogado). Rotas `/api/advocacia/lawyers/:id/{offerings,windows}*`. `test:legal-professional-schedule` (11).
 
-**Diferidos restantes:** federação OAB — OAB-F3..F5 (disponibilidade/agendamento federado → UI → hardening) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **OAB-F3 (EM PR)** disponibilidade + agendamento federado a partir da Advocacia — `LegalProfessionalBookingService`, COMPOSIÇÃO PURA (§184): traduz `lawyerId`→`relationshipId` (exige federação) e DELEGA ao `ProfessionalBookingService` (vagas ATERRADAS RN-PN-4 + hold atômico RN-PN-5 + confirmação idempotente). Adição da vertical: `confirm` amarra o agendamento federado ao PROCESSO (`legal_case_id`) e deriva o cliente do processo — o fio da agenda jurídica. `waitlist` (demanda sem vaga → espinha). Rotas `/api/advocacia/lawyers/:id/{availability,hold,waitlist}` + `/holds/:holdId/booking`. `test:legal-professional-booking` (10).
+
+**Diferidos restantes:** federação OAB — OAB-F4 (UI: seção Rede/OAB no advogado) + OAB-F5 (hardening) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

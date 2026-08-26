@@ -11,6 +11,7 @@ import { LegalTimesheetService } from "../LegalTimesheetService.js";
 import { LegalSuccessFeeService } from "../LegalSuccessFeeService.js";
 import { LegalProfessionalFederationService } from "../LegalProfessionalFederationService.js";
 import { LegalProfessionalScheduleService } from "../LegalProfessionalScheduleService.js";
+import { LegalProfessionalBookingService } from "../LegalProfessionalBookingService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -114,6 +115,45 @@ router.put("/lawyers/:id/windows", requireRole("owner", "admin"), (req: AuthRequ
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json({ windows: LegalProfessionalScheduleService.setWindows(orgId, req.params.id, req.body?.windows || [], actor(req)) }); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Disponibilidade + agendamento federado (ADR-191 OAB-F3 — reuso ProfessionalBooking) ──
+router.get("/lawyers/:id/availability", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const date = typeof req.query.date === "string" ? req.query.date : "";
+    const serviceId = typeof req.query.serviceId === "string" ? req.query.serviceId : undefined;
+    const slots = await LegalProfessionalBookingService.availability(orgId, req.params.id, date, { serviceId });
+    res.json({ slots });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/lawyers/:id/hold", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalProfessionalBookingService.hold(orgId, req.params.id, { serviceId: b.serviceId, startISO: b.startISO, slotMinutes: b.slotMinutes, ttlMinutes: b.ttlMinutes }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/holds/:holdId/booking", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalProfessionalBookingService.confirm(orgId, { holdId: req.params.holdId, caseId: b.caseId, contactId: b.contactId, title: b.title }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/lawyers/:id/waitlist", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalProfessionalBookingService.waitlist(orgId, req.params.id, { serviceId: b.serviceId, contactId: b.contactId, note: b.note }));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 router.get("/lawyers/:id/areas", (req: AuthRequest, res): any => {

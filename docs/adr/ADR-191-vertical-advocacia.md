@@ -88,7 +88,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **OAB-F3 (EM PR)** disponibilidade + agendamento federado a partir da Advocacia — `LegalProfessionalBookingService`, COMPOSIÇÃO PURA (§184): traduz `lawyerId`→`relationshipId` (exige federação) e DELEGA ao `ProfessionalBookingService` (vagas ATERRADAS RN-PN-4 + hold atômico RN-PN-5 + confirmação idempotente). Adição da vertical: `confirm` amarra o agendamento federado ao PROCESSO (`legal_case_id`) e deriva o cliente do processo — o fio da agenda jurídica. `waitlist` (demanda sem vaga → espinha). Rotas `/api/advocacia/lawyers/:id/{availability,hold,waitlist}` + `/holds/:holdId/booking`. `test:legal-professional-booking` (10).
 
-**Diferidos restantes:** federação OAB — OAB-F4 (UI: seção Rede/OAB no advogado) + OAB-F5 (hardening) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **OAB-F4 (EM PR)** UI da federação — seção "Rede profissional (federação OAB)" na aba Configuração da `AdvocaciaView`: toggle da rede (org-scoped, reuso `ProfessionalNetworkSettingsService` exposto em `/api/advocacia/professional-network/settings`) + por advogado com OAB: badge federado/não + Federar/Desfederar + editor de disponibilidade semanal (janelas dow/início/fim, replace-all) quando federado. UI-only sobre as rotas OAB-F1..F3; tsc + build verdes. (1 rota backend fina: settings da rede no namespace advocacia, pra não depender do gate do módulo `clinica`.)
+
+**Diferidos restantes:** federação OAB — OAB-F5 (hardening `test:advocacia-federation-hardening` + nota no runbook) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

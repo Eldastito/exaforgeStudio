@@ -12,6 +12,7 @@ import { LegalSuccessFeeService } from "../LegalSuccessFeeService.js";
 import { LegalProfessionalFederationService } from "../LegalProfessionalFederationService.js";
 import { LegalProfessionalScheduleService } from "../LegalProfessionalScheduleService.js";
 import { LegalProfessionalBookingService } from "../LegalProfessionalBookingService.js";
+import { ProfessionalNetworkSettingsService } from "../ProfessionalNetworkSettingsService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -55,6 +56,20 @@ router.post("/lawyers", requireRole("owner", "admin"), (req: AuthRequest, res): 
     const b = req.body || {};
     res.json(LegalPracticeService.createLawyer(orgId, { name: b.name, oabUf: b.oabUf, oabNumber: b.oabNumber, color: b.color, userId: b.userId, areaIds: b.areaIds }, actor(req)));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Rede profissional: liga/desliga o opt-in da federação (org-scoped; reuso ADR-180) ──
+router.get("/professional-network/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProfessionalNetworkSettingsService.get(orgId));
+});
+
+router.put("/professional-network/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ProfessionalNetworkSettingsService.set(orgId, req.body || {})); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 // ── Federação OAB (ADR-191 OAB-F1 — ponte de identidade com a Agenda Federada ADR-180) ──

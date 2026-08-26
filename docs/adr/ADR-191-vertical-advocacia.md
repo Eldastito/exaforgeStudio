@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0–F12 FECHADAS (#1358–#1370) — vertical + honorários (por-hora/êxito) completos. UI: F13-UI (núcleo operacional + setup) EM PR.**
+**Estado:** **F0–F12 FECHADAS + F13-UI FECHADA (#1358–#1371). UI 2ª fatia (audiências + documentos) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -77,7 +77,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **F13-UI (EM PR)** UI da vertical — 1ª fatia (núcleo operacional + setup). `src/features/AdvocaciaView.tsx` (espelha `ClinicAgendaView`: `apiFetch`, tabs locais, `toast`, cards Tailwind; hook local `useLegalTerms`; acento índigo). Abas: **Processos** (listar + criar com cliente/área/advogado/CNJ/tribunal + encerrar/reabrir) · **Prazos** (calculadora de preview com aviso `holidaysLoaded` + listar/criar/concluir/cancelar; prazo fatal/vencido destacado) · **Configuração** (áreas do direito: criar/seed-defaults; advogados: criar com OAB). Wiring: `ViewMode` `'advocacia'` + `App.tsx` (título + render sob `ErrorBoundary`) + `Sidebar` (NavItem gated por `vertical === 'advocacia'`, ícone `Gavel`). UI-only sobre as rotas testadas F0–F12; tsc + build verdes. Próxima fatia de UI: audiências + documentos + honorários (fees/timesheet/êxito) + sigilo.
 
-**Diferidos restantes:** UI (2ª fatia: audiências/documentos/honorários/sigilo) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **UI 2ª fatia (EM PR)** — estende `AdvocaciaView` com 2 abas: **Audiências** (listar próximas/passadas com "sem baixa" destacado + agendar com detecção de conflito de agenda do advogado → prompt de `force` + concluir/cancelar) e **Documentos** (listar por status + criar rascunho petição/contrato/procuração + editar corpo + emitir com PIN opcional + baixar PDF via blob, tratando 403 sigilo + cancelar; chip "Sigiloso" quando redigido). UI-only sobre as rotas testadas; tsc + build verdes. Próxima fatia de UI: honorários (fixo/avença/por-hora/êxito + extrato) + toggle de sigilo.
+
+**Diferidos restantes:** UI (3ª fatia: honorários + sigilo) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

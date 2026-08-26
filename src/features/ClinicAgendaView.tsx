@@ -1420,6 +1420,45 @@ const VAX_CHIP: Record<string, { label: string; cls: string }> = {
   no_due: { label: 'sem próxima', cls: 'text-zinc-400 bg-zinc-500/10 border-zinc-700' },
 };
 
+// Petshop F9 — "Próximos cuidados" (vacina + vermífugo/antipulga + retorno de
+// banho) de TODA a org, ordenado por vencimento. Só gestor (rota role-gated);
+// pra não-gestor a lista vem vazia e o card não aparece.
+const CARE_META: Record<string, { icon: string; label: string }> = {
+  vaccine: { icon: '💉', label: 'Vacina' }, treatment: { icon: '💊', label: 'Preventivo' }, grooming: { icon: '🛁', label: 'Banho & tosa' },
+};
+function PetCareUpcomingCard() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    apiFetch('/api/clinic/pets-care/upcoming').then((x) => (x.ok ? x.json() : { upcoming: [] }))
+      .then((d) => setItems(Array.isArray(d?.upcoming) ? d.upcoming : []))
+      .catch(() => setItems([]))
+      .finally(() => setLoaded(true));
+  }, []);
+  if (!loaded || items.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="text-sm font-medium text-amber-300 mb-2">🔔 Próximos cuidados ({items.length})</div>
+      <div className="space-y-1.5 max-h-64 overflow-y-auto">
+        {items.map((r, i) => {
+          const m = CARE_META[r.kind] || { icon: '•', label: r.kind };
+          return (
+            <div key={`${r.kind}:${r.petId}:${i}`} className="flex items-center gap-2 text-[12px]">
+              <span>{m.icon}</span>
+              <span className="text-zinc-100 font-medium truncate">{r.petName}</span>
+              <span className="text-zinc-500 truncate">{r.label}</span>
+              <span className={`ml-auto rounded-full border px-1.5 py-0.5 text-[10px] ${r.status === 'overdue' ? 'text-rose-300 border-rose-500/30 bg-rose-500/10' : 'text-amber-300 border-amber-500/30 bg-amber-500/10'}`}>
+                {r.status === 'overdue' ? 'atrasado' : 'a vencer'} · {r.nextDueAt}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] text-zinc-500">Pipeline de recompra: quem está na hora de voltar. Consolida vacina, vermífugo/antipulga e retorno de banho.</p>
+    </div>
+  );
+}
+
 function PetsTab({ contacts }: { contacts: ContactLite[] }) {
   const terms = useClinicTerms();
   const [tutorId, setTutorId] = useState('');
@@ -1440,6 +1479,9 @@ function PetsTab({ contacts }: { contacts: ContactLite[] }) {
 
   return (
     <div className="space-y-4">
+      {/* Petshop F9 — visão consolidada da pipeline de recompra (org-level) */}
+      <PetCareUpcomingCard />
+
       <div className="flex items-end gap-3 flex-wrap">
         <div className="min-w-[16rem]">
           <label className="text-sm text-zinc-400 mb-1 block">{terms.guardian}</label>

@@ -2155,6 +2155,15 @@ router.get("/pets-treatments/due", requireRole("owner", "admin"), (req: AuthRequ
   res.json({ due: ClinicPetService.dueTreatments(orgId, { withinDays }) });
 });
 
+// GET /api/clinic/pets-care/upcoming?withinDays= — visão consolidada "Próximos
+// cuidados" (vacina + vermífugo/antipulga + retorno de banho) da org (gestor).
+router.get("/pets-care/upcoming", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const withinDays = typeof req.query?.withinDays === "string" ? Number(req.query.withinDays) : undefined;
+  res.json({ upcoming: await ClinicPetService.upcomingCare(orgId, { withinDays }) });
+});
+
 // ─────────────── Banho & Tosa / grooming (Petshop F4) ───────────────
 
 // GET /api/clinic/grooming-services — catálogo de serviços de grooming.

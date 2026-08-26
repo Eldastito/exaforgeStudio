@@ -112,9 +112,18 @@ async function main() {
   const escolaV = EntitlementService.check(orgV, ownerV, "escola", "view");
   check("peixaria: escola também hidden", escolaV.state === "hidden");
 
-  // Contra-teste: escola numa org educação NÃO seria hidden. Aqui na clinica (saude) é hidden.
-  const escolaC = EntitlementService.check(orgC, ownerC, "escola", "view");
-  check("clinica (saude): escola também hidden (esconde por vertical)", escolaC.state === "hidden");
+  // Contra-teste: escola numa org saude é hidden POR VERTICAL — mas só quando o
+  // plano NÃO a cobre (regra: hidden = blueprint incoerente E fora do plano).
+  // A orgC é enterprise, que AGORA vende escola (add-on/tier), então lá escola
+  // deixa de ser hidden e vira available_to_enable (G-153-2: não esconder o
+  // contratado). Provamos os dois: no growth (não cobre) → hidden; no enterprise
+  // (cobre) → available_to_enable.
+  db.prepare(`UPDATE organization_settings SET plan_id = 'growth' WHERE organization_id = ?`).run(orgC);
+  const escolaCGrowth = EntitlementService.check(orgC, ownerC, "escola", "view");
+  check("clinica (saude) fora do plano: escola hidden (esconde por vertical)", escolaCGrowth.state === "hidden");
+  db.prepare(`UPDATE organization_settings SET plan_id = 'enterprise' WHERE organization_id = ?`).run(orgC);
+  const escolaCEnt = EntitlementService.check(orgC, ownerC, "escola", "view");
+  check("clinica (saude) no enterprise (vende escola): available_to_enable, não hidden", escolaCEnt.state === "available_to_enable");
 
   // ===== 7. Master Admin bypassa =====
   const clinicaMaster = EntitlementService.check(orgV, master, "clinica", "view");

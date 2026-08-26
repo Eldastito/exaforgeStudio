@@ -34,6 +34,7 @@ export class AddonService {
       { key: "clinica", price: 3000 },
       { key: "prospect", price: 3500 },
       { key: "advocacia", price: 3000 },
+      { key: "escola", price: 3000 },
     ],
   };
 

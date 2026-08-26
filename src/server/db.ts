@@ -10035,6 +10035,32 @@ const initDb = () => {
     `);
   } catch (e) { /* noop */ }
 
+  // Petshop F7 — tratamentos preventivos RECORRENTES do pet (vermífugo,
+  // antipulga/carrapaticida, ...) que NÃO são vacina (carteira própria) mas
+  // seguem o MESMO padrão de lembrete por `next_due_at`. Espelha
+  // `clinic_pet_vaccinations`; aditivo, opt-in pela vertical petshop.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clinic_pet_preventive_treatments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        pet_id TEXT NOT NULL,
+        treatment_type TEXT NOT NULL,                    -- vermifugo|antipulga|carrapaticida|outro
+        product TEXT,                                    -- nome comercial do produto aplicado
+        applied_at TEXT,                                 -- ISO date da aplicação
+        next_due_at TEXT,                                -- ISO date da próxima dose (lembrete)
+        professional_id TEXT,                            -- quem aplicou (clinic_professionals.id)
+        notes TEXT,
+        status TEXT NOT NULL DEFAULT 'applied',          -- applied|scheduled|cancelled
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_treat_pet ON clinic_pet_preventive_treatments (organization_id, pet_id);
+      CREATE INDEX IF NOT EXISTS idx_clinic_pet_treat_due ON clinic_pet_preventive_treatments (organization_id, next_due_at) WHERE next_due_at IS NOT NULL AND status = 'applied';
+    `);
+  } catch (e) { /* noop */ }
+
   // PETSHOP F4 — catálogo de serviços de BANHO & TOSA (grooming) da loja. Curado pela
   // loja (nome/duração/preço); alimenta o agendamento. Aditivo; a fila é a própria
   // agenda (reuso — o appointment recebe pet_id + grooming_service_id abaixo).

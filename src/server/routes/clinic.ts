@@ -2131,6 +2131,30 @@ router.get("/pets-vaccinations/due", requireRole("owner", "admin"), (req: AuthRe
   res.json({ due: ClinicPetService.dueVaccinations(orgId, { withinDays }) });
 });
 
+// ─────────────── Tratamentos preventivos do pet (Petshop F7) ───────────────
+// GET /api/clinic/pets/:id/treatments — vermífugo/antipulga do pet.
+router.get("/pets/:id/treatments", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ treatments: ClinicPetService.listTreatments(orgId, String(req.params.id)) });
+});
+
+// POST /api/clinic/pets/:id/treatments — registra um tratamento preventivo.
+router.post("/pets/:id/treatments", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ClinicPetService.addTreatment(orgId, String(req.params.id), req.body || {}, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// GET /api/clinic/pets-treatments/due?withinDays= — tratamentos vencidos/a vencer (gestor).
+router.get("/pets-treatments/due", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const withinDays = typeof req.query?.withinDays === "string" ? Number(req.query.withinDays) : undefined;
+  res.json({ due: ClinicPetService.dueTreatments(orgId, { withinDays }) });
+});
+
 // ─────────────── Banho & Tosa / grooming (Petshop F4) ───────────────
 
 // GET /api/clinic/grooming-services — catálogo de serviços de grooming.

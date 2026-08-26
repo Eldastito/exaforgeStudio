@@ -28,6 +28,12 @@ export interface VaccinationInput {
   vaccine?: string; dose?: string | null; appliedAt?: string | null; nextDueAt?: string | null;
   professionalId?: string | null; lote?: string | null; notes?: string | null;
 }
+// Petshop F7 — tratamento preventivo recorrente (vermífugo/antipulga/...).
+export interface TreatmentInput {
+  treatmentType?: string; product?: string | null; appliedAt?: string | null; nextDueAt?: string | null;
+  professionalId?: string | null; notes?: string | null;
+}
+const TREATMENT_TYPES = new Set(["vermifugo", "antipulga", "carrapaticida", "outro"]);
 
 export class ClinicPetService {
   /** Idade DERIVADA (anos/meses) a partir de birth_date. null sem data (não inventa). */
@@ -222,6 +228,85 @@ export class ClinicPetService {
   static async passVaccinationReminders(): Promise<void> {
     const orgs = db.prepare(`SELECT DISTINCT organization_id AS org FROM clinic_pets WHERE status = 'active'`).all() as any[];
     for (const o of orgs) { try { await this.publishVaccinationReminders(o.org); } catch { /* noop */ } }
+  }
+
+  // ── Petshop F7 — tratamentos preventivos recorrentes (vermífugo/antipulga) ──
+  // Espelham a carteira de vacina: mesmo status por `next_due_at`, mesmo lembrete
+  // via business_signals (conv. nº 12). Vacina é vacina; tratamento é à parte.
+  private static mapTreatment(r: any) {
+    return {
+      id: r.id, petId: r.pet_id, treatmentType: r.treatment_type, product: r.product ?? null,
+      appliedAt: r.applied_at ?? null, nextDueAt: r.next_due_at ?? null,
+      professionalId: r.professional_id ?? null, notes: r.notes ?? null,
+      status: r.status, createdAt: r.created_at,
+    };
+  }
+
+  static listTreatments(orgId: string, petId: string): any[] {
+    const rows = db.prepare(`SELECT * FROM clinic_pet_preventive_treatments WHERE organization_id = ? AND pet_id = ? ORDER BY COALESCE(applied_at, next_due_at) DESC, created_at DESC`).all(orgId, petId) as any[];
+    return rows.map((r) => this.mapTreatment(r));
+  }
+
+  static addTreatment(orgId: string, petId: string, input: TreatmentInput, actorId?: string): { id: string } {
+    const pet = db.prepare(`SELECT 1 FROM clinic_pets WHERE organization_id = ? AND id = ?`).get(orgId, petId);
+    if (!pet) throw new Error("pet não encontrado.");
+    const type = String(input.treatmentType || "").trim().toLowerCase();
+    if (!TREATMENT_TYPES.has(type)) throw new Error("treatmentType inválido (vermifugo|antipulga|carrapaticida|outro).");
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO clinic_pet_preventive_treatments (id, organization_id, pet_id, treatment_type, product, applied_at, next_due_at, professional_id, notes, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, orgId, petId, type, input.product ? String(input.product).slice(0, 80) : null,
+      input.appliedAt || null, input.nextDueAt || null, input.professionalId || null,
+      input.notes ? String(input.notes).slice(0, 1000) : null, actorId || null);
+    try { logAuthEvent(orgId, actorId || "system", orgId, "CLINIC_PET_TREATMENT_ADD", { id, petId, treatmentType: type }); } catch { /* noop */ }
+    return { id };
+  }
+
+  /** Tratamentos vencidos/a vencer da org (reusa a situação da vacina). */
+  static dueTreatments(orgId: string, opts?: { withinDays?: number; nowISO?: string }): Array<{ treatmentId: string; petId: string; petName: string; tutorContactId: string; treatmentType: string; nextDueAt: string; status: "due" | "overdue" }> {
+    const within = opts?.withinDays ?? 30;
+    const rows = db.prepare(`
+      SELECT t.id tid, t.pet_id, t.treatment_type, t.next_due_at, p.name pet_name, p.tutor_contact_id
+      FROM clinic_pet_preventive_treatments t JOIN clinic_pets p ON p.id = t.pet_id AND p.organization_id = t.organization_id
+      WHERE t.organization_id = ? AND t.status = 'applied' AND t.next_due_at IS NOT NULL AND p.status = 'active'
+    `).all(orgId) as any[];
+    const out: any[] = [];
+    for (const r of rows) {
+      const st = this.vaccinationStatus(r.next_due_at, opts?.nowISO, within);
+      if (st === "due" || st === "overdue") {
+        out.push({ treatmentId: r.tid, petId: r.pet_id, petName: r.pet_name, tutorContactId: r.tutor_contact_id, treatmentType: r.treatment_type, nextDueAt: r.next_due_at, status: st });
+      }
+    }
+    return out.sort((a, b) => a.nextDueAt.localeCompare(b.nextDueAt));
+  }
+
+  static async publishTreatmentReminders(orgId: string, opts?: { withinDays?: number; nowISO?: string }): Promise<{ published: number }> {
+    const due = this.dueTreatments(orgId, opts);
+    if (due.length === 0) return { published: 0 };
+    let published = 0;
+    const LABEL: Record<string, string> = { vermifugo: "Vermífugo", antipulga: "Antipulgas", carrapaticida: "Carrapaticida", outro: "Tratamento" };
+    try {
+      const { BusinessSignalService } = await import("./BusinessSignalService.js");
+      for (const d of due) {
+        const label = LABEL[d.treatmentType] || "Tratamento";
+        BusinessSignalService.publish(orgId, {
+          domain: "clinic", signalType: "pet_treatment_due", severity: d.status === "overdue" ? "attention" : "info",
+          basis: "fact", confidence: 1, sourceService: "ClinicPetService", sourceEntityType: "clinic_pet_treatment", sourceEntityId: d.treatmentId,
+          subjectType: "pet", subjectId: d.petId,
+          evidence: { petName: d.petName, treatmentType: d.treatmentType, nextDueAt: d.nextDueAt, status: d.status, tutorContactId: d.tutorContactId, note: `${label} de ${d.petName} ${d.status === "overdue" ? "venceu" : "vence em breve"} (${d.nextDueAt}).` },
+          dedupeKey: `clinic:pet_treatment_due:${d.treatmentId}`,
+        });
+        published++;
+      }
+    } catch { /* best-effort */ }
+    return { published };
+  }
+
+  /** Passe do Scheduler: lembretes de tratamento por org com pets (best-effort). */
+  static async passTreatmentReminders(): Promise<void> {
+    const orgs = db.prepare(`SELECT DISTINCT organization_id AS org FROM clinic_pets WHERE status = 'active'`).all() as any[];
+    for (const o of orgs) { try { await this.publishTreatmentReminders(o.org); } catch { /* noop */ } }
   }
 }
 

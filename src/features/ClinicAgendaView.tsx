@@ -1465,6 +1465,7 @@ function PetCard({ pet, terms, expanded, onToggle, onChanged }: { pet: any; term
         <div className="border-t border-zinc-800 p-3 space-y-4">
           <PetHealthPlanRow pet={pet} onChanged={onChanged} />
           <PetVaccinationCard petId={pet.id} terms={terms} />
+          <PetTreatmentCard petId={pet.id} />
           <PetHospitalizationSection petId={pet.id} terms={terms} />
           <PetSurgerySection petId={pet.id} terms={terms} />
           <PetHistorySection petId={pet.id} />
@@ -1731,6 +1732,77 @@ function PetVaccinationCard({ petId, terms }: { petId: string; terms: ClinicTerm
                 <span className="text-zinc-500">{v.appliedAt ? `aplicada ${v.appliedAt}` : ''}</span>
                 {v.nextDueAt && <span className="text-zinc-400 ml-auto">próxima {v.nextDueAt}</span>}
                 <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${st.cls} ${v.nextDueAt ? '' : 'ml-auto'}`}>{st.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Petshop F7 — tratamentos preventivos recorrentes (vermífugo/antipulga). Espelha
+// o PetVaccinationCard; reusa vaxStatus/VAX_CHIP (mesma lógica de next_due_at).
+const TREAT_LABEL: Record<string, string> = { vermifugo: 'Vermífugo', antipulga: 'Antipulgas', carrapaticida: 'Carrapaticida', outro: 'Outro' };
+function PetTreatmentCard({ petId }: { petId: string }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ treatmentType: 'vermifugo', product: '', appliedAt: '', nextDueAt: '' });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/clinic/pets/${petId}/treatments`).then((x) => (x.ok ? x.json() : { treatments: [] }));
+      setItems(Array.isArray(r?.treatments) ? r.treatments : []);
+    } catch { setItems([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [petId]);
+
+  const add = async () => {
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/clinic/pets/${petId}/treatments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ treatmentType: form.treatmentType, product: form.product.trim() || null, appliedAt: form.appliedAt || null, nextDueAt: form.nextDueAt || null }) });
+      if (!r.ok) throw new Error();
+      toast.success('Tratamento registrado.'); setForm({ treatmentType: 'vermifugo', product: '', appliedAt: '', nextDueAt: '' }); setShowAdd(false); load();
+    } catch { toast.error('Erro ao registrar'); } finally { setSaving(false); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-medium text-zinc-300">Vermífugo & antipulgas</div>
+        <button onClick={() => setShowAdd((v) => !v)} className="text-[11px] inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200"><Plus className="w-3 h-3" /> Registrar tratamento</button>
+      </div>
+      {showAdd && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2 mb-2 grid grid-cols-2 gap-2">
+          <select className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={form.treatmentType} onChange={(e) => setForm((f) => ({ ...f, treatmentType: e.target.value }))}>
+            {Object.entries(TREAT_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <input className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" placeholder="Produto (ex.: Bravecto)" value={form.product} onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))} />
+          <label className="text-[10px] text-zinc-500">Aplicado em<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={form.appliedAt} onChange={(e) => setForm((f) => ({ ...f, appliedAt: e.target.value }))} /></label>
+          <label className="text-[10px] text-zinc-500">Próxima dose<input type="date" className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-100" value={form.nextDueAt} onChange={(e) => setForm((f) => ({ ...f, nextDueAt: e.target.value }))} /></label>
+          <div className="col-span-2 flex justify-end">
+            <button onClick={add} disabled={saving} className="text-[11px] rounded bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar'}</button>
+          </div>
+        </div>
+      )}
+      {loading ? (
+        <p className="text-xs text-zinc-500">Carregando…</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-zinc-500">Nenhum tratamento registrado ainda.</p>
+      ) : (
+        <div className="space-y-1">
+          {items.map((t) => {
+            const st = VAX_CHIP[vaxStatus(t.nextDueAt)];
+            return (
+              <div key={t.id} className="flex items-center gap-2 text-[12px]">
+                <span className="text-zinc-100 font-medium w-28 truncate">{TREAT_LABEL[t.treatmentType] || t.treatmentType}</span>
+                {t.product && <span className="text-zinc-500 text-[10px] truncate">{t.product}</span>}
+                <span className="text-zinc-500">{t.appliedAt ? `aplicado ${t.appliedAt}` : ''}</span>
+                {t.nextDueAt && <span className="text-zinc-400 ml-auto">próxima {t.nextDueAt}</span>}
+                <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${st.cls} ${t.nextDueAt ? '' : 'ml-auto'}`}>{st.label}</span>
               </div>
             );
           })}

@@ -255,6 +255,7 @@
     "test:legal-professional-booking": "tsx scripts/test-legal-professional-booking.ts",
     "test:advocacia-federation-hardening": "tsx scripts/test-advocacia-federation-hardening.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
+    "test:clinic-pet-treatment": "tsx scripts/test-clinic-pet-treatment.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",
     "test:clinic-pet-history": "tsx scripts/test-clinic-pet-history.ts",

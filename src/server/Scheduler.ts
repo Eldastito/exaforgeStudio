@@ -871,6 +871,12 @@ export class Scheduler {
       import("./ClinicPetService.js").then((m) => m.ClinicPetService.passVaccinationReminders())
         .catch((e) => console.error('[Scheduler] lembrete de vacina pet falhou', e));
     } catch (e) { console.error('[Scheduler] pass de lembrete de vacina pet falhou', e); }
+    // Petshop F7 — lembrete de tratamento preventivo recorrente (vermífugo/
+    // antipulga): mesmo padrão da vacina (business_signals, idempotente).
+    try {
+      import("./ClinicPetService.js").then((m) => m.ClinicPetService.passTreatmentReminders())
+        .catch((e) => console.error('[Scheduler] lembrete de tratamento pet falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de lembrete de tratamento pet falhou', e); }
     // Agenda Federada — gap de demanda (ADR-180 F9.2): publica UM sinal por serviço com
     // pressão ALTA no `business_signals` (conv. nº 12), self-healing quando o gap fecha.
     // Só orgs com a rede habilitada; advisório, nunca inventa dinheiro. Best-effort.

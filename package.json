@@ -247,6 +247,7 @@
     "test:legal-federation": "tsx scripts/test-legal-federation.ts",
     "test:legal-professional-schedule": "tsx scripts/test-legal-professional-schedule.ts",
     "test:legal-professional-booking": "tsx scripts/test-legal-professional-booking.ts",
+    "test:advocacia-federation-hardening": "tsx scripts/test-advocacia-federation-hardening.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",

@@ -243,6 +243,7 @@
     "test:legal-privilege": "tsx scripts/test-legal-privilege.ts",
     "test:advocacia-hardening": "tsx scripts/test-advocacia-hardening.ts",
     "test:legal-timesheet": "tsx scripts/test-legal-timesheet.ts",
+    "test:legal-success-fee": "tsx scripts/test-legal-success-fee.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",

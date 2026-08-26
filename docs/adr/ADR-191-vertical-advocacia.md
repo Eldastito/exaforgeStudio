@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0–F10 FECHADAS (#1358–#1368) — vertical completa. Diferidos em andamento: F11 (honorário por-hora / timesheet) EM PR.**
+**Estado:** **F0–F11 FECHADAS (#1358–#1369) — vertical completa + timesheet. Diferidos em andamento: F12 (honorário de êxito / success fee) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -73,7 +73,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **F11 (EM PR)** honorário **por-hora / timesheet** (1º diferido do F8, borda nova autocontida): `legal_time_entries` + `LegalTimesheetService`. O advogado registra HORAS por processo/cliente; `amount` DERIVA horas × valor-hora (RN-004). **RN-ADV-07:** lançamento sem valor-hora tem horas mas `amount` NULL e NÃO é faturável até ter tarifa (nunca arbitrada pela IA); `summary` separa faturável (com tarifa) de pendente-de-tarifa; sem lançamento → `billableAmount` NULL. Faturar (`bill`) empacota as horas não faturadas num honorário **FIXO** (reuso F8 → `receivable`), congela a tarifa aplicada (auditável), marca `billed` + amarra `fee_id` (idempotente — hora faturada não fatura de novo); `defaultRatePerHour` no faturamento aplica aos sem-tarifa só por decisão humana explícita. Anular = `billable=0` (nunca DELETE após faturado). Dinheiro role-gated (§73). Rotas `/api/advocacia/timesheet*`. `test:legal-timesheet` (20).
 
-**Diferidos restantes:** honorário de êxito (success fee) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **F12 (EM PR)** honorário de **êxito / success fee** (2º diferido do F8, borda nova autocontida): `legal_success_fees` + `LegalSuccessFeeService`. Percentual ACORDADO sobre o PROVEITO ECONÔMICO do processo, cobrado só quando o resultado se confirma. **RN-ADV-07 (o ponto sensível):** o acordo nasce `pending` com `base_amount`/`amount` NULL — a IA NUNCA arbitra o valor da causa; o proveito econômico é informado pelo HUMANO na `confirm`, e só então `amount = base × percent/100` vira honorário FIXO (reuso F8 → `receivable`). `preview` calcula sem persistir; `agree`/`confirm`(idempotente)/`cancel`(pendente); confirmado não cancela o acordo (cancela-se o honorário gerado). Percentual validado (0 < % ≤ 100). Dinheiro role-gated (§73). Rotas `/api/advocacia/success-fees*`. `test:legal-success-fee` (19).
+
+**Diferidos restantes:** federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

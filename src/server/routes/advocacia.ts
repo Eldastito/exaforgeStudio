@@ -8,6 +8,7 @@ import { LegalDocumentService } from "../LegalDocumentService.js";
 import { LegalFeeService } from "../LegalFeeService.js";
 import { LegalPrivilegeService } from "../LegalPrivilegeService.js";
 import { LegalTimesheetService } from "../LegalTimesheetService.js";
+import { LegalSuccessFeeService } from "../LegalSuccessFeeService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -443,6 +444,48 @@ router.post("/timesheet/bill", requireRole("owner", "admin"), (req: AuthRequest,
     const b = req.body || {};
     res.json(LegalTimesheetService.bill(orgId, { caseId: b.caseId, contactId: b.contactId, dueDate: b.dueDate, defaultRatePerHour: b.defaultRatePerHour, description: b.description }, actor(req)));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Honorário de êxito / success fee (ADR-191 F12). Dinheiro role-gated (§73). ──
+router.get("/success-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  res.json({ successFees: LegalSuccessFeeService.list(orgId, { caseId, contactId, status }) });
+});
+
+router.post("/success-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalSuccessFeeService.agree(orgId, { caseId: b.caseId, percent: Number(b.percent), description: b.description }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/success-fees/:id/preview", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalSuccessFeeService.preview(orgId, req.params.id, Number(req.body?.baseAmount))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/success-fees/:id/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalSuccessFeeService.confirm(orgId, req.params.id, { baseAmount: Number(b.baseAmount), dueDate: b.dueDate }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/success-fees/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalSuccessFeeService.cancel(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

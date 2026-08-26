@@ -190,7 +190,7 @@ export const INITIAL_BLUEPRINTS: CreateBlueprintInput[] = [
         "agenda", "catalogo", "vendas", "loja", "pagamentos",
         "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
         "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-        "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor",
+        "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor", "advocacia",
       ],
       commercialUpgrades: [],
       quickStartPack: null,

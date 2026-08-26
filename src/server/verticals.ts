@@ -55,7 +55,7 @@ export const OPTIONAL_MODULES = [
   "agenda", "catalogo", "vendas", "loja", "pagamentos",
   "campanhas", "cadencias", "areas", "integracoes", "reservas", "assinaturas",
   "compras", "orcamentos", "eventos", "diretor", "estudio", "rie", "execucao", "prospect",
-  "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor",
+  "vms", "radar", "clinica", "retail", "copiloto", "escola", "retail_floor", "advocacia",
   // ADR-151 F2: falatu virou módulo opcional multi-tenant (ligado por org via
   // organization_settings.falatu_enabled + RBAC). ADR-154 F2.1 formaliza como
   // módulo conhecido pra poder aparecer em blueprint.requiredModules
@@ -99,7 +99,7 @@ export const OPTIONAL_MODULES = [
 // "retail_floor" (Atendimento de Loja / Lista da Vez, ADR-150) segue o mesmo
 // racional do "retail": operação de loja física supervisionada é opt-in
 // explícito do dono — nenhuma vertical liga sozinha.
-export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "escola", "retail_floor"] as const;
+export const ADDON_MODULES = ["vms", "radar", "prospect", "clinica", "retail", "escola", "retail_floor", "advocacia"] as const;
 
 // PLAN_FREE_ADDONS: subconjunto dos add-ons que o DONO pode ligar em
 // Configurações › Módulos independentemente do teto do plano (billing mockado).
@@ -202,7 +202,7 @@ export const VERTICALS: Vertical[] = [
     // o módulo `clinica` (que traz prontuário/prescrição — não cabe no jurídico).
     key: "advocacia", label: "Advocacia / Jurídico", icon: "⚖️",
     descricao: "Escritório de advocacia — processos, prazos, audiências, clientes e honorários.",
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
+    modules: ["advocacia", "agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

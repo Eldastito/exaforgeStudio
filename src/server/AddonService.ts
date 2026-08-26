@@ -33,6 +33,7 @@ export class AddonService {
       { key: "vms", price: 3500 },
       { key: "clinica", price: 3000 },
       { key: "prospect", price: 3500 },
+      { key: "advocacia", price: 3000 },
     ],
   };
 

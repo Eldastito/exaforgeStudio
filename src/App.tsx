@@ -255,7 +255,7 @@ export default function App() {
       campanhas: 'campanhas', cadencias: 'cadencias', areas: 'areas', integrations: 'integracoes',
       reservas: 'reservas', assinaturas: 'assinaturas', compras: 'compras',
       orcamentos: 'orcamentos', eventos: 'eventos', diretor: 'diretor',
-      vision: 'vms', radar: 'radar', clinica: 'clinica', escola: 'escola', prospect: 'prospect', radar_b2b: 'prospect',
+      vision: 'vms', radar: 'radar', clinica: 'clinica', escola: 'escola', advocacia: 'advocacia', prospect: 'prospect', radar_b2b: 'prospect',
       retailops: 'retail', retailfloor: 'retail_floor', comigo: 'copiloto',
     };
     const mod = map[viewMode];

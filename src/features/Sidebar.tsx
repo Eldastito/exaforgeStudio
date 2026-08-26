@@ -60,7 +60,7 @@ export function Sidebar() {
              {mod('diretor') && <NavItem icon={<BrainCircuit />} label="Diretor IA" active={viewMode === 'diretor'} onClick={() => setViewMode('diretor')} />}
              {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
              {mod('clinica') && <NavItem icon={<Stethoscope />} label="Agenda Clínica" active={viewMode === 'clinica'} onClick={() => setViewMode('clinica')} />}
-             {vertical === 'advocacia' && <NavItem icon={<Gavel />} label="Advocacia" active={viewMode === 'advocacia'} onClick={() => setViewMode('advocacia')} />}
+             {mod('advocacia') && <NavItem icon={<Gavel />} label="Advocacia" active={viewMode === 'advocacia'} onClick={() => setViewMode('advocacia')} />}
              {mod('escola') && <NavItem icon={<GraduationCap />} label="Escola" active={viewMode === 'escola'} onClick={() => setViewMode('escola')} />}
              {mod('reservas') && <NavItem icon={<CalendarCheck />} label="Reservas" active={viewMode === 'reservas'} onClick={() => setViewMode('reservas')} />}
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}

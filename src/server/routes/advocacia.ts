@@ -10,6 +10,7 @@ import { LegalPrivilegeService } from "../LegalPrivilegeService.js";
 import { LegalTimesheetService } from "../LegalTimesheetService.js";
 import { LegalSuccessFeeService } from "../LegalSuccessFeeService.js";
 import { LegalProfessionalFederationService } from "../LegalProfessionalFederationService.js";
+import { LegalProfessionalScheduleService } from "../LegalProfessionalScheduleService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -74,6 +75,44 @@ router.post("/lawyers/:id/federation/revoke", requireRole("owner", "admin"), (re
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(LegalProfessionalFederationService.defederate(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Ofertas + janelas do advogado federado (ADR-191 OAB-F2 — reuso ProfessionalScheduleConfig) ──
+router.get("/lawyers/:id/offerings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ offerings: LegalProfessionalScheduleService.listOfferings(orgId, req.params.id, { includeInactive: req.query.all === "1" }) }); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/lawyers/:id/offerings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalProfessionalScheduleService.setOffering(orgId, req.params.id, { serviceId: b.serviceId, durationMin: b.durationMin, active: b.active, requiredRoomId: b.requiredRoomId }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.delete("/lawyers/:id/offerings/:offeringId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalProfessionalScheduleService.removeOffering(orgId, req.params.id, req.params.offeringId, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.get("/lawyers/:id/windows", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ windows: LegalProfessionalScheduleService.listWindows(orgId, req.params.id) }); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.put("/lawyers/:id/windows", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ windows: LegalProfessionalScheduleService.setWindows(orgId, req.params.id, req.body?.windows || [], actor(req)) }); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

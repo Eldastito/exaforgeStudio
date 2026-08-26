@@ -59,6 +59,19 @@ async function main() {
   check("growth_clinica.verticalHints inclui 'saude'", (clinica?.verticalHints || []).includes("saude"));
   check("growth_clinica.priceMonthly > 0", (clinica?.priceMonthly || 0) > 0);
 
+  // ===== 3b. Bundles verticais Escola e Advocacia (mesma tese comercial) =====
+  const escola = PLAN_BUNDLES.find((b) => b.key === "growth_escola");
+  check("bundle 'growth_escola' existe", !!escola);
+  check("growth_escola.basePlan = 'growth'", escola?.basePlan === "growth");
+  check("growth_escola.addons inclui 'escola'", (escola?.addons || []).includes("escola"));
+  check("growth_escola.verticalHints inclui 'educacao'", (escola?.verticalHints || []).includes("educacao"));
+
+  const adv = PLAN_BUNDLES.find((b) => b.key === "growth_advocacia");
+  check("bundle 'growth_advocacia' existe", !!adv);
+  check("growth_advocacia.basePlan = 'growth'", adv?.basePlan === "growth");
+  check("growth_advocacia.addons inclui 'advocacia'", (adv?.addons || []).includes("advocacia"));
+  check("growth_advocacia.verticalHints inclui 'advocacia'", (adv?.verticalHints || []).includes("advocacia"));
+
   // ===== 4. basePlan é válido em PLAN_GRADE =====
   const validPlans = new Set(PLAN_GRADE.map((p) => p.id));
   for (const b of PLAN_BUNDLES) {

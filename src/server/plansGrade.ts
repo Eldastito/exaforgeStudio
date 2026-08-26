@@ -121,6 +121,44 @@ export const PLAN_BUNDLES: PlanBundle[] = [
       savingsPercent: 27,         // arred.
     },
   },
+  {
+    // Mesma tese comercial da Clínica (PRD §10.3): o público-alvo de Escola
+    // (escolas/cursos) raramente paga Enterprise, então Growth + add-on Escola
+    // resolve o mismatch. Números espelham `growth_clinica` (add-on Escola no
+    // Scale = R$3000). Preço final ajustável pelo Master Admin.
+    key: "growth_escola",
+    name: "Growth + Escola",
+    description:
+      "Bundle recomendado para escolas e cursos — plano Growth (cadências, assinaturas, Diretor IA, RIE) + módulo Escola (secretaria virtual, resumo diário à família, professores e extracurriculares) incluído.",
+    basePlan: "growth",
+    addons: ["escola"],
+    priceMonthly: 3500,
+    priceAnnualMonth: 2997,
+    verticalHints: ["educacao"],
+    bundleDiscount: {
+      avulsoTotal: 4797,          // Growth (1797) + addon Escola (Scale-tier R$3000)
+      savingsMonthly: 1297,       // 4797 - 3500
+      savingsPercent: 27,
+    },
+  },
+  {
+    // Idem para Advocacia: escritórios não pagam Enterprise, Growth + add-on
+    // Advocacia resolve. Números espelham `growth_clinica`. Ajustável no Master.
+    key: "growth_advocacia",
+    name: "Growth + Advocacia",
+    description:
+      "Bundle recomendado para escritórios de advocacia — plano Growth (cadências, assinaturas, Diretor IA, RIE) + módulo Advocacia (processos, prazos em dias úteis, audiências, documentos e honorários) incluído.",
+    basePlan: "growth",
+    addons: ["advocacia"],
+    priceMonthly: 3500,
+    priceAnnualMonth: 2997,
+    verticalHints: ["advocacia"],
+    bundleDiscount: {
+      avulsoTotal: 4797,          // Growth (1797) + addon Advocacia (Scale-tier R$3000)
+      savingsMonthly: 1297,       // 4797 - 3500
+      savingsPercent: 27,
+    },
+  },
 ];
 
 /**

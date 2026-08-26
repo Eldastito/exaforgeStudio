@@ -70,6 +70,11 @@ caixa/sobrevivência/a-receber/vencido/inadimplência/margem/resultado, honesto 
 e **Dependência de pessoas** (§38 `/key-person`: só mostra dimensões high/medium, `topShare%`
 por pessoa, rotulado hipótese) — fechando o gap de endpoints testados sem superfície. UI-only,
 `tsc`+`vite build` verdes, 0-regressão.
+**Editor de visão:** a visão (F3) tinha `PUT /vision` testado mas NENHUMA forma de editar pela
+tela (só via API — nenhum dono faz isso). `VisionCard` fecha o loop F3 backend→UI: mostra a
+visão declarada (statement + horizonte + prioridade) com botão "editar", ou um convite
+"Definir visão" quando vazia; grava via `PUT /api/executive/vision` e recarrega. Intenção
+HUMANA (§12 — a IA nunca inventa; só grava o que o dono escreveu). UI-only, tsc+build verdes.
 
 ## 17. Briefing proativo (diferida, agora entregue)
 

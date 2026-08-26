@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0–F12 FECHADAS + F13-UI FECHADA (#1358–#1371). UI 2ª fatia (audiências + documentos) EM PR.**
+**Estado:** **F0–F12 + UI (3 fatias) FECHADAS (#1358–#1372). UI 3ª fatia (honorários + sigilo) EM PR — fecha o painel completo da vertical.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -79,7 +79,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **UI 2ª fatia (EM PR)** — estende `AdvocaciaView` com 2 abas: **Audiências** (listar próximas/passadas com "sem baixa" destacado + agendar com detecção de conflito de agenda do advogado → prompt de `force` + concluir/cancelar) e **Documentos** (listar por status + criar rascunho petição/contrato/procuração + editar corpo + emitir com PIN opcional + baixar PDF via blob, tratando 403 sigilo + cancelar; chip "Sigiloso" quando redigido). UI-only sobre as rotas testadas; tsc + build verdes. Próxima fatia de UI: honorários (fixo/avença/por-hora/êxito + extrato) + toggle de sigilo.
 
-**Diferidos restantes:** UI (3ª fatia: honorários + sigilo) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **UI 3ª fatia (EM PR)** — fecha o painel: aba **Honorários** (seletor de processo → extrato acordado/recebido/aberto em cards BRL + seções Fixo/Avença, Por-hora com lançar/faturar, Êxito com acordar/confirmar-com-proveito/cancelar; dinheiro honesto — `null`→"—", nunca R$ 0,00) + seção **Sigilo** na Configuração (toggle do gate opt-in + por-cliente registrar/revogar consentimento). UI-only sobre as rotas role-gated testadas; tsc + build verdes. **Painel da vertical completo** (Processos · Prazos · Audiências · Documentos · Honorários · Configuração+Sigilo).
+
+**Diferidos restantes:** federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

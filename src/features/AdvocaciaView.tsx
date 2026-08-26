@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
-import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel } from 'lucide-react';
+import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel, CalendarClock, FileText, Download, Pencil, FileSignature } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -32,7 +32,7 @@ const DEADLINE_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'Cancelado', cls: 'text-zinc-500 bg-zinc-500/10 border-zinc-500/30' },
 };
 
-type Tab = 'cases' | 'deadlines' | 'config';
+type Tab = 'cases' | 'deadlines' | 'hearings' | 'documents' | 'config';
 
 export function AdvocaciaView() {
   const terms = useLegalTerms();
@@ -41,6 +41,8 @@ export function AdvocaciaView() {
   const tabs: [Tab, string][] = [
     ['cases', terms.casePlural],
     ['deadlines', terms.deadlinePlural],
+    ['hearings', terms.hearingPlural],
+    ['documents', 'Documentos'],
     ['config', 'Configuração'],
   ];
 
@@ -69,6 +71,8 @@ export function AdvocaciaView() {
 
       {tab === 'cases' && <CasesTab terms={terms} />}
       {tab === 'deadlines' && <DeadlinesTab terms={terms} />}
+      {tab === 'hearings' && <HearingsTab terms={terms} />}
+      {tab === 'documents' && <DocumentsTab terms={terms} />}
       {tab === 'config' && <ConfigTab terms={terms} />}
     </div>
   );
@@ -591,6 +595,338 @@ function ConfigTab({ terms }: { terms: LegalTerms }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ───────────────────────── Audiências ─────────────────────────
+
+const HEARING_TYPES: [string, string][] = [
+  ['audiencia', 'Audiência'], ['pericia', 'Perícia'], ['sustentacao', 'Sustentação oral'],
+  ['julgamento', 'Sessão de julgamento'], ['reuniao', 'Reunião'], ['diligencia', 'Diligência'],
+];
+const hearingLabel = (t: string) => HEARING_TYPES.find(([k]) => k === t)?.[1] || t;
+
+function HearingsTab({ terms }: { terms: LegalTerms }) {
+  const [hearings, setHearings] = useState<any[]>([]);
+  const [cases, setCases] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+
+  const load = useCallback(() => {
+    return apiFetch('/api/advocacia/hearings')
+      .then((r) => r.json())
+      .then((d) => setHearings(Array.isArray(d?.hearings) ? d.hearings : []))
+      .catch(() => setHearings([]));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+    apiFetch('/api/advocacia/cases').then((r) => r.json()).then((d) => setCases(Array.isArray(d?.cases) ? d.cases : [])).catch(() => {});
+  }, [load]);
+
+  const action = async (path: string, okMsg: string, body?: any) => {
+    try {
+      const r = await apiFetch(path, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success(okMsg);
+      await load();
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  const caseTitle = (id: string) => cases.find((c) => c.id === id)?.title || '';
+  const fmt = (iso: string) => { try { return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); } catch { return iso; } };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-zinc-400">{hearings.length} {hearings.length === 1 ? terms.hearing.toLowerCase() : terms.hearingPlural.toLowerCase()}</p>
+        <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
+          <Plus className="w-4 h-4 mr-2" /> Nova {terms.hearing.toLowerCase()}
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-500 text-sm py-8 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : hearings.length === 0 ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center text-zinc-500 text-sm">Nenhuma {terms.hearing.toLowerCase()} agendada.</div>
+      ) : (
+        <div className="space-y-2">
+          {hearings.map((h) => {
+            const past = h.status === 'confirmed' && new Date(h.scheduled_start).getTime() < Date.now();
+            return (
+              <div key={h.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4" style={{ borderLeft: '3px solid #6366f1' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <CalendarClock className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span className="font-medium text-zinc-100">{h.title}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border text-indigo-300 bg-indigo-500/10 border-indigo-500/30">{hearingLabel(h.hearing_type)}</span>
+                      {h.status === 'completed' && <span className="text-[10px] px-1.5 py-0.5 rounded border text-emerald-300 bg-emerald-500/10 border-emerald-500/30">Realizada</span>}
+                      {h.status === 'cancelled' && <span className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-500 bg-zinc-500/10 border-zinc-500/30">Cancelada</span>}
+                      {past && <span className="text-[10px] px-1.5 py-0.5 rounded border text-amber-300 bg-amber-500/10 border-amber-500/30">Sem baixa</span>}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-1 space-y-0.5">
+                      <div>{fmt(h.scheduled_start)}</div>
+                      {h.professional_name_snapshot && <div>{terms.professional}: {h.professional_name_snapshot}</div>}
+                      {h.legal_case_id && caseTitle(h.legal_case_id) && <div>{terms.case}: {caseTitle(h.legal_case_id)}</div>}
+                      {h.description && <div>Local: {h.description}</div>}
+                    </div>
+                  </div>
+                  {h.status === 'confirmed' && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button title="Concluir" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-emerald-300" onClick={() => action(`/api/advocacia/hearings/${h.id}/complete`, 'Audiência concluída.')}>
+                        <CheckCircle2 className="w-4 h-4" />
+                      </button>
+                      <button title="Cancelar" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-300" onClick={async () => { if (await confirmDialog('Cancelar esta audiência?')) action(`/api/advocacia/hearings/${h.id}/cancel`, 'Audiência cancelada.', { reason: 'cancelada pelo escritório' }); }}>
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showNew && <NewHearingModal terms={terms} cases={cases} onClose={() => setShowNew(false)} onCreated={async () => { setShowNew(false); await load(); }} />}
+    </div>
+  );
+}
+
+function NewHearingModal({ terms, cases, onClose, onCreated }: { terms: LegalTerms; cases: any[]; onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState<any>({ caseId: '', title: '', hearingType: 'audiencia', start: '', durationMinutes: '60', location: '' });
+  const [saving, setSaving] = useState(false);
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const submit = async (force = false) => {
+    if (!form.caseId) return toast.error(`Selecione o ${terms.caseLower}.`);
+    if (!form.start) return toast.error('Informe data e hora.');
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/advocacia/hearings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          caseId: form.caseId, title: form.title.trim() || undefined, hearingType: form.hearingType,
+          start: new Date(form.start).toISOString(), durationMinutes: Number(form.durationMinutes), location: form.location || undefined, force,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (d?.code === 'CONFLICT' && !force) {
+          if (await confirmDialog('Conflito de agenda do advogado nesse horário. Agendar mesmo assim?')) return submit(true);
+          return;
+        }
+        throw new Error(d?.error || 'Não foi possível agendar.');
+      }
+      toast.success('Audiência agendada.');
+      onCreated();
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title={`Nova ${terms.hearing.toLowerCase()}`} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label={`${terms.case} *`}>
+          <Select value={form.caseId} onChange={(v) => set('caseId', v)}>
+            <option value="">Selecione…</option>
+            {cases.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+          </Select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Tipo">
+            <Select value={form.hearingType} onChange={(v) => set('hearingType', v)}>
+              {HEARING_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            </Select>
+          </Field>
+          <Field label="Duração (min)"><Input type="number" value={form.durationMinutes} onChange={(v) => set('durationMinutes', v)} /></Field>
+        </div>
+        <Field label="Data e hora *"><Input type="datetime-local" value={form.start} onChange={(v) => set('start', v)} /></Field>
+        <Field label="Título"><Input value={form.title} onChange={(v) => set('title', v)} placeholder="(opcional — usa o tipo + processo)" /></Field>
+        <Field label="Local (fórum/sala/link)"><Input value={form.location} onChange={(v) => set('location', v)} /></Field>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => submit(false)} saving={saving} />
+    </Modal>
+  );
+}
+
+// ───────────────────────── Documentos ─────────────────────────
+
+const DOC_TYPES: [string, string][] = [['peticao', 'Petição'], ['contrato', 'Contrato'], ['procuracao', 'Procuração']];
+const docLabel = (t: string) => DOC_TYPES.find(([k]) => k === t)?.[1] || t;
+
+function DocumentsTab({ terms }: { terms: LegalTerms }) {
+  const [docs, setDocs] = useState<any[]>([]);
+  const [cases, setCases] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+
+  const load = useCallback(() => {
+    return apiFetch('/api/advocacia/documents')
+      .then((r) => r.json())
+      .then((d) => setDocs(Array.isArray(d?.documents) ? d.documents : []))
+      .catch(() => setDocs([]));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    load().finally(() => setLoading(false));
+    apiFetch('/api/advocacia/cases').then((r) => r.json()).then((d) => setCases(Array.isArray(d?.cases) ? d.cases : [])).catch(() => {});
+  }, [load]);
+
+  const action = async (path: string, okMsg: string, body?: any) => {
+    try {
+      const r = await apiFetch(path, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success(okMsg);
+      await load();
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  const issue = async (id: string) => {
+    const pin = window.prompt('PIN do advogado (deixe em branco se não usa PIN):') ?? undefined;
+    if (pin === undefined) return;
+    action(`/api/advocacia/documents/${id}/issue`, 'Documento emitido.', pin ? { pin } : {});
+  };
+
+  const downloadPdf = async (id: string, title: string) => {
+    try {
+      const r = await apiFetch(`/api/advocacia/documents/${id}/pdf`);
+      if (r.status === 403) return toast.error('Conteúdo sigiloso — requer consentimento do cliente.');
+      if (!r.ok) throw new Error('Não foi possível gerar o PDF.');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${title || 'documento'}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  const caseTitle = (id: string) => cases.find((c) => c.id === id)?.title || '';
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-zinc-400">{docs.length} documento(s)</p>
+        <Button className="zf-button zf-button-primary" onClick={() => setShowNew(true)}>
+          <Plus className="w-4 h-4 mr-2" /> Novo documento
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-500 text-sm py-8 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : docs.length === 0 ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center text-zinc-500 text-sm">Nenhum documento ainda.</div>
+      ) : (
+        <div className="space-y-2">
+          {docs.map((d) => (
+            <div key={d.id} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4" style={{ borderLeft: '3px solid #6366f1' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span className="font-medium text-zinc-100">{d.title}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border text-indigo-300 bg-indigo-500/10 border-indigo-500/30">{docLabel(d.doc_type)}</span>
+                    {d.status === 'draft' && <span className="text-[10px] px-1.5 py-0.5 rounded border text-amber-300 bg-amber-500/10 border-amber-500/30">Rascunho</span>}
+                    {d.status === 'issued' && <span className="text-[10px] px-1.5 py-0.5 rounded border text-emerald-300 bg-emerald-500/10 border-emerald-500/30">Emitido</span>}
+                    {d.status === 'cancelled' && <span className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-500 bg-zinc-500/10 border-zinc-500/30">Cancelado</span>}
+                    {d.sigilo_redacted ? <span className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-500 bg-zinc-500/10 border-zinc-500/30">Sigiloso</span> : null}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1 space-y-0.5">
+                    {d.legal_case_id && caseTitle(d.legal_case_id) && <div>{terms.case}: {caseTitle(d.legal_case_id)}</div>}
+                    {d.status === 'issued' && d.signed_with_pin ? <div className="text-emerald-400/80">Assinado com PIN · hash {String(d.signature_hash).slice(0, 12)}…</div> : null}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {d.status === 'draft' && (
+                    <>
+                      <button title="Editar" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-indigo-300" onClick={() => setEditing(d)}><Pencil className="w-4 h-4" /></button>
+                      <button title="Emitir" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-emerald-300" onClick={() => issue(d.id)}><FileSignature className="w-4 h-4" /></button>
+                    </>
+                  )}
+                  <button title="PDF" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-indigo-300" onClick={() => downloadPdf(d.id, d.title)}><Download className="w-4 h-4" /></button>
+                  {d.status !== 'cancelled' && (
+                    <button title="Cancelar" className="p-1.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-300" onClick={async () => { if (await confirmDialog('Cancelar este documento?')) action(`/api/advocacia/documents/${d.id}/cancel`, 'Documento cancelado.', { reason: 'cancelado' }); }}><Ban className="w-4 h-4" /></button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showNew && <DocumentModal terms={terms} cases={cases} onClose={() => setShowNew(false)} onSaved={async () => { setShowNew(false); await load(); }} />}
+      {editing && <DocumentModal terms={terms} cases={cases} doc={editing} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await load(); }} />}
+    </div>
+  );
+}
+
+function DocumentModal({ terms, cases, doc, onClose, onSaved }: { terms: LegalTerms; cases: any[]; doc?: any; onClose: () => void; onSaved: () => void }) {
+  const isEdit = !!doc;
+  const [form, setForm] = useState<any>({ caseId: doc?.legal_case_id || '', docType: doc?.doc_type || 'peticao', title: doc?.title || '', body: doc?.body || '' });
+  const [saving, setSaving] = useState(false);
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!isEdit && !form.caseId) return toast.error(`Selecione o ${terms.caseLower}.`);
+    if (!form.title.trim()) return toast.error('Dê um título.');
+    setSaving(true);
+    try {
+      const r = isEdit
+        ? await apiFetch(`/api/advocacia/documents/${doc.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: form.title, body: form.body }) })
+        : await apiFetch('/api/advocacia/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caseId: form.caseId, docType: form.docType, title: form.title, body: form.body }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success(isEdit ? 'Documento atualizado.' : 'Rascunho criado.');
+      onSaved();
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal title={isEdit ? 'Editar documento' : 'Novo documento'} onClose={onClose}>
+      <div className="space-y-3">
+        {!isEdit && (
+          <>
+            <Field label={`${terms.case} *`}>
+              <Select value={form.caseId} onChange={(v) => set('caseId', v)}>
+                <option value="">Selecione…</option>
+                {cases.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </Select>
+            </Field>
+            <Field label="Tipo">
+              <Select value={form.docType} onChange={(v) => set('docType', v)}>
+                {DOC_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+              </Select>
+            </Field>
+          </>
+        )}
+        <Field label="Título *"><Input value={form.title} onChange={(v) => set('title', v)} /></Field>
+        <Field label="Conteúdo">
+          <textarea
+            value={form.body}
+            onChange={(e) => set('body', e.target.value)}
+            rows={8}
+            className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none resize-y"
+            placeholder="Corpo do documento…"
+          />
+        </Field>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={submit} saving={saving} />
+    </Modal>
   );
 }
 

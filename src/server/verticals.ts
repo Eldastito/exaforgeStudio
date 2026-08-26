@@ -6,7 +6,7 @@
 // ligados e NÃO entram nesta lista — aqui ficam só os módulos OPCIONAIS.
 
 export type VerticalKey =
-  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "beleza" | "petshop" | "outro";
+  | "varejo" | "moda" | "food" | "servicos" | "saude" | "educacao" | "hospitalidade" | "beleza" | "petshop" | "advocacia" | "outro";
 
 export type Vertical = {
   key: VerticalKey;
@@ -40,6 +40,13 @@ export const CONSENT_BY_VERTICAL: Record<string, string[]> = {
   // marketing. A ficha clínica é do ANIMAL, não é dado sensível de pessoa natural
   // (LGPD Art.11), então NÃO entra `dados_sensiveis` (diferente de 'saude' humana).
   petshop: ["dados_pessoais", "comunicacoes", "marketing"],
+  // ADR-191 (Vertical Advocacia). Dado do cliente (pessoa/empresa) + comunicações
+  // (lembrete de audiência/prazo) + SIGILO profissional advogado-cliente. O sigilo
+  // NÃO é `dados_sensiveis` (LGPD Art.11, saúde/biometria etc.) — a base legal é o
+  // exercício regular de direitos + o dever profissional de sigilo (EOAB Art.34);
+  // categoria própria `sigilo_profissional`, cujo GATE nos documentos do caso entra
+  // na F9. Aqui é só a pré-população pra org de advocacia nascer com a categoria.
+  advocacia: ["dados_pessoais", "comunicacoes", "sigilo_profissional"],
   outro: ["marketing", "dados_pessoais", "perfilamento", "comunicacoes"],
 };
 
@@ -179,6 +186,23 @@ export const VERTICALS: Vertical[] = [
     // carteira de vacina) são fatias seguintes — aqui é o preset que torna a vertical
     // selecionável no onboarding e liga os módulos certos.
     modules: ["catalogo", "vendas", "loja", "pagamentos", "compras", "agenda", "clinica", "areas", "cadencias", "assinaturas", "campanhas", "integracoes", "diretor", "rie", "execucao"],
+    saleMode: "unit",
+  },
+  {
+    // ADR-191 — Vertical Advocacia. Escritório de advocacia é um PRESTADOR DE
+    // SERVIÇO jurídico: o preset espelha `servicos` (agenda p/ audiências/reuniões,
+    // areas p/ áreas do direito, assinaturas p/ avença mensal, pagamentos p/
+    // honorários, cadencias p/ follow-up de cliente) + as superfícies transversais
+    // (diretor, rie, execucao — inclusive o CEO Operating Layer, que é horizontal).
+    // As features LEGAL-específicas (processo/CNJ, prazos em dias úteis, documentos
+    // jurídicos, sigilo) são fatias seguintes, GATED pela vertical (não por um módulo
+    // novo — como o petshop faz com pet/tutor). Aqui é o preset que torna a vertical
+    // selecionável no onboarding e liga os módulos certos. Sem `catalogo`/`loja`
+    // (não é varejo); reusa a agenda profissional/sala/área da Clínica sem ligar
+    // o módulo `clinica` (que traz prontuário/prescrição — não cabe no jurídico).
+    key: "advocacia", label: "Advocacia / Jurídico", icon: "⚖️",
+    descricao: "Escritório de advocacia — processos, prazos, audiências, clientes e honorários.",
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

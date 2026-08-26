@@ -10700,6 +10700,36 @@ const initDb = () => {
   // documentos do caso. Reusa o mecanismo LGPD (`contact_consents`), base legal exercício
   // de direitos/EOAB Art.34 — NÃO é `dados_sensiveis` (saúde). Desligado, tudo opera como antes.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN advocacia_sigilo_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // ADR-191 F11 — Honorário POR-HORA (timesheet). Diferido do F8: o advogado registra
+  // horas por processo/cliente; o faturamento DERIVA horas × valor-hora e vira um
+  // honorário FIXO (reuso do F8 → receivable). RN-ADV-07 (nunca inventa dinheiro): sem
+  // valor-hora, a entrada tem horas mas amount NULL e NÃO é faturável até ter tarifa.
+  // Aditivo/opt-in por vertical; isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_time_entries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        case_id TEXT,                                     -- processo (nullable — trabalho avulso do cliente)
+        contact_id TEXT NOT NULL,                         -- cliente
+        professional_id TEXT,                             -- advogado que registrou
+        description TEXT NOT NULL,
+        minutes INTEGER NOT NULL,                         -- duração em minutos
+        rate_per_hour REAL,                               -- valor-hora acordado (NULL → não faturável ainda, RN-ADV-07)
+        entry_date TEXT NOT NULL,                         -- YYYY-MM-DD
+        billable INTEGER DEFAULT 1,                       -- conta pro faturamento?
+        billed INTEGER DEFAULT 0,                         -- já faturado?
+        fee_id TEXT,                                      -- honorário fixo gerado no faturamento (F8)
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_time_org ON legal_time_entries (organization_id, billed);
+      CREATE INDEX IF NOT EXISTS idx_legal_time_case ON legal_time_entries (organization_id, case_id);
+      CREATE INDEX IF NOT EXISTS idx_legal_time_client ON legal_time_entries (organization_id, contact_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_time_entries', e); }
 };
 
 initDb();

@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **FECHADO — F0–F10 em produção (#1358–#1367 + F10). Vertical Advocacia completa.**
+**Estado:** **F0–F10 FECHADAS (#1358–#1368) — vertical completa. Diferidos em andamento: F11 (honorário por-hora / timesheet) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -71,7 +71,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 - **F9 (EM PR)** sigilo profissional — REUSA o mecanismo LGPD de consentimento (`contact_consents` via `LgpdService`, D6, sem mecanismo novo). `LegalPrivilegeService`: gate OPT-IN por org (`advocacia_sigilo_enabled`, default 0 → 0-regressão) que exige o consentimento `sigilo_profissional` do cliente (base legal EXERCÍCIO DE DIREITOS/EOAB Art.34 — NÃO `dados_sensiveis`) pra EXPOR o conteúdo dos documentos do caso: `get`/`renderPdf` LANÇAM `SIGILO_REQUIRED` (rota→403) sem consentimento; `list` REDIGE o corpo (metadado visível, conteúdo não) dos clientes sem consentimento; **operações do escritório (criar/emitir/cancelar) NÃO são bloqueadas** (usam leitura crua). Espelha o gate de `dados_sensiveis` da clínica (revogar → perde acesso ao conteúdo — RN-ADV-05). `grant`/`revoke`/`status`/`setEnabled`. Rotas `/api/advocacia/privilege*` + `/clients/:id/sigilo*`. `test:legal-privilege` (17); `test:legal-document` segue 20/20 (0-regressão).
 - **F10 (FECHADA)** hardening + runbook — `test:advocacia-hardening` (21) é doc-of-record executável de dupla função: (A) CODIFICA os RN-ADV-01..09 como REGRESSÃO tocando os serviços reais F1–F9 (CNJ mód. 97 · prazo dias úteis + `holidaysLoaded` honesto · prazo fatal na espinha · documento congelado · nunca inventa dinheiro/totais NULL · sigilo gated + opt-in · isolamento) + (B) verifica a FIAÇÃO de produção (9 serviços importáveis, rota `/api/advocacia` montada, passes `LegalDeadlineService.pass`/`LegalHearingService.pass` no Scheduler, 10 testes wired, runbook presente). Runbook `docs/runbook/advocacia-operacao.md` (mapa dos serviços, rotas, passes, fluxo, guardrails RN-ADV, diferidos, troubleshooting). **FECHA o ADR-191.**
 
-**Diferidos:** honorário por-hora (timesheet) · honorário de êxito (success fee) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **F11 (EM PR)** honorário **por-hora / timesheet** (1º diferido do F8, borda nova autocontida): `legal_time_entries` + `LegalTimesheetService`. O advogado registra HORAS por processo/cliente; `amount` DERIVA horas × valor-hora (RN-004). **RN-ADV-07:** lançamento sem valor-hora tem horas mas `amount` NULL e NÃO é faturável até ter tarifa (nunca arbitrada pela IA); `summary` separa faturável (com tarifa) de pendente-de-tarifa; sem lançamento → `billableAmount` NULL. Faturar (`bill`) empacota as horas não faturadas num honorário **FIXO** (reuso F8 → `receivable`), congela a tarifa aplicada (auditável), marca `billed` + amarra `fee_id` (idempotente — hora faturada não fatura de novo); `defaultRatePerHour` no faturamento aplica aos sem-tarifa só por decisão humana explícita. Anular = `billable=0` (nunca DELETE após faturado). Dinheiro role-gated (§73). Rotas `/api/advocacia/timesheet*`. `test:legal-timesheet` (20).
+
+**Diferidos restantes:** honorário de êxito (success fee) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

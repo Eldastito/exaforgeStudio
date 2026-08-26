@@ -7,6 +7,7 @@ import { LegalHearingService } from "../LegalHearingService.js";
 import { LegalDocumentService } from "../LegalDocumentService.js";
 import { LegalFeeService } from "../LegalFeeService.js";
 import { LegalPrivilegeService } from "../LegalPrivilegeService.js";
+import { LegalTimesheetService } from "../LegalTimesheetService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -397,6 +398,51 @@ router.post("/clients/:contactId/sigilo/revoke", requireRole("owner", "admin"), 
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(LegalPrivilegeService.revoke(orgId, req.params.contactId, actor(req)));
+});
+
+// ── Honorário por-hora / timesheet (ADR-191 F11). Dinheiro role-gated (§73). ──
+router.get("/timesheet", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  const professionalId = typeof req.query.professionalId === "string" ? req.query.professionalId : undefined;
+  const billed = req.query.billed === "1" ? true : req.query.billed === "0" ? false : undefined;
+  res.json({ entries: LegalTimesheetService.list(orgId, { caseId, contactId, professionalId, billed }) });
+});
+
+router.get("/timesheet/summary", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  if (!caseId && !contactId) return res.status(400).json({ error: "Informe caseId ou contactId." });
+  res.json(LegalTimesheetService.summary(orgId, { caseId, contactId, onlyUnbilled: req.query.onlyUnbilled === "1" }));
+});
+
+router.post("/timesheet", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalTimesheetService.logTime(orgId, { caseId: b.caseId, contactId: b.contactId, professionalId: b.professionalId, description: b.description, minutes: Number(b.minutes), ratePerHour: b.ratePerHour, entryDate: b.entryDate, billable: b.billable }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/timesheet/:id/void", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalTimesheetService.voidEntry(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/timesheet/bill", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalTimesheetService.bill(orgId, { caseId: b.caseId, contactId: b.contactId, dueDate: b.dueDate, defaultRatePerHour: b.defaultRatePerHour, description: b.description }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

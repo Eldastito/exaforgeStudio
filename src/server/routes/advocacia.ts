@@ -9,6 +9,7 @@ import { LegalFeeService } from "../LegalFeeService.js";
 import { LegalPrivilegeService } from "../LegalPrivilegeService.js";
 import { LegalTimesheetService } from "../LegalTimesheetService.js";
 import { LegalSuccessFeeService } from "../LegalSuccessFeeService.js";
+import { LegalProfessionalFederationService } from "../LegalProfessionalFederationService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -52,6 +53,28 @@ router.post("/lawyers", requireRole("owner", "admin"), (req: AuthRequest, res): 
     const b = req.body || {};
     res.json(LegalPracticeService.createLawyer(orgId, { name: b.name, oabUf: b.oabUf, oabNumber: b.oabNumber, color: b.color, userId: b.userId, areaIds: b.areaIds }, actor(req)));
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Federação OAB (ADR-191 OAB-F1 — ponte de identidade com a Agenda Federada ADR-180) ──
+router.get("/lawyers/:id/federation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalProfessionalFederationService.status(orgId, req.params.id)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/lawyers/:id/federation", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalProfessionalFederationService.federate(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/lawyers/:id/federation/revoke", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalProfessionalFederationService.defederate(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 router.get("/lawyers/:id/areas", (req: AuthRequest, res): any => {

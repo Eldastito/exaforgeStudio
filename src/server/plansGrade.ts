@@ -108,12 +108,15 @@ export const PLAN_BUNDLES: PlanBundle[] = [
     key: "growth_clinica",
     name: "Growth + Clínica",
     description:
-      "Bundle recomendado para clínicas multiespecialidade — plano Growth (cadências, assinaturas, Diretor IA, RIE) + módulo Clínica (agenda clínica, prontuário, portal do paciente) incluído.",
+      "Bundle recomendado para clínicas multiespecialidade E petshops/veterinárias — plano Growth (cadências, assinaturas, Diretor IA, RIE) + módulo Clínica (agenda clínica, prontuário, portal do paciente; no petshop dá corpo à parte veterinária: cirurgia, internação, banho & tosa) incluído.",
     basePlan: "growth",
     addons: ["clinica"],
     priceMonthly: 3500,
     priceAnnualMonth: 2997,
-    verticalHints: ["saude"],
+    // `petshop` consome o MÓDULO `clinica` (parte veterinária) igual `saude` —
+    // sem este hint, um petshop no Growth ficaria sem caminho pro módulo central
+    // da própria vertical (mesmo mismatch comercial que motivou o bundle). §10.3.
+    verticalHints: ["saude", "petshop"],
     bundleDiscount: {
       // Growth (1797) + addon Clinica normal (Scale-tier R$3000) = 4797 avulso
       avulsoTotal: 4797,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
-import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel, CalendarClock, FileText, Download, Pencil, FileSignature } from 'lucide-react';
+import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel, CalendarClock, FileText, Download, Pencil, FileSignature, Wallet, Clock, Trophy, ShieldCheck } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -32,7 +32,7 @@ const DEADLINE_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'Cancelado', cls: 'text-zinc-500 bg-zinc-500/10 border-zinc-500/30' },
 };
 
-type Tab = 'cases' | 'deadlines' | 'hearings' | 'documents' | 'config';
+type Tab = 'cases' | 'deadlines' | 'hearings' | 'documents' | 'fees' | 'config';
 
 export function AdvocaciaView() {
   const terms = useLegalTerms();
@@ -43,6 +43,7 @@ export function AdvocaciaView() {
     ['deadlines', terms.deadlinePlural],
     ['hearings', terms.hearingPlural],
     ['documents', 'Documentos'],
+    ['fees', 'Honorários'],
     ['config', 'Configuração'],
   ];
 
@@ -73,6 +74,7 @@ export function AdvocaciaView() {
       {tab === 'deadlines' && <DeadlinesTab terms={terms} />}
       {tab === 'hearings' && <HearingsTab terms={terms} />}
       {tab === 'documents' && <DocumentsTab terms={terms} />}
+      {tab === 'fees' && <FeesTab terms={terms} />}
       {tab === 'config' && <ConfigTab terms={terms} />}
     </div>
   );
@@ -551,6 +553,7 @@ function ConfigTab({ terms }: { terms: LegalTerms }) {
   if (loading) return <div className="flex items-center gap-2 text-zinc-500 text-sm py-8 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 
   return (
+    <div className="space-y-4">
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* Áreas do direito */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -594,6 +597,79 @@ function ConfigTab({ terms }: { terms: LegalTerms }) {
           <Button className="zf-button zf-button-secondary w-full" onClick={addLawyer}><Plus className="w-4 h-4 mr-2" /> Adicionar</Button>
         </div>
       </div>
+    </div>
+
+    <SigiloSection terms={terms} />
+    </div>
+  );
+}
+
+function SigiloSection({ terms }: { terms: LegalTerms }) {
+  const [enabled, setEnabled] = useState(false);
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [contactId, setContactId] = useState('');
+  const [status, setStatus] = useState<any>(null);
+
+  useEffect(() => {
+    apiFetch('/api/advocacia/privilege').then((r) => r.json()).then((d) => setEnabled(!!d?.enabled)).catch(() => {});
+    apiFetch('/api/contacts').then((r) => r.json()).then((d) => setContacts(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!contactId) { setStatus(null); return; }
+    apiFetch(`/api/advocacia/clients/${contactId}/sigilo`).then((r) => r.json()).then(setStatus).catch(() => setStatus(null));
+  }, [contactId]);
+
+  const toggle = async () => {
+    const next = !enabled;
+    try {
+      const r = await apiFetch('/api/advocacia/privilege/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
+      if (!r.ok) throw new Error();
+      setEnabled(next);
+      toast.success(next ? 'Sigilo ativado.' : 'Sigilo desativado.');
+    } catch { toast.error('Erro.'); }
+  };
+
+  const grantRevoke = async (grant: boolean) => {
+    try {
+      const r = await apiFetch(`/api/advocacia/clients/${contactId}/sigilo/${grant ? 'grant' : 'revoke'}`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      setStatus((s: any) => ({ ...s, hasConsent: grant }));
+      toast.success(grant ? 'Consentimento registrado.' : 'Consentimento revogado.');
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-indigo-400" /> Sigilo profissional</h3>
+        <button
+          onClick={toggle}
+          className={`text-xs px-2 py-1 rounded border transition-colors ${enabled ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30'}`}
+        >
+          {enabled ? 'Ativado' : 'Desativado'}
+        </button>
+      </div>
+      <p className="text-xs text-zinc-500 mb-3">Quando ativado, o conteúdo dos documentos do caso só é exibido para {terms.clientPlural.toLowerCase()} com consentimento registrado (base legal: exercício de direitos).</p>
+      {enabled && (
+        <div className="space-y-2">
+          <Select value={contactId} onChange={setContactId}>
+            <option value="">Selecione um {terms.clientLower}…</option>
+            {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </Select>
+          {contactId && status && (
+            <div className="flex items-center justify-between text-sm">
+              <span className={status.hasConsent ? 'text-emerald-300' : 'text-amber-300'}>
+                {status.hasConsent ? 'Consentimento ativo' : 'Sem consentimento'}
+              </span>
+              {status.hasConsent
+                ? <button className="text-xs text-red-300 hover:underline" onClick={() => grantRevoke(false)}>Revogar</button>
+                : <button className="text-xs text-emerald-300 hover:underline" onClick={() => grantRevoke(true)}>Registrar consentimento</button>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -926,6 +1002,281 @@ function DocumentModal({ terms, cases, doc, onClose, onSaved }: { terms: LegalTe
         </Field>
       </div>
       <ModalActions onClose={onClose} onSubmit={submit} saving={saving} />
+    </Modal>
+  );
+}
+
+// ───────────────────────── Honorários ─────────────────────────
+
+const brl = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+
+function FeesTab({ terms }: { terms: LegalTerms }) {
+  const [cases, setCases] = useState<any[]>([]);
+  const [caseId, setCaseId] = useState('');
+  const [statement, setStatement] = useState<any>(null);
+  const [fees, setFees] = useState<any[]>([]);
+  const [entries, setEntries] = useState<any[]>([]);
+  const [successFees, setSuccessFees] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [modal, setModal] = useState<null | 'fixed' | 'retainer' | 'time' | 'bill' | 'success'>(null);
+
+  useEffect(() => {
+    apiFetch('/api/advocacia/cases').then((r) => r.json()).then((d) => setCases(Array.isArray(d?.cases) ? d.cases : [])).catch(() => {});
+  }, []);
+
+  const load = useCallback(async (id: string) => {
+    if (!id) { setStatement(null); setFees([]); setEntries([]); setSuccessFees([]); return; }
+    setLoading(true);
+    try {
+      const [st, fs, ts, sf] = await Promise.all([
+        apiFetch(`/api/advocacia/fees/statement?caseId=${id}`).then((r) => r.json()).catch(() => null),
+        apiFetch(`/api/advocacia/fees?caseId=${id}`).then((r) => r.json()).catch(() => ({})),
+        apiFetch(`/api/advocacia/timesheet?caseId=${id}`).then((r) => r.json()).catch(() => ({})),
+        apiFetch(`/api/advocacia/success-fees?caseId=${id}`).then((r) => r.json()).catch(() => ({})),
+      ]);
+      setStatement(st);
+      setFees(Array.isArray(fs?.fees) ? fs.fees : []);
+      setEntries(Array.isArray(ts?.entries) ? ts.entries : []);
+      setSuccessFees(Array.isArray(sf?.successFees) ? sf.successFees : []);
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(caseId); }, [caseId, load]);
+
+  const post = async (path: string, okMsg: string, body?: any) => {
+    try {
+      const r = await apiFetch(path, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success(okMsg);
+      setModal(null);
+      await load(caseId);
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  return (
+    <div>
+      <Field label={terms.case}>
+        <Select value={caseId} onChange={setCaseId}>
+          <option value="">Selecione um {terms.caseLower}…</option>
+          {cases.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+        </Select>
+      </Field>
+
+      {!caseId ? (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center text-zinc-500 text-sm mt-4">
+          Escolha um {terms.caseLower} para ver e lançar honorários.
+        </div>
+      ) : loading ? (
+        <div className="flex items-center gap-2 text-zinc-500 text-sm py-8 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="mt-4 space-y-5">
+          {/* Extrato */}
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label="Acordado" value={brl(statement?.agreedTotal)} />
+            <StatCard label="Recebido" value={brl(statement?.receivedTotal)} accent="emerald" />
+            <StatCard label="Em aberto" value={brl(statement?.openTotal)} accent="amber" />
+          </div>
+
+          {/* Honorários fixo/avença */}
+          <Section title="Honorários" icon={<Wallet className="w-4 h-4 text-indigo-400" />} actions={
+            <div className="flex gap-2">
+              <button className="text-xs text-indigo-300 hover:underline" onClick={() => setModal('fixed')}>+ Fixo</button>
+              <button className="text-xs text-indigo-300 hover:underline" onClick={() => setModal('retainer')}>+ Avença</button>
+            </div>
+          }>
+            {fees.length === 0 ? <Empty>Nenhum honorário lançado.</Empty> : fees.map((f) => (
+              <div key={f.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
+                <div>
+                  <div className="text-sm text-zinc-200">{f.description}</div>
+                  <div className="text-xs text-zinc-500">{f.fee_type === 'avenca' ? 'Avença mensal' : 'Fixo'} · {brl(f.amount)} · {f.status === 'cancelled' ? 'cancelado' : 'ativo'}</div>
+                </div>
+                {f.fee_type === 'fixo' && f.status === 'active' && (
+                  <button className="text-xs text-emerald-300 hover:underline" onClick={() => post(`/api/advocacia/fees/${f.id}/pay`, 'Honorário recebido.')}>Marcar pago</button>
+                )}
+              </div>
+            ))}
+          </Section>
+
+          {/* Timesheet */}
+          <Section title="Por hora" icon={<Clock className="w-4 h-4 text-indigo-400" />} actions={
+            <div className="flex gap-2">
+              <button className="text-xs text-indigo-300 hover:underline" onClick={() => setModal('time')}>+ Lançar hora</button>
+              {entries.some((e) => !e.billed && e.billable) && <button className="text-xs text-indigo-300 hover:underline" onClick={() => setModal('bill')}>Faturar</button>}
+            </div>
+          }>
+            {entries.length === 0 ? <Empty>Nenhuma hora lançada.</Empty> : entries.map((e) => (
+              <div key={e.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
+                <div>
+                  <div className="text-sm text-zinc-200">{e.description}</div>
+                  <div className="text-xs text-zinc-500">{(e.minutes / 60).toFixed(2)}h · {e.rate_per_hour == null ? 'sem tarifa' : brl(e.amount)} · {e.billed ? 'faturado' : e.billable ? 'em aberto' : 'anulado'}</div>
+                </div>
+                {!e.billed && e.billable && (
+                  <button className="text-xs text-zinc-500 hover:text-red-300" onClick={() => post(`/api/advocacia/timesheet/${e.id}/void`, 'Lançamento anulado.')}>Anular</button>
+                )}
+              </div>
+            ))}
+          </Section>
+
+          {/* Êxito */}
+          <Section title="Êxito" icon={<Trophy className="w-4 h-4 text-indigo-400" />} actions={
+            <button className="text-xs text-indigo-300 hover:underline" onClick={() => setModal('success')}>+ Acordar êxito</button>
+          }>
+            {successFees.length === 0 ? <Empty>Nenhum honorário de êxito.</Empty> : successFees.map((s) => (
+              <div key={s.id} className="flex items-center justify-between gap-3 py-1.5 border-b border-zinc-800/60 last:border-0">
+                <div>
+                  <div className="text-sm text-zinc-200">{s.description}</div>
+                  <div className="text-xs text-zinc-500">{s.percent}% {s.status === 'confirmed' ? `· proveito ${brl(s.base_amount)} → ${brl(s.amount)}` : s.status === 'cancelled' ? '· cancelado' : '· aguardando proveito'}</div>
+                </div>
+                {s.status === 'pending' && (
+                  <div className="flex gap-2">
+                    <button className="text-xs text-emerald-300 hover:underline" onClick={async () => {
+                      const base = window.prompt('Proveito econômico obtido (R$):');
+                      if (base == null) return;
+                      const n = Number(base.replace(',', '.'));
+                      if (!(n > 0)) return toast.error('Valor inválido.');
+                      post(`/api/advocacia/success-fees/${s.id}/confirm`, 'Êxito confirmado.', { baseAmount: n });
+                    }}>Confirmar</button>
+                    <button className="text-xs text-zinc-500 hover:text-red-300" onClick={() => post(`/api/advocacia/success-fees/${s.id}/cancel`, 'Acordo cancelado.')}>Cancelar</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </Section>
+        </div>
+      )}
+
+      {modal === 'fixed' && <FeeFixedModal caseId={caseId} onClose={() => setModal(null)} onSubmit={(b) => post('/api/advocacia/fees/fixed', 'Honorário fixo criado.', b)} />}
+      {modal === 'retainer' && <FeeRetainerModal caseId={caseId} onClose={() => setModal(null)} onSubmit={(b) => post('/api/advocacia/fees/retainer', 'Avença criada.', b)} />}
+      {modal === 'time' && <TimeModal caseId={caseId} onClose={() => setModal(null)} onSubmit={(b) => post('/api/advocacia/timesheet', 'Hora lançada.', b)} />}
+      {modal === 'bill' && <BillModal caseId={caseId} onClose={() => setModal(null)} onSubmit={(b) => post('/api/advocacia/timesheet/bill', 'Horas faturadas.', b)} />}
+      {modal === 'success' && <SuccessModal caseId={caseId} onClose={() => setModal(null)} onSubmit={(b) => post('/api/advocacia/success-fees', 'Êxito acordado.', b)} />}
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent }: { label: string; value: string; accent?: 'emerald' | 'amber' }) {
+  const color = accent === 'emerald' ? 'text-emerald-300' : accent === 'amber' ? 'text-amber-300' : 'text-zinc-100';
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className={`text-lg font-semibold mt-1 ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function Section({ title, icon, actions, children }: { title: string; icon: ReactNode; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2">{icon} {title}</h3>
+        {actions}
+      </div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-xs text-zinc-500">{children}</p>;
+}
+
+function FeeFixedModal({ caseId, onClose, onSubmit }: { caseId: string; onClose: () => void; onSubmit: (b: any) => void }) {
+  const [form, setForm] = useState<any>({ description: '', amount: '', dueDate: '' });
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  return (
+    <Modal title="Honorário fixo" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Descrição *"><Input value={form.description} onChange={(v) => set('description', v)} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Valor (R$) *"><Input type="number" value={form.amount} onChange={(v) => set('amount', v)} /></Field>
+          <Field label="Vencimento *"><Input type="date" value={form.dueDate} onChange={(v) => set('dueDate', v)} /></Field>
+        </div>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => {
+        if (!form.description.trim()) return toast.error('Descreva o honorário.');
+        if (!(Number(form.amount) > 0)) return toast.error('Informe o valor.');
+        if (!form.dueDate) return toast.error('Informe o vencimento.');
+        onSubmit({ caseId, description: form.description, amount: Number(form.amount), dueDate: form.dueDate });
+      }} saving={false} />
+    </Modal>
+  );
+}
+
+function FeeRetainerModal({ caseId, onClose, onSubmit }: { caseId: string; onClose: () => void; onSubmit: (b: any) => void }) {
+  const [form, setForm] = useState<any>({ description: '', amount: '', startDate: '' });
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  return (
+    <Modal title="Avença mensal" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Descrição *"><Input value={form.description} onChange={(v) => set('description', v)} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Valor mensal (R$) *"><Input type="number" value={form.amount} onChange={(v) => set('amount', v)} /></Field>
+          <Field label="Início"><Input type="date" value={form.startDate} onChange={(v) => set('startDate', v)} /></Field>
+        </div>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => {
+        if (!form.description.trim()) return toast.error('Descreva a avença.');
+        if (!(Number(form.amount) > 0)) return toast.error('Informe o valor mensal.');
+        onSubmit({ caseId, description: form.description, amount: Number(form.amount), startDate: form.startDate || undefined });
+      }} saving={false} />
+    </Modal>
+  );
+}
+
+function TimeModal({ caseId, onClose, onSubmit }: { caseId: string; onClose: () => void; onSubmit: (b: any) => void }) {
+  const [form, setForm] = useState<any>({ description: '', minutes: '60', ratePerHour: '', entryDate: '' });
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  return (
+    <Modal title="Lançar horas" onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Descrição do trabalho *"><Input value={form.description} onChange={(v) => set('description', v)} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Minutos *"><Input type="number" value={form.minutes} onChange={(v) => set('minutes', v)} /></Field>
+          <Field label="Valor-hora (R$)"><Input type="number" value={form.ratePerHour} onChange={(v) => set('ratePerHour', v)} /></Field>
+        </div>
+        <Field label="Data"><Input type="date" value={form.entryDate} onChange={(v) => set('entryDate', v)} /></Field>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => {
+        if (!form.description.trim()) return toast.error('Descreva o trabalho.');
+        if (!(Number(form.minutes) > 0)) return toast.error('Informe os minutos.');
+        onSubmit({ caseId, description: form.description, minutes: Number(form.minutes), ratePerHour: form.ratePerHour ? Number(form.ratePerHour) : undefined, entryDate: form.entryDate || undefined });
+      }} saving={false} />
+    </Modal>
+  );
+}
+
+function BillModal({ caseId, onClose, onSubmit }: { caseId: string; onClose: () => void; onSubmit: (b: any) => void }) {
+  const [form, setForm] = useState<any>({ dueDate: '', defaultRatePerHour: '' });
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  return (
+    <Modal title="Faturar horas" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">Empacota as horas em aberto (com tarifa) num honorário fixo. Horas sem tarifa só entram se você informar um valor-hora padrão abaixo.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Vencimento"><Input type="date" value={form.dueDate} onChange={(v) => set('dueDate', v)} /></Field>
+          <Field label="Valor-hora padrão (R$)"><Input type="number" value={form.defaultRatePerHour} onChange={(v) => set('defaultRatePerHour', v)} /></Field>
+        </div>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => onSubmit({ caseId, dueDate: form.dueDate || undefined, defaultRatePerHour: form.defaultRatePerHour ? Number(form.defaultRatePerHour) : undefined })} saving={false} />
+    </Modal>
+  );
+}
+
+function SuccessModal({ caseId, onClose, onSubmit }: { caseId: string; onClose: () => void; onSubmit: (b: any) => void }) {
+  const [form, setForm] = useState<any>({ percent: '20', description: '' });
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+  return (
+    <Modal title="Honorário de êxito" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">Só o percentual é acordado agora. O valor é calculado quando você confirmar o proveito econômico obtido — o sistema nunca arbitra o valor da causa.</p>
+        <Field label="Percentual (%) *"><Input type="number" value={form.percent} onChange={(v) => set('percent', v)} /></Field>
+        <Field label="Descrição"><Input value={form.description} onChange={(v) => set('description', v)} /></Field>
+      </div>
+      <ModalActions onClose={onClose} onSubmit={() => {
+        const p = Number(form.percent);
+        if (!(p > 0) || p > 100) return toast.error('Percentual inválido (0 < % ≤ 100).');
+        onSubmit({ caseId, percent: p, description: form.description || undefined });
+      }} saving={false} />
     </Modal>
   );
 }

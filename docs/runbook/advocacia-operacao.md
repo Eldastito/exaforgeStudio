@@ -59,6 +59,31 @@ Ambos com **self-heal**: concluir/cancelar resolve o sinal (`resolveByDedupe`).
 8. **CNJ validado, não inventado** — dígito verificador (mód. 97); DV errado ou dígitos≠20 rejeitados; ausente fica `null`.
 9. **Aditivo/reversível/opt-in** — tudo por flag; desligar preserva histórico (nunca DELETE; cancelamento é UPDATE).
 
+## Federação OAB (ADR-191 OAB-F1..F5 — composição sobre a Agenda Federada ADR-180)
+
+O advogado pertence ao **ecossistema**, não a um escritório (§90): a mesma OAB é uma
+identidade global única, e vários escritórios podem ter **relacionamento** com ela.
+
+| Fatia | Serviço | Papel |
+| --- | --- | --- |
+| OAB-F1 | `LegalProfessionalFederationService` | ponte de identidade: `federate`/`status`/`defederate` (reusa `upsertIdentity` + bridge) |
+| OAB-F2 | `LegalProfessionalScheduleService` | ofertas (serviços jurídicos) + janelas do advogado federado (delega ao `ProfessionalScheduleConfigService`) |
+| OAB-F3 | `LegalProfessionalBookingService` | disponibilidade + hold + agendamento federado amarrado ao processo (`legal_case_id`) |
+| OAB-F4 | `AdvocaciaView` (aba Configuração) | toggle da rede + Federar/Desfederar + editor de janelas por advogado |
+
+**Rotas:** `/api/advocacia/professional-network/settings` (liga/desliga a rede) ·
+`/api/advocacia/lawyers/:id/{federation[/revoke],offerings,windows,availability,hold,waitlist}` ·
+`/api/advocacia/holds/:holdId/booking`.
+
+**Como ligar:** aba **Configuração → Rede profissional (federação OAB)** → ativar a rede →
+por advogado com OAB, **Federar** → configurar as **janelas** (todas as clínicas da rede
+respeitam) → agendar pela disponibilidade provada.
+
+**Guardrails (RN-PN):** opt-in server-side (RN-PN-8) · OAB obrigatória (RN-ADV-08) ·
+identidade global nunca apagada no defederate (RN-PN-3) · vínculos isolados por org
+(RN-PN-2) · vagas aterradas, nunca inventadas (RN-PN-4) · AGENDADO ≠ ATENDIDO (RN-PN-5).
+Codificados em `test:advocacia-federation-hardening`.
+
 ## Diferidos (não bloqueiam o núcleo)
 
 - Honorário **por-hora** (timesheet) · honorário de **êxito** (success fee).

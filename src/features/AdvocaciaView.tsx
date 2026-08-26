@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
-import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel, CalendarClock, FileText, Download, Pencil, FileSignature, Wallet, Clock, Trophy, ShieldCheck } from 'lucide-react';
+import { Scale, Plus, X, Loader2, Calculator, CheckCircle2, RotateCcw, Ban, Gavel, CalendarClock, FileText, Download, Pencil, FileSignature, Wallet, Clock, Trophy, ShieldCheck, Link2, Unlink, Trash2 } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
@@ -600,6 +600,145 @@ function ConfigTab({ terms }: { terms: LegalTerms }) {
     </div>
 
     <SigiloSection terms={terms} />
+    <NetworkSection terms={terms} lawyers={lawyers} />
+    </div>
+  );
+}
+
+// ── Rede profissional / federação OAB (ADR-191 OAB-F4) ──
+
+const DOW_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function NetworkSection({ terms, lawyers }: { terms: LegalTerms; lawyers: any[] }) {
+  const [enabled, setEnabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/advocacia/professional-network/settings').then((r) => r.json()).then((d) => setEnabled(!!d?.networkEnabled)).catch(() => {}).finally(() => setLoaded(true));
+  }, []);
+
+  const toggle = async () => {
+    const next = !enabled;
+    try {
+      const r = await apiFetch('/api/advocacia/professional-network/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ networkEnabled: next }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      setEnabled(!!d.networkEnabled);
+      toast.success(next ? 'Rede profissional ativada.' : 'Rede desativada.');
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  const withOab = lawyers.filter((l) => (l.council || '').toUpperCase() === 'OAB' && l.registration_number);
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-zinc-200 flex items-center gap-2"><Link2 className="w-4 h-4 text-indigo-400" /> Rede profissional (federação OAB)</h3>
+        {loaded && (
+          <button onClick={toggle} className={`text-xs px-2 py-1 rounded border transition-colors ${enabled ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : 'text-zinc-400 bg-zinc-500/10 border-zinc-500/30'}`}>
+            {enabled ? 'Ativada' : 'Desativada'}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-zinc-500 mb-3">
+        Federar pela OAB liga o {terms.professionalLower} à sua identidade única no ecossistema — ele pode atuar em vários escritórios com uma disponibilidade só. Ative a rede para federar.
+      </p>
+      {enabled && (
+        <div className="space-y-2">
+          {withOab.length === 0 ? <p className="text-xs text-zinc-500">Cadastre {terms.professionalPlural.toLowerCase()} com OAB para federar.</p>
+            : withOab.map((l) => <div key={l.id}><LawyerFederationRow terms={terms} lawyer={l} /></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LawyerFederationRow({ terms, lawyer }: { terms: LegalTerms; lawyer: any }) {
+  const [st, setSt] = useState<any>(null);
+  const [open, setOpen] = useState(false);
+
+  const load = useCallback(() => apiFetch(`/api/advocacia/lawyers/${lawyer.id}/federation`).then((r) => r.json()).then(setSt).catch(() => {}), [lawyer.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (path: string, okMsg: string) => {
+    try {
+      const r = await apiFetch(path, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success(okMsg);
+      setSt(d);
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm text-zinc-200 flex items-center gap-2">
+            {lawyer.name}
+            {st?.federated
+              ? <span className="text-[10px] px-1.5 py-0.5 rounded border text-emerald-300 bg-emerald-500/10 border-emerald-500/30">Federado</span>
+              : <span className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-400 bg-zinc-500/10 border-zinc-500/30">Não federado</span>}
+          </div>
+          <div className="text-xs text-zinc-500">{lawyer.registration_number}</div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {st?.federated && <button className="text-xs text-indigo-300 hover:underline" onClick={() => setOpen((o) => !o)}>{open ? 'Fechar' : 'Agenda'}</button>}
+          {st?.federated
+            ? <button className="text-xs text-red-300 hover:underline flex items-center gap-1" onClick={() => act(`/api/advocacia/lawyers/${lawyer.id}/federation/revoke`, 'Desfederado.')}><Unlink className="w-3 h-3" /> Desfederar</button>
+            : <button className="text-xs text-emerald-300 hover:underline flex items-center gap-1" onClick={() => act(`/api/advocacia/lawyers/${lawyer.id}/federation`, 'Federado.')}><Link2 className="w-3 h-3" /> Federar</button>}
+        </div>
+      </div>
+      {open && st?.federated && <WindowsEditor lawyerId={lawyer.id} />}
+    </div>
+  );
+}
+
+function WindowsEditor({ lawyerId }: { lawyerId: string }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => apiFetch(`/api/advocacia/lawyers/${lawyerId}/windows`).then((r) => r.json())
+    .then((d) => setRows((Array.isArray(d?.windows) ? d.windows : []).map((w: any) => ({ dayOfWeek: w.dayOfWeek, start: w.start, end: w.end, bufferMin: w.bufferMin || 0 }))))
+    .catch(() => setRows([])).finally(() => setLoading(false)), [lawyerId]);
+  useEffect(() => { load(); }, [load]);
+
+  const setRow = (i: number, k: string, v: any) => setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, [k]: v } : r));
+  const addRow = () => setRows((rs) => [...rs, { dayOfWeek: 1, start: '09:00', end: '12:00', bufferMin: 0 }]);
+  const rmRow = (i: number) => setRows((rs) => rs.filter((_, idx) => idx !== i));
+
+  const save = async () => {
+    try {
+      const r = await apiFetch(`/api/advocacia/lawyers/${lawyerId}/windows`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ windows: rows.map((w) => ({ ...w, bufferMin: Number(w.bufferMin) || 0 })) }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Erro.');
+      toast.success('Disponibilidade salva.');
+      await load();
+    } catch (e: any) { toast.error(e?.message || 'Erro.'); }
+  };
+
+  if (loading) return <div className="mt-3 text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Carregando…</div>;
+
+  return (
+    <div className="mt-3 border-t border-zinc-800 pt-3">
+      <p className="text-xs text-zinc-400 mb-2">Disponibilidade semanal (todas as clínicas da rede respeitam)</p>
+      <div className="space-y-2">
+        {rows.length === 0 && <p className="text-xs text-zinc-500">Nenhuma janela — adicione horários.</p>}
+        {rows.map((w, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Select value={String(w.dayOfWeek)} onChange={(v) => setRow(i, 'dayOfWeek', Number(v))}>
+              {DOW_LABELS.map((d, idx) => <option key={idx} value={idx}>{d}</option>)}
+            </Select>
+            <Input type="time" value={w.start} onChange={(v) => setRow(i, 'start', v)} />
+            <Input type="time" value={w.end} onChange={(v) => setRow(i, 'end', v)} />
+            <button className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-300 shrink-0" onClick={() => rmRow(i)}><Trash2 className="w-4 h-4" /></button>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <button className="text-xs text-indigo-300 hover:underline" onClick={addRow}>+ Janela</button>
+        <Button className="zf-button zf-button-secondary ml-auto" onClick={save}>Salvar</Button>
+      </div>
     </div>
   );
 }

@@ -80,9 +80,20 @@ const fmtIndicator = (v: number | null, unit: string) => {
   return String(v);
 };
 
+function FinRow({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-zinc-400">{label}</span>
+      <span className={`tabular-nums ${muted ? 'text-zinc-500' : 'text-zinc-100'}`}>{value}</span>
+    </div>
+  );
+}
+
 function MinhaEmpresaTab() {
   const [snap, setSnap] = useState<any | null>(null);
   const [con, setCon] = useState<any | null>(null);
+  const [fin, setFin] = useState<any | null>(null);
+  const [kp, setKp] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = () => {
@@ -90,7 +101,9 @@ function MinhaEmpresaTab() {
     Promise.all([
       apiFetch('/api/executive/snapshot').then(r => r.json()).catch(() => null),
       apiFetch('/api/executive/constraint').then(r => r.json()).catch(() => null),
-    ]).then(([s, c]) => { setSnap(s); setCon(c); }).finally(() => setLoading(false));
+      apiFetch('/api/executive/finance').then(r => r.json()).catch(() => null),
+      apiFetch('/api/executive/key-person').then(r => r.json()).catch(() => null),
+    ]).then(([s, c, f, k]) => { setSnap(s); setCon(c); setFin(f); setKp(k); }).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
 
@@ -152,6 +165,41 @@ function MinhaEmpresaTab() {
             </div>
           );
         })}
+      </div>
+
+      {/* Financeiro executivo (F7) + Dependência de pessoas (§38) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {fin?.available && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+            <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5"><TrendingUp className="h-4 w-4 text-emerald-400" /> Financeiro</div>
+            <div className="mt-3 space-y-1.5 text-sm">
+              <FinRow label="Caixa" value={fmtIndicator(fin.liquidity?.cash ?? null, 'BRL')} />
+              {fin.liquidity?.survivalDays != null && <FinRow label="Sobrevivência de caixa" value={`${fin.liquidity.survivalDays} dias`} />}
+              <FinRow label="A receber" value={fmtIndicator(fin.receivables?.total ?? null, 'BRL')} />
+              <FinRow label="Vencido" value={fmtIndicator(fin.receivables?.overdue ?? null, 'BRL')} muted={!fin.receivables?.overdue} />
+              <FinRow label="Inadimplência" value={fin.receivables?.defaultRateAvailability === 'available' ? `${fin.receivables?.defaultRatePct}%` : '—'} />
+              {fin.profitability?.available && <FinRow label="Margem" value={fin.profitability?.marginPct != null ? `${fin.profitability.marginPct}%` : '—'} />}
+              {fin.profitability?.available && <FinRow label="Resultado (core)" value={fmtIndicator(fin.profitability?.operatingResultCore ?? null, 'BRL')} />}
+            </div>
+            {Array.isArray(fin.caveats) && fin.caveats.length > 0 && (
+              <div className="mt-3 text-[11px] text-zinc-500 leading-snug">{fin.caveats[0]}</div>
+            )}
+          </div>
+        )}
+        {kp?.dimensions?.some((d: any) => d.risk === 'high' || d.risk === 'medium') && (
+          <div className="rounded-xl border border-amber-800/60 bg-amber-950/20 p-4">
+            <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5"><UserX className="h-4 w-4 text-amber-400" /> Dependência de pessoas</div>
+            <div className="text-[11px] text-zinc-500 mt-0.5">Risco de concentração — hipótese, não certeza.</div>
+            <div className="mt-3 space-y-2">
+              {kp.dimensions.filter((d: any) => d.risk === 'high' || d.risk === 'medium').map((d: any) => (
+                <div key={d.dimension} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-300">{d.label}</span>
+                  <span className={`tabular-nums font-medium ${d.risk === 'high' ? 'text-red-300' : 'text-amber-300'}`}>{d.topShare}% num só ({d.participants} pessoas)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end">

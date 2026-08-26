@@ -233,6 +233,7 @@
     "test:petshop-vertical": "tsx scripts/test-petshop-vertical.ts",
     "test:advocacia-vertical": "tsx scripts/test-advocacia-vertical.ts",
     "test:vertical-self-switch": "tsx scripts/test-vertical-self-switch.ts",
+    "test:escola-view-wiring": "tsx scripts/test-escola-view-wiring.ts",
     "test:clinic-terms": "tsx scripts/test-clinic-terms.ts",
     "test:legal-terms": "tsx scripts/test-legal-terms.ts",
     "test:legal-practice-areas": "tsx scripts/test-legal-practice-areas.ts",

@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel, GraduationCap } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -61,6 +61,7 @@ export function Sidebar() {
              {mod('agenda') && <NavItem icon={<Calendar />} label="Agenda" active={viewMode === 'agenda'} onClick={() => setViewMode('agenda')} />}
              {mod('clinica') && <NavItem icon={<Stethoscope />} label="Agenda Clínica" active={viewMode === 'clinica'} onClick={() => setViewMode('clinica')} />}
              {vertical === 'advocacia' && <NavItem icon={<Gavel />} label="Advocacia" active={viewMode === 'advocacia'} onClick={() => setViewMode('advocacia')} />}
+             {mod('escola') && <NavItem icon={<GraduationCap />} label="Escola" active={viewMode === 'escola'} onClick={() => setViewMode('escola')} />}
              {mod('reservas') && <NavItem icon={<CalendarCheck />} label="Reservas" active={viewMode === 'reservas'} onClick={() => setViewMode('reservas')} />}
              {mod('assinaturas') && <NavItem icon={<RefreshCw />} label="Assinaturas" active={viewMode === 'assinaturas'} onClick={() => setViewMode('assinaturas')} />}
              {mod('copiloto') && <NavItem icon={<HandCoins />} label="Comigo" active={viewMode === 'comigo'} onClick={() => setViewMode('comigo')} />}

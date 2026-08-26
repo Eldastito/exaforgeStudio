@@ -532,6 +532,27 @@ router.post("/settings/onboarding", (req, res) => {
   }
 });
 
+// POST /api/analytics/settings/vertical — troca o RAMO de uma conta JÁ criada
+// (leigo-friendly): o onboarding só roda 1x, então sem isto não havia caminho
+// simples pra mudar a vertical de uma org existente e fazer a tela dedicada
+// (ex.: Advocacia) aparecer no menu. Aplica o preset da vertical (módulos
+// habilitados) — mesma mecânica do onboarding. Aditivo/reversível: trocar de
+// volta reaplica o outro preset. owner/admin (muda módulos habilitados).
+router.post("/settings/vertical", requireRole("owner", "admin"), (req, res) => {
+  const orgId = getOrgId(req);
+  const { vertical } = req.body || {};
+  if (!vertical || typeof vertical !== "string") return res.status(400).json({ error: "vertical_obrigatorio" });
+  // Só aceita chave que exista no catálogo — nunca grava vertical inventada.
+  const known = ModuleService.catalog().some((v: any) => v.key === vertical);
+  if (!known) return res.status(400).json({ error: "vertical_desconhecida" });
+  try {
+    ModuleService.applyVertical(orgId, vertical);
+    res.json({ success: true, vertical });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/analytics/verticals — catálogo de categorias p/ os cards do onboarding.
 router.get("/verticals", (_req, res) => {
   res.json(ModuleService.catalog());

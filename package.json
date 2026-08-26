@@ -231,6 +231,7 @@
     "test:beauty-tenant-b-generalization": "tsx scripts/test-beauty-tenant-b-generalization.ts",
     "test:beauty-admin-vertical": "tsx scripts/test-beauty-admin-vertical.ts",
     "test:petshop-vertical": "tsx scripts/test-petshop-vertical.ts",
+    "test:advocacia-vertical": "tsx scripts/test-advocacia-vertical.ts",
     "test:clinic-terms": "tsx scripts/test-clinic-terms.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",

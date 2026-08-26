@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0 (auditoria + design) — esta fatia (doc-only).**
+**Estado:** **F0 FECHADA (#1358). F1 (vertical + preset + consent) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -60,7 +60,7 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 ## 4. Plano de fatias (F0–F10)
 
 - **F0** auditoria + ADR (**esta fatia**, doc-only).
-- **F1** vertical `advocacia`: chave em `verticals.ts` + preset (agenda/areas/documentos/assinaturas/diretor/…) + `CONSENT_BY_VERTICAL['advocacia']` com `sigilo`. `test:advocacia-vertical`.
+- **F1 (EM PR)** vertical `advocacia`: chave em `verticals.ts` (`VerticalKey` + preset prestador-de-serviço `agenda/vendas/pagamentos/campanhas/cadencias/areas/integracoes/assinaturas/diretor/rie/execucao` — sem varejo, sem `clinica`) + `CONSENT_BY_VERTICAL['advocacia']` = `dados_pessoais/comunicacoes/sigilo_profissional` (sigilo NÃO é `dados_sensiveis` — base é exercício de direitos + EOAB Art.34; gate na F9). Features legais são GATED pela vertical, não por módulo novo (padrão petshop). `test:advocacia-vertical` (15).
 - **F2** terminologia (`legalTerms`): cliente/advogado/área do direito/processo/encerramento. `test:legal-terms`.
 - **F3** áreas do direito (reuso `clinic_specialties`) + advogados (reuso `clinic_professionals`, OAB campo). `test:legal-practice-areas`.
 - **F4** `legal_cases` (processo): número CNJ + validação + área + advogado responsável + status/fase + parte contrária + vara/comarca; `LegalCaseService` (abrir/transferir/encerrar/listar). `test:legal-case`.

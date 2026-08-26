@@ -20,7 +20,6 @@ export function LoginView() {
   const [name, setName] = useState('');
   const [organizationName, setOrganizationName] = useState('');
   const [phone, setPhone] = useState('');
-  const [segment, setSegment] = useState('');
   const [sizeRange, setSizeRange] = useState('');
   const [token, setToken] = useState('');
   const [inviteToken, setInviteToken] = useState('');
@@ -31,7 +30,11 @@ export function LoginView() {
   // Self-service: escolha de plano no cadastro (inicia teste grátis).
   const [plans, setPlans] = useState<any[]>([]);
   const [planId, setPlanId] = useState('');
-  
+  // Vertical (ramo) escolhida no cadastro — configura a conta já aqui e pula o
+  // onboarding do 1º login. Substitui o antigo "Segmento" texto-livre.
+  const [verticals, setVerticals] = useState<any[]>([]);
+  const [vertical, setVertical] = useState('');
+
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -109,6 +112,7 @@ export function LoginView() {
   // Carrega os planos para a tela de "Ver planos" e a nota no cadastro.
   useEffect(() => {
     fetch('/api/plans').then(r => r.json()).then(d => setPlans(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch('/api/verticals').then(r => r.json()).then(d => setVerticals(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
 
   const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR')}`;
@@ -275,7 +279,7 @@ export function LoginView() {
           payload.inviteToken = inviteToken;
         } else {
           payload.organizationName = organizationName;
-          payload.segment = segment;
+          payload.vertical = vertical;       // ramo → configura a conta e pula o onboarding
           payload.sizeRange = sizeRange;
           if (planId) payload.planId = planId;
         }
@@ -603,12 +607,17 @@ export function LoginView() {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-zinc-300 mb-1">Segmento</label>
-                        <input 
-                          type="text" value={segment} onChange={e => setSegment(e.target.value)}
-                          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
-                          placeholder="Ex: Varejo, Serviços..."
-                        />
+                        <label className="block text-sm font-medium text-zinc-300 mb-1">Ramo do negócio</label>
+                        <select
+                          value={vertical} onChange={e => setVertical(e.target.value)}
+                          className="w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors"
+                        >
+                          <option value="">Selecione o ramo…</option>
+                          {verticals.map((v: any) => (
+                            <option key={v.key} value={v.key}>{v.icon ? `${v.icon} ` : ''}{v.label}</option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-xs text-zinc-500">Já deixa o ZapFlow configurado para o seu tipo de negócio — sem passo extra depois.</p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Tamanho da Empresa</label>

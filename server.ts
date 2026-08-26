@@ -543,6 +543,14 @@ async function startServer() {
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
+  // Catálogo de verticais — PÚBLICO (pré-login) para o seletor de ramo do
+  // cadastro. Só a lista (key/label/ícone/descrição); nada por-org. Mesmo motivo
+  // do /api/plans: a página de signup precisa dela sem sessão.
+  app.get("/api/verticals", (_req, res): any => {
+    try { res.json(ModuleService.catalog()); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   // Conector AGNÓSTICO de PMS/OTA/ERP — autenticado por TOKEN (não JWT). Fica
   // antes do catch-all autenticado para sistemas externos empurrarem dados.
   app.use("/api/connector-in", connectorPublicRoutes);

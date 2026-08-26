@@ -64,7 +64,7 @@ router.get("/org-invite/:token", (req: Request, res: Response): any => {
 });
 
 router.post("/register", async (req: Request, res: Response): Promise<any> => {
-  const { name, email, phone, password, organizationName, segment, sizeRange, inviteToken, orgInviteToken, planId } = req.body;
+  const { name, email, phone, password, organizationName, segment, vertical, sizeRange, inviteToken, orgInviteToken, planId } = req.body;
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -130,14 +130,23 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
           return res.status(400).json({ error: "Nome da empresa é obrigatório para nova conta" });
        }
        orgId = "org_" + uuidv4().substring(0, 8);
+       // Vertical escolhida NO CADASTRO (self-service): se for uma chave válida do
+       // catálogo, configuramos a conta já aqui (applyVertical) e PULAMOS o
+       // onboarding — o 1º login já cai no ZapFlow com o menu da vertical∩plano.
+       // Sem vertical válida, cai no onboarding do 1º login (comportamento antigo).
+       const chosenVertical = typeof vertical === "string" && ModuleService.catalog().some((v: any) => v.key === vertical) ? vertical : null;
        db.prepare(`
          INSERT INTO organization_settings (id, organization_id, business_name, phone, segment, size_range, status, onboarding_status)
-         VALUES (?, ?, ?, ?, ?, ?, 'active', 'pending')
-       `).run(uuidv4(), orgId, organizationName, phone || null, segment || null, sizeRange || null);
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+       `).run(uuidv4(), orgId, organizationName, phone || null, segment || chosenVertical || null, sizeRange || null, chosenVertical ? "completed" : "pending");
 
-       // Self-service: se escolheu um plano no cadastro, inicia o teste grátis.
+       // Plano PRIMEIRO (é o teto), depois a vertical — applyVertical intersecciona
+       // o preset com os módulos do plano, então a ordem importa.
        if (planId) {
          try { PlanService.selectPlan(orgId, String(planId)); } catch (e) { /* noop */ }
+       }
+       if (chosenVertical) {
+         try { ModuleService.applyVertical(orgId, chosenVertical); } catch (e) { /* noop */ }
        }
     }
 

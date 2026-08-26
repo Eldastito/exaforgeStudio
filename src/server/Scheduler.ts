@@ -877,6 +877,13 @@ export class Scheduler {
       import("./ClinicPetService.js").then((m) => m.ClinicPetService.passTreatmentReminders())
         .catch((e) => console.error('[Scheduler] lembrete de tratamento pet falhou', e));
     } catch (e) { console.error('[Scheduler] pass de lembrete de tratamento pet falhou', e); }
+    // Petshop F8 — lembrete de RETORNO de banho & tosa (recompra): derivado do
+    // último grooming + recorrência do serviço. business_signals, self-heal ao
+    // reagendar.
+    try {
+      import("./ClinicGroomingService.js").then((m) => m.ClinicGroomingService.passGroomingReturnReminders())
+        .catch((e) => console.error('[Scheduler] lembrete de retorno de banho&tosa falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de retorno de banho&tosa falhou', e); }
     // Agenda Federada — gap de demanda (ADR-180 F9.2): publica UM sinal por serviço com
     // pressão ALTA no `business_signals` (conv. nº 12), self-healing quando o gap fecha.
     // Só orgs com a rede habilitada; advisório, nunca inventa dinheiro. Best-effort.

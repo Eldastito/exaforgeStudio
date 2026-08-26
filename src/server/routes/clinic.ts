@@ -2195,6 +2195,15 @@ router.get("/grooming/queue", (req: AuthRequest, res): any => {
   res.json({ queue: ClinicGroomingService.dayQueue(orgId, String(req.query?.date || "")) });
 });
 
+// GET /api/clinic/grooming/returns/due?withinDays= — retornos de banho & tosa
+// previstos/atrasados (Petshop F8, gestor). Driver de recompra.
+router.get("/grooming/returns/due", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const withinDays = typeof req.query?.withinDays === "string" ? Number(req.query.withinDays) : undefined;
+  res.json({ due: ClinicGroomingService.dueGroomingReturns(orgId, { withinDays }) });
+});
+
 // ─────────── Plano de saúde + internação + cirurgia do pet (Petshop F5) ───────────
 
 // PUT /api/clinic/pets/:id/health-plan { name, status } — define o plano do pet.

@@ -1188,15 +1188,19 @@ function GroomingTab({ contacts, professionals }: { contacts: ContactLite[]; pro
   const [loadingQ, setLoadingQ] = useState(false);
   const [showBook, setShowBook] = useState(false);
   const [showSvc, setShowSvc] = useState(false);
+  const [returns, setReturns] = useState<any[]>([]);
 
   const loadServices = async () => {
     try { const r = await apiFetch('/api/clinic/grooming-services?all=1').then((x) => (x.ok ? x.json() : { services: [] })); setServices(Array.isArray(r?.services) ? r.services : []); } catch { /* noop */ }
+  };
+  const loadReturns = async () => {
+    try { const r = await apiFetch('/api/clinic/grooming/returns/due').then((x) => (x.ok ? x.json() : { due: [] })); setReturns(Array.isArray(r?.due) ? r.due : []); } catch { setReturns([]); }
   };
   const loadQueue = async () => {
     setLoadingQ(true);
     try { const r = await apiFetch(`/api/clinic/grooming/queue?date=${date}`).then((x) => (x.ok ? x.json() : { queue: [] })); setQueue(Array.isArray(r?.queue) ? r.queue : []); } catch { setQueue([]); } finally { setLoadingQ(false); }
   };
-  useEffect(() => { loadServices(); }, []);
+  useEffect(() => { loadServices(); loadReturns(); }, []);
   useEffect(() => { loadQueue(); /* eslint-disable-next-line */ }, [date]);
 
   const activeServices = services.filter((s) => s.active);
@@ -1219,6 +1223,26 @@ function GroomingTab({ contacts, professionals }: { contacts: ContactLite[]; pro
 
       {/* Gestão de serviços (colapsável) */}
       {showSvc && <GroomingServicesPanel services={services} onChanged={loadServices} />}
+
+      {/* Retornos previstos (Petshop F8) — recompra: quem está na hora de voltar */}
+      {returns.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="text-sm font-medium text-amber-300 mb-2">🔔 Retornos previstos ({returns.length})</div>
+          <div className="space-y-1.5">
+            {returns.map((r) => (
+              <div key={`${r.petId}:${r.serviceId}`} className="flex items-center gap-2 text-[12px]">
+                <span className="text-zinc-100 font-medium truncate">{r.petName}</span>
+                <span className="text-zinc-500 truncate">{r.serviceName}</span>
+                <span className="text-zinc-500">último {r.lastGroomAt}</span>
+                <span className={`ml-auto rounded-full border px-1.5 py-0.5 text-[10px] ${r.status === 'overdue' ? 'text-rose-300 border-rose-500/30 bg-rose-500/10' : 'text-amber-300 border-amber-500/30 bg-amber-500/10'}`}>
+                  {r.status === 'overdue' ? 'atrasado' : 'a vencer'} · {r.nextDueAt}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-zinc-500">Derivado do último banho + intervalo do serviço. Some da lista quando o tutor reagenda.</p>
+        </div>
+      )}
 
       {/* Fila do dia */}
       <div>
@@ -1248,22 +1272,22 @@ function GroomingTab({ contacts, professionals }: { contacts: ContactLite[]; pro
       </div>
 
       {showBook && <BookGroomingModal contacts={contacts} professionals={professionals} services={activeServices} defaultDate={date}
-        onClose={() => setShowBook(false)} onBooked={() => { setShowBook(false); loadQueue(); }} />}
+        onClose={() => setShowBook(false)} onBooked={() => { setShowBook(false); loadQueue(); loadReturns(); }} />}
     </div>
   );
 }
 
 function GroomingServicesPanel({ services, onChanged }: { services: any[]; onChanged: () => void }) {
-  const [form, setForm] = useState({ name: '', durationMin: '60', priceCents: '' });
+  const [form, setForm] = useState({ name: '', durationMin: '60', priceCents: '', recurrenceDays: '' });
   const [busy, setBusy] = useState(false);
   const add = async () => {
     if (!form.name.trim()) { toast.error('Informe o nome do serviço.'); return; }
     setBusy(true);
     try {
-      const body: any = { name: form.name.trim(), durationMin: form.durationMin ? Number(form.durationMin) : 60, priceCents: form.priceCents ? Math.round(Number(form.priceCents) * 100) : null };
+      const body: any = { name: form.name.trim(), durationMin: form.durationMin ? Number(form.durationMin) : 60, priceCents: form.priceCents ? Math.round(Number(form.priceCents) * 100) : null, recurrenceDays: form.recurrenceDays ? Number(form.recurrenceDays) : null };
       const r = await apiFetch('/api/clinic/grooming-services', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
-      toast.success('Serviço criado.'); setForm({ name: '', durationMin: '60', priceCents: '' }); onChanged();
+      toast.success('Serviço criado.'); setForm({ name: '', durationMin: '60', priceCents: '', recurrenceDays: '' }); onChanged();
     } catch (e: any) { toast.error(e.message || 'Erro'); } finally { setBusy(false); }
   };
   const toggle = async (s: any) => {
@@ -1272,10 +1296,13 @@ function GroomingServicesPanel({ services, onChanged }: { services: any[]; onCha
   };
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-        <input className="sm:col-span-2 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Serviço (ex.: Banho, Tosa)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <input className="col-span-2 bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Serviço (ex.: Banho, Tosa)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Duração (min)" inputMode="numeric" value={form.durationMin} onChange={(e) => setForm((f) => ({ ...f, durationMin: e.target.value }))} />
         <input className="bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="Preço (R$)" inputMode="decimal" value={form.priceCents} onChange={(e) => setForm((f) => ({ ...f, priceCents: e.target.value }))} />
+        <label className="col-span-2 sm:col-span-4 text-[11px] text-zinc-500">Retorno a cada (dias) — opcional, liga o lembrete de recompra
+          <input className="mt-0.5 w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100" placeholder="ex.: 30 (banho mensal)" inputMode="numeric" value={form.recurrenceDays} onChange={(e) => setForm((f) => ({ ...f, recurrenceDays: e.target.value }))} />
+        </label>
       </div>
       <div className="flex justify-end"><button onClick={add} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"><Plus className="w-4 h-4" /> Adicionar serviço</button></div>
       {services.length > 0 && (
@@ -1283,7 +1310,7 @@ function GroomingServicesPanel({ services, onChanged }: { services: any[]; onCha
           {services.map((s) => (
             <div key={s.id} className="flex items-center gap-2 text-[13px]">
               <span className={`font-medium ${s.active ? 'text-zinc-100' : 'text-zinc-500 line-through'}`}>{s.name}</span>
-              <span className="text-[11px] text-zinc-500">{s.durationMin} min{typeof s.priceCents === 'number' ? ` · R$ ${(s.priceCents / 100).toFixed(2)}` : ''}</span>
+              <span className="text-[11px] text-zinc-500">{s.durationMin} min{typeof s.priceCents === 'number' ? ` · R$ ${(s.priceCents / 100).toFixed(2)}` : ''}{s.recurrenceDays ? ` · retorno ${s.recurrenceDays}d` : ''}</span>
               <button onClick={() => toggle(s)} className="ml-auto text-[11px] text-zinc-400 hover:text-zinc-200">{s.active ? 'desativar' : 'ativar'}</button>
             </div>
           ))}

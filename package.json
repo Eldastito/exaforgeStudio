@@ -257,6 +257,7 @@
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-pet-treatment": "tsx scripts/test-clinic-pet-treatment.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
+    "test:clinic-grooming-return": "tsx scripts/test-clinic-grooming-return.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",
     "test:clinic-pet-history": "tsx scripts/test-clinic-pet-history.ts",
     "test:professional-network": "tsx scripts/test-professional-network.ts",

@@ -10087,6 +10087,10 @@ const initDb = () => {
   // sendo a agenda (chegada→atendimento→checkout já existentes).
   try { db.exec(`ALTER TABLE appointments ADD COLUMN pet_id TEXT`); } catch (e) { /* noop */ }
   try { db.exec(`ALTER TABLE appointments ADD COLUMN grooming_service_id TEXT`); } catch (e) { /* noop */ }
+  // PETSHOP F8 — intervalo típico de RETORNO do serviço de banho & tosa (dias).
+  // NULL = sem lembrete (0-regressão). Ex.: banho mensal = 30. Alimenta o lembrete
+  // de retorno derivado do ÚLTIMO grooming do pet (não inventa recorrência).
+  try { db.exec(`ALTER TABLE clinic_grooming_services ADD COLUMN recurrence_days INTEGER`); } catch (e) { /* noop */ }
 
   // PETSHOP F5 — plano de saúde pet como ATRIBUTO do pet (o que está coberto). A
   // COBRANÇA recorrente é do módulo Assinaturas (reuso, sem motor paralelo); aqui só

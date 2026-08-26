@@ -10114,6 +10114,44 @@ const initDb = () => {
     `);
   } catch (e) { /* noop */ }
 
+  // ── ADR-191 F4 — Processo (vertical Advocacia) ──
+  // `legal_cases`: registro LONGITUDINAL do caso, modelado no clinic_care_episodes
+  // (D2 — tabela PRÓPRIA, não sobrecarrega a clínica; o vocabulário processual difere
+  // do clínico). Cliente=contact, área=clinic_specialties, advogado=clinic_professionals.
+  // cnj_number VALIDADO (dígito verificador módulo 97) e nullable (caso consultivo/
+  // pré-processual não tem número) — nunca inventado (RN-ADV-08). Unique parcial garante
+  // 1 processo por número CNJ na org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_cases (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,                        -- cliente
+        practice_area_id TEXT,                           -- área do direito (clinic_specialties); nullable
+        responsible_lawyer_id TEXT,                      -- advogado responsável (clinic_professionals)
+        cnj_number TEXT,                                 -- número CNJ normalizado; nullable (consultivo)
+        title TEXT NOT NULL,                             -- descrição do caso
+        case_type TEXT DEFAULT 'judicial',              -- judicial|consultivo|administrativo
+        court TEXT,                                      -- vara/tribunal
+        comarca TEXT,                                    -- comarca/foro
+        opposing_party TEXT,                             -- parte contrária
+        phase TEXT,                                      -- fase processual (livre: conhecimento/recurso/execução…)
+        status TEXT NOT NULL DEFAULT 'active',           -- active|on_hold|closed|archived
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        closed_at DATETIME,
+        closed_reason TEXT,
+        closed_by TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_cases_org ON legal_cases (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_legal_cases_client ON legal_cases (organization_id, contact_id);
+      CREATE INDEX IF NOT EXISTS idx_legal_cases_lawyer ON legal_cases (organization_id, responsible_lawyer_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_legal_cases_cnj ON legal_cases (organization_id, cnj_number) WHERE cnj_number IS NOT NULL;
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_cases', e); }
+
   // ── ADR-180 F1 — Professional Identity & Federated Calendar (Agenda Federada) ──
   // Decisão de fronteira (§90): o profissional pertence ao ECOSSISTEMA ZapFlow, não
   // a uma clínica. Espelha vertical_intelligence (GLOBAL, sem organization_id) +

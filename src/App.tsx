@@ -24,6 +24,7 @@ import { TasksView } from '@/src/features/TasksView';
 import { ProspectView } from '@/src/features/ProspectView';
 import { RadarB2BView } from '@/src/features/RadarB2BView';
 import { ClinicAgendaView } from '@/src/features/ClinicAgendaView';
+import { AdvocaciaView } from '@/src/features/AdvocaciaView';
 import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
 import { RadarConsultantView } from '@/src/features/RadarConsultantView';
@@ -486,6 +487,7 @@ export default function App() {
              {viewMode === 'prospect' && 'Prospect AI'}
              {viewMode === 'radar_b2b' && 'Radar B2B'}
              {viewMode === 'clinica' && 'Agenda Clínica'}
+             {viewMode === 'advocacia' && 'Advocacia'}
              {viewMode === 'vision' && 'Vision VMS'}
              {viewMode === 'radar' && 'Radar de Execução IA'}
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
@@ -612,6 +614,7 @@ export default function App() {
           {viewMode === 'prospect' && <ProspectView />}
           {viewMode === 'radar_b2b' && <RadarB2BView />}
           {viewMode === 'clinica' && <ClinicAgendaView />}
+          {viewMode === 'advocacia' && <AdvocaciaView />}
           {viewMode === 'vision' && <VisionVmsView />}
           {viewMode === 'radar' && <RadarView />}
           {viewMode === 'radar_consultant' && <RadarConsultantView />}

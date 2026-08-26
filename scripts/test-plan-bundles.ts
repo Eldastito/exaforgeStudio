@@ -57,6 +57,7 @@ async function main() {
   check("growth_clinica.basePlan = 'growth'", clinica?.basePlan === "growth");
   check("growth_clinica.addons inclui 'clinica'", (clinica?.addons || []).includes("clinica"));
   check("growth_clinica.verticalHints inclui 'saude'", (clinica?.verticalHints || []).includes("saude"));
+  check("growth_clinica.verticalHints inclui 'petshop' (consome o módulo clinica)", (clinica?.verticalHints || []).includes("petshop"));
   check("growth_clinica.priceMonthly > 0", (clinica?.priceMonthly || 0) > 0);
 
   // ===== 3b. Bundles verticais Escola e Advocacia (mesma tese comercial) =====

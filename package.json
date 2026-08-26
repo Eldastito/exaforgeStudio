@@ -237,6 +237,7 @@
     "test:advocacia-plan-gated": "tsx scripts/test-advocacia-plan-gated.ts",
     "test:register-vertical": "tsx scripts/test-register-vertical.ts",
     "test:escola-plan-gated": "tsx scripts/test-escola-plan-gated.ts",
+    "test:module-sellability-coherence": "tsx scripts/test-module-sellability-coherence.ts",
     "test:clinic-terms": "tsx scripts/test-clinic-terms.ts",
     "test:legal-terms": "tsx scripts/test-legal-terms.ts",
     "test:legal-practice-areas": "tsx scripts/test-legal-practice-areas.ts",

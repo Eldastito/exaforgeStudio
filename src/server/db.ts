@@ -10626,6 +10626,45 @@ const initDb = () => {
   // audiência/perícia/sustentação/reunião/julgamento. Aditivas, nullable (0-regressão).
   try { db.exec(`ALTER TABLE appointments ADD COLUMN legal_case_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE appointments ADD COLUMN hearing_type TEXT`); } catch(e){}
+  // ADR-191 F7 — Documentos jurídicos (petição/contrato/procuração). REUSA a infra de
+  // snapshot canônico + hash SHA-256 (`computeDocumentHash`) + assinatura por PIN +
+  // rodapé de assinatura eletrônica do `ClinicDocumentsService` (D5). Tabela PRÓPRIA
+  // polimórfica por `doc_type` (o vocabulário jurídico difere do clínico). RN-ADV-06:
+  // documento EMITIDO congela snapshot+hash — renomear cliente/negócio depois NÃO altera
+  // o doc. Retenção: nunca DELETE; cancelamento é UPDATE status='cancelled'.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_documents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        case_id TEXT,                                     -- processo (legal_cases); nullable (contrato/procuração avulsos)
+        contact_id TEXT NOT NULL,                         -- cliente
+        professional_id TEXT,                             -- advogado autor
+        doc_type TEXT NOT NULL,                           -- peticao | contrato | procuracao
+        title TEXT NOT NULL,
+        body TEXT,                                        -- conteúdo do documento (texto)
+        status TEXT NOT NULL DEFAULT 'draft',             -- draft | issued | cancelled
+        client_name_snapshot TEXT,                        -- snapshots congelados na emissão (Fase 29)
+        business_name_snapshot TEXT,
+        professional_name_snapshot TEXT,
+        professional_registration_snapshot TEXT,
+        professional_council_snapshot TEXT,
+        signed_with_pin INTEGER DEFAULT 0,
+        signature_hash TEXT,
+        signature_timestamp TEXT,
+        issued_by TEXT,
+        issued_at DATETIME,
+        cancelled_at DATETIME,
+        cancelled_reason TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_documents_org ON legal_documents (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_legal_documents_case ON legal_documents (organization_id, case_id);
+      CREATE INDEX IF NOT EXISTS idx_legal_documents_client ON legal_documents (organization_id, contact_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_documents', e); }
 };
 
 initDb();

@@ -4,6 +4,7 @@ import { LegalPracticeService } from "../LegalPracticeService.js";
 import { LegalCaseService } from "../LegalCaseService.js";
 import { LegalDeadlineService } from "../LegalDeadlineService.js";
 import { LegalHearingService } from "../LegalHearingService.js";
+import { LegalDocumentService } from "../LegalDocumentService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -241,6 +242,68 @@ router.post("/hearings/:id/cancel", requireRole("owner", "admin"), (req: AuthReq
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(LegalHearingService.cancel(orgId, req.params.id, req.body?.reason ?? null, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Documentos jurídicos (ADR-191 F7 — petição/contrato/procuração) ──
+router.get("/documents", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  const docType = typeof req.query.docType === "string" ? req.query.docType : undefined;
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  res.json({ documents: LegalDocumentService.list(orgId, { caseId, contactId, docType, status }) });
+});
+
+router.get("/documents/:id", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const d = LegalDocumentService.get(orgId, req.params.id);
+  if (!d) return res.status(404).json({ error: "not_found" });
+  res.json(d);
+});
+
+router.post("/documents", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalDocumentService.createDraft(orgId, { caseId: b.caseId, contactId: b.contactId, professionalId: b.professionalId, docType: b.docType, title: b.title, body: b.body }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro", code: e?.code }); }
+});
+
+router.put("/documents/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalDocumentService.update(orgId, req.params.id, { title: b.title, body: b.body, professionalId: b.professionalId }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/documents/:id/issue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalDocumentService.issue(orgId, req.params.id, actor(req), { pin: req.body?.pin })); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro", code: e?.code }); }
+});
+
+router.post("/documents/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalDocumentService.cancel(orgId, req.params.id, req.body?.reason ?? null, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.get("/documents/:id/pdf", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const pdf = await LegalDocumentService.renderPdf(orgId, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(pdf);
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

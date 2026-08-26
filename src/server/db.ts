@@ -10694,6 +10694,12 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_legal_fees_client ON legal_fees (organization_id, contact_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar legal_fees', e); }
+
+  // ADR-191 F9 — Sigilo profissional: gate OPT-IN (RN-ADV-09, default 0 = 0-regressão) que
+  // exige o consentimento `sigilo_profissional` do cliente pra EXPOR o conteúdo dos
+  // documentos do caso. Reusa o mecanismo LGPD (`contact_consents`), base legal exercício
+  // de direitos/EOAB Art.34 — NÃO é `dados_sensiveis` (saúde). Desligado, tudo opera como antes.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN advocacia_sigilo_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

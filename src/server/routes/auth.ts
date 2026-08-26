@@ -11,6 +11,8 @@ import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
 import { ModuleService } from "../ModuleService.js";
 import { PlanService } from "../PlanService.js";
+import { AddonService } from "../AddonService.js";
+import { PLAN_BUNDLES } from "../plansGrade.js";
 import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
@@ -64,7 +66,7 @@ router.get("/org-invite/:token", (req: Request, res: Response): any => {
 });
 
 router.post("/register", async (req: Request, res: Response): Promise<any> => {
-  const { name, email, phone, password, organizationName, segment, vertical, sizeRange, inviteToken, orgInviteToken, planId } = req.body;
+  const { name, email, phone, password, organizationName, segment, vertical, sizeRange, inviteToken, orgInviteToken, planId, bundleKey } = req.body;
   
   if (!name || !email || !password) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -130,23 +132,36 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
           return res.status(400).json({ error: "Nome da empresa é obrigatório para nova conta" });
        }
        orgId = "org_" + uuidv4().substring(0, 8);
-       // Vertical escolhida NO CADASTRO (self-service): se for uma chave válida do
+       // Vertical escolhida NO CADASTRO (self-service): se for chave válida do
        // catálogo, configuramos a conta já aqui (applyVertical) e PULAMOS o
        // onboarding — o 1º login já cai no ZapFlow com o menu da vertical∩plano.
-       // Sem vertical válida, cai no onboarding do 1º login (comportamento antigo).
        const chosenVertical = typeof vertical === "string" && ModuleService.catalog().some((v: any) => v.key === vertical) ? vertical : null;
+       // Bundle vertical (ADR-153 F2.2): a oferta traz plano-base + add-on(s) que
+       // desbloqueiam o MÓDULO CENTRAL da vertical (ex.: Growth + Advocacia).
+       // Sem isto, escolher "Advocacia" + plano genérico deixaria o módulo
+       // desligado (teto do plano) e a tela não apareceria — a armadilha que o
+       // bundle resolve. O basePlan do bundle tem prioridade sobre planId.
+       const bundle = typeof bundleKey === "string" ? PLAN_BUNDLES.find((b) => b.key === bundleKey) : null;
+       const effVertical = chosenVertical || (bundle?.verticalHints?.[0] ?? null);
        db.prepare(`
          INSERT INTO organization_settings (id, organization_id, business_name, phone, segment, size_range, status, onboarding_status)
          VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
-       `).run(uuidv4(), orgId, organizationName, phone || null, segment || chosenVertical || null, sizeRange || null, chosenVertical ? "completed" : "pending");
+       `).run(uuidv4(), orgId, organizationName, phone || null, segment || effVertical || null, sizeRange || null, effVertical ? "completed" : "pending");
 
-       // Plano PRIMEIRO (é o teto), depois a vertical — applyVertical intersecciona
-       // o preset com os módulos do plano, então a ordem importa.
-       if (planId) {
-         try { PlanService.selectPlan(orgId, String(planId)); } catch (e) { /* noop */ }
+       // Plano PRIMEIRO (é o teto), depois add-ons do bundle, depois a vertical —
+       // applyVertical intersecciona o preset com (plano ∪ add-ons ativos), então
+       // a ordem importa pro módulo central da vertical ser habilitado.
+       const planToSelect = bundle?.basePlan || (planId ? String(planId) : null);
+       if (planToSelect) {
+         try { PlanService.selectPlan(orgId, planToSelect); } catch (e) { /* noop */ }
        }
-       if (chosenVertical) {
-         try { ModuleService.applyVertical(orgId, chosenVertical); } catch (e) { /* noop */ }
+       if (bundle) {
+         for (const addonKey of bundle.addons) {
+           try { AddonService.grantForBundle(orgId, addonKey); } catch (e) { /* noop */ }
+         }
+       }
+       if (effVertical) {
+         try { ModuleService.applyVertical(orgId, effVertical); } catch (e) { /* noop */ }
        }
     }
 

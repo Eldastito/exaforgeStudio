@@ -34,6 +34,11 @@ export function LoginView() {
   // onboarding do 1º login. Substitui o antigo "Segmento" texto-livre.
   const [verticals, setVerticals] = useState<any[]>([]);
   const [vertical, setVertical] = useState('');
+  // Bundle vertical recomendado pro ramo escolhido (ex.: Advocacia → Growth +
+  // Advocacia). Escolher o bundle no cadastro ativa o add-on do módulo central,
+  // então o 1º login já mostra a tela da vertical.
+  const [bundles, setBundles] = useState<any[]>([]);
+  const [bundleKey, setBundleKey] = useState('');
 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -113,10 +118,15 @@ export function LoginView() {
   useEffect(() => {
     fetch('/api/plans').then(r => r.json()).then(d => setPlans(Array.isArray(d) ? d : [])).catch(() => {});
     fetch('/api/verticals').then(r => r.json()).then(d => setVerticals(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch('/api/plans/bundles').then(r => r.json()).then(d => setBundles(Array.isArray(d?.bundles) ? d.bundles : [])).catch(() => {});
   }, []);
 
   const brl = (v?: number) => `R$ ${Number(v || 0).toLocaleString('pt-BR')}`;
   const selectedPlan = plans.find(p => p.id === planId);
+  // Bundle recomendado pro ramo escolhido (verticalHints). Trocar de ramo limpa
+  // a escolha do bundle (evita mandar bundle de outra vertical).
+  const recommendedBundle = vertical ? bundles.find((b: any) => Array.isArray(b?.verticalHints) && b.verticalHints.includes(vertical)) : null;
+  useEffect(() => { setBundleKey(''); }, [vertical]);
 
   // ADR-154 F6.1 — cadastro Solo. Passos: POST /api/onboarding-solo → guarda
   // orgId + qrBase64 → auto-login em background pra guardar Bearer necessário
@@ -281,7 +291,8 @@ export function LoginView() {
           payload.organizationName = organizationName;
           payload.vertical = vertical;       // ramo → configura a conta e pula o onboarding
           payload.sizeRange = sizeRange;
-          if (planId) payload.planId = planId;
+          if (bundleKey) payload.bundleKey = bundleKey;  // bundle do ramo: plano-base + add-on do módulo central
+          if (planId) payload.planId = planId;           // ignorado se bundleKey vier (basePlan tem prioridade)
         }
         
         const res = await fetch('/api/auth/register', {
@@ -619,6 +630,28 @@ export function LoginView() {
                         </select>
                         <p className="mt-1 text-xs text-zinc-500">Já deixa o ZapFlow configurado para o seu tipo de negócio — sem passo extra depois.</p>
                       </div>
+
+                      {/* Bundle recomendado pro ramo (ADR-153 F2.2): quando o ramo
+                          tem um módulo central de tier alto (Clínica/Advocacia/
+                          Escola), o bundle Growth+add-on desbloqueia esse módulo
+                          já no cadastro — senão a tela da vertical não apareceria. */}
+                      {recommendedBundle && (
+                        <button
+                          type="button"
+                          onClick={() => setBundleKey(bundleKey === recommendedBundle.key ? '' : recommendedBundle.key)}
+                          className={`w-full text-left rounded-md border p-3 transition-colors ${bundleKey === recommendedBundle.key ? 'border-emerald-500 bg-emerald-500/10' : 'border-zinc-800 bg-zinc-950 hover:border-emerald-500/50'}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-emerald-300">🎯 Recomendado: {recommendedBundle.name}</span>
+                            {bundleKey === recommendedBundle.key && <span className="text-emerald-400">✓</span>}
+                          </div>
+                          <p className="mt-0.5 text-xs text-zinc-400">
+                            {brl(recommendedBundle.priceMonthly)}/mês
+                            {recommendedBundle.bundleDiscount?.savingsPercent ? ` · economia de ${recommendedBundle.bundleDiscount.savingsPercent}%` : ''}
+                            {' '}— já habilita a tela completa do seu ramo.
+                          </p>
+                        </button>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-zinc-300 mb-1">Tamanho da Empresa</label>
                         <select 

@@ -72,6 +72,25 @@ export class AddonService {
     return { ok: true, price: item.price };
   }
 
+  /**
+   * Ativa um add-on como parte de um BUNDLE vertical (ADR-153 F2.2). A OFERTA do
+   * bundle autoriza o add-on independentemente do catálogo do plano-base — ex.:
+   * "Growth + Clínica" concede o add-on `clinica` (que no avulso vive no tier
+   * Scale). Por isso NÃO passa por `catalogFor` (que barraria). Idempotente;
+   * preço vem do catálogo (qualquer tier) só p/ registro. Mock billing, igual
+   * `contract`. A cobrança real do bundle é da F5.2 (SubscriptionOrchestrator).
+   */
+  static grantForBundle(orgId: string, key: string): { ok: boolean } {
+    if (this.isActive(orgId, key)) return { ok: true };
+    let price = 0;
+    for (const arr of Object.values(this.ADDON_CATALOG)) {
+      const it = arr.find((c) => c.key === key);
+      if (it) { price = it.price; break; }
+    }
+    db.prepare(`INSERT INTO org_addons (id, organization_id, addon_key, price, status) VALUES (?, ?, ?, ?, 'active')`).run(uuidv4(), orgId, key, price);
+    return { ok: true };
+  }
+
   /** Cancela um add-on ativo (o módulo perde acesso pelo teto no próximo isEnabled). */
   static cancel(orgId: string, key: string): { ok: boolean } {
     db.prepare(`UPDATE org_addons SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND addon_key = ? AND status = 'active'`).run(orgId, key);

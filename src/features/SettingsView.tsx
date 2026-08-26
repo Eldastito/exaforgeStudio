@@ -219,6 +219,12 @@ export function SettingsView() {
 
           </form>
           </div>
+
+          {/* Ramo do negócio (vertical) — troca leigo-friendly. O onboarding só
+              roda 1x; sem isto não havia caminho simples pra mudar o ramo de
+              uma conta existente e fazer a tela dedicada (ex.: Advocacia)
+              aparecer no menu. Trocar reaplica o preset de módulos da vertical. */}
+          <BusinessVerticalCard />
           </>
           )}
 
@@ -258,6 +264,96 @@ type Snapshot = {
   limits: any;
 };
 type Invoice = { id: string; status: string; value: number; dueDate: string; invoiceUrl: string };
+
+// Card de troca do RAMO do negócio (vertical). Leigo-friendly: escolhe o ramo
+// num select, confirma, e a tela dedicada da vertical aparece no menu na hora
+// (recarrega os entitlements → o Sidebar lê `vertical` do store). Aditivo/
+// reversível — trocar de volta reaplica o outro preset. Nunca inventa vertical
+// (o backend só aceita chave do catálogo).
+function BusinessVerticalCard() {
+  const vertical = useStore(s => s.vertical);
+  const loadEntitlements = useStore(s => s.loadEntitlements);
+  const [cats, setCats] = useState<{ key: string; label: string; icon?: string }[]>([]);
+  const [sel, setSel] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/analytics/verticals')
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setCats(d); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { setSel(vertical || ''); }, [vertical]);
+
+  const current = cats.find(c => c.key === vertical);
+  const target = cats.find(c => c.key === sel);
+  const changed = !!sel && sel !== (vertical || '');
+
+  const apply = async () => {
+    if (!target) return;
+    const ok = await confirmDialog(
+      `Trocar o ramo do negócio para "${target.label}"?\n\nIsto ajusta os módulos e as telas que aparecem no menu para esse tipo de negócio. Você pode trocar de volta a qualquer momento.`
+    );
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/analytics/settings/vertical', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vertical: sel }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d?.success) {
+        await loadEntitlements(); // atualiza `vertical` no store → Sidebar reage na hora
+        toast.success(`Ramo alterado para ${target.label}. O menu já foi atualizado.`);
+      } else {
+        toast.error(d?.error === 'vertical_desconhecida' ? 'Ramo inválido.' : (d?.error || 'Falha ao trocar o ramo.'));
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Falha ao trocar o ramo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Briefcase className="w-5 h-5 text-teal-300" />
+        <h3 className="text-base font-semibold text-zinc-100">Ramo do negócio</h3>
+      </div>
+      <p className="text-sm text-zinc-400 mb-4">
+        Define quais telas e módulos aparecem no menu. Ex.: escolher <b>Advocacia / Jurídico</b>
+        {' '}liga a tela <b>Advocacia</b> (processos, prazos, audiências) no menu lateral.
+      </p>
+
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex-1">
+          <label className="text-sm font-medium text-zinc-400 mb-1 block">Ramo atual</label>
+          <select
+            value={sel}
+            onChange={e => setSel(e.target.value)}
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 focus:border-teal-400 outline-none"
+          >
+            {!vertical && <option value="">Selecione o ramo…</option>}
+            {cats.map(c => (
+              <option key={c.key} value={c.key}>{c.icon ? `${c.icon} ` : ''}{c.label}</option>
+            ))}
+          </select>
+          <p className="text-xs text-zinc-500 mt-1">
+            {current ? `Hoje: ${current.icon ? current.icon + ' ' : ''}${current.label}` : 'Nenhum ramo definido ainda.'}
+          </p>
+        </div>
+        <Button
+          onClick={apply}
+          disabled={!changed || saving}
+          className="zf-button zf-button-primary whitespace-nowrap"
+        >
+          {saving ? 'Trocando…' : 'Trocar ramo'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function BillingPanel() {
   const loadOrgConfigForSidebar = useStore(s => s.loadOrgConfig);

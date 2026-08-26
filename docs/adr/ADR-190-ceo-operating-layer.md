@@ -65,6 +65,11 @@ pilar + restrição nº1 rotulada HIPÓTESE + meta ameaçada) e a **visão** dec
 indicador sem fonte → "—" (nunca 0); negócio calmo → "Tudo sob controle nos 3 pilares"; a IA
 NÃO entra (leitura determinística do snapshot). UI-only sobre backend testado (padrão F4b/F8b);
 `tsc` + `vite build` verdes. Aditivo/reversível; 0-regressão (só adiciona uma aba).
+**Complemento:** a aba "Minha empresa" ganhou também os cards **Financeiro** (F7 `/finance`:
+caixa/sobrevivência/a-receber/vencido/inadimplência/margem/resultado, honesto "—" sem fonte)
+e **Dependência de pessoas** (§38 `/key-person`: só mostra dimensões high/medium, `topShare%`
+por pessoa, rotulado hipótese) — fechando o gap de endpoints testados sem superfície. UI-only,
+`tsc`+`vite build` verdes, 0-regressão.
 
 ## 17. Briefing proativo (diferida, agora entregue)
 

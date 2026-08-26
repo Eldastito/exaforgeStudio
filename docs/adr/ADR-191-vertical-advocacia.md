@@ -1,6 +1,6 @@
 # ADR-191 — Vertical Escritório de Advocacia
 
-**Estado:** **F0–F11 FECHADAS (#1358–#1369) — vertical completa + timesheet. Diferidos em andamento: F12 (honorário de êxito / success fee) EM PR.**
+**Estado:** **F0–F12 FECHADAS (#1358–#1370) — vertical + honorários (por-hora/êxito) completos. UI: F13-UI (núcleo operacional + setup) EM PR.**
 **Data:** 2026-08-26.
 **Natureza:** vertical de 1ª classe que **COMPÕE** módulos existentes (agenda + CRM + documentos +
 financeiro + tarefas + o modelo longitudinal da clínica), sem motor novo onde já há um. Espelha o
@@ -75,7 +75,9 @@ Reconhecimento sobre o monolito (`src/server/*.ts` + `db.ts`, tudo por `organiza
 
 - **F12 (EM PR)** honorário de **êxito / success fee** (2º diferido do F8, borda nova autocontida): `legal_success_fees` + `LegalSuccessFeeService`. Percentual ACORDADO sobre o PROVEITO ECONÔMICO do processo, cobrado só quando o resultado se confirma. **RN-ADV-07 (o ponto sensível):** o acordo nasce `pending` com `base_amount`/`amount` NULL — a IA NUNCA arbitra o valor da causa; o proveito econômico é informado pelo HUMANO na `confirm`, e só então `amount = base × percent/100` vira honorário FIXO (reuso F8 → `receivable`). `preview` calcula sem persistir; `agree`/`confirm`(idempotente)/`cancel`(pendente); confirmado não cancela o acordo (cancela-se o honorário gerado). Percentual validado (0 < % ≤ 100). Dinheiro role-gated (§73). Rotas `/api/advocacia/success-fees*`. `test:legal-success-fee` (19).
 
-**Diferidos restantes:** federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
+- **F13-UI (EM PR)** UI da vertical — 1ª fatia (núcleo operacional + setup). `src/features/AdvocaciaView.tsx` (espelha `ClinicAgendaView`: `apiFetch`, tabs locais, `toast`, cards Tailwind; hook local `useLegalTerms`; acento índigo). Abas: **Processos** (listar + criar com cliente/área/advogado/CNJ/tribunal + encerrar/reabrir) · **Prazos** (calculadora de preview com aviso `holidaysLoaded` + listar/criar/concluir/cancelar; prazo fatal/vencido destacado) · **Configuração** (áreas do direito: criar/seed-defaults; advogados: criar com OAB). Wiring: `ViewMode` `'advocacia'` + `App.tsx` (título + render sob `ErrorBoundary`) + `Sidebar` (NavItem gated por `vertical === 'advocacia'`, ícone `Gavel`). UI-only sobre as rotas testadas F0–F12; tsc + build verdes. Próxima fatia de UI: audiências + documentos + honorários (fees/timesheet/êxito) + sigilo.
+
+**Diferidos restantes:** UI (2ª fatia: audiências/documentos/honorários/sigilo) · federação OAB (ADR-180) · integração com tribunais (PJe/e-SAJ — depende de terceiro).
 
 ## 5. Defaults honestos adotados (o dono veta na revisão do F0)
 

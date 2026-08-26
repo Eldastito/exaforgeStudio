@@ -45,6 +45,7 @@ export class ModuleService {
     "retail-floor": "retail_floor",
     comigo: "copiloto",
     escola: "escola",
+    advocacia: "advocacia",
   };
 
   // Rótulos + descrição de cada módulo opcional (fonte única p/ a tela de Módulos).
@@ -75,6 +76,7 @@ export class ModuleService {
     retail_floor: { label: "Atendimento de Loja", desc: "Lista da vez, cronômetro de atendimento, desfechos, consulta de estoque no atendimento e conciliação com o PDV." },
     copiloto: { label: "Comigo (Copiloto)", desc: "Balcão de vendas por toque + precificação (quanto custa, quanto cobrar, quanto sobra) + fiado com limite e caderneta. Disponível em todos os planos (ADR-153 F2.1)." },
     escola: { label: "Escola", desc: "Conecta a escola à família: resumo diário do aluno ao responsável no WhatsApp + sinais de coordenação." },
+    advocacia: { label: "Advocacia", desc: "Escritório de advocacia: processos, prazos em dias úteis, audiências, documentos e honorários." },
   };
 
   /**

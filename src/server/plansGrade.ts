@@ -28,7 +28,7 @@ const AUTONOMO = ["catalogo", "agenda", "vendas", "pagamentos", "integracoes", "
 const START = [...AUTONOMO, "campanhas", "areas", "diretor"];
 const GROWTH = [...START, "cadencias", "assinaturas", "orcamentos", "reservas", "estudio"];
 const SCALE = [...GROWTH, "compras", "eventos", "rie", "execucao", "radar", "retail", "valor"];
-const ENTERPRISE = [...SCALE, "vms", "clinica", "prospect"];
+const ENTERPRISE = [...SCALE, "vms", "clinica", "prospect", "advocacia"];
 
 export type PlanGradeRow = {
   id: string;

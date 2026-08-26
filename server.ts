@@ -98,6 +98,7 @@ import insightsRoutes from "./src/server/routes/insights.js";
 import controlerRoutes from "./src/server/routes/controler.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import { PlanService } from "./src/server/PlanService.js";
+import { PLAN_BUNDLES } from "./src/server/plansGrade.js";
 import instagramOAuthRoutes, { instagramCallback } from "./src/server/routes/instagramOAuth.js";
 import { GoogleOAuthService } from "./src/server/GoogleOAuthService.js";
 import storefrontRoutes from "./src/server/routes/storefront.js";
@@ -548,6 +549,14 @@ async function startServer() {
   // do /api/plans: a página de signup precisa dela sem sessão.
   app.get("/api/verticals", (_req, res): any => {
     try { res.json(ModuleService.catalog()); }
+    catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Bundles verticais — PÚBLICO (pré-login) para o cadastro recomendar o bundle
+  // do ramo escolhido (ex.: Advocacia → "Growth + Advocacia"). Sombreia o GET
+  // protegido de /plans/bundles (registrado antes do protectedApi, como /plans).
+  app.get("/api/plans/bundles", (_req, res): any => {
+    try { res.json({ bundles: PLAN_BUNDLES }); }
     catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 

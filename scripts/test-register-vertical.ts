@@ -85,6 +85,36 @@ async function main() {
     // ═══ 5. catálogo público de verticais (usado pelo seletor do cadastro) ═══
     const cat = ModuleService.catalog();
     check("5.1 catálogo de verticais não-vazio e com chaves conhecidas", Array.isArray(cat) && cat.some((v: any) => v.key === "educacao") && cat.some((v: any) => v.key === "advocacia"));
+
+    // ═══ 6. cadastro com BUNDLE → ativa o add-on do módulo central + habilita a tela ═══
+    // Growth + Advocacia: basePlan=growth (não inclui advocacia), add-on advocacia
+    // (que no avulso vive no Scale) é concedido pela OFERTA → módulo advocacia liga.
+    const e6 = `f_${randomUUID().slice(0, 8)}@t.com`;
+    r = await register({ name: "Adv Bundle", email: e6, password: pw, organizationName: "Adv Bundle", vertical: "advocacia", bundleKey: "growth_advocacia" });
+    check("6.1 register 201", r.status === 201, `status=${r.status} ${JSON.stringify(r.j)}`);
+    const o6 = orgOf(e6);
+    check("6.2 basePlan do bundle aplicado (plan_id=growth)", o6?.plan_id === "growth");
+    check("6.3 vertical=advocacia + onboarding completed", o6?.vertical === "advocacia" && o6?.onboarding_status === "completed");
+    const addonActive = !!db.prepare(`SELECT 1 FROM org_addons WHERE organization_id=? AND addon_key='advocacia' AND status='active'`).get(o6.organization_id);
+    check("6.4 add-on advocacia ATIVO (concedido pela oferta, fora do catálogo do Growth)", addonActive);
+    const em6: string[] = JSON.parse(o6?.enabled_modules || "[]");
+    check("6.5 módulo advocacia HABILITADO (tela aparece no 1º login)", em6.includes("advocacia"));
+
+    // ═══ 7. bundleKey sozinho (sem vertical explícita) usa o hint do bundle ═══
+    const e7 = `g_${randomUUID().slice(0, 8)}@t.com`;
+    r = await register({ name: "Escola Bundle", email: e7, password: pw, organizationName: "Escola Bundle", bundleKey: "growth_escola" });
+    check("7.1 register 201", r.status === 201);
+    const o7 = orgOf(e7);
+    check("7.2 vertical inferida do hint do bundle (educacao)", o7?.vertical === "educacao");
+    const em7: string[] = JSON.parse(o7?.enabled_modules || "[]");
+    check("7.3 módulo escola habilitado via bundle", em7.includes("escola"));
+
+    // ═══ 8. bundleKey inválido → ignorado (cai no fluxo normal) ═══
+    const e8 = `h_${randomUUID().slice(0, 8)}@t.com`;
+    r = await register({ name: "Bundle Falso", email: e8, password: pw, organizationName: "Bundle Falso", vertical: "varejo", bundleKey: "bundle_que_nao_existe" });
+    check("8.1 register 201", r.status === 201);
+    const o8 = orgOf(e8);
+    check("8.2 bundle inválido ignorado (vertical varejo aplicada, sem add-on)", o8?.vertical === "varejo" && !db.prepare(`SELECT 1 FROM org_addons WHERE organization_id=? AND status='active'`).get(o8.organization_id));
   } finally {
     server.close();
   }

@@ -904,6 +904,13 @@ export class Scheduler {
       import("./ExecutiveProactiveService.js").then((m) => m.ExecutiveProactiveService.pass())
         .catch((e) => console.error('[Scheduler] briefing executivo falhou', e));
     } catch (e) { console.error('[Scheduler] pass de briefing executivo falhou', e); }
+    // Prazos processuais (ADR-191 F5): sinaliza na espinha os PRAZOS FATAIS abertos
+    // vencendo em ≤3 dias úteis (ou já vencidos) das orgs de advocacia. Nunca inventa —
+    // só o que está armazenado. Perder prazo é erro profissional. Best-effort.
+    try {
+      import("./LegalDeadlineService.js").then((m) => m.LegalDeadlineService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de prazo processual falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de prazo processual falhou', e); }
     // Controladoria (ADR-185 F3): sinal advisory de despesa não apropriada a centro de custo.
     // Só orgs com centro ativo; hipótese, nunca apropria sozinho. Best-effort.
     try {

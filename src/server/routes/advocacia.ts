@@ -2,6 +2,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { LegalPracticeService } from "../LegalPracticeService.js";
 import { LegalCaseService } from "../LegalCaseService.js";
+import { LegalDeadlineService } from "../LegalDeadlineService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -118,6 +119,73 @@ router.post("/cases/:id/reopen", requireRole("owner", "admin"), (req: AuthReques
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(LegalCaseService.reopen(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Prazos processuais (ADR-191 F5) ──
+router.get("/holidays", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const year = req.query.year ? Number(req.query.year) : undefined;
+  res.json({ holidays: LegalDeadlineService.listHolidays(orgId, year) });
+});
+
+router.post("/holidays", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    if (!b.date || !b.name) return res.status(400).json({ error: "Informe data (YYYY-MM-DD) e nome." });
+    LegalDeadlineService.addHoliday(orgId, String(b.date), String(b.name), b.type || "local");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/holidays/seed/:year", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalDeadlineService.seedNationalHolidays(orgId, Number(req.params.year))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// Preview da data-fim SEM persistir (calculadora de prazo).
+router.post("/deadlines/preview", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalDeadlineService.computeDeadline(orgId, String(b.publicationDate), Number(b.termDays), b.countingMode === "calendar" ? "calendar" : "business"));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.get("/deadlines", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  res.json({ deadlines: LegalDeadlineService.list(orgId, { status, caseId }) });
+});
+
+router.post("/deadlines", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalDeadlineService.create(orgId, { caseId: b.caseId, title: b.title, publicationDate: b.publicationDate, termDays: Number(b.termDays), countingMode: b.countingMode, isFatal: b.isFatal }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/deadlines/:id/complete", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalDeadlineService.complete(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/deadlines/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalDeadlineService.cancel(orgId, req.params.id, actor(req))); }
   catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 

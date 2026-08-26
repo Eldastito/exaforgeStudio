@@ -8,7 +8,7 @@
  */
 import db from "./db.js";
 
-export type PetHistoryKind = "vaccination" | "hospitalization" | "surgery" | "appointment" | "grooming";
+export type PetHistoryKind = "vaccination" | "treatment" | "hospitalization" | "surgery" | "appointment" | "grooming";
 export interface PetHistoryEvent {
   kind: PetHistoryKind;
   at: string | null;      // ISO — chave de ordenação (mais recente primeiro)
@@ -33,6 +33,18 @@ export class ClinicPetHistoryService {
           kind: "vaccination", at: r.applied_at || r.created_at || null,
           title: `Vacina ${r.vaccine}`,
           detail: [r.dose, r.next_due_at ? `próxima ${r.next_due_at}` : null].filter(Boolean).join(" · ") || null,
+          status: r.status || null, refId: r.id,
+        });
+      }
+    }
+    if (want("treatment")) {
+      const LABEL: Record<string, string> = { vermifugo: "Vermífugo", antipulga: "Antipulgas", carrapaticida: "Carrapaticida", outro: "Tratamento" };
+      const rows = db.prepare(`SELECT id, treatment_type, product, applied_at, next_due_at, status, created_at FROM clinic_pet_preventive_treatments WHERE organization_id = ? AND pet_id = ?`).all(orgId, petId) as any[];
+      for (const r of rows) {
+        events.push({
+          kind: "treatment", at: r.applied_at || r.created_at || null,
+          title: LABEL[r.treatment_type] || "Tratamento",
+          detail: [r.product, r.next_due_at ? `próxima ${r.next_due_at}` : null].filter(Boolean).join(" · ") || null,
           status: r.status || null, refId: r.id,
         });
       }

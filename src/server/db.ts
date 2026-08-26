@@ -10730,6 +10730,35 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_legal_time_client ON legal_time_entries (organization_id, contact_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar legal_time_entries', e); }
+
+  // ADR-191 F12 — Honorário de ÊXITO (success fee). Diferido do F8: percentual ACORDADO
+  // sobre o PROVEITO ECONÔMICO do processo, cobrado só quando o resultado se confirma.
+  // RN-ADV-07 (nunca inventa dinheiro): fica `pending` com `base_amount`/`amount` NULL até
+  // o HUMANO informar o proveito econômico na confirmação (a IA NUNCA arbitra o valor da
+  // causa); confirmar vira honorário FIXO (reuso F8 → receivable). Isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_success_fees (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        case_id TEXT NOT NULL,                            -- êxito é sempre sobre um processo
+        contact_id TEXT NOT NULL,                         -- cliente
+        description TEXT NOT NULL,
+        percent REAL NOT NULL,                            -- % acordado sobre o proveito econômico
+        base_amount REAL,                                 -- proveito econômico (NULL até confirmar — nunca inventado)
+        amount REAL,                                      -- base × percent/100 (NULL até confirmar)
+        status TEXT NOT NULL DEFAULT 'pending',           -- pending | confirmed | cancelled
+        fee_id TEXT,                                      -- honorário fixo gerado na confirmação (F8)
+        confirmed_at DATETIME,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_success_org ON legal_success_fees (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_legal_success_case ON legal_success_fees (organization_id, case_id);
+      CREATE INDEX IF NOT EXISTS idx_legal_success_client ON legal_success_fees (organization_id, contact_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_success_fees', e); }
 };
 
 initDb();

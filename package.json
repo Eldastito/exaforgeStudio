@@ -236,6 +236,7 @@
     "test:legal-terms": "tsx scripts/test-legal-terms.ts",
     "test:legal-practice-areas": "tsx scripts/test-legal-practice-areas.ts",
     "test:legal-case": "tsx scripts/test-legal-case.ts",
+    "test:legal-deadline": "tsx scripts/test-legal-deadline.ts",
     "test:clinic-pet": "tsx scripts/test-clinic-pet.ts",
     "test:clinic-grooming": "tsx scripts/test-clinic-grooming.ts",
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",

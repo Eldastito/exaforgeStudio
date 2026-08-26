@@ -10152,6 +10152,46 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar legal_cases', e); }
 
+  // ── ADR-191 F5 — Prazos processuais (vertical Advocacia) ──
+  // `legal_holidays`: calendário de feriados POR-ORG (o escritório configura o seu:
+  // nacionais + forenses móveis + recesso + locais/tribunal). Nunca inventado — a
+  // contagem em dias úteis só é confiável com o calendário carregado (a UI avisa
+  // quando não há cobertura). `legal_deadlines`: o prazo em si, com a data-fim
+  // DERIVADA pelo motor (dias úteis) e materializado numa `task` (reuso ADR-171/172).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_holidays (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        date TEXT NOT NULL,                              -- YYYY-MM-DD
+        name TEXT NOT NULL,
+        holiday_type TEXT DEFAULT 'national',            -- national|forum_movable|forum_recess|local
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_legal_holiday_date ON legal_holidays (organization_id, date);
+
+      CREATE TABLE IF NOT EXISTS legal_deadlines (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        case_id TEXT,                                    -- processo (legal_cases); nullable (prazo avulso)
+        title TEXT NOT NULL,
+        publication_date TEXT NOT NULL,                  -- data da publicação/intimação (YYYY-MM-DD)
+        term_days INTEGER NOT NULL,                       -- nº de dias do prazo
+        counting_mode TEXT NOT NULL DEFAULT 'business',   -- business (dias úteis, CPC) | calendar (corridos)
+        due_date TEXT NOT NULL,                           -- data-fim DERIVADA pelo motor
+        is_fatal INTEGER DEFAULT 1,                        -- prazo fatal (peremptório)?
+        status TEXT NOT NULL DEFAULT 'open',              -- open|done|cancelled
+        task_id TEXT,                                     -- tarefa materializada (ADR-171)
+        holidays_loaded INTEGER DEFAULT 0,                -- havia cobertura de feriado no período? (honestidade)
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_deadlines_org ON legal_deadlines (organization_id, status, due_date);
+      CREATE INDEX IF NOT EXISTS idx_legal_deadlines_case ON legal_deadlines (organization_id, case_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_deadlines', e); }
+
   // ── ADR-180 F1 — Professional Identity & Federated Calendar (Agenda Federada) ──
   // Decisão de fronteira (§90): o profissional pertence ao ECOSSISTEMA ZapFlow, não
   // a uma clínica. Espelha vertical_intelligence (GLOBAL, sem organization_id) +

@@ -5,6 +5,7 @@ import { LegalCaseService } from "../LegalCaseService.js";
 import { LegalDeadlineService } from "../LegalDeadlineService.js";
 import { LegalHearingService } from "../LegalHearingService.js";
 import { LegalDocumentService } from "../LegalDocumentService.js";
+import { LegalFeeService } from "../LegalFeeService.js";
 
 // ADR-191 F3/F4 — áreas do direito + advogados + processos (composição sobre a clínica).
 // Namespace próprio /api/advocacia (o /api/legal é a Consultora CDC/Trabalhista, ADR-115/178).
@@ -304,6 +305,57 @@ router.get("/documents/:id/pdf", async (req: AuthRequest, res): Promise<any> => 
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(pdf);
   } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+// ── Honorários (ADR-191 F8 — fixo→receivable, avença→subscription). Dinheiro role-gated (§73). ──
+router.get("/fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  res.json({ fees: LegalFeeService.list(orgId, { caseId, contactId, status }) });
+});
+
+router.get("/fees/statement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const caseId = typeof req.query.caseId === "string" ? req.query.caseId : undefined;
+  const contactId = typeof req.query.contactId === "string" ? req.query.contactId : undefined;
+  if (!caseId && !contactId) return res.status(400).json({ error: "Informe caseId ou contactId." });
+  res.json(LegalFeeService.statement(orgId, { caseId, contactId }));
+});
+
+router.post("/fees/fixed", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalFeeService.createFixed(orgId, { caseId: b.caseId, contactId: b.contactId, description: b.description, amount: Number(b.amount), dueDate: b.dueDate }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/fees/retainer", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json(LegalFeeService.createRetainer(orgId, { caseId: b.caseId, contactId: b.contactId, description: b.description, amount: Number(b.amount), startDate: b.startDate }, actor(req)));
+  } catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/fees/:id/pay", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalFeeService.markFixedPaid(orgId, req.params.id, { date: req.body?.date, accountId: req.body?.accountId }, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+});
+
+router.post("/fees/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(LegalFeeService.cancel(orgId, req.params.id, actor(req))); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "erro" }); }
 });
 
 export default router;

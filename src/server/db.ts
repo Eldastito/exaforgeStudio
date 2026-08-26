@@ -10665,6 +10665,35 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_legal_documents_client ON legal_documents (organization_id, contact_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar legal_documents', e); }
+
+  // ADR-191 F8 — Honorários. COMPÕE o financeiro existente (D7): honorário FIXO vira
+  // `receivable` (FinancialLedgerService), AVENÇA mensal vira `subscription`
+  // (SubscriptionService). `legal_fees` é só o ELO (processo/cliente ↔ instrumento
+  // financeiro) — não duplica o razão. RN-ADV-07: nunca inventa dinheiro (valor acordado
+  // obrigatório; sem valor não cria). Por-hora/êxito DEFERIDOS. Isolado por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS legal_fees (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        case_id TEXT,                                     -- processo (nullable — honorário do cliente sem processo)
+        contact_id TEXT NOT NULL,                         -- cliente
+        fee_type TEXT NOT NULL,                           -- fixo | avenca
+        description TEXT NOT NULL,
+        amount REAL NOT NULL,                             -- fixo: total; avença: mensal
+        status TEXT NOT NULL DEFAULT 'active',            -- active | cancelled
+        receivable_id TEXT,                               -- fixo → receivable
+        plan_id TEXT,                                     -- avença → plano
+        subscription_id TEXT,                             -- avença → assinatura
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_legal_fees_org ON legal_fees (organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_legal_fees_case ON legal_fees (organization_id, case_id);
+      CREATE INDEX IF NOT EXISTS idx_legal_fees_client ON legal_fees (organization_id, contact_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar legal_fees', e); }
 };
 
 initDb();

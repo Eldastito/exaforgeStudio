@@ -10913,6 +10913,42 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_pel_gh_cache_expires ON product_evolution_github_cache (expires_at);
     `);
   } catch (e) { console.error('[DB] Falha ao criar product_evolution_github_cache', e); }
+
+  // ADR-194 F1 — Visual Recipe Engine (contrato + resolver).
+  // GLOBAL (sem organization_id nesta fatia; F5 pode adicionar overrides per-org).
+  // Recipes são versionadas: nova versão = nova linha (INSERT), UPDATE de key rejeitado.
+  // Aliases são globais e case-insensitive na resolução.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS studio_visual_recipes (
+        id TEXT PRIMARY KEY,
+        recipe_key TEXT NOT NULL,               -- ^[A-Z][A-Z0-9_]{2,63}$ (RN-VRE-1)
+        version INTEGER NOT NULL DEFAULT 1,     -- monótona; nova versão = nova linha
+        active INTEGER NOT NULL DEFAULT 1,      -- 0/1 — 1 versão active por key
+        name TEXT NOT NULL,
+        description TEXT,
+        intent TEXT,                            -- product_hero | lifestyle | magazine_cover | etc
+        composition_json TEXT,                  -- JSON: camera, lighting, background, etc
+        provider_hints_json TEXT,               -- JSON: {preferred: [...], avoid: [...]}
+        constraints_json TEXT,                  -- JSON: preserve_product_identity, allow_text, etc
+        supported_formats_json TEXT NOT NULL,   -- JSON array: ≥1 formato (RN-VRE-4)
+        vertical_hints_json TEXT,               -- JSON array: verticals sugeridas
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (recipe_key, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_svr_key ON studio_visual_recipes (recipe_key);
+      CREATE INDEX IF NOT EXISTS idx_svr_active ON studio_visual_recipes (recipe_key, active);
+
+      CREATE TABLE IF NOT EXISTS studio_visual_recipe_aliases (
+        id TEXT PRIMARY KEY,
+        alias TEXT NOT NULL UNIQUE,             -- storage case original; resolve case-insensitive
+        recipe_key TEXT NOT NULL,               -- aponta pra active version
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_svra_lower ON studio_visual_recipe_aliases (LOWER(alias));
+      CREATE INDEX IF NOT EXISTS idx_svra_key ON studio_visual_recipe_aliases (recipe_key);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar studio_visual_recipes', e); }
 };
 
 initDb();

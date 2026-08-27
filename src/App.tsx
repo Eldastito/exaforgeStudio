@@ -43,6 +43,7 @@ import { EscutaView } from '@/src/features/EscutaView';
 import { StorefrontSettingsView } from '@/src/features/StorefrontSettingsView';
 import { AreasView } from '@/src/features/AreasView';
 import { AdminMasterView } from '@/src/features/AdminMasterView';
+import { ProductEvolutionView } from '@/src/features/ProductEvolutionView';
 import { AiUsageDashboardView } from '@/src/features/AiUsageDashboardView';
 import { NicheIntelligenceView } from '@/src/features/NicheIntelligenceView';
 import { ProductionReadinessView } from '@/src/features/ProductionReadinessView';
@@ -460,6 +461,7 @@ export default function App() {
              {viewMode === 'manifesto' && 'Manifesto da Marca'}
              {viewMode === 'escuta' && 'Escuta Ativa'}
              {viewMode === 'admin' && 'Admin Master'}
+             {viewMode === 'product_evolution' && 'Product Evolution Ledger'}
              {viewMode === 'ai_usage' && 'Consumo de IA'}
              {viewMode === 'niche_intel' && 'Inteligência de Nicho'}
              {viewMode === 'production_readiness' && 'Prontidão de Produção'}
@@ -587,6 +589,7 @@ export default function App() {
           {viewMode === 'manifesto' && <ManifestoView />}
           {viewMode === 'escuta' && <EscutaView />}
           {viewMode === 'admin' && <AdminMasterView />}
+          {viewMode === 'product_evolution' && <ProductEvolutionView />}
           {viewMode === 'ai_usage' && <AiUsageDashboardView />}
           {viewMode === 'niche_intel' && <NicheIntelligenceView />}
           {viewMode === 'production_readiness' && <ProductionReadinessView />}

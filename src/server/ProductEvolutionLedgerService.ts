@@ -388,6 +388,65 @@ export class ProductEvolutionLedgerService {
         i.updated_at DESC
     `).all() as Item[];
   }
+
+  // ═══════════════ Seed helpers (ADR-193 F5) ═══════════════
+
+  /**
+   * Avança um item pelo grafo até `target_status`, respeitando as transições
+   * permitidas. Usado por scripts de seed que precisam levar um item recém-
+   * criado (IDEA) até um estado observável (ex.: PILOT/PRODUCTION) sem
+   * repetir chamadas manuais de setStatus.
+   *
+   * NÃO tenta atingir VALIDATED (requer evidência verificada — RN-PEL-4).
+   * Se `target_status` == VALIDATED, para em PRODUCTION.
+   *
+   * Idempotente: se já está no target_status ou além, retorna sem mudar.
+   * Se o caminho não existir (ex.: item já REJECTED), retorna sem mudar.
+   */
+  static seedProgressTo(evolution_key: string, target_status: Status, reason: string): Item {
+    const item = this.getItem(evolution_key);
+    if (!item) throw new LedgerNotFoundError(`Item não encontrado: ${evolution_key}`);
+    if (item.status === target_status) return item;
+    // VALIDATED requer evidência — parar em PRODUCTION se alvo é VALIDATED
+    const effectiveTarget: Status = target_status === "VALIDATED" ? "PRODUCTION" : target_status;
+    if (item.status === effectiveTarget) return item;
+
+    // BFS no grafo pra achar caminho mais curto (evita revisitar).
+    const visited = new Set<Status>([item.status as Status]);
+    const parent = new Map<Status, Status>();
+    const queue: Status[] = [item.status as Status];
+    let found = false;
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      if (cur === effectiveTarget) { found = true; break; }
+      for (const next of (STATUS_GRAPH[cur] || [])) {
+        if (visited.has(next)) continue;
+        // Não passa por SUPERSEDED (precisa superseded_by) nem VALIDATED (precisa evid)
+        if (next === "SUPERSEDED" || next === "VALIDATED") continue;
+        visited.add(next);
+        parent.set(next, cur);
+        queue.push(next);
+      }
+    }
+    if (!found) return item; // sem caminho — retorna sem mudar (idempotente)
+
+    // Reconstrói caminho
+    const path: Status[] = [effectiveTarget];
+    let step: Status | undefined = effectiveTarget;
+    while (step && step !== item.status) {
+      const p = parent.get(step);
+      if (!p) break;
+      path.unshift(p);
+      step = p;
+    }
+
+    // Avança passo a passo
+    let last = item;
+    for (let i = 1; i < path.length; i++) {
+      last = this.setStatus(evolution_key, { new_status: path[i], reason });
+    }
+    return last;
+  }
 }
 
 export default ProductEvolutionLedgerService;

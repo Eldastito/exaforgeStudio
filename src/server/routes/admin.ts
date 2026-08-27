@@ -34,8 +34,13 @@ import { HelpKnowledgeService } from "../HelpKnowledgeService.js";
 import { eventsEnabled } from "../ContinuityService.js";
 import { MessageDeliveryService } from "../MessageDeliveryService.js";
 import { EdgeSyncService } from "../EdgeSyncService.js";
+import productEvolutionRoutes from "./productEvolution.js";
 
 const router = Router();
+
+// ADR-193 F1 — Product Evolution Ledger montado como sub-router. Herda
+// `requireMasterAdmin` do mount `/api/admin` em server.ts. GLOBAL (sem org).
+router.use("/product-evolution", productEvolutionRoutes);
 
 // ADR-154 F10.1 — prontidão de produção (master admin). Relatório completo de
 // quais dependências estão configuradas pra vender: blockers, recomendados e

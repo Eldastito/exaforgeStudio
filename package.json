@@ -77,6 +77,7 @@
     "test:capacity-headroom": "tsx scripts/test-capacity-headroom.ts",
     "test:capacity-forecast": "tsx scripts/test-capacity-forecast.ts",
     "test:vps-spec-profile": "tsx scripts/test-vps-spec-profile.ts",
+    "test:product-evolution-ledger": "tsx scripts/test-product-evolution-ledger.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",
     "test:platform-rootcause": "tsx scripts/test-platform-rootcause.ts",
     "test:capacity-recommendation": "tsx scripts/test-capacity-recommendation.ts",

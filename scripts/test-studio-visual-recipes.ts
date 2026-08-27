@@ -189,6 +189,87 @@ async function main() {
   // ═══════════════ 11. Contadores esperados ═══════════════
   check("11.1 SUPPORTED_FORMATS tem 5 valores", SUPPORTED_FORMATS.length === 5);
 
+  // ═══════════════ 12. F2 — generate() com generator fake ═══════════════
+  // Injeta generator fake pra não bater no Google/OpenAI. Retorna base64 dummy
+  // (imagem PNG 1x1 transparente).
+  let generatorCalls = 0;
+  const dummyB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeIVWUcAAAAASUVORK5CYII=";
+  VRE.configureImageGenerator(async (prompt: string, size: string) => {
+    generatorCalls++;
+    return dummyB64;
+  });
+
+  // Precisa criar org fake pra generate funcionar (constraint em studio_creations
+  // aponta pra organization_id, mas não há FK forte — INSERT direto passa).
+  const testOrgId = "org-vre-test-" + Date.now();
+
+  const gen1 = await VRE.generate({
+    orgId: testOrgId,
+    recipe_key_or_alias: "/ProductExplosion",
+    inputs: { produto: "tênis running", marca: "Acme" },
+    format: "feed_1_1",
+    brand_hint: "Loja Acme, paleta pastel, tom minimalista.",
+  });
+  check("12.1 generate() retorna id", typeof gen1.id === "string" && gen1.id.length > 0);
+  check("12.2 mediaUrl começa com /media/", gen1.mediaUrl.startsWith("/media/"));
+  check("12.3 mediaUrl termina em .png", gen1.mediaUrl.endsWith(".png"));
+  check("12.4 recipe_key retornado (resolveu alias)", gen1.recipe_key === "PRODUCT_EXPLOSION");
+  check("12.5 recipe_version > 0", gen1.recipe_version > 0);
+  check("12.6 prompt inclui brand_hint", gen1.prompt.includes("Loja Acme"));
+  check("12.7 prompt inclui inputs", gen1.prompt.includes("tênis running"));
+  check("12.8 generator foi chamado 1x", generatorCalls === 1);
+
+  // Arquivo escrito no MEDIA_DIR
+  const mediaFile = path.join(process.env.DATA_DIR!, "media", gen1.mediaUrl.replace("/media/", ""));
+  check("12.9 arquivo mídia foi escrito no disco", fs.existsSync(mediaFile));
+
+  // Row em studio_creations com marca do recipe
+  const createdRow = db.prepare(
+    "SELECT * FROM studio_creations WHERE id = ?"
+  ).get(gen1.id) as any;
+  check("12.10 studio_creations tem row inserted", !!createdRow);
+  check("12.11 organization_id preservado", createdRow?.organization_id === testOrgId);
+  check("12.12 kind = 'image'", createdRow?.kind === "image");
+  check("12.13 prompt marcado com [KEY@vN]",
+    createdRow?.prompt.startsWith("[PRODUCT_EXPLOSION@v"));
+
+  // ═══════════════ 13. F2 — size mapping ═══════════════
+  // Reset fake pra capturar size
+  let lastSize = "";
+  VRE.configureImageGenerator(async (prompt: string, size: string) => {
+    lastSize = size;
+    return dummyB64;
+  });
+
+  await VRE.generate({ orgId: testOrgId, recipe_key_or_alias: "/LifestyleShort", format: "story_9_16" });
+  check("13.1 story_9_16 → 1024x1536", lastSize === "1024x1536");
+
+  await VRE.generate({ orgId: testOrgId, recipe_key_or_alias: "/3Dbillboard", format: "landscape_16_9" });
+  check("13.2 landscape_16_9 → 1536x1024", lastSize === "1536x1024");
+
+  await VRE.generate({ orgId: testOrgId, recipe_key_or_alias: "/3DSoft", format: "feed_1_1" });
+  check("13.3 feed_1_1 → 1024x1024", lastSize === "1024x1024");
+
+  // ═══════════════ 14. F2 — erros ═══════════════
+  let missingOrg = false;
+  try { await VRE.generate({ orgId: "", recipe_key_or_alias: "/ProductExplosion", format: "feed_1_1" }); }
+  catch (e: any) { missingOrg = e instanceof VisualRecipeError && e.code === "missing_org"; }
+  check("14.1 generate() sem orgId → missing_org", missingOrg);
+
+  let badFormatGenerate = false;
+  try { await VRE.generate({ orgId: testOrgId, recipe_key_or_alias: "/3DSoft", format: "landscape_16_9" }); }
+  catch (e: any) { badFormatGenerate = e instanceof VisualRecipeError && e.code === "format_not_supported"; }
+  check("14.2 generate() com formato não suportado pela recipe → format_not_supported", badFormatGenerate);
+
+  // Provider retorna vazio → 502
+  VRE.configureImageGenerator(async () => "");
+  let empty = false;
+  try { await VRE.generate({ orgId: testOrgId, recipe_key_or_alias: "/ProductExplosion", format: "feed_1_1" }); }
+  catch (e: any) { empty = e instanceof VisualRecipeError && e.code === "provider_empty"; }
+  check("14.3 provider vazio → provider_empty", empty);
+
+  VRE.resetImageGenerator();
+
   // ─── Relatório final ───
   const passed = results.length - failures;
   console.log(`\n${passed}/${results.length} checks OK`);

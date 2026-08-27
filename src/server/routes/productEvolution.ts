@@ -15,6 +15,11 @@ import {
   Status,
 } from "../ProductEvolutionLedgerService.js";
 import { ProductEvolutionScoringService as Scoring } from "../ProductEvolutionScoringService.js";
+import {
+  GitHubEvidenceSyncService as GhSync,
+  GitHubEvidenceSyncError,
+} from "../GitHubEvidenceSyncService.js";
+import db from "../db.js";
 
 const router = Router();
 
@@ -22,6 +27,14 @@ const router = Router();
 function handle(res: any, e: any) {
   if (e instanceof LedgerNotFoundError) return res.status(404).json({ error: e.message });
   if (e instanceof LedgerValidationError) return res.status(400).json({ error: e.message, code: e.code });
+  if (e instanceof GitHubEvidenceSyncError) {
+    // disabled=503, rate_limit=429, github_4xx=502 (upstream)
+    const s = e.code === "disabled" ? 503
+      : e.code === "rate_limit" ? 429
+      : e.code.startsWith("github_") ? 502
+      : 500;
+    return res.status(s).json({ error: e.message, code: e.code });
+  }
   console.error("[product-evolution] erro inesperado", e);
   return res.status(500).json({ error: e?.message || "internal_error" });
 }
@@ -199,6 +212,71 @@ router.get("/items/:key/score", (req: AuthRequest, res): any => {
 router.get("/scores", (_req: AuthRequest, res): any => {
   try {
     return res.json({ scores: Scoring.listAllScores() });
+  } catch (e) { return handle(res, e); }
+});
+
+// ─── GitHub Evidence Sync (ADR-193 F4) ─────────────────────────────────────
+
+router.get("/github/status", (_req: AuthRequest, res): any => {
+  try {
+    return res.json(GhSync.status());
+  } catch (e) { return handle(res, e); }
+});
+
+/**
+ * Sync metadata GitHub para uma evidência já anexada. Nunca cria evidência
+ * nova — o vínculo (item ↔ evidência ↔ ref GitHub) é sempre explícito.
+ *
+ * Body: { kind?: 'pr'|'commit'|'issue' } — se omitido, tenta parsear
+ * `reference` como owner/repo#N (pr) ou owner/repo@sha (commit).
+ *
+ * Efeito: merge do metadata GitHub em `product_evolution_evidence.metadata_json`
+ * sob chave `github` (aditivo; não sobrescreve outras chaves).
+ */
+router.post("/evidence/:id/sync-github", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const evid = db.prepare("SELECT * FROM product_evolution_evidence WHERE id = ?")
+      .get(req.params.id) as any;
+    if (!evid) return res.status(404).json({ error: "evidence not_found" });
+
+    const b = req.body || {};
+    const kindOverride: 'pr' | 'commit' | 'issue' | undefined = b.kind;
+
+    // Parseia reference se kind não veio explícito
+    let owner: string, repo: string, ref: string, kind: 'pr' | 'commit' | 'issue';
+    if (kindOverride && b.owner && b.repo && b.ref) {
+      kind = kindOverride;
+      owner = String(b.owner); repo = String(b.repo); ref = String(b.ref);
+    } else {
+      const parsed = GhSync.parseReference(evid.reference);
+      if (!parsed) {
+        return res.status(400).json({
+          error: `não consegui parsear reference "${evid.reference}". Formato esperado: owner/repo#N ou owner/repo@sha. Ou envie {kind, owner, repo, ref} no body.`,
+          code: "unparseable_reference",
+        });
+      }
+      kind = kindOverride || parsed.kind;
+      owner = parsed.owner; repo = parsed.repo; ref = parsed.ref;
+    }
+
+    let meta;
+    if (kind === "pr") meta = await GhSync.fetchPr(owner, repo, Number(ref));
+    else if (kind === "commit") meta = await GhSync.fetchCommit(owner, repo, ref);
+    else if (kind === "issue") meta = await GhSync.fetchIssue(owner, repo, Number(ref));
+    else return res.status(400).json({ error: `kind inválido: ${kind}` });
+
+    // Merge no metadata_json existente sob chave 'github'
+    let existing: Record<string, any> = {};
+    try { if (evid.metadata_json) existing = JSON.parse(evid.metadata_json); } catch { /* mantém {} */ }
+    existing.github = meta;
+    db.prepare("UPDATE product_evolution_evidence SET metadata_json = ? WHERE id = ?")
+      .run(JSON.stringify(existing), req.params.id);
+
+    return res.json({
+      evidence_id: req.params.id,
+      github: meta,
+      synced_at: new Date().toISOString(),
+    });
   } catch (e) { return handle(res, e); }
 });
 

@@ -10891,6 +10891,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_pel_deps_target ON product_evolution_dependencies (depends_on_item_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar product_evolution_reviews/dependencies', e); }
+
+  // ADR-193 F4 — cache local da API do GitHub (read-only + opt-in).
+  // Kind: 'pr' | 'commit' | 'issue'. Key: `owner/repo#<ref>` (ref = numero ou SHA).
+  // payload_json: resposta compactada (title, author, state, date).
+  // Sem PII de terceiros no payload — só metadata pública.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_evolution_github_cache (
+        id TEXT PRIMARY KEY,
+        cache_key TEXT NOT NULL UNIQUE,        -- <owner>/<repo>#<kind>:<ref>
+        kind TEXT NOT NULL,                    -- 'pr' | 'commit' | 'issue'
+        owner TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        ref TEXT NOT NULL,                     -- número (PR/issue) ou SHA (commit)
+        payload_json TEXT NOT NULL,            -- resposta compactada
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL           -- TTL (default 1h)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_gh_cache_key ON product_evolution_github_cache (cache_key);
+      CREATE INDEX IF NOT EXISTS idx_pel_gh_cache_expires ON product_evolution_github_cache (expires_at);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar product_evolution_github_cache', e); }
 };
 
 initDb();

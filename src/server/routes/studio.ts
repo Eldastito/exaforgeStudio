@@ -7,8 +7,56 @@ import { CampaignObjectiveContractService } from "../CampaignObjectiveContractSe
 import { HookIntelligenceService } from "../HookIntelligenceService.js";
 import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
+import { StudioVisualRecipeService, VisualRecipeError } from "../StudioVisualRecipeService.js";
 
 const router = Router();
+
+// ── Visual Recipes (ADR-194 F1) — catálogo + resolver + prompt plan ──
+
+// GET /api/studio/recipes — lista active versions de todos os recipes
+router.get("/recipes", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json({ recipes: StudioVisualRecipeService.list() });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/studio/recipes/:key — 1 recipe por key OU alias (case-insensitive)
+router.get("/recipes/:key", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const recipe = StudioVisualRecipeService.get(req.params.key);
+    if (!recipe) return res.status(404).json({ error: "not_found" });
+    res.json(recipe);
+  } catch (e: any) {
+    if (e instanceof VisualRecipeError) return res.status(400).json({ error: e.message, code: e.code });
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// POST /api/studio/recipes/plan { recipe: 'KEY_OR_ALIAS', inputs?: {...}, format: 'feed_1_1' }
+router.post("/recipes/plan", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    if (!b.recipe) return res.status(400).json({ error: "recipe é obrigatório" });
+    if (!b.format) return res.status(400).json({ error: "format é obrigatório" });
+    const plan = StudioVisualRecipeService.buildPromptPlan({
+      recipe_key_or_alias: String(b.recipe),
+      inputs: b.inputs || {},
+      format: b.format,
+    });
+    res.json(plan);
+  } catch (e: any) {
+    if (e instanceof VisualRecipeError) {
+      const s = e.code === "recipe_not_found" ? 404 : 400;
+      return res.status(s).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
 
 // ── Channel Adaptation (PRD 11 / ADR-168 F5) — reescreve o conteúdo por canal ──
 

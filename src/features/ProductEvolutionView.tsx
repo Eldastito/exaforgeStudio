@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Layers, Search, Plus, RefreshCcw, AlertTriangle, CheckCircle2,
   ChevronRight, ChevronDown, ExternalLink, Loader2, Clock, GitBranch,
-  Gauge, X,
+  Gauge, X, Github,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
@@ -181,6 +181,7 @@ export function ProductEvolutionView() {
   const [tab, setTab] = useState<Tab>('matrix');
   const [items, setItems] = useState<Item[]>([]);
   const [scores, setScores] = useState<Map<string, Score>>(new Map());
+  const [githubEnabled, setGithubEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -226,6 +227,15 @@ export function ProductEvolutionView() {
 
   useEffect(() => { loadItems(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ },
     [tab, filterStatus, filterDomain]);
+
+  // Fetch GitHub sync status uma vez — habilita/desabilita botão de sync
+  // por evidência. 503 → desabilitado (env não configurada).
+  useEffect(() => {
+    apiFetch('/api/admin/product-evolution/github/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(s => setGithubEnabled(!!s?.enabled))
+      .catch(() => setGithubEnabled(false));
+  }, []);
 
   // Debounce da busca por texto
   useEffect(() => {
@@ -352,6 +362,7 @@ export function ProductEvolutionView() {
                   key={item.id}
                   item={item}
                   score={scores.get(item.evolution_key) || null}
+                  githubEnabled={githubEnabled}
                   expanded={expanded === item.evolution_key}
                   onToggle={() => setExpanded(expanded === item.evolution_key ? null : item.evolution_key)}
                   onChange={loadItems}
@@ -409,12 +420,13 @@ function TabButton({ active, onClick, label, count, icon }: {
 interface ItemRowProps {
   item: Item;
   score: Score | null;
+  githubEnabled: boolean;
   expanded: boolean;
   onToggle: () => void;
   onChange: () => void;
 }
 
-const ItemRow: React.FC<ItemRowProps> = ({ item, score, expanded, onToggle, onChange }) => {
+const ItemRow: React.FC<ItemRowProps> = ({ item, score, githubEnabled, expanded, onToggle, onChange }) => {
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -494,6 +506,7 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, score, expanded, onToggle, onCh
                 reviews={reviews}
                 deps={deps}
                 score={detailScore}
+                githubEnabled={githubEnabled}
                 onChange={onChange}
               />
             )}
@@ -506,9 +519,10 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, score, expanded, onToggle, onCh
 
 // ═══════════════ Item detail (expanded row) ═══════════════
 
-function ItemDetail({ item, evidence, sources, reviews, deps, score, onChange }: {
+function ItemDetail({ item, evidence, sources, reviews, deps, score, githubEnabled, onChange }: {
   item: Item; evidence: Evidence[]; sources: Source[];
   reviews: Review[]; deps: DepsGraph; score: Score | null;
+  githubEnabled: boolean;
   onChange: () => void;
 }) {
   const [dtab, setDtab] = useState<DetailTab>('detail');
@@ -551,7 +565,7 @@ function ItemDetail({ item, evidence, sources, reviews, deps, score, onChange }:
             </div>
           </div>
           <div className="space-y-4">
-            <EvidenceSection item={item} evidence={evidence} onChange={onChange} />
+            <EvidenceSection item={item} evidence={evidence} githubEnabled={githubEnabled} onChange={onChange} />
             <SourceSection item={item} sources={sources} onChange={onChange} />
           </div>
         </div>
@@ -849,8 +863,8 @@ function StatusTransitionForm({ item, allowed, onChange }: {
 
 // ═══════════════ Evidence section ═══════════════
 
-function EvidenceSection({ item, evidence, onChange }: {
-  item: Item; evidence: Evidence[]; onChange: () => void;
+function EvidenceSection({ item, evidence, githubEnabled, onChange }: {
+  item: Item; evidence: Evidence[]; githubEnabled: boolean; onChange: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [type, setType] = useState<string>('code');
@@ -858,6 +872,7 @@ function EvidenceSection({ item, evidence, onChange }: {
   const [desc, setDesc] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<string | null>(null); // id da evidência em sync
 
   const add = async () => {
     if (!ref.trim()) { setErr('reference é obrigatório'); return; }
@@ -891,6 +906,35 @@ function EvidenceSection({ item, evidence, onChange }: {
     } catch (e: any) { alert(e.message); }
   };
 
+  // ADR-193 F4-UI — dispara sync no backend (POST /evidence/:id/sync-github).
+  // Backend parseia `reference` (owner/repo#N ou owner/repo@sha) e faz fetch
+  // read-only da API GitHub, cacheando local. Erros esperados: 429 (rate),
+  // 502 (upstream), 503 (env off).
+  const syncGithub = async (id: string) => {
+    setSyncing(id);
+    try {
+      const res = await apiFetch(`/api/admin/product-evolution/evidence/${id}/sync-github`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        const msg = res.status === 429 ? 'Rate-limit do GitHub atingido — tente em 1h'
+          : res.status === 503 ? 'GitHub sync desabilitado (env não configurada)'
+          : res.status === 502 ? `Erro do GitHub: ${b.error || 'upstream'}`
+          : b.error || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      onChange();
+    } catch (e: any) { alert(e.message); } finally { setSyncing(null); }
+  };
+
+  const parseGithubMeta = (metadata_json: string | null): any | null => {
+    if (!metadata_json) return null;
+    try { return JSON.parse(metadata_json)?.github || null; } catch { return null; }
+  };
+
+  const isGithubSyncable = (t: string) => t === 'pr' || t === 'commit' || t === 'issue';
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -919,24 +963,67 @@ function EvidenceSection({ item, evidence, onChange }: {
         <div className="text-xs text-slate-500 italic">Sem evidência ainda. Item não pode transicionar para VALIDATED.</div>
       ) : (
         <ul className="space-y-1.5">
-          {evidence.map(e => (
-            <li key={e.id} className="flex items-start gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded px-2 py-1.5">
-              {e.verified ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
-              ) : (
-                <button onClick={() => verify(e.id)} className="text-slate-500 hover:text-slate-300 shrink-0" title="Marcar como verificada">
-                  <CheckCircle2 className="w-3.5 h-3.5 mt-0.5" />
-                </button>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-slate-400"><span className="text-slate-500">[{e.evidence_type}]</span> <span className="font-mono text-slate-300 break-all">{e.reference}</span></div>
-                {e.description && <div className="text-slate-500 text-[11px]">{e.description}</div>}
-                {e.verified === 1 && e.verified_by && (
-                  <div className="text-emerald-500/70 text-[10px]">verificado por {e.verified_by} · {relTime(e.verified_at || '')}</div>
+          {evidence.map(e => {
+            const gh = parseGithubMeta(e.metadata_json);
+            const syncable = isGithubSyncable(e.evidence_type);
+            return (
+              <li key={e.id} className="flex items-start gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded px-2 py-1.5">
+                {e.verified ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                ) : (
+                  <button onClick={() => verify(e.id)} className="text-slate-500 hover:text-slate-300 shrink-0" title="Marcar como verificada">
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5" />
+                  </button>
                 )}
-              </div>
-            </li>
-          ))}
+                <div className="flex-1 min-w-0">
+                  <div className="text-slate-400"><span className="text-slate-500">[{e.evidence_type}]</span> <span className="font-mono text-slate-300 break-all">{e.reference}</span></div>
+                  {e.description && <div className="text-slate-500 text-[11px]">{e.description}</div>}
+                  {e.verified === 1 && e.verified_by && (
+                    <div className="text-emerald-500/70 text-[10px]">verificado por {e.verified_by} · {relTime(e.verified_at || '')}</div>
+                  )}
+                  {gh && (
+                    <div className="mt-1 pl-2 border-l-2 border-slate-800 text-[11px]">
+                      <div className="flex items-center gap-1 text-slate-400">
+                        <Github className="w-3 h-3" />
+                        {gh.title && <span className="truncate">{gh.title}</span>}
+                      </div>
+                      <div className="text-slate-500 flex flex-wrap gap-x-2 text-[10px]">
+                        {gh.author && <span>por <span className="text-slate-400">{gh.author}</span></span>}
+                        {gh.state && (
+                          <span className={
+                            gh.merged ? 'text-violet-400'
+                            : gh.state === 'closed' ? 'text-slate-500'
+                            : 'text-emerald-400'
+                          }>
+                            {gh.merged ? 'merged' : gh.state}
+                          </span>
+                        )}
+                        {gh.url && (
+                          <a href={gh.url} target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:text-sky-300 flex items-center gap-0.5">
+                            <ExternalLink className="w-2.5 h-2.5" /> abrir
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {syncable && (
+                  <button
+                    onClick={() => syncGithub(e.id)}
+                    disabled={!githubEnabled || syncing === e.id}
+                    className="shrink-0 text-slate-500 hover:text-sky-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                    title={githubEnabled ? (gh ? 'Re-sincronizar com GitHub' : 'Sincronizar com GitHub') : 'GitHub sync desabilitado (GITHUB_TOKEN + GITHUB_EVIDENCE_ENABLED=1 no env)'}
+                  >
+                    {syncing === e.id ? (
+                      <Loader2 className="w-3.5 h-3.5 mt-0.5 animate-spin" />
+                    ) : (
+                      <Github className="w-3.5 h-3.5 mt-0.5" />
+                    )}
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

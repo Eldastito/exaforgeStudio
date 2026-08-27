@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel, GraduationCap } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel, GraduationCap, Layers } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -90,6 +90,9 @@ export function Sidebar() {
              <NavItem icon={<Settings />} label="Configurações" active={viewMode === 'settings'} onClick={() => setViewMode('settings')} />
              {isMasterAdmin && (
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />
+             )}
+             {isMasterAdmin && (
+               <NavItem icon={<Layers />} label="Product Evolution" active={viewMode === 'product_evolution'} onClick={() => setViewMode('product_evolution')} />
              )}
              {isMasterAdmin && (
                <NavItem icon={<BarChart3 />} label="Consumo de IA" active={viewMode === 'ai_usage'} onClick={() => setViewMode('ai_usage')} />

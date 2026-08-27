@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Layers, Search, Plus, RefreshCcw, AlertTriangle, CheckCircle2,
-  ChevronRight, ChevronDown, ExternalLink, Loader2,
+  ChevronRight, ChevronDown, ExternalLink, Loader2, Clock, GitBranch,
+  Gauge, X,
 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 
@@ -127,13 +128,59 @@ interface Source {
   created_at: string;
 }
 
+interface Review {
+  id: string;
+  item_id: string;
+  previous_status: Status;
+  new_status: Status;
+  reason: string;
+  evidence_snapshot: Array<{ id: string; evidence_type: string; reference: string; verified: number }>;
+  reviewer_user_id: string | null;
+  created_at: string;
+}
+
+interface DependencyOut { id: string; depends_on_key: string; depends_on_title: string; dependency_type: string; notes: string | null; created_at: string; }
+interface DependencyIn  { id: string; item_key: string; item_title: string; dependency_type: string; notes: string | null; created_at: string; }
+interface DepsGraph { outgoing: DependencyOut[]; incoming: DependencyIn[]; }
+
+interface Score {
+  evolution_key: string;
+  status: Status;
+  total: number;
+  raw_total: number;
+  cap_applied: number | null;
+  cap_reason: string | null;
+  dimensions: Array<{ dimension: string; weight: number; raw_hits: number; earned: number; saturated: boolean }>;
+  notes: string[];
+  computed_at: string;
+}
+
+const DEP_TYPES = ['requires', 'enhances', 'blocks', 'related'] as const;
+type DepType = typeof DEP_TYPES[number];
+
+const DEP_TYPE_STYLE: Record<DepType, string> = {
+  requires: 'bg-amber-500/15 text-amber-300 border-amber-800/50',
+  enhances: 'bg-sky-500/15 text-sky-300 border-sky-800/50',
+  blocks:   'bg-red-500/15 text-red-300 border-red-800/50',
+  related:  'bg-slate-500/15 text-slate-300 border-slate-700/50',
+};
+
 type Tab = 'matrix' | 'gaps';
+type DetailTab = 'detail' | 'timeline' | 'dependencies';
+
+function scoreColor(total: number): string {
+  if (total >= 80) return 'text-emerald-400';
+  if (total >= 50) return 'text-sky-400';
+  if (total >= 30) return 'text-amber-400';
+  return 'text-slate-500';
+}
 
 // ═══════════════ Component ═══════════════
 
 export function ProductEvolutionView() {
   const [tab, setTab] = useState<Tab>('matrix');
   const [items, setItems] = useState<Item[]>([]);
+  const [scores, setScores] = useState<Map<string, Score>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,6 +205,17 @@ export function ProductEvolutionView() {
       }
       const data = await res.json();
       setItems(data.items || []);
+
+      // Batch fetch de scores em paralelo (não bloqueia o render principal).
+      // Falha silenciosa: coluna score fica vazia se o endpoint quebrar.
+      apiFetch('/api/admin/product-evolution/scores')
+        .then(r => r.ok ? r.json() : { scores: [] })
+        .then(sd => {
+          const m = new Map<string, Score>();
+          for (const s of (sd.scores || [])) m.set(s.evolution_key, s);
+          setScores(m);
+        })
+        .catch(() => { /* noop */ });
     } catch (e: any) {
       setError(e.message || 'Falha ao carregar');
       setItems([]);
@@ -284,6 +342,7 @@ export function ProductEvolutionView() {
                 <th className="text-left py-2 px-3">Domínio</th>
                 <th className="text-left py-2 px-3">Estado</th>
                 <th className="text-left py-2 px-3">Prio</th>
+                <th className="text-right py-2 px-3">Score</th>
                 <th className="text-left py-2 px-3">Atualizado</th>
               </tr>
             </thead>
@@ -292,6 +351,7 @@ export function ProductEvolutionView() {
                 <ItemRow
                   key={item.id}
                   item={item}
+                  score={scores.get(item.evolution_key) || null}
                   expanded={expanded === item.evolution_key}
                   onToggle={() => setExpanded(expanded === item.evolution_key ? null : item.evolution_key)}
                   onChange={loadItems}
@@ -348,14 +408,18 @@ function TabButton({ active, onClick, label, count, icon }: {
 
 interface ItemRowProps {
   item: Item;
+  score: Score | null;
   expanded: boolean;
   onToggle: () => void;
   onChange: () => void;
 }
 
-const ItemRow: React.FC<ItemRowProps> = ({ item, expanded, onToggle, onChange }) => {
+const ItemRow: React.FC<ItemRowProps> = ({ item, score, expanded, onToggle, onChange }) => {
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [deps, setDeps] = useState<DepsGraph>({ outgoing: [], incoming: [] });
+  const [detailScore, setDetailScore] = useState<Score | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
@@ -364,9 +428,15 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, expanded, onToggle, onChange })
     Promise.all([
       apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/evidence`).then(r => r.json()).catch(() => ({ evidence: [] })),
       apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/sources`).then(r => r.json()).catch(() => ({ sources: [] })),
-    ]).then(([e, s]) => {
+      apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/reviews`).then(r => r.json()).catch(() => ({ reviews: [] })),
+      apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/dependencies`).then(r => r.json()).catch(() => ({ outgoing: [], incoming: [] })),
+      apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/score`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([e, s, rv, dp, sc]) => {
       setEvidence(e.evidence || []);
       setSources(s.sources || []);
+      setReviews(rv.reviews || []);
+      setDeps({ outgoing: dp.outgoing || [], incoming: dp.incoming || [] });
+      setDetailScore(sc);
       setDetailLoading(false);
     });
   }, [expanded, item.evolution_key]);
@@ -399,15 +469,33 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, expanded, onToggle, onChange })
           )}
         </td>
         <td className="py-2.5 px-3 text-slate-400 text-xs">{item.priority || '—'}</td>
+        <td className="py-2.5 px-3 text-right">
+          {score ? (
+            <div className="inline-flex items-center gap-1" title={score.cap_reason || `raw ${score.raw_total}`}>
+              <span className={`font-mono text-sm font-semibold ${scoreColor(score.total)}`}>{score.total}</span>
+              {score.cap_applied !== null && (
+                <span className="text-[10px] text-slate-500" title={score.cap_reason || ''}>cap</span>
+              )}
+            </div>
+          ) : <span className="text-slate-600 text-xs">—</span>}
+        </td>
         <td className="py-2.5 px-3 text-slate-500 text-xs">{relTime(item.updated_at)}</td>
       </tr>
       {expanded && (
         <tr className="border-b border-slate-800">
-          <td colSpan={6} className="p-4 bg-slate-900/40">
+          <td colSpan={7} className="p-4 bg-slate-900/40">
             {detailLoading ? (
               <div className="text-slate-500 text-xs flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> carregando detalhe…</div>
             ) : (
-              <ItemDetail item={item} evidence={evidence} sources={sources} onChange={onChange} />
+              <ItemDetail
+                item={item}
+                evidence={evidence}
+                sources={sources}
+                reviews={reviews}
+                deps={deps}
+                score={detailScore}
+                onChange={onChange}
+              />
             )}
           </td>
         </tr>
@@ -418,41 +506,265 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, expanded, onToggle, onChange })
 
 // ═══════════════ Item detail (expanded row) ═══════════════
 
-function ItemDetail({ item, evidence, sources, onChange }: {
-  item: Item; evidence: Evidence[]; sources: Source[]; onChange: () => void;
+function ItemDetail({ item, evidence, sources, reviews, deps, score, onChange }: {
+  item: Item; evidence: Evidence[]; sources: Source[];
+  reviews: Review[]; deps: DepsGraph; score: Score | null;
+  onChange: () => void;
 }) {
+  const [dtab, setDtab] = useState<DetailTab>('detail');
   const allowedTransitions = TRANSITIONS[item.status] || [];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* Coluna esquerda: sumário + transição */}
-      <div className="space-y-3">
-        {item.summary && (
-          <div>
-            <div className="text-xs uppercase text-slate-500 mb-1">Sumário</div>
-            <div className="text-sm text-slate-300">{item.summary}</div>
-          </div>
-        )}
-        {item.source_of_truth && (
-          <div>
-            <div className="text-xs uppercase text-slate-500 mb-1">Fonte da verdade</div>
-            <div className="text-sm text-slate-300 font-mono">{item.source_of_truth}</div>
-          </div>
-        )}
-        <div className="border-t border-slate-800 pt-3">
-          <div className="text-xs uppercase text-slate-500 mb-2">Transicionar estado</div>
-          {allowedTransitions.length === 0 ? (
-            <div className="text-xs text-slate-500 italic">Estado terminal — nenhuma transição permitida.</div>
-          ) : (
-            <StatusTransitionForm item={item} allowed={allowedTransitions} onChange={onChange} />
-          )}
+    <div>
+      {/* Header do detalhe: score badge + abas */}
+      <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+        <div className="flex gap-1">
+          <DetailTabBtn active={dtab === 'detail'} onClick={() => setDtab('detail')} icon={<Layers className="w-3.5 h-3.5" />} label="Detalhe" />
+          <DetailTabBtn active={dtab === 'timeline'} onClick={() => setDtab('timeline')} icon={<Clock className="w-3.5 h-3.5" />} label="Histórico" count={reviews.length} />
+          <DetailTabBtn active={dtab === 'dependencies'} onClick={() => setDtab('dependencies')} icon={<GitBranch className="w-3.5 h-3.5" />} label="Dependências" count={deps.outgoing.length + deps.incoming.length} />
         </div>
+        {score && <ScoreBadge score={score} />}
       </div>
 
-      {/* Coluna direita: evidências + fontes */}
-      <div className="space-y-4">
-        <EvidenceSection item={item} evidence={evidence} onChange={onChange} />
-        <SourceSection item={item} sources={sources} onChange={onChange} />
+      {dtab === 'detail' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="space-y-3">
+            {item.summary && (
+              <div>
+                <div className="text-xs uppercase text-slate-500 mb-1">Sumário</div>
+                <div className="text-sm text-slate-300">{item.summary}</div>
+              </div>
+            )}
+            {item.source_of_truth && (
+              <div>
+                <div className="text-xs uppercase text-slate-500 mb-1">Fonte da verdade</div>
+                <div className="text-sm text-slate-300 font-mono">{item.source_of_truth}</div>
+              </div>
+            )}
+            <div className="border-t border-slate-800 pt-3">
+              <div className="text-xs uppercase text-slate-500 mb-2">Transicionar estado</div>
+              {allowedTransitions.length === 0 ? (
+                <div className="text-xs text-slate-500 italic">Estado terminal — nenhuma transição permitida.</div>
+              ) : (
+                <StatusTransitionForm item={item} allowed={allowedTransitions} onChange={onChange} />
+              )}
+            </div>
+          </div>
+          <div className="space-y-4">
+            <EvidenceSection item={item} evidence={evidence} onChange={onChange} />
+            <SourceSection item={item} sources={sources} onChange={onChange} />
+          </div>
+        </div>
+      )}
+
+      {dtab === 'timeline' && <TimelineSection reviews={reviews} />}
+      {dtab === 'dependencies' && <DependenciesSection item={item} deps={deps} onChange={onChange} />}
+    </div>
+  );
+}
+
+function DetailTabBtn({ active, onClick, icon, label, count }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count?: number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded ${
+        active ? 'bg-slate-800 text-slate-200 font-medium' : 'text-slate-500 hover:text-slate-300'
+      }`}
+    >
+      {icon}{label}
+      {count !== undefined && count > 0 && (
+        <span className="text-[10px] px-1 rounded bg-slate-700/60">{count}</span>
+      )}
+    </button>
+  );
+}
+
+function ScoreBadge({ score }: { score: Score }) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setShowBreakdown(!showBreakdown)}
+        className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-900/60 border border-slate-800 hover:border-slate-700"
+      >
+        <Gauge className="w-3.5 h-3.5 text-slate-500" />
+        <span className={`font-mono text-sm font-semibold ${scoreColor(score.total)}`}>{score.total}</span>
+        <span className="text-[10px] text-slate-500">/100</span>
+        {score.cap_applied !== null && (
+          <span className="text-[10px] px-1 rounded bg-amber-500/15 text-amber-300 border border-amber-800/50">cap {score.cap_applied}</span>
+        )}
+      </button>
+      {showBreakdown && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-80 bg-slate-950 border border-slate-800 rounded-lg p-3 shadow-xl">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs uppercase text-slate-500">Score breakdown</div>
+            <button onClick={() => setShowBreakdown(false)} className="text-slate-500 hover:text-slate-300"><X className="w-3.5 h-3.5" /></button>
+          </div>
+          <div className="space-y-1 mb-2">
+            {score.dimensions.map(d => (
+              <div key={d.dimension} className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">{d.dimension}</span>
+                <span className="font-mono">
+                  <span className={d.saturated ? 'text-emerald-400' : 'text-slate-300'}>{d.earned}</span>
+                  <span className="text-slate-600">/{d.weight}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+          {score.notes.length > 0 && (
+            <div className="border-t border-slate-800 pt-2 space-y-0.5">
+              {score.notes.map((n, i) => (
+                <div key={i} className="text-[11px] text-slate-500">• {n}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════ Timeline (histórico de reviews) ═══════════════
+
+function TimelineSection({ reviews }: { reviews: Review[] }) {
+  if (reviews.length === 0) {
+    return <div className="text-sm text-slate-500 italic py-6 text-center">Sem histórico de transições ainda.</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {reviews.map(r => (
+        <div key={r.id} className="border-l-2 border-slate-800 pl-3 py-1.5">
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`px-1.5 py-0.5 rounded text-[10px] border ${STATUS_STYLE[r.previous_status] || STATUS_STYLE.IDEA}`}>{r.previous_status}</span>
+            <ChevronRight className="w-3 h-3 text-slate-600" />
+            <span className={`px-1.5 py-0.5 rounded text-[10px] border ${STATUS_STYLE[r.new_status] || STATUS_STYLE.IDEA}`}>{r.new_status}</span>
+            <span className="text-slate-500 text-[11px]">{relTime(r.created_at)}</span>
+          </div>
+          <div className="text-sm text-slate-300 mt-1">{r.reason}</div>
+          {r.evidence_snapshot.length > 0 && (
+            <div className="text-[11px] text-slate-500 mt-1">
+              {r.evidence_snapshot.filter(e => e.verified === 1).length} evidência(s) verificada(s) no snapshot
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ═══════════════ Dependencies (grafo bidirecional) ═══════════════
+
+function DependenciesSection({ item, deps, onChange }: {
+  item: Item; deps: DepsGraph; onChange: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [targetKey, setTargetKey] = useState('');
+  const [depType, setDepType] = useState<DepType>('requires');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const add = async () => {
+    if (!targetKey.trim()) { setErr('depends_on_key é obrigatório'); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await apiFetch(`/api/admin/product-evolution/items/${item.evolution_key}/dependencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          depends_on_key: targetKey.trim(),
+          dependency_type: depType,
+          notes: notes.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || `HTTP ${res.status}`);
+      }
+      setTargetKey(''); setNotes(''); setAdding(false);
+      onChange();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Remover dependência?')) return;
+    try {
+      const res = await apiFetch(`/api/admin/product-evolution/dependencies/${id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) throw new Error('falhou');
+      onChange();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Outgoing (this depends on X) */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs uppercase text-slate-500">Este item depende de ({deps.outgoing.length})</div>
+          <button onClick={() => setAdding(!adding)} className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1">
+            <Plus className="w-3 h-3" /> {adding ? 'Cancelar' : 'Adicionar'}
+          </button>
+        </div>
+        {adding && (
+          <div className="mb-3 p-2 bg-slate-950 border border-slate-800 rounded space-y-1.5">
+            <input
+              placeholder="evolution_key do item alvo"
+              value={targetKey}
+              onChange={e => setTargetKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
+              className="w-full px-2 py-1 text-xs bg-slate-900 border border-slate-800 rounded font-mono"
+            />
+            <select value={depType} onChange={e => setDepType(e.target.value as DepType)} className="w-full px-2 py-1 text-xs bg-slate-900 border border-slate-800 rounded">
+              {DEP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <input placeholder="notas (opcional)" value={notes} onChange={e => setNotes(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-900 border border-slate-800 rounded" />
+            {err && <div className="text-xs text-red-400">{err}</div>}
+            <button disabled={busy} onClick={add} className="w-full px-2 py-1 text-xs bg-sky-600 hover:bg-sky-500 disabled:opacity-50 rounded">
+              {busy ? 'Enviando…' : 'Adicionar dependência'}
+            </button>
+          </div>
+        )}
+        {deps.outgoing.length === 0 ? (
+          <div className="text-xs text-slate-500 italic">Não depende de nada.</div>
+        ) : (
+          <ul className="space-y-1.5">
+            {deps.outgoing.map(d => (
+              <li key={d.id} className="flex items-start gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded px-2 py-1.5">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] border shrink-0 ${DEP_TYPE_STYLE[d.dependency_type as DepType]}`}>{d.dependency_type}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-sky-300 text-[11px]">{d.depends_on_key}</div>
+                  <div className="text-slate-400 text-[11px]">{d.depends_on_title}</div>
+                  {d.notes && <div className="text-slate-500 text-[10px] mt-0.5">{d.notes}</div>}
+                </div>
+                <button onClick={() => remove(d.id)} className="text-slate-500 hover:text-red-400" title="Remover">
+                  <X className="w-3 h-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Incoming (X depends on this) */}
+      <div>
+        <div className="text-xs uppercase text-slate-500 mb-2">Dependem deste item ({deps.incoming.length})</div>
+        {deps.incoming.length === 0 ? (
+          <div className="text-xs text-slate-500 italic">Ninguém depende deste item.</div>
+        ) : (
+          <ul className="space-y-1.5">
+            {deps.incoming.map(d => (
+              <li key={d.id} className="flex items-start gap-2 text-xs bg-slate-950/60 border border-slate-800 rounded px-2 py-1.5">
+                <span className={`px-1.5 py-0.5 rounded text-[10px] border shrink-0 ${DEP_TYPE_STYLE[d.dependency_type as DepType]}`}>{d.dependency_type}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-mono text-sky-300 text-[11px]">{d.item_key}</div>
+                  <div className="text-slate-400 text-[11px]">{d.item_title}</div>
+                  {d.notes && <div className="text-slate-500 text-[10px] mt-0.5">{d.notes}</div>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

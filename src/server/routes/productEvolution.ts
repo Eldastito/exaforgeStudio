@@ -149,6 +149,43 @@ router.get("/gaps", (_req: AuthRequest, res): any => {
   } catch (e) { return handle(res, e); }
 });
 
+// ─── Reviews (ADR-193 F1.5) ────────────────────────────────────────────────
+
+router.get("/items/:key/reviews", (req: AuthRequest, res): any => {
+  try {
+    return res.json({ reviews: Ledger.listReviews(req.params.key) });
+  } catch (e) { return handle(res, e); }
+});
+
+// ─── Dependencies (ADR-193 F1.5) ───────────────────────────────────────────
+
+router.post("/items/:key/dependencies", (req: AuthRequest, res): any => {
+  try {
+    const b = req.body || {};
+    const dep = Ledger.addDependency({
+      evolution_key: req.params.key,
+      depends_on_key: String(b.depends_on_key || ""),
+      dependency_type: b.dependency_type,
+      notes: b.notes ?? null,
+    });
+    return res.status(201).json(dep);
+  } catch (e) { return handle(res, e); }
+});
+
+router.get("/items/:key/dependencies", (req: AuthRequest, res): any => {
+  try {
+    return res.json(Ledger.listDependencies(req.params.key));
+  } catch (e) { return handle(res, e); }
+});
+
+router.delete("/dependencies/:id", (req: AuthRequest, res): any => {
+  try {
+    const removed = Ledger.removeDependency(req.params.id);
+    if (!removed) return res.status(404).json({ error: "not_found" });
+    return res.status(204).end();
+  } catch (e) { return handle(res, e); }
+});
+
 // ─── Scoring (ADR-193 F3) ──────────────────────────────────────────────────
 
 router.get("/items/:key/score", (req: AuthRequest, res): any => {

@@ -10853,6 +10853,44 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_pel_src_type ON product_evolution_sources (source_type);
     `);
   } catch (e) { console.error('[DB] Falha ao criar product_evolution_*', e); }
+
+  // ADR-193 F1.5 — Histórico imutável de transições de estado + grafo de dependências.
+  // Reviews é append-only: cada setStatus escreve 1 linha. Nunca UPDATE nem DELETE
+  // (RN-PEL-3 — histórico é fonte de verdade da progressão).
+  // Dependencies armazena tipo semântico (requires/enhances/blocks/related) — o
+  // ScoringService da F3 pode consultar futuramente para reduzir score se um
+  // `requires` estiver bloqueado (fora do escopo desta fatia).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_evolution_reviews (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        previous_status TEXT NOT NULL,
+        new_status TEXT NOT NULL,
+        reason TEXT NOT NULL,                        -- setStatus exige (RN-PEL-3)
+        evidence_snapshot_json TEXT,                 -- snapshot do estado das evidências no momento
+        reviewer_user_id TEXT,                       -- opcional; futuro FK para users
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (item_id) REFERENCES product_evolution_items(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_reviews_item ON product_evolution_reviews (item_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_pel_reviews_new_status ON product_evolution_reviews (new_status);
+
+      CREATE TABLE IF NOT EXISTS product_evolution_dependencies (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,                       -- depende de
+        depends_on_item_id TEXT NOT NULL,            -- alvo
+        dependency_type TEXT NOT NULL,               -- 'requires' | 'enhances' | 'blocks' | 'related'
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (item_id, depends_on_item_id, dependency_type),
+        FOREIGN KEY (item_id) REFERENCES product_evolution_items(id),
+        FOREIGN KEY (depends_on_item_id) REFERENCES product_evolution_items(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_deps_item ON product_evolution_dependencies (item_id);
+      CREATE INDEX IF NOT EXISTS idx_pel_deps_target ON product_evolution_dependencies (depends_on_item_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar product_evolution_reviews/dependencies', e); }
 };
 
 initDb();

@@ -270,6 +270,28 @@ export class ProductEvolutionLedgerService {
           validated_at = CASE WHEN ? = 'VALIDATED' THEN CURRENT_TIMESTAMP ELSE validated_at END
       WHERE evolution_key = ?
     `).run(input.new_status, supersededBy, input.new_status, evolution_key);
+
+    // ADR-193 F1.5 — grava review imutável. Fonte de verdade da progressão.
+    // Snapshot das evidências verificadas no momento da transição — útil para
+    // o Reconciliation Engine (F3+) auditar por que um item chegou a VALIDATED.
+    try {
+      const snapshot = this.listEvidence(evolution_key).map(e => ({
+        id: e.id,
+        evidence_type: e.evidence_type,
+        reference: e.reference,
+        verified: e.verified,
+      }));
+      db.prepare(`
+        INSERT INTO product_evolution_reviews (id, item_id, previous_status, new_status, reason, evidence_snapshot_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(uuidv4(), item.id, item.status, input.new_status, input.reason.trim(), JSON.stringify(snapshot));
+    } catch (e) {
+      // Best-effort — não falha a transição se o review não conseguir gravar.
+      // A tabela pode não existir em migrations antigas; o setStatus principal
+      // já aconteceu com sucesso.
+      console.error("[PEL] falha ao gravar review (transição já efetivada)", e);
+    }
+
     return this.getItem(evolution_key)!;
   }
 
@@ -387,6 +409,123 @@ export class ProductEvolutionLedgerService {
         CASE i.priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,
         i.updated_at DESC
     `).all() as Item[];
+  }
+
+  // ═══════════════ Reviews (ADR-193 F1.5) ═══════════════
+
+  /**
+   * Histórico imutável de transições de um item. Ordenado por mais recente
+   * primeiro. Cada linha vem com evidence_snapshot deserializado.
+   */
+  static listReviews(evolution_key: string): Array<{
+    id: string; item_id: string; previous_status: Status; new_status: Status;
+    reason: string; evidence_snapshot: any[]; reviewer_user_id: string | null;
+    created_at: string;
+  }> {
+    const item = this.getItem(evolution_key);
+    if (!item) throw new LedgerNotFoundError(`Item não encontrado: ${evolution_key}`);
+    // Ordena por rowid DESC (ordem de inserção reversa) — tie-break estável
+    // quando várias transições caem no mesmo segundo do created_at.
+    const rows = db.prepare(
+      "SELECT * FROM product_evolution_reviews WHERE item_id = ? ORDER BY rowid DESC"
+    ).all(item.id) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      item_id: r.item_id,
+      previous_status: r.previous_status,
+      new_status: r.new_status,
+      reason: r.reason,
+      evidence_snapshot: r.evidence_snapshot_json ? JSON.parse(r.evidence_snapshot_json) : [],
+      reviewer_user_id: r.reviewer_user_id,
+      created_at: r.created_at,
+    }));
+  }
+
+  // ═══════════════ Dependencies (ADR-193 F1.5) ═══════════════
+
+  /**
+   * Adiciona uma aresta no grafo de dependências. Idempotente por UNIQUE
+   * (item_id, depends_on_item_id, dependency_type). Rejeita self-loops
+   * (item não pode depender de si mesmo).
+   */
+  static addDependency(input: {
+    evolution_key: string;
+    depends_on_key: string;
+    dependency_type: 'requires' | 'enhances' | 'blocks' | 'related';
+    notes?: string | null;
+  }): {
+    id: string; item_id: string; depends_on_item_id: string;
+    dependency_type: string; notes: string | null; created_at: string;
+  } {
+    const ALLOWED = ['requires', 'enhances', 'blocks', 'related'] as const;
+    if (!ALLOWED.includes(input.dependency_type)) {
+      throw new LedgerValidationError("invalid_dependency_type",
+        `dependency_type inválido: ${input.dependency_type}. Aceitos: ${ALLOWED.join(', ')}`);
+    }
+    if (input.evolution_key === input.depends_on_key) {
+      throw new LedgerValidationError("self_dependency",
+        "item não pode depender de si mesmo");
+    }
+    const from = this.getItem(input.evolution_key);
+    if (!from) throw new LedgerNotFoundError(`Item não encontrado: ${input.evolution_key}`);
+    const to = this.getItem(input.depends_on_key);
+    if (!to) throw new LedgerNotFoundError(`Item alvo não encontrado: ${input.depends_on_key}`);
+
+    // Verifica se já existe (idempotente)
+    const existing = db.prepare(
+      "SELECT * FROM product_evolution_dependencies WHERE item_id = ? AND depends_on_item_id = ? AND dependency_type = ?"
+    ).get(from.id, to.id, input.dependency_type) as any;
+    if (existing) return existing;
+
+    const id = uuidv4();
+    db.prepare(`
+      INSERT INTO product_evolution_dependencies (id, item_id, depends_on_item_id, dependency_type, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, from.id, to.id, input.dependency_type, input.notes ?? null);
+    return db.prepare("SELECT * FROM product_evolution_dependencies WHERE id = ?").get(id) as any;
+  }
+
+  /**
+   * Lista dependências de/para o item. Retorna arestas saindo (this→other) e
+   * chegando (other→this) — útil para a UI mostrar "depende de X" e "X depende
+   * disso".
+   */
+  static listDependencies(evolution_key: string): {
+    outgoing: Array<{ id: string; depends_on_key: string; depends_on_title: string; dependency_type: string; notes: string | null; created_at: string; }>;
+    incoming: Array<{ id: string; item_key: string; item_title: string; dependency_type: string; notes: string | null; created_at: string; }>;
+  } {
+    const item = this.getItem(evolution_key);
+    if (!item) throw new LedgerNotFoundError(`Item não encontrado: ${evolution_key}`);
+
+    const outgoing = db.prepare(`
+      SELECT d.id, d.dependency_type, d.notes, d.created_at,
+             i.evolution_key AS depends_on_key, i.title AS depends_on_title
+      FROM product_evolution_dependencies d
+      JOIN product_evolution_items i ON i.id = d.depends_on_item_id
+      WHERE d.item_id = ?
+      ORDER BY d.created_at DESC
+    `).all(item.id) as any[];
+
+    const incoming = db.prepare(`
+      SELECT d.id, d.dependency_type, d.notes, d.created_at,
+             i.evolution_key AS item_key, i.title AS item_title
+      FROM product_evolution_dependencies d
+      JOIN product_evolution_items i ON i.id = d.item_id
+      WHERE d.depends_on_item_id = ?
+      ORDER BY d.created_at DESC
+    `).all(item.id) as any[];
+
+    return { outgoing, incoming };
+  }
+
+  /**
+   * Remove uma dependência por id. Retorna true se removeu, false se não existia.
+   */
+  static removeDependency(id: string): boolean {
+    const result = db.prepare(
+      "DELETE FROM product_evolution_dependencies WHERE id = ?"
+    ).run(id);
+    return result.changes > 0;
   }
 
   // ═══════════════ Seed helpers (ADR-193 F5) ═══════════════

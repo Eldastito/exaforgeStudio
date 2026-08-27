@@ -14,6 +14,7 @@ import {
   LedgerValidationError,
   Status,
 } from "../ProductEvolutionLedgerService.js";
+import { ProductEvolutionScoringService as Scoring } from "../ProductEvolutionScoringService.js";
 
 const router = Router();
 
@@ -145,6 +146,22 @@ router.get("/items/:key/sources", (req: AuthRequest, res): any => {
 router.get("/gaps", (_req: AuthRequest, res): any => {
   try {
     return res.json({ items: Ledger.gaps() });
+  } catch (e) { return handle(res, e); }
+});
+
+// ─── Scoring (ADR-193 F3) ──────────────────────────────────────────────────
+
+router.get("/items/:key/score", (req: AuthRequest, res): any => {
+  try {
+    const score = Scoring.computeScore(req.params.key);
+    if (!score) return res.status(404).json({ error: "not_found" });
+    return res.json(score);
+  } catch (e) { return handle(res, e); }
+});
+
+router.get("/scores", (_req: AuthRequest, res): any => {
+  try {
+    return res.json({ scores: Scoring.listAllScores() });
   } catch (e) { return handle(res, e); }
 });
 

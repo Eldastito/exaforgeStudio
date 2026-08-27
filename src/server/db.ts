@@ -10789,6 +10789,70 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_legal_success_client ON legal_success_fees (organization_id, contact_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar legal_success_fees', e); }
+
+  // ADR-193 F1 — Product Evolution Ledger (backend mínimo).
+  // GLOBAL, Admin Master only: NÃO carrega organization_id (RN-PEL-2).
+  // 3 tabelas nesta fatia (items + evidence + sources). Dependencies, reviews,
+  // batches ficam para F1.5+ com base em uso real, não em especulação.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_evolution_items (
+        id TEXT PRIMARY KEY,
+        evolution_key TEXT NOT NULL UNIQUE,          -- ^[A-Z][A-Z0-9_]{2,63}$ (RN-PEL-1, imutável)
+        title TEXT NOT NULL,
+        domain TEXT,                                  -- área/cluster (vision, verticals, platform, etc.)
+        summary TEXT,
+        status TEXT NOT NULL DEFAULT 'IDEA',          -- taxonomia CONVENCOES.md §2
+        priority TEXT,                                -- P0 | P1 | P2 | P3 | null
+        risk_level TEXT,                              -- low | medium | high | null
+        owner_user_id TEXT,                           -- responsável, opcional
+        source_of_truth TEXT,                         -- link/ref primária (ADR-XXX, PRD-YYY, doc-Z)
+        target_release TEXT,                          -- data/tag alvo, opcional
+        blocked_reason TEXT,
+        superseded_by TEXT,                           -- FK lógica para product_evolution_items.evolution_key
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        validated_at DATETIME,                        -- setado quando entra em VALIDATED
+        archived_at DATETIME                          -- soft-delete opcional
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_items_status ON product_evolution_items (status);
+      CREATE INDEX IF NOT EXISTS idx_pel_items_domain ON product_evolution_items (domain);
+      CREATE INDEX IF NOT EXISTS idx_pel_items_priority ON product_evolution_items (priority);
+
+      CREATE TABLE IF NOT EXISTS product_evolution_evidence (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        evidence_type TEXT NOT NULL,                  -- CONVENCOES.md §3 (code|migration|route|ui|test|test_run|pr|commit|rollout|production_check|runbook|metric|customer_validation)
+        reference TEXT NOT NULL,                      -- path/SHA/PR#/issue# — referência estável
+        description TEXT,
+        verified INTEGER NOT NULL DEFAULT 0,          -- 0/1 (RN-PEL-4)
+        verified_by TEXT,                             -- user id ao marcar verified
+        verified_at DATETIME,
+        metadata_json TEXT,                           -- livre; ex.: linha, coluna, timestamps
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (item_id) REFERENCES product_evolution_items(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_evid_item ON product_evolution_evidence (item_id);
+      CREATE INDEX IF NOT EXISTS idx_pel_evid_item_verified ON product_evolution_evidence (item_id, verified);
+      CREATE INDEX IF NOT EXISTS idx_pel_evid_type ON product_evolution_evidence (evidence_type);
+
+      CREATE TABLE IF NOT EXISTS product_evolution_sources (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        source_type TEXT NOT NULL,                    -- CONVENCOES.md §5 (chat|prd|adr|file|github_pr|github_commit|issue|meeting|manual|external_repository)
+        title TEXT NOT NULL,
+        source_date DATETIME,                         -- data aproximada da fonte
+        source_reference TEXT,                        -- path/URL/id/nota
+        external_url TEXT,
+        file_ref TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (item_id) REFERENCES product_evolution_items(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pel_src_item ON product_evolution_sources (item_id);
+      CREATE INDEX IF NOT EXISTS idx_pel_src_type ON product_evolution_sources (source_type);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar product_evolution_*', e); }
 };
 
 initDb();

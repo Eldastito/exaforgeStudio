@@ -41,6 +41,9 @@ interface SeedItem {
   source_of_truth?: string;
   blocked_reason?: string;
   target_status: Status;
+  /** Necessário quando target_status === "SUPERSEDED". Aponta pro
+   *  `evolution_key` que substituiu esta iniciativa. */
+  superseded_by?: string;
   sources: SeedSource[];
 }
 
@@ -382,6 +385,45 @@ const SEED: SeedItem[] = [
       { source_type: "file", title: "src/server/llm.ts (generateImageB64 + startVideoGoogle)", source_reference: "src/server/llm.ts" },
     ],
   },
+
+  // ─── SUPERSEDED (STATUS-DE-EXECUCAO §5.5) ───
+  // Registrar como SUPERSEDED evita re-abertura desses PRDs históricos.
+  {
+    evolution_key: "SOCIAL_INTELLIGENCE_PRD10_LEGACY",
+    title: "Social Intelligence (PRD 10 histórico)",
+    domain: "growth",
+    summary: "PRD 10 original de Social Intelligence — visão conceitual pré-consolidação. Absorvido por ADR-167 (Social Providers) + INTELLIGENCE_HUB atual.",
+    target_status: "SUPERSEDED",
+    superseded_by: "INTELLIGENCE_HUB",
+    sources: [
+      { source_type: "prd", title: "ANALISE-PRD10-vs-CODEBASE", source_reference: "docs/prd/ANALISE-PRD10-vs-CODEBASE.md" },
+      { source_type: "adr", title: "ADR-167 — Final Integration Social Intelligence", source_reference: "docs/adr/ADR-167-final-integration-social-intelligence.md" },
+    ],
+  },
+  {
+    evolution_key: "VERTICAL_INTELLIGENCE_HUB_LEGACY",
+    title: "Vertical Intelligence Hub (histórico)",
+    domain: "growth",
+    summary: "Iteração histórica do Vertical Intelligence Hub antes da consolidação em vertical_intelligence GLOBAL + provider externo. Superseded pela INTELLIGENCE_HUB atual (ADR-156 + Track B).",
+    target_status: "SUPERSEDED",
+    superseded_by: "INTELLIGENCE_HUB",
+    sources: [
+      { source_type: "adr", title: "ADR-135 — Enterprise Intelligence baseline", source_reference: "docs/adr/ADR-135-enterprise-intelligence-kernel.md" },
+      { source_type: "adr", title: "ADR-156 — External Intelligence Vertical Compartilhada", source_reference: "docs/adr/ADR-156-external-intelligence-vertical-compartilhada.md" },
+    ],
+  },
+  {
+    evolution_key: "ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY",
+    title: "Enterprise Intelligence (pré-ADR-166)",
+    domain: "governance",
+    summary: "Design de Enterprise Intelligence anterior à ADR-166 (CONTROLER Operational + Enterprise Learning). Absorvido pela iniciativa ENTERPRISE_INTELLIGENCE_CONTROLER atual.",
+    target_status: "SUPERSEDED",
+    superseded_by: "ENTERPRISE_INTELLIGENCE_CONTROLER",
+    sources: [
+      { source_type: "adr", title: "ADR-135 — Enterprise Intelligence (baseline pré-166)", source_reference: "docs/adr/ADR-135-enterprise-intelligence-kernel.md" },
+      { source_type: "adr", title: "ADR-166 — Enterprise Learning + External Intelligence (versão vigente)", source_reference: "docs/adr/ADR-166-enterprise-learning-external-intelligence.md" },
+    ],
+  },
 ];
 
 // ═══════════════ Runner ═══════════════
@@ -462,8 +504,33 @@ export async function runSeed(opts: { silent?: boolean } = {}): Promise<Summary>
 
       if (!DRY_RUN && item) {
         const before = item.status;
-        const after = PEL.seedProgressTo(seed.evolution_key, seed.target_status, `seed F5 → ${seed.target_status}`).status;
-        if (before !== after) s.status_bumped.push({ key: seed.evolution_key, from: before, to: after });
+        // SUPERSEDED é terminal — seedProgressTo não passa por ele
+        // (precisa superseded_by). Caminho: IDEA → IMPLEMENTING via
+        // seedProgressTo, depois setStatus explícito pra SUPERSEDED.
+        if (seed.target_status === "SUPERSEDED") {
+          if (!seed.superseded_by) {
+            throw new Error(`SUPERSEDED requer superseded_by (${seed.evolution_key})`);
+          }
+          if (before !== "SUPERSEDED") {
+            // Só avança até IMPLEMENTING se ainda não passou. Se já está
+            // em IMPLEMENTING/CODED/TESTED/PILOT/PRODUCTION, pula direto.
+            const activeStates: Status[] = [
+              "IMPLEMENTING", "CODED", "TESTED", "PILOT", "PRODUCTION",
+            ];
+            if (!activeStates.includes(before as Status)) {
+              PEL.seedProgressTo(seed.evolution_key, "IMPLEMENTING", "seed F5 → SUPERSEDED (via IMPLEMENTING)");
+            }
+            const after = PEL.setStatus(seed.evolution_key, {
+              new_status: "SUPERSEDED",
+              reason: `seed F5 → SUPERSEDED por ${seed.superseded_by}`,
+              superseded_by: seed.superseded_by,
+            }).status;
+            if (before !== after) s.status_bumped.push({ key: seed.evolution_key, from: before, to: after });
+          }
+        } else {
+          const after = PEL.seedProgressTo(seed.evolution_key, seed.target_status, `seed F5 → ${seed.target_status}`).status;
+          if (before !== after) s.status_bumped.push({ key: seed.evolution_key, from: before, to: after });
+        }
       }
     } catch (e: any) {
       s.errors.push({ key: seed.evolution_key, error: e?.message || String(e) });

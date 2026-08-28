@@ -223,8 +223,21 @@ export class CompetitorIntelligenceService {
   /**
    * Hard delete — usado por teardown/testes ou pelo próprio dono via UI
    * confirmatória. Só remove se a org for dona. Retorna true se removeu.
+   * A partir do F2 (Track B), cascata manual apaga posts do competitor
+   * — SQLite não força FK sem PRAGMA foreign_keys=ON globalmente.
    */
   static hardDelete(orgId: string, id: string): boolean {
+    // Verifica ownership primeiro pra não gastar cascade em ninguém.
+    const owned = db.prepare(
+      "SELECT 1 FROM competitor_accounts WHERE id = ? AND organization_id = ?"
+    ).get(id, orgId);
+    if (!owned) return false;
+    // Import dinâmico pra evitar ciclo (CompetitorPostsService é opcional).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { CompetitorPostsService } = require("./CompetitorPostsService.js");
+      CompetitorPostsService.deleteAllForCompetitor(id);
+    } catch { /* posts service não presente — F1 puro */ }
     const info = db.prepare(
       "DELETE FROM competitor_accounts WHERE id = ? AND organization_id = ?"
     ).run(id, orgId);

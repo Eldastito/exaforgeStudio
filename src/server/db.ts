@@ -10989,6 +10989,33 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_ca_org_platform_lower ON competitor_accounts (organization_id, platform, LOWER(handle));
     `);
   } catch (e) { console.error('[DB] Falha ao criar competitor_accounts', e); }
+
+  // Closure Track B F2 — posts ingeridos das contas de concorrentes.
+  // Fatia F2 cobre storage + upsert manual + queries; ingestão real via
+  // adapter de plataforma virá em F2.5 (fetcher DI-injetável).
+  // ON DELETE CASCADE apaga os posts quando o competitor é hard-deleted.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS competitor_posts (
+        id TEXT PRIMARY KEY,
+        competitor_id TEXT NOT NULL,
+        external_id TEXT NOT NULL,             -- id da plataforma (permalink slug, media id, etc)
+        url TEXT,                              -- link público do post
+        kind TEXT NOT NULL DEFAULT 'post',     -- 'post' | 'reel' | 'video' | 'story' | 'image' | 'other'
+        caption TEXT,                          -- texto do post
+        media_url TEXT,                        -- URL da mídia principal (thumb ou vídeo)
+        posted_at DATETIME,                    -- quando o post foi publicado na plataforma
+        metrics_json TEXT,                     -- JSON { likes, comments, views, shares, ... }
+        raw_json TEXT,                         -- payload bruto opcional (debug/auditoria)
+        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- quando este registro foi (re)ingerido
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (competitor_id) REFERENCES competitor_accounts(id) ON DELETE CASCADE,
+        UNIQUE (competitor_id, external_id)   -- idempotência da ingestão
+      );
+      CREATE INDEX IF NOT EXISTS idx_cp_competitor_posted ON competitor_posts (competitor_id, posted_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_cp_competitor_fetched ON competitor_posts (competitor_id, fetched_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar competitor_posts', e); }
 };
 
 initDb();

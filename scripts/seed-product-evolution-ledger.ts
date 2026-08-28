@@ -142,14 +142,15 @@ const SEED: SeedItem[] = [
   },
   {
     evolution_key: "PETSHOP",
-    title: "Petshop",
+    title: "Petshop / Veterinário",
     domain: "verticals",
-    summary: "Vertical composta VAREJO+CLÍNICA+SERVIÇOS via verticals.ts + módulo Clinic (ClinicPet*Service). Falta ADR próprio.",
-    target_status: "IMPLEMENTING",
-    blocked_reason: "Sem ADR próprio nem PRD dedicado — composição implícita",
+    summary: "Vertical composta VAREJO+CLÍNICA+SERVIÇOS via verticals.ts + módulo Clinic (ClinicPet*Service). Composição documentada em ADR-196 (F0 fechado; F1+ pra terminologia pet/tutor e campos pet-específicos).",
+    source_of_truth: "ADR-196",
+    target_status: "PRODUCTION",
     sources: [
+      { source_type: "adr", title: "ADR-196 — Vertical Petshop / Veterinário", source_reference: "docs/adr/ADR-196-vertical-petshop.md" },
       { source_type: "file", title: "src/server/verticals.ts (definição petshop)", source_reference: "src/server/verticals.ts" },
-      { source_type: "manual", title: "Composição VAREJO+CLÍNICA+SERVIÇOS via preset", notes: "Sem ADR próprio" },
+      { source_type: "file", title: "ClinicPetService + variantes (motor clínico pet)", source_reference: "src/server/ClinicPetService.ts" },
     ],
   },
   {

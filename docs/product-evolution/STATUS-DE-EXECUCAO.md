@@ -78,7 +78,51 @@ Todos EXISTE ou PARCIAL. Nenhum bloqueador externo.
 - `STUDIO_IMAGE_GEN_CORE` — EXISTE (Gemini Imagen/Veo + OpenAI fallback pronto para reuso)
 
 ### 4.5 Business Skills (§15)
-- `BUSINESS_SKILLS_PACK` — PRECISA ADAPTAR — **PRD + ADR aprovados**: `docs/prd/PRD-BSP-01-business-skills-pack.md` e `docs/adr/ADR-195-business-skills-pack.md`. §Gap-2 destravado. Estado sugerido no ledger: `APPROVED` (PRD + ADR + F0 concluídos). F1 (fachada Pricing) pode começar.
+- `BUSINESS_SKILLS_PACK` — **DELIVERED** (Track C fechado em 2026-08-28).
+  Todas as 5 fatias do PRD-BSP-01 mergeadas em `main`:
+  - **F1 — Pricing 360 (fachada)** — PR #1414
+    (`src/server/BusinessSkillsPackService.ts`, adapter map por vertical,
+    tabela `business_skills_pack_org_config`, endpoint
+    `/api/bsp/pricing/suggest`). Cobertura: `test:bsp-pricing` 53/53.
+  - **F2 — RFP templates** — PR #1415
+    (`getQuoteTemplate`, `renderTemplateString`, `createQuoteFromTemplate`
+    delegando para `QuoteService.buildAndSave`, métricas por vendedor
+    RN-BSP-05, endpoints `/api/bsp/rfp/*`). Cobertura: `test:bsp-rfp` 57/57.
+  - **F3 — Local Marketing** — PR #1416
+    (`enrichContactsWithCompetitor` cruzando `contacts.identifier` ×
+    `competitor_accounts.handle`, tabela cache
+    `bsp_contact_competitor_match`, endpoints `/api/bsp/local-marketing/*`).
+    Adaptação vs PRD: usa `contacts` em vez de `prospects` — a tabela
+    `prospects` referida no PRD não existe neste repo; contacts +
+    competitor_accounts (Track B F1) cumpre o mesmo sinal. Cobertura:
+    `test:bsp-outreach` 45/45.
+  - **F4 — Gate + soft launch** — PR #1417
+    (feature flag `BSP_SOFT_LAUNCH` env var, `checkAccess(orgId, dim?)`
+    com curto-circuito no bake-in, helper `gateOrDeny` wireado em 6
+    endpoints, novo `GET /api/bsp/access` pro CTA de upgrade na UI).
+    Cobertura: `test:bsp-gate` 39/39.
+  - **F5 — UI** — PR #1418 (`BspSettingsPanel` em Configurações → aba
+    "Business Skills Pack", com 3 cards: toggles de dimensão, editor
+    do quote_template com placeholders visíveis, preview de sugestão
+    de preço).
+
+  §Gap-2 do PRD-PEL-01 fechado. Estado no ledger:
+  `DELIVERED` (F1-F5 em produção via `main`; soft launch on por default
+  em bake-in via env `BSP_SOFT_LAUNCH=1`).
+
+  Fora do escopo desta implementação (deliberado; possível trabalho
+  futuro):
+  - Add-on comercial `business_skills_pack` no `AddonService` +
+    `PlanService.businessSkillsPackAllowed` + module_keys
+    `bsp_pricing_360/bsp_rfp/bsp_local_marketing` no `ModuleService`.
+    F4 cobriu RN-BSP-08 via gate por dimensão + soft launch sem mexer
+    em `ModuleService`/`OPTIONAL_MODULES` (blast radius menor).
+  - Editor de outreach pack na UI (o campo `outreach_pack_json` está
+    reservado na config, mas sem tela de "envio massivo" ainda).
+  - Tela de métricas por vendedor (endpoint pronto; superfície natural
+    é "Vendas", não Configurações).
+  - Lista de matches contact↔competitor na UI (idem — natural em
+    Contatos).
 
 ### 4.6 Vision, Wi-Fi, Sensor Fusion (§16–§19)
 - `VISION_VMS_CONTROL_PLANE` (ADR-001..008) — PARCIAL (sem ingestão real)
@@ -97,7 +141,7 @@ Todos EXISTE ou PARCIAL. Nenhum bloqueador externo.
 Estas são as decisões que **precisam de humano** antes de avançar para F1
 do Ledger:
 
-1. **Confirmar §Gap-2**: PRD-BSP-01 está fora do repo (drive/notion/conversa) e precisa ser importado, ou o pacote precisa ser reescrito consolidando serviços verticais existentes?
+1. ~~**Confirmar §Gap-2**: PRD-BSP-01 está fora do repo (drive/notion/conversa) e precisa ser importado, ou o pacote precisa ser reescrito consolidando serviços verticais existentes?~~ **RESOLVIDO** (2026-08-28): PRD-BSP-01 e ADR-195 escritos e mergeados; Track C F1-F5 entregues em `main` (ver §4.5). Gap-2 fechado.
 2. **Reclassificar prioridades do PRD-PEL-01 §11 vs realidade** (§Gap-7 da matriz):
    - `PLATFORM_RELIABILITY_CAPACITY` foi classificada como "parcial/ausente" no PRD-PEL-01; na verdade está F0–F14 em produção.
    - `RECLAME_AQUI_INTELLIGENCE` foi P3 backlog "ausente"; espinha está COMPLETA, falta só conector.

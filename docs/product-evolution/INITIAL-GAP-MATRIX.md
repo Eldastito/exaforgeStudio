@@ -51,7 +51,7 @@ Descoberta crítica destacada abaixo em `Gaps estruturais §Gap-2`: **PRD-BSP-01
 | 12 | `SOCIAL_PROVIDERS` | Social Providers | PARCIAL / BLOQUEADO POR TERCEIRO | ADR-167 | Track B |
 | 13 | `INTELLIGENCE_HUB` | Competitor / Vertical / Social Intelligence | PARCIAL | ADR-135, ADR-156, ADR-157, ADR-166, ADR-167 (F5) | Track B |
 | 14 | `VISUAL_RECIPE_ENGINE` | Visual Recipe Engine | NÃO EXISTE | — (encosta em ADR-034–ADR-045) | Track A (P0) |
-| 15 | `BUSINESS_SKILLS_PACK` | Business Skills Pack (Pricing/RFP/Local Mktg) | PRECISA ADAPTAR | — (fragmentado em ADR-023 e services por vertical) | Track C (P1) |
+| 15 | `BUSINESS_SKILLS_PACK` | Business Skills Pack (Pricing/RFP/Local Mktg) | **DELIVERED** (Track C F1-F5 mergeados em 2026-08-28) | PRD-BSP-01 + ADR-195 + `BusinessSkillsPackService` + `BspSettingsPanel` | Track C (P1) — fechado |
 | 16 | `VISION_VMS_CONTROL_PLANE` | Vision VMS Control Plane | PARCIAL | ADR-001..ADR-008 | — |
 | 17 | `VISION_EDGE_PERCEPTION` | Vision Edge Perception | NÃO EXISTE | ADR-001 (parcial), ADR-003, ADR-005 | Track E (P1) |
 | 18 | `WIFI_PRESENCE_CSI` | Wi-Fi Presence / CSI | NÃO EXISTE | — | Track F (P1/P2, POC) |
@@ -191,18 +191,17 @@ Para cada linha da tabela acima, seção com evidência concreta.
 - **Justificativa do estado (NÃO EXISTE)**: motor de comandos "recipe" nunca foi codado. Pipeline base de geração já existe — o gap é a camada declarativa (aliases, presets, versionamento de receita).
 - **Prioridade**: P0 no PRD-PEL-01 §21. Fatia dedicada na Fase 6.
 
-### 15. `BUSINESS_SKILLS_PACK` (Track C — P1)
-- **ADRs**: nenhum ADR-BSP-01 no repo. Sub-capacidades encostam em ADR-023 (marketplace pricing).
-- **PRDs/análises**: **`PRD-BSP-01` não está checked-in** — grep case-insensitive em `docs/` retorna vazio. Apenas `docs/PRD-REVENUE-INTELLIGENCE-CENTER.md` tangencia Pricing 360.
-- **Services fragmentados por vertical**:
-  - Precificação: `src/server/pricing.ts` (markup Loja Virtual), `ComigoPricingService.ts` (recipes/costs/calibrate), `RetailPricingService.ts`
-  - Proposta/RFP-RFQ: `QuoteService.ts`, `SupplierQuoteService.ts` (adjacente, não é RFP formal)
-  - Marketing Local & Conversão: **NÃO EXISTE** `LocalMarketingService`. Parcial via `CampaignService.ts`, `CampaignObjectiveContractService.ts`, rota `campaigns.ts`
-- **Rotas**: `/api/comigo` (`/recipes`, `/recipes/:id/calibrate`), `/api/quotes` (`/settings`, `/:id/accept|decline`). Nada de `/api/local-marketing` nem `/api/proposals`.
-- **Tabelas**: nenhuma `proposals`, `rfp`, `rfq`, `local_marketing`. `manager_solution_proposals` é contexto diferente.
-- **Testes**: `test-comigo-pricing.ts`, `test-retail-pricing.ts`, `test-pricing.ts`, `test-quote-service.ts`
-- **Justificativa do estado (PRECISA ADAPTAR)**: as 3 sub-capacidades existem espalhadas por vertical, sem pacote unificado. Marketing Local & Conversão praticamente ausente como capability nomeada.
-- **Bloqueadores**: ~~falta PRD-BSP-01 no repo~~ **destravado** — ver `docs/prd/PRD-BSP-01-business-skills-pack.md` (rascunho inicial, ADR-BSP-01 pendente antes de F1). Decisão sobre compor/rebrandar serviços verticais foi tomada em favor de fachada aditiva (RN-BSP-02).
+### 15. `BUSINESS_SKILLS_PACK` (Track C — P1) — **DELIVERED**
+- **ADRs**: `docs/adr/ADR-195-business-skills-pack.md` (aprovado + mergeado). Sub-capacidades continuam usando os services vertical-específicos originais (RN-BSP-02 fachada aditiva).
+- **PRDs/análises**: `docs/prd/PRD-BSP-01-business-skills-pack.md` (RN-BSP-01..12, US-BSP-01..06, F0-F5).
+- **Nova fachada aditiva**: `src/server/BusinessSkillsPackService.ts` — adapter map por vertical, config CRUD, quote templates, contact↔competitor enrichment, gate por dimensão.
+- **Services vertical intactos** (RN-BSP-02): `pricing.ts` (Loja Virtual), `ComigoPricingService.ts`, `RetailPricingService.ts`, `QuoteService.ts` — sem mudança de assinatura.
+- **Rotas**: `/api/bsp/*` (config, pricing/suggest, rfp/template, rfp/create, rfp/metrics/by-agent, local-marketing/enrich, local-marketing/matches, access). Rotas legadas (`/api/comigo`, `/api/quotes`) permanecem.
+- **Tabelas novas** (aditivas, fim de db.ts): `business_skills_pack_org_config` (config JSON por dimensão), `bsp_contact_competitor_match` (cache dos matches).
+- **UI**: aba "Business Skills Pack" em Configurações → `src/features/settings/BspSettingsPanel.tsx` (toggles de dimensão + editor de quote_template + preview de pricing).
+- **Cobertura**: 4 suítes de teste dedicadas — `test:bsp-pricing` (53), `test:bsp-rfp` (57), `test:bsp-outreach` (45), `test:bsp-gate` (39) — **194 checks totais**.
+- **Gate**: RN-BSP-08 via feature flag `BSP_SOFT_LAUNCH` (env var, default ON durante bake-in) + `checkAccess(orgId, dimension?)`. `AddonService.business_skills_pack` + integração `ModuleService` ficaram fora deste ciclo (gate por dimensão + soft launch cobre o requisito sem ampliar blast radius; add-on comercial pode entrar depois quando cobrança por plano evoluir).
+- **PRs**: F1 #1414 · F2 #1415 · F3 #1416 · F4 #1417 · F5 #1418 (todos merged em `main`).
 
 ### 16. `VISION_VMS_CONTROL_PLANE`
 - **ADRs**: ADR-001..ADR-008 (Vision Edge Runtime, Tenant Isolation, Media Pipeline, Recording/Evidence, Vision AI Inference, Access Control, Edge-Cloud Sync, Process Supervisor)

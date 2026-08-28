@@ -7,8 +7,8 @@
 - **Prioridade:** Alta — destrava Track C do PRD-PEL-01 (Product Evolution Ledger + Gap Closure Program).
 - **Responsável pela execução:** IA Dev.
 - **Tipo:** PRD funcional + técnico + política de bundling.
-- **Status:** **Rascunho inicial** — desbloqueia `Gap-2` do `docs/product-evolution/INITIAL-GAP-MATRIX.md`. Sem ADR-BSP-01 ainda; ver §11.
-- **ADR associado (a criar):** ADR-BSP-01 — Business Skills Pack (arquitetura + bundling + gates de plano).
+- **Status:** **Rascunho inicial** — desbloqueia `Gap-2` do `docs/product-evolution/INITIAL-GAP-MATRIX.md`. ADR arquitetural em `docs/adr/ADR-195-business-skills-pack.md`.
+- **ADR associado:** [ADR-195 — Business Skills Pack (arquitetura + bundling + gates de plano)](../adr/ADR-195-business-skills-pack.md).
 - **Dependências principais:** `PlanService`, `AddonService`, `PermissionService`, `ModuleService`, `pricing.ts` (§ADR-023), `ComigoPricingService`, `RetailPricingService`, `QuoteService`, `SupplierQuoteService`, `ProspectService`, `ProspectDiscoveryService`, `ProspectResearchService`, `ProspectExecutionService`, `StudioService` (Track A), `CompetitorInsightsService` (Track B).
 
 ---
@@ -367,7 +367,7 @@ Após F1-F4 em produção:
 
 ## §11 — Próximos passos e itens pendentes
 
-- **Criar ADR-BSP-01** consolidando as decisões arquiteturais (fachada + tabela + herança de plano)
+- ~~Criar ADR-BSP-01 consolidando as decisões arquiteturais~~ — **feito** em [ADR-195](../adr/ADR-195-business-skills-pack.md) (D1-D8 cobrindo fachada, tabela única, herança de plano, roll-out com feature flag)
 - **Ratificar RN-BSP-11 e RN-BSP-12** com o time comercial
 - **Validar preços de add-on** com finance (fora deste PRD)
 - **Escolher se F1 começa por Pricing ou por RFP** — recomendação: **Pricing** por já ter 3 adapters prontos

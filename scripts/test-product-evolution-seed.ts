@@ -38,7 +38,7 @@ async function main() {
   const summary1 = await runSeed({ silent: true });
   check("1.1 runSeed() sem erros", summary1.errors.length === 0);
   check("1.2 cria 25 items", summary1.created.length === 25);
-  check("1.3 21 status ajustados (4 permanecem em IDEA por design)", summary1.status_bumped.length === 21);
+  check("1.3 22 status ajustados (3 permanecem em IDEA por design: Vision Edge/WiFi/Sense)", summary1.status_bumped.length === 22);
   check("1.4 fontes anexadas > 40", summary1.sources_added.reduce((a, b) => a + b.count, 0) > 40);
 
   const total1 = (db.prepare("SELECT COUNT(*) as n FROM product_evolution_items").get() as any).n;
@@ -62,17 +62,19 @@ async function main() {
   check("3.1 CEO_OPERATING_LAYER em PRODUCTION", PEL.getItem("CEO_OPERATING_LAYER")?.status === "PRODUCTION");
   check("3.2 FALA_TU em PRODUCTION", PEL.getItem("FALA_TU")?.status === "PRODUCTION");
   check("3.3 VISION_VMS_CONTROL_PLANE em TESTED", PEL.getItem("VISION_VMS_CONTROL_PLANE")?.status === "TESTED");
-  check("3.4 BUSINESS_SKILLS_PACK fica em IDEA (target IDEA)", PEL.getItem("BUSINESS_SKILLS_PACK")?.status === "IDEA");
+  check("3.4 BUSINESS_SKILLS_PACK em PRODUCTION (Track C entregue: PRs #1414-#1418)",
+    PEL.getItem("BUSINESS_SKILLS_PACK")?.status === "PRODUCTION");
   check("3.5 VISION_EDGE_PERCEPTION fica em IDEA (NÃO EXISTE)", PEL.getItem("VISION_EDGE_PERCEPTION")?.status === "IDEA");
   check("3.6 WIFI_PRESENCE_CSI fica em IDEA (conceitual)", PEL.getItem("WIFI_PRESENCE_CSI")?.status === "IDEA");
   check("3.7 ZAPFLOW_SENSE fica em IDEA (cascata NÃO EXISTE)", PEL.getItem("ZAPFLOW_SENSE")?.status === "IDEA");
-  check("3.8 VISUAL_RECIPE_ENGINE em PRD_READY", PEL.getItem("VISUAL_RECIPE_ENGINE")?.status === "PRD_READY");
+  check("3.8 VISUAL_RECIPE_ENGINE em PRODUCTION (Track A entregue: PRs #1403-#1406)",
+    PEL.getItem("VISUAL_RECIPE_ENGINE")?.status === "PRODUCTION");
   check("3.9 RETAIL_FLOOR_TOULON em PILOT (precisa validar dados reais)", PEL.getItem("RETAIL_FLOOR_TOULON")?.status === "PILOT");
 
   // ═══════════════ 4. blocked_reason preservado ═══════════════
   const bsp = PEL.getItem("BUSINESS_SKILLS_PACK");
-  check("4.1 BUSINESS_SKILLS_PACK tem blocked_reason mencionando PRD-BSP-01",
-    !!bsp?.blocked_reason && bsp.blocked_reason.includes("PRD-BSP-01"));
+  check("4.1 BUSINESS_SKILLS_PACK sem blocked_reason (Track C fechado)",
+    !bsp?.blocked_reason);
   check("4.2 VISION_EDGE_PERCEPTION tem blocked_reason (runtime adiado)",
     !!PEL.getItem("VISION_EDGE_PERCEPTION")?.blocked_reason);
   check("4.3 RETAIL_FLOOR_TOULON tem blocked_reason (campo pendente)",
@@ -110,8 +112,8 @@ async function main() {
     !gaps.some(i => i.evolution_key === "VISION_EDGE_PERCEPTION"));
   check("7.3 TESTED sem evid. aparece em gaps",
     gaps.some(i => i.evolution_key === "CONTENT_GROWTH_ENGINE"));
-  check("7.4 PRD_READY sem evid. aparece em gaps",
-    gaps.some(i => i.evolution_key === "VISUAL_RECIPE_ENGINE"));
+  check("7.4 VISUAL_RECIPE_ENGINE agora fora dos gaps (PRODUCTION após Track A)",
+    !gaps.some(i => i.evolution_key === "VISUAL_RECIPE_ENGINE"));
 
   // Ordenação por prioridade
   const p0Gaps = gaps.filter(i => i.priority === "P0");

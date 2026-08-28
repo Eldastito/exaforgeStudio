@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -129,6 +129,11 @@ export function StudioView() {
     suggestion: { recipe_key: string; name: string; reasoning: string; confidence: number } | null;
     alternatives: Array<{ recipe_key: string; name: string; reasoning: string }>;
   } | null>(null);
+  // F5 — Atalhos per-org (aliases customizados).
+  const [orgAliases, setOrgAliases] = useState<Array<{ id: string; alias: string; recipe_key: string }>>([]);
+  const [newAliasText, setNewAliasText] = useState('');
+  const [newAliasKey, setNewAliasKey] = useState('');
+  const [aliasBusy, setAliasBusy] = useState(false);
   const selectedRecipe = recipes.find(r => r.key === selectedRecipeKey) || null;
 
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
@@ -147,7 +152,9 @@ export function StudioView() {
     .then(d => setRecipes(Array.isArray(d?.recipes) ? d.recipes : [])).catch(() => {});
   const loadRecipeAnalytics = () => apiFetch('/api/studio/recipes/analytics').then(r => r.json())
     .then(d => setRecipeAnalytics(d && typeof d.total_uses === 'number' ? d : null)).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); loadRecipeAnalytics(); }, []);
+  const loadOrgAliases = () => apiFetch('/api/studio/recipes/aliases?scope=own').then(r => r.json())
+    .then(d => setOrgAliases(Array.isArray(d?.aliases) ? d.aliases : [])).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); loadRecipeAnalytics(); loadOrgAliases(); }, []);
 
   // Auto-seleciona primeira receita disponível quando o catálogo chega.
   useEffect(() => {
@@ -265,6 +272,38 @@ export function StudioView() {
       }
       toast.success(`Sugestão: ${data.suggestion?.name || data.suggestion?.recipe_key || 'nenhuma'} ✨`);
     } catch (e: any) { toast.error(e.message); } finally { setSuggestBusy(false); }
+  };
+
+  const addOrgAlias = async () => {
+    const alias = newAliasText.trim();
+    const key = newAliasKey || selectedRecipeKey;
+    if (!alias) { toast.error('Digite o texto do atalho.'); return; }
+    if (!key) { toast.error('Escolha uma receita.'); return; }
+    setAliasBusy(true);
+    try {
+      const res = await apiFetch('/api/studio/recipes/aliases', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias, recipe_key: key }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao criar atalho.');
+      setNewAliasText('');
+      setNewAliasKey('');
+      loadOrgAliases();
+      toast.success(`Atalho "${alias}" criado 🔗`);
+    } catch (e: any) { toast.error(e.message); } finally { setAliasBusy(false); }
+  };
+
+  const removeOrgAlias = async (id: string, alias: string) => {
+    try {
+      const res = await apiFetch(`/api/studio/recipes/aliases/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || 'Falha ao remover atalho.');
+      }
+      loadOrgAliases();
+      toast.success(`Atalho "${alias}" removido.`);
+    } catch (e: any) { toast.error(e.message); }
   };
 
   const applyAlternative = (key: string) => {
@@ -648,6 +687,60 @@ export function StudioView() {
             </div>
           </div>
         )}
+
+        {/* Atalhos per-org (F5) */}
+        <div className="mt-4 pt-3 border-t border-zinc-800/70">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-[11px] text-zinc-500">Meus atalhos</span>
+            <span className="text-[10px] text-zinc-500">{orgAliases.length} atalho(s)</span>
+          </div>
+          {orgAliases.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {orgAliases.map(a => (
+                <span key={a.id} className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px]">
+                  <span className="text-zinc-200 font-medium">{a.alias}</span>
+                  <span className="text-zinc-600">→</span>
+                  <span className="text-fuchsia-300">{a.recipe_key}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeOrgAlias(a.id, a.alias)}
+                    title="Remover atalho"
+                    className="ml-0.5 text-zinc-500 hover:text-red-400"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <input
+              type="text" value={newAliasText}
+              onChange={e => setNewAliasText(e.target.value)}
+              placeholder="ex.: meu-3d"
+              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-[11px] text-zinc-100 focus:border-fuchsia-500 outline-none"
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOrgAlias(); } }}
+            />
+            <select
+              value={newAliasKey} onChange={e => setNewAliasKey(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded-lg p-1.5 text-[11px] text-zinc-300 focus:border-fuchsia-500 outline-none"
+            >
+              <option value="">— receita —</option>
+              {recipes.map(r => (
+                <option key={r.key} value={r.key}>{r.key}</option>
+              ))}
+            </select>
+            <button
+              type="button" onClick={addOrgAlias}
+              disabled={aliasBusy || !newAliasText.trim() || (!newAliasKey && !selectedRecipeKey)}
+              className="inline-flex items-center gap-1 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700 text-white px-2.5 py-1.5 text-[11px] font-medium disabled:opacity-60"
+            >
+              {aliasBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Adicionar
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] text-zinc-600">Vazio na receita → usa a que está selecionada acima. Atalho da org tem prioridade sobre os globais.</p>
+        </div>
       </div>
 
       {/* Gerar vídeo (Veo) */}

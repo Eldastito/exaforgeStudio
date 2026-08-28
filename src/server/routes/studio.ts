@@ -28,7 +28,7 @@ router.get("/recipes", (req: AuthRequest, res): any => {
 router.get("/recipes/:key", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const recipe = StudioVisualRecipeService.get(req.params.key);
+    const recipe = StudioVisualRecipeService.get(req.params.key, req.organizationId);
     if (!recipe) return res.status(404).json({ error: "not_found" });
     res.json(recipe);
   } catch (e: any) {
@@ -48,6 +48,7 @@ router.post("/recipes/plan", (req: AuthRequest, res): any => {
       recipe_key_or_alias: String(b.recipe),
       inputs: b.inputs || {},
       format: b.format,
+      orgId: req.organizationId,
     });
     res.json(plan);
   } catch (e: any) {
@@ -98,6 +99,56 @@ router.post("/recipes/generate", async (req: AuthRequest, res): Promise<any> => 
         : 400;
       return res.status(s).json({ error: e.message, code: e.code });
     }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// ── Org-scoped aliases (ADR-194 F5) ──
+//
+// Aliases globais (seed do PRD §12) continuam em studio_visual_recipe_aliases;
+// esses endpoints tratam APENAS overrides per-org na tabela paralela
+// studio_visual_recipe_org_aliases. resolveAlias prioriza org > global.
+
+// GET /api/studio/recipes/aliases — lista globais + os da própria org.
+// ?scope=own filtra pra só os da org (útil pra tela de gerenciamento).
+router.get("/recipes/aliases", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const ownOnly = req.query.scope === "own";
+    res.json({ aliases: StudioVisualRecipeService.listAliasesForOrg(req.organizationId, ownOnly) });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// POST /api/studio/recipes/aliases { alias: string, recipe_key: string }
+// Cria alias per-org; rejeita duplicata na mesma org.
+router.post("/recipes/aliases", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const created = StudioVisualRecipeService.addOrgAlias(
+      req.organizationId, String(b.alias || ""), String(b.recipe_key || ""),
+    );
+    res.status(201).json(created);
+  } catch (e: any) {
+    if (e instanceof VisualRecipeError) {
+      const s = e.code === "recipe_not_found" ? 404
+        : e.code === "duplicate_alias" ? 409 : 400;
+      return res.status(s).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// DELETE /api/studio/recipes/aliases/:id — só remove se a org for a dona.
+router.delete("/recipes/aliases/:id", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const removed = StudioVisualRecipeService.removeOrgAlias(req.organizationId, req.params.id);
+    if (!removed) return res.status(404).json({ error: "not_found" });
+    res.json({ ok: true });
+  } catch (e: any) {
     res.status(500).json({ error: e?.message || "internal_error" });
   }
 });

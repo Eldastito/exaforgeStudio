@@ -10947,6 +10947,22 @@ const initDb = () => {
       );
       CREATE INDEX IF NOT EXISTS idx_svra_lower ON studio_visual_recipe_aliases (LOWER(alias));
       CREATE INDEX IF NOT EXISTS idx_svra_key ON studio_visual_recipe_aliases (recipe_key);
+
+      -- ADR-194 F5: aliases por organização (overrides). Tabela nova pra
+      -- preservar UNIQUE(alias) global da studio_visual_recipe_aliases —
+      -- SQLite não permite DROP CONSTRAINT sem recriar a tabela toda.
+      -- Aliases globais continuam em studio_visual_recipe_aliases (seed);
+      -- overrides per-org ficam aqui. resolveAlias tenta org antes de global.
+      CREATE TABLE IF NOT EXISTS studio_visual_recipe_org_aliases (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        alias TEXT NOT NULL,                     -- case original; resolve case-insensitive
+        recipe_key TEXT NOT NULL,                -- aponta pra active version
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, alias)          -- mesma org não pode ter alias duplicado
+      );
+      CREATE INDEX IF NOT EXISTS idx_svroa_org_lower ON studio_visual_recipe_org_aliases (organization_id, LOWER(alias));
+      CREATE INDEX IF NOT EXISTS idx_svroa_key ON studio_visual_recipe_org_aliases (recipe_key);
     `);
   } catch (e) { console.error('[DB] Falha ao criar studio_visual_recipes', e); }
 };

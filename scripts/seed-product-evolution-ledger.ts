@@ -344,15 +344,17 @@ const SEED: SeedItem[] = [
   },
   {
     evolution_key: "INTEGRATION_FACTORY",
-    title: "Integration Factory",
+    title: "Integrations (composição por conector, não fábrica)",
     domain: "platform",
     priority: "P2",
-    summary: "Conectores específicos (Alterdata + Instagram/Google OAuth). Sem 'fábrica' abstrata — cada conector é service+route dedicado.",
-    target_status: "IMPLEMENTING",
-    blocked_reason: "Sem ADR/PRD de fábrica; decisão pendente entre reengenharia da tabela integrations ou pacote novo",
+    summary: "Padrão de composição por conector formalizado em ADR-197: cada integração externa é um `<Provider>Service.ts` + rota, sem fábrica abstrata nem registry runtime. Utilitários horizontais (JobQueue, webhookSecurity, oauth_connections) cobrem a mecânica repetida. Pacote separado só quando D5 do ADR disparar.",
+    source_of_truth: "ADR-197",
+    target_status: "TESTED",
     sources: [
+      { source_type: "adr", title: "ADR-197 — Integrations composição por conector", source_reference: "docs/adr/ADR-197-integrations-composition-pattern.md" },
       { source_type: "file", title: "docs/integrations/alterdata-fase2-vendas.md", source_reference: "docs/integrations/alterdata-fase2-vendas.md" },
-      { source_type: "file", title: "src/server/AlterdataConnectorService.ts", source_reference: "src/server/AlterdataConnectorService.ts" },
+      { source_type: "file", title: "AlterdataConnectorService (referência de conector)", source_reference: "src/server/AlterdataConnectorService.ts" },
+      { source_type: "file", title: "routes/integrations.ts (hub de rotas)", source_reference: "src/server/routes/integrations.ts" },
     ],
   },
   {

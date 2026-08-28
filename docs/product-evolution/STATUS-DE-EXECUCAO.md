@@ -78,7 +78,7 @@ Todos EXISTE ou PARCIAL. Nenhum bloqueador externo.
 - `STUDIO_IMAGE_GEN_CORE` — EXISTE (Gemini Imagen/Veo + OpenAI fallback pronto para reuso)
 
 ### 4.5 Business Skills (§15)
-- `BUSINESS_SKILLS_PACK` — PRECISA ADAPTAR — **PRD-BSP-01 escrito** em `docs/prd/PRD-BSP-01-business-skills-pack.md`; §Gap-2 destravado. Estado sugerido pode ir para `PRD_READY` no ledger; ADR-BSP-01 ainda pendente antes de F1.
+- `BUSINESS_SKILLS_PACK` — PRECISA ADAPTAR — **PRD + ADR aprovados**: `docs/prd/PRD-BSP-01-business-skills-pack.md` e `docs/adr/ADR-195-business-skills-pack.md`. §Gap-2 destravado. Estado sugerido no ledger: `APPROVED` (PRD + ADR + F0 concluídos). F1 (fachada Pricing) pode começar.
 
 ### 4.6 Vision, Wi-Fi, Sensor Fusion (§16–§19)
 - `VISION_VMS_CONTROL_PLANE` (ADR-001..008) — PARCIAL (sem ingestão real)

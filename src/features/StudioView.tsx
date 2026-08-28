@@ -121,6 +121,14 @@ export function StudioView() {
     recipe_key: string; recipe_version: number;
   } | null>(null);
   const [recipeAnalytics, setRecipeAnalytics] = useState<RecipeAnalytics | null>(null);
+  // F3.5 — auto-sugestão de receita a partir de briefing livre.
+  const [suggestBriefing, setSuggestBriefing] = useState('');
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [lastSuggestion, setLastSuggestion] = useState<{
+    method: 'llm' | 'fallback_keyword';
+    suggestion: { recipe_key: string; name: string; reasoning: string; confidence: number } | null;
+    alternatives: Array<{ recipe_key: string; name: string; reasoning: string }>;
+  } | null>(null);
   const selectedRecipe = recipes.find(r => r.key === selectedRecipeKey) || null;
 
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
@@ -238,6 +246,31 @@ export function StudioView() {
     } catch (e: any) { setVStatus('error'); toast.error(e.message); }
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const suggestRecipe = async () => {
+    if (!suggestBriefing.trim()) { toast.error('Descreva o que você quer criar.'); return; }
+    setSuggestBusy(true);
+    try {
+      const body: any = { briefing: suggestBriefing.trim() };
+      if (recipeFormat) body.format = recipeFormat;
+      const res = await apiFetch('/api/studio/recipes/suggest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao sugerir receita.');
+      setLastSuggestion(data);
+      if (data.suggestion?.recipe_key) {
+        setSelectedRecipeKey(data.suggestion.recipe_key);
+      }
+      toast.success(`Sugestão: ${data.suggestion?.name || data.suggestion?.recipe_key || 'nenhuma'} ✨`);
+    } catch (e: any) { toast.error(e.message); } finally { setSuggestBusy(false); }
+  };
+
+  const applyAlternative = (key: string) => {
+    setSelectedRecipeKey(key);
+    toast.success(`Trocado para: ${recipes.find(r => r.key === key)?.name || key}`);
+  };
 
   const generateFromRecipe = async () => {
     if (!selectedRecipeKey) { toast.error('Escolha uma receita.'); return; }
@@ -456,6 +489,56 @@ export function StudioView() {
                     <option key={r.key} value={r.key}>{r.name} — v{r.version}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Sugestão automática (F3.5) */}
+              <div className="rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/5 p-3 space-y-2">
+                <label className="text-[11px] text-fuchsia-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3" /> Não sabe qual escolher? Descreva sua ideia
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text" value={suggestBriefing}
+                    onChange={e => setSuggestBriefing(e.target.value)}
+                    placeholder="Ex.: outdoor 3D pra lançamento de tênis"
+                    className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-fuchsia-500 outline-none"
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); suggestRecipe(); } }}
+                  />
+                  <button
+                    type="button" onClick={suggestRecipe}
+                    disabled={suggestBusy || !suggestBriefing.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700 text-white px-3 py-2 text-xs font-medium disabled:opacity-60">
+                    {suggestBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Sugerir
+                  </button>
+                </div>
+                {lastSuggestion?.suggestion && (
+                  <div className="text-[10px] text-zinc-400 space-y-1">
+                    <p>
+                      <span className="text-fuchsia-300 font-medium">{lastSuggestion.suggestion.name}</span>
+                      <span className="text-zinc-600 mx-1">·</span>
+                      <span>{Math.round((lastSuggestion.suggestion.confidence || 0) * 100)}% ({lastSuggestion.method === 'llm' ? 'IA' : 'palavra-chave'})</span>
+                    </p>
+                    {lastSuggestion.suggestion.reasoning && (
+                      <p className="text-zinc-500 italic line-clamp-2">{lastSuggestion.suggestion.reasoning}</p>
+                    )}
+                    {lastSuggestion.alternatives.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        <span className="text-zinc-500">Outras:</span>
+                        {lastSuggestion.alternatives.map(a => (
+                          <button
+                            key={a.recipe_key} type="button"
+                            onClick={() => applyAlternative(a.recipe_key)}
+                            title={a.reasoning}
+                            className="text-fuchsia-300 hover:text-fuchsia-200 underline underline-offset-2"
+                          >
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {selectedRecipe && (

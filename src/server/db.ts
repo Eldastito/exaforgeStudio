@@ -11016,6 +11016,28 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_cp_competitor_fetched ON competitor_posts (competitor_id, fetched_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar competitor_posts', e); }
+
+  // Closure Track B F3 — classificação de posts de concorrentes por recipe do VRE.
+  // Cada post pode ter várias classificações ao longo do tempo (histórico), pra
+  // permitir reclassificar quando o catálogo ou o classifier mudarem.
+  // A "última" classificação de um post é a de maior classified_at.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS competitor_post_classifications (
+        id TEXT PRIMARY KEY,
+        post_id TEXT NOT NULL,
+        recipe_key TEXT,                       -- pode ser NULL se nenhum recipe casou (raro)
+        recipe_version INTEGER,                -- versão do recipe no momento da classificação
+        confidence REAL,                       -- 0..1
+        method TEXT NOT NULL,                  -- 'llm' | 'fallback_keyword' | 'manual'
+        reasoning TEXT,
+        classified_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (post_id) REFERENCES competitor_posts(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_cpc_post ON competitor_post_classifications (post_id, classified_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_cpc_recipe ON competitor_post_classifications (recipe_key, classified_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar competitor_post_classifications', e); }
 };
 
 initDb();

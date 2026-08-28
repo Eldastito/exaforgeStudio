@@ -7,8 +7,40 @@ import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { CompetitorIntelligenceService, CompetitorError } from "../CompetitorIntelligenceService.js";
 import { CompetitorPostsService, CompetitorPostError } from "../CompetitorPostsService.js";
+import { CompetitorClassificationService, ClassificationError } from "../CompetitorClassificationService.js";
 
 const router = Router();
+
+// ── Distribuição de recipes usados pelos concorrentes (F3) ──
+// ANTES de /:id porque 'classifications' precisa preceder qualquer :id.
+// GET /api/competitors/classifications/distribution?platform=&competitorId=&since=
+router.get("/classifications/distribution", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const platform = typeof req.query.platform === "string" ? req.query.platform : undefined;
+    const competitorId = typeof req.query.competitorId === "string" ? req.query.competitorId : undefined;
+    const since = typeof req.query.since === "string" ? req.query.since : undefined;
+    res.json(CompetitorClassificationService.distributionForOrg(req.organizationId, { platform, competitorId, since }));
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/competitors/classifications/recent?limit=&platform=&recipeKey=
+router.get("/classifications/recent", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const platform = typeof req.query.platform === "string" ? req.query.platform : undefined;
+    const recipeKey = typeof req.query.recipeKey === "string" ? req.query.recipeKey : undefined;
+    res.json({
+      classifications: CompetitorClassificationService.listRecentClassifiedPostsForOrg(
+        req.organizationId, { limit, platform, recipeKey }),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
 
 // ── Feed cronológico global de posts da org (F2) ──
 // Definido ANTES de /:id pra que o path 'posts' não seja tratado como :id.
@@ -165,6 +197,87 @@ router.delete("/:id/posts/:postId", (req: AuthRequest, res): any => {
     if (!removed) return res.status(404).json({ error: "not_found" });
     res.json({ ok: true });
   } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// ── Classificações por post individual (F3) ──
+
+// POST /api/competitors/:id/posts/:postId/classify { format? }
+// Dispara classificação automática do post via VRE.suggestForBriefing.
+router.post("/:id/posts/:postId/classify", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const result = await CompetitorClassificationService.classifyPost({
+      orgId: req.organizationId,
+      postId: req.params.postId,
+      format: typeof b.format === "string" ? b.format : null,
+    });
+    res.status(201).json(result);
+  } catch (e: any) {
+    if (e instanceof ClassificationError) {
+      const s = e.code === "post_not_found" ? 404 : 400;
+      return res.status(s).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// POST /api/competitors/:id/posts/:postId/classify-manual { recipe_key, reasoning?, confidence? }
+router.post("/:id/posts/:postId/classify-manual", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const result = CompetitorClassificationService.classifyManual({
+      orgId: req.organizationId,
+      postId: req.params.postId,
+      recipe_key: String(b.recipe_key || ""),
+      reasoning: typeof b.reasoning === "string" ? b.reasoning : undefined,
+      confidence: typeof b.confidence === "number" ? b.confidence : undefined,
+    });
+    res.status(201).json(result);
+  } catch (e: any) {
+    if (e instanceof ClassificationError) {
+      const s = e.code === "post_not_found" || e.code === "recipe_not_found" ? 404 : 400;
+      return res.status(s).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/competitors/:id/posts/:postId/classifications — histórico
+router.get("/:id/posts/:postId/classifications", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json({
+      classifications: CompetitorClassificationService.listClassificationsForPost(
+        req.organizationId, req.params.postId),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// POST /api/competitors/:id/classify-all?limit=100&reclassifyAll=0 { format? }
+router.post("/:id/classify-all", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const reclassifyAll = req.query.reclassifyAll === "1" || req.query.reclassifyAll === "true";
+    const result = await CompetitorClassificationService.classifyBatchForCompetitor({
+      orgId: req.organizationId,
+      competitorId: req.params.id,
+      limit,
+      reclassifyAll,
+      format: typeof b.format === "string" ? b.format : null,
+    });
+    res.json(result);
+  } catch (e: any) {
+    if (e instanceof ClassificationError) {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     res.status(500).json({ error: e?.message || "internal_error" });
   }
 });

@@ -23,7 +23,7 @@ import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs";
 import db from "./db.js";
-import { generateImageB64 as defaultGenerateImageB64 } from "./llm.js";
+import { generateImageB64 as defaultGenerateImageB64, chat as llmChat, isAIConfigured } from "./llm.js";
 
 export const RECIPE_KEY_REGEX = /^[A-Z][A-Z0-9_]{2,63}$/;
 
@@ -401,6 +401,160 @@ export class StudioVisualRecipeService {
     };
   }
 
+  // ═══════════════ Suggest (F3.5) ═══════════════
+  //
+  // Classifica um briefing livre no melhor recipe. Duas rotas:
+  //   1. LLM classifier (via chat() do llm.ts), retorna JSON estruturado.
+  //   2. Fallback determinístico por palavras-chave sobre name/description/
+  //      intent/vertical_hints. Também usado quando a chave inválida vem do LLM.
+  //
+  // DI: `configureBriefingClassifier(fn)` substitui o classifier para testes
+  // que não podem bater na API real.
+
+  private static briefingClassifier: (
+    input: { briefing: string; format?: SupportedFormat | null },
+    catalog: Array<{ recipe_key: string; name: string; description: string | null; intent: string | null; vertical_hints: string[]; supported_formats: SupportedFormat[] }>,
+  ) => Promise<{ recipe_key: string; reasoning: string; confidence: number; alternatives?: Array<{ recipe_key: string; reasoning: string }> } | null> =
+    defaultBriefingClassifier;
+
+  static configureBriefingClassifier(
+    fn: typeof StudioVisualRecipeService.briefingClassifier,
+  ): void {
+    this.briefingClassifier = fn;
+  }
+
+  static resetBriefingClassifier(): void {
+    this.briefingClassifier = defaultBriefingClassifier;
+  }
+
+  /**
+   * Sugere um recipe a partir de um briefing livre.
+   * @throws VisualRecipeError('missing_briefing') se briefing vazio.
+   */
+  static async suggestForBriefing(input: {
+    briefing: string;
+    format?: SupportedFormat | null;
+  }): Promise<{
+    suggestion: {
+      recipe_key: string;
+      name: string;
+      reasoning: string;
+      confidence: number;
+    } | null;
+    method: "llm" | "fallback_keyword";
+    alternatives: Array<{ recipe_key: string; name: string; reasoning: string }>;
+  }> {
+    const briefing = (input.briefing || "").trim();
+    if (!briefing) {
+      throw new VisualRecipeError("missing_briefing", "briefing é obrigatório");
+    }
+
+    const format = input.format || null;
+
+    // Catálogo filtrado pelo formato quando pedido — não vale sugerir
+    // uma receita que não suporta o formato que o usuário quer.
+    const all = this.list();
+    const candidates = format
+      ? all.filter(r => r.supported_formats.includes(format))
+      : all;
+
+    if (candidates.length === 0) {
+      return { suggestion: null, method: "fallback_keyword", alternatives: [] };
+    }
+
+    // Shape leve pro classifier (não expor JSON interno).
+    const catalog = candidates.map(r => ({
+      recipe_key: r.key,
+      name: r.name,
+      description: r.description,
+      intent: r.intent,
+      vertical_hints: r.vertical_hints,
+      supported_formats: r.supported_formats,
+    }));
+
+    // 1. Tenta LLM classifier.
+    let llmResult: Awaited<ReturnType<typeof this.briefingClassifier>> = null;
+    try {
+      llmResult = await this.briefingClassifier({ briefing, format }, catalog);
+    } catch {
+      // erro silencioso — cai no fallback abaixo
+      llmResult = null;
+    }
+
+    if (llmResult && candidates.find(r => r.key === llmResult!.recipe_key)) {
+      const chosen = candidates.find(r => r.key === llmResult!.recipe_key)!;
+      const alts = (llmResult.alternatives || [])
+        .filter(a => candidates.find(r => r.key === a.recipe_key))
+        .slice(0, 2)
+        .map(a => ({
+          recipe_key: a.recipe_key,
+          name: candidates.find(r => r.key === a.recipe_key)!.name,
+          reasoning: a.reasoning,
+        }));
+      return {
+        suggestion: {
+          recipe_key: chosen.key,
+          name: chosen.name,
+          reasoning: llmResult.reasoning,
+          confidence: Math.max(0, Math.min(1, llmResult.confidence)),
+        },
+        method: "llm",
+        alternatives: alts,
+      };
+    }
+
+    // 2. Fallback keyword — pontuar cada recipe por hits de tokens.
+    const tokens = briefing.toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")   // remove acentos
+      .split(/[^a-z0-9]+/)
+      .filter(t => t.length >= 3);
+
+    const scored = candidates.map(r => {
+      const haystack = [
+        r.name, r.description || "", r.intent || "",
+        ...r.vertical_hints,
+      ].join(" ").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+      let score = 0;
+      for (const t of tokens) {
+        if (haystack.includes(t)) score++;
+      }
+      return { recipe: r, score };
+    }).sort((a, b) => b.score - a.score);
+
+    const top = scored[0];
+    if (!top || top.score === 0) {
+      // Nada bateu — devolve a primeira do catálogo como default fraco.
+      const first = candidates[0];
+      return {
+        suggestion: {
+          recipe_key: first.key,
+          name: first.name,
+          reasoning: "Nenhuma palavra-chave do briefing bateu com o catálogo — devolvendo primeira receita disponível como ponto de partida.",
+          confidence: 0.1,
+        },
+        method: "fallback_keyword",
+        alternatives: [],
+      };
+    }
+
+    const alts = scored.slice(1, 3).filter(s => s.score > 0).map(s => ({
+      recipe_key: s.recipe.key,
+      name: s.recipe.name,
+      reasoning: `${s.score} palavra(s) do briefing bateu com o catálogo.`,
+    }));
+
+    return {
+      suggestion: {
+        recipe_key: top.recipe.key,
+        name: top.recipe.name,
+        reasoning: `${top.score} palavra(s) do briefing bateu com name/description/intent/verticais.`,
+        confidence: Math.min(0.6, 0.2 + top.score * 0.1),
+      },
+      method: "fallback_keyword",
+      alternatives: alts,
+    };
+  }
+
   // ═══════════════ Analytics (F4) ═══════════════
 
   /**
@@ -526,6 +680,58 @@ export class StudioVisualRecipeService {
 
     return { created, aliases_added };
   }
+}
+
+/**
+ * Classifier default (F3.5) — chama chat() do llm.ts com response_format JSON
+ * e devolve a chave escolhida. Retorna null se IA não estiver configurada
+ * ou se a resposta não parsear — o caller cai no fallback keyword.
+ */
+async function defaultBriefingClassifier(
+  input: { briefing: string; format?: SupportedFormat | null },
+  catalog: Array<{ recipe_key: string; name: string; description: string | null; intent: string | null; vertical_hints: string[]; supported_formats: SupportedFormat[] }>,
+): Promise<{ recipe_key: string; reasoning: string; confidence: number; alternatives?: Array<{ recipe_key: string; reasoning: string }> } | null> {
+  if (!isAIConfigured() || catalog.length === 0) return null;
+
+  const catalogLines = catalog.map(r => {
+    const parts = [`- ${r.recipe_key}: ${r.name}`];
+    if (r.description) parts.push(`descrição: ${r.description}`);
+    if (r.intent) parts.push(`intenção: ${r.intent}`);
+    if (r.vertical_hints.length > 0) parts.push(`verticais: ${r.vertical_hints.join(", ")}`);
+    return parts.join(" | ");
+  }).join("\n");
+
+  const system = "Você é um classificador de receitas visuais para geração de imagem. Escolha a MELHOR receita para o briefing e até 2 alternativas. Responda APENAS JSON válido no formato {choice: string, reasoning: string, confidence: number, alternatives: [{recipe_key: string, reasoning: string}]}. `choice` e `recipe_key` DEVEM ser uma das keys exatas do catálogo.";
+  const prompt = [
+    `Catálogo (${catalog.length} receita(s) disponível(is)):`,
+    catalogLines,
+    "",
+    `Briefing do usuário: "${input.briefing}"`,
+    input.format ? `Formato solicitado: ${input.format}` : "",
+    "",
+    "Devolva JSON com: choice (recipe_key escolhido), reasoning (1-2 frases em pt-BR), confidence (0..1), alternatives (0-2 outras opções com recipe_key + reasoning curto).",
+  ].filter(Boolean).join("\n");
+
+  let raw = "";
+  try {
+    raw = await llmChat(prompt, { system, json: true, temperature: 0.3 });
+  } catch { return null; }
+  if (!raw) return null;
+
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (!parsed || typeof parsed.choice !== "string") return null;
+
+  return {
+    recipe_key: String(parsed.choice),
+    reasoning: String(parsed.reasoning || ""),
+    confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
+    alternatives: Array.isArray(parsed.alternatives)
+      ? parsed.alternatives
+          .filter((a: any) => a && typeof a.recipe_key === "string")
+          .map((a: any) => ({ recipe_key: String(a.recipe_key), reasoning: String(a.reasoning || "") }))
+      : [],
+  };
 }
 
 // Dados curados do §12 do PRD-PEL-01.

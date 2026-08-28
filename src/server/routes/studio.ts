@@ -102,6 +102,25 @@ router.post("/recipes/generate", async (req: AuthRequest, res): Promise<any> => 
   }
 });
 
+// POST /api/studio/recipes/suggest — F3.5. Classifica um briefing livre no
+// melhor recipe. Não gera arte (sem gate de plano); só sugere.
+// Body: { briefing: string, format?: SupportedFormat }
+router.post("/recipes/suggest", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    const briefing = typeof b.briefing === "string" ? b.briefing : "";
+    const format = typeof b.format === "string" ? b.format : null;
+    const result = await StudioVisualRecipeService.suggestForBriefing({ briefing, format });
+    res.json(result);
+  } catch (e: any) {
+    if (e instanceof VisualRecipeError) {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
 // GET /api/studio/recipes/analytics — F4. Uso agregado por recipe/vertical.
 // Escopo default = organização do caller. `?scope=global` só quando o caller é
 // admin master (mesmo padrão de outros endpoints cross-org). `?since=ISO`

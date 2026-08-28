@@ -286,7 +286,7 @@ export class CompetitorClassificationService {
     const params: any[] = [orgId];
     if (opts.platform) { wheres.push("c.platform = ?"); params.push(opts.platform); }
     if (opts.competitorId) { wheres.push("c.id = ?"); params.push(opts.competitorId); }
-    if (opts.since) { wheres.push("cls.classified_at >= ?"); params.push(opts.since); }
+    if (opts.since) { wheres.push("latest.classified_at >= ?"); params.push(opts.since); }
 
     const rows = db.prepare(`
       WITH latest AS (

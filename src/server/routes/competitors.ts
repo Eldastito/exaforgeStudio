@@ -8,8 +8,52 @@ import { AuthRequest } from "../middleware/auth.js";
 import { CompetitorIntelligenceService, CompetitorError } from "../CompetitorIntelligenceService.js";
 import { CompetitorPostsService, CompetitorPostError } from "../CompetitorPostsService.js";
 import { CompetitorClassificationService, ClassificationError } from "../CompetitorClassificationService.js";
+import { CompetitorInsightsService } from "../CompetitorInsightsService.js";
 
 const router = Router();
+
+// ── Insights comparativos (F4) — antes de /:id pra não colidir ──
+
+// GET /api/competitors/insights/comparison?platform=&since=
+router.get("/insights/comparison", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const platform = typeof req.query.platform === "string" ? req.query.platform : undefined;
+    const since = typeof req.query.since === "string" ? req.query.since : undefined;
+    res.json(CompetitorInsightsService.compareRecipeUsage(req.organizationId, { platform, since }));
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/competitors/insights/gaps?platform=&since=&minCompetitorUses=
+router.get("/insights/gaps", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const platform = typeof req.query.platform === "string" ? req.query.platform : undefined;
+    const since = typeof req.query.since === "string" ? req.query.since : undefined;
+    const minCompetitorUses = req.query.minCompetitorUses ? Number(req.query.minCompetitorUses) : undefined;
+    res.json({
+      gaps: CompetitorInsightsService.topGapsForOrg(req.organizationId, { platform, since, minCompetitorUses }),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/competitors/insights/trending?platform=&windowDays=
+router.get("/insights/trending", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const platform = typeof req.query.platform === "string" ? req.query.platform : undefined;
+    const windowDays = req.query.windowDays ? Number(req.query.windowDays) : undefined;
+    res.json({
+      trending: CompetitorInsightsService.trendingRecipes(req.organizationId, { platform, windowDays }),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
 
 // ── Distribuição de recipes usados pelos concorrentes (F3) ──
 // ANTES de /:id porque 'classifications' precisa preceder qualquer :id.

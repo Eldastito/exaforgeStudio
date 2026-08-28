@@ -1,21 +1,29 @@
 /**
- * StudioVisualRecipeService — ADR-194 F1.
+ * StudioVisualRecipeService — ADR-194 F1 + F2.
  *
- * Contrato + resolver dos Visual Recipes do Studio. Nunca gera imagem nesta
- * fatia — a geração é responsabilidade do `StudioService` (F2+), que vai
- * consumir `buildPromptPlan()` e chamar `llm.ts::generateImageB64`.
+ * F1: contrato + resolver dos Visual Recipes do Studio.
+ * F2: `generate()` — consome `buildPromptPlan()`, monta prompt final,
+ *     chama `generateImageB64` do llm.ts (Gemini Imagen com fallback OpenAI),
+ *     salva mídia local, registra em `studio_creations` marcando o recipe usado.
  *
- * Determinístico. Sem LLM. Sem side-effect fora do SQLite.
+ * Determinístico até o ponto de chamar o provider. Sem LLM no service — só o
+ * provider externo (Imagen/OpenAI) faz inferência, e o prompt seed é literal.
  *
- * Regras (RN-VRE-01..05):
+ * Regras (RN-VRE-01..06):
  *   1. recipe_key regex `^[A-Z][A-Z0-9_]{2,63}$`, imutável.
  *   2. version monótona; nova versão = INSERT nova linha.
  *   3. alias único global; resolve case-insensitive; slash é opcional.
  *   4. supported_formats_json obrigatório com ≥1 formato.
- *   5. provider_hints é dica; StudioService (F2+) escolhe o provider real.
+ *   5. provider_hints é dica; provider real vem do llm.ts (default gemini→openai).
+ *   6. `generate()` NUNCA burla plan gate — usa mesma `PlanService.studioAllowed`
+ *      do StudioService (F2).
  */
 import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
+import path from "path";
+import fs from "fs";
 import db from "./db.js";
+import { generateImageB64 as defaultGenerateImageB64 } from "./llm.js";
 
 export const RECIPE_KEY_REGEX = /^[A-Z][A-Z0-9_]{2,63}$/;
 
@@ -23,6 +31,32 @@ export const SUPPORTED_FORMATS = [
   "feed_1_1", "story_9_16", "landscape_16_9", "square_1_1", "portrait_4_5",
 ] as const;
 export type SupportedFormat = typeof SUPPORTED_FORMATS[number];
+
+// Sizes que o llm.ts::generateImageB64 suporta hoje.
+export type ImageSize = "1024x1024" | "1024x1536" | "1536x1024";
+
+/**
+ * Mapa formato lógico → size da API. story/portrait vão pra 1024x1536 (retrato),
+ * landscape vai pra 1536x1024, resto pra 1024x1024 quadrado. Mantém proporção
+ * aproximada; provider pode ajustar mas não distorcer.
+ */
+function mapFormatToSize(format: SupportedFormat): ImageSize {
+  if (format === "story_9_16" || format === "portrait_4_5") return "1024x1536";
+  if (format === "landscape_16_9") return "1536x1024";
+  return "1024x1024";
+}
+
+// Diretório de mídia (mesmo padrão do StudioService).
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch { /* noop */ }
+
+/** Salva base64 → arquivo em MEDIA_DIR e retorna URL relativa (/media/xxx.png). */
+function saveMediaB64(b64: string, ext = "png"): string {
+  const name = `${randomUUID()}.${ext}`;
+  const buf = Buffer.from(b64, "base64");
+  fs.writeFileSync(path.join(MEDIA_DIR, name), buf);
+  return `/media/${name}`;
+}
 
 export interface RecipeRow {
   id: string;
@@ -279,6 +313,91 @@ export class StudioVisualRecipeService {
       inputs: input.inputs,
       requested_format: input.format,
       prompt_seed,
+    };
+  }
+
+  // ═══════════════ Generate (F2) ═══════════════
+
+  /**
+   * Injetável: default usa generateImageB64 do llm.ts (Gemini→OpenAI).
+   * Testes substituem por adapter fake pra não bater na API.
+   */
+  private static imageGenerator: (prompt: string, size: ImageSize) => Promise<string> =
+    (p, s) => defaultGenerateImageB64(p, s);
+
+  static configureImageGenerator(fn: (prompt: string, size: ImageSize) => Promise<string>): void {
+    this.imageGenerator = fn;
+  }
+
+  static resetImageGenerator(): void {
+    this.imageGenerator = (p, s) => defaultGenerateImageB64(p, s);
+  }
+
+  /**
+   * Executa geração de imagem a partir de recipe + inputs + formato.
+   *
+   * Pipeline:
+   *   1. buildPromptPlan → plan estruturado
+   *   2. compose prompt final (concat plan.prompt_seed + brand_hint opcional)
+   *   3. mapeia formato → size Imagen ("1024x1024" | "1024x1536" | "1536x1024")
+   *   4. chama imageGenerator (Gemini/OpenAI)
+   *   5. salva base64 em MEDIA_DIR
+   *   6. registra em `studio_creations` com o `prompt` marcado com recipe_key/version
+   *
+   * Não faz gate de plano aqui — o caller da rota é responsável, com
+   * PlanService.studioAllowed. Isso evita duplicar a política em 2 lugares
+   * (StudioService já enforça em /api/studio/generate).
+   */
+  static async generate(input: {
+    orgId: string;
+    recipe_key_or_alias: string;
+    inputs?: Record<string, any>;
+    format: SupportedFormat;
+    brand_hint?: string;                 // texto opcional pra contextualizar marca
+  }): Promise<{
+    id: string; mediaUrl: string; prompt: string;
+    recipe_key: string; recipe_version: number;
+  }> {
+    if (!input.orgId) throw new VisualRecipeError("missing_org", "orgId é obrigatório");
+
+    const plan = this.buildPromptPlan({
+      recipe_key_or_alias: input.recipe_key_or_alias,
+      inputs: input.inputs || {},
+      format: input.format,
+    });
+
+    // Compose prompt final. plan.prompt_seed já é a base; brand_hint entra na frente
+    // se veio. Restrições da receita viram texto legível pro provider.
+    const parts: string[] = [];
+    if (input.brand_hint) parts.push(input.brand_hint);
+    parts.push(plan.prompt_seed);
+    if (plan.constraints && typeof plan.constraints === "object") {
+      const c = plan.constraints as Record<string, any>;
+      if (c.preserve_product_identity) parts.push("preservar identidade do produto");
+      if (c.allow_text_on_image === false) parts.push("sem texto sobre a imagem");
+      if (typeof c.max_people_in_scene === "number") parts.push(`no máximo ${c.max_people_in_scene} pessoa(s) na cena`);
+    }
+    const finalPrompt = parts.join(". ");
+
+    // Mapeia formato → size do generateImageB64 (só 3 sizes suportados).
+    const size = mapFormatToSize(input.format);
+
+    const b64 = await this.imageGenerator(finalPrompt, size);
+    if (!b64) throw new VisualRecipeError("provider_empty", "provider retornou vazio");
+
+    const mediaUrl = saveMediaB64(b64, "png");
+    const id = randomUUID();
+    // Registra em studio_creations com marcador do recipe usado no prompt
+    // (não altera schema; a marca fica no prompt como comentário estruturado).
+    const markedPrompt = `[${plan.recipe_key}@v${plan.recipe_version}] ${finalPrompt}`;
+    db.prepare(
+      "INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url) VALUES (?, ?, 'image', ?, ?)"
+    ).run(id, input.orgId, markedPrompt, mediaUrl);
+
+    return {
+      id, mediaUrl, prompt: finalPrompt,
+      recipe_key: plan.recipe_key,
+      recipe_version: plan.recipe_version,
     };
   }
 

@@ -58,6 +58,49 @@ router.post("/recipes/plan", (req: AuthRequest, res): any => {
   }
 });
 
+// POST /api/studio/recipes/generate — F2. Executa geração via provider real
+// (Gemini/OpenAI). Gate de plano continua com PlanService.studioAllowed
+// (mesmo do /api/studio/generate). brand_hint opcional carrega contexto de
+// marca (paleta, tom, nome). Retorna id + mediaUrl + prompt marcado.
+router.post("/recipes/generate", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    if (!b.recipe) return res.status(400).json({ error: "recipe é obrigatório" });
+    if (!b.format) return res.status(400).json({ error: "format é obrigatório" });
+
+    // Gate de plano — reusa a mesma política do StudioService.generateImage.
+    // Import dinâmico pra evitar ciclo com PlanService.
+    const { PlanService } = await import("../PlanService.js");
+    const gate = PlanService.studioAllowed(req.organizationId, "image");
+    if (!gate.allowed) {
+      const msg = gate.reason === "monthly_limit"
+        ? `Limite de imagens do plano atingido (${gate.used}/${gate.limit} este mês).`
+        : gate.reason === "plan_no_studio"
+          ? "Seu plano não inclui geração no Estúdio."
+          : "Geração indisponível no momento.";
+      return res.status(402).json({ error: msg, code: gate.reason });
+    }
+
+    const result = await StudioVisualRecipeService.generate({
+      orgId: req.organizationId,
+      recipe_key_or_alias: String(b.recipe),
+      inputs: b.inputs || {},
+      format: b.format,
+      brand_hint: b.brand_hint ? String(b.brand_hint) : undefined,
+    });
+    res.json(result);
+  } catch (e: any) {
+    if (e instanceof VisualRecipeError) {
+      const s = e.code === "recipe_not_found" ? 404
+        : e.code === "provider_empty" ? 502
+        : 400;
+      return res.status(s).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
 // ── Channel Adaptation (PRD 11 / ADR-168 F5) — reescreve o conteúdo por canal ──
 
 // GET /api/studio/channels — normas dos canais suportados

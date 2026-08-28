@@ -1,18 +1,38 @@
 /**
  * Rotas REST do Business Skills Pack (Track C do PRD-PEL-01).
- * F1 escopo: pricing suggest + org config CRUD.
- * F2 vai adicionar quote template + createQuoteFromTemplate.
- * F4 vai adicionar gate de plano (RN-BSP-08).
+ * F1: pricing suggest + org config CRUD.
+ * F2: quote template + createQuoteFromTemplate.
+ * F3: local marketing (enrichContactsWithCompetitor).
+ * F4: gate de plano (RN-BSP-08) — cada endpoint agora chama gateOrDeny.
  */
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { BusinessSkillsPackService, BusinessSkillsPackError } from "../BusinessSkillsPackService.js";
+import type { Dimension } from "../BusinessSkillsPackService.js";
 
 const router = Router();
 
+/**
+ * Retorna true se a chamada pode prosseguir; se não, já responde 401/403
+ * e retorna false. Uso: `if (!gateOrDeny(req, res, "pricing")) return;`
+ */
+function gateOrDeny(req: AuthRequest, res: any, dimension?: Dimension): boolean {
+  if (!req.organizationId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  const check = BusinessSkillsPackService.checkAccess(req.organizationId, dimension);
+  if (!check.allowed) {
+    // 403 pra dimensão desligada (org autenticada mas sem acesso).
+    res.status(403).json({ error: check.reason || "forbidden", code: check.code });
+    return false;
+  }
+  return true;
+}
+
 // GET /api/bsp/pricing/suggest?cost=X&vertical=Y&markup=Z&targetMargin=W
 router.get("/pricing/suggest", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "pricing")) return;
   try {
     const cost = Number(req.query.cost);
     if (!isFinite(cost)) {
@@ -37,7 +57,9 @@ router.get("/pricing/suggest", (req: AuthRequest, res): any => {
   }
 });
 
-// GET /api/bsp/config — config atual da org
+// GET /api/bsp/config — config atual da org (sem gate: leitura de metadata
+// da própria org, precisa funcionar mesmo com todas as dimensões desligadas
+// pra UI de admin conseguir ligar de volta).
 router.get("/config", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -49,6 +71,8 @@ router.get("/config", (req: AuthRequest, res): any => {
 });
 
 // PATCH /api/bsp/config { pricing_prefs?, quote_template?, outreach_pack?, enabled_dimensions? }
+// Sem gate: mesmo motivo do GET /config — o admin precisa poder mexer nas
+// dimensões, inclusive religá-las.
 router.patch("/config", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -73,7 +97,7 @@ router.patch("/config", (req: AuthRequest, res): any => {
 
 // GET /api/bsp/rfp/template — template atual (com fallback default)
 router.get("/rfp/template", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "rfp")) return;
   try {
     res.json(BusinessSkillsPackService.getQuoteTemplate(req.organizationId));
   } catch (e: any) {
@@ -83,7 +107,7 @@ router.get("/rfp/template", (req: AuthRequest, res): any => {
 
 // PUT /api/bsp/rfp/template { header?, greeting?, footer?, conditions?, signature? }
 router.put("/rfp/template", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "rfp")) return;
   try {
     const b = req.body || {};
     // Aceita null pra "reset ao default"
@@ -114,7 +138,7 @@ router.put("/rfp/template", (req: AuthRequest, res): any => {
 
 // POST /api/bsp/rfp/create { items, contactId?, ticketId?, contactName?, orgName?, templateOverrides? }
 router.post("/rfp/create", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "rfp")) return;
   try {
     const b = req.body || {};
     const result = BusinessSkillsPackService.createQuoteFromTemplate({
@@ -141,7 +165,7 @@ router.post("/rfp/create", (req: AuthRequest, res): any => {
 
 // POST /api/bsp/local-marketing/enrich — dispara o batch de matching
 router.post("/local-marketing/enrich", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "local_marketing")) return;
   try {
     res.json(BusinessSkillsPackService.enrichContactsWithCompetitor(req.organizationId));
   } catch (e: any) {
@@ -154,7 +178,7 @@ router.post("/local-marketing/enrich", (req: AuthRequest, res): any => {
 
 // GET /api/bsp/local-marketing/matches?limit=200 — lista matches cacheados
 router.get("/local-marketing/matches", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "local_marketing")) return;
   try {
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
     res.json({
@@ -167,11 +191,31 @@ router.get("/local-marketing/matches", (req: AuthRequest, res): any => {
 
 // GET /api/bsp/rfp/metrics/by-agent?days=30 — métricas por vendedor (RN-BSP-05)
 router.get("/rfp/metrics/by-agent", (req: AuthRequest, res): any => {
-  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!gateOrDeny(req, res, "rfp")) return;
   try {
     const days = req.query.days ? Number(req.query.days) : undefined;
     res.json({
       metrics: BusinessSkillsPackService.salesMetricsByAgent(req.organizationId, { days }),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/bsp/access — status do gate BSP pra a UI (o que a org pode usar
+// agora). Sempre 200 pra org autenticada — nunca 403 —, pra UI conseguir
+// desenhar o CTA de upgrade quando algo estiver bloqueado.
+router.get("/access", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const pricing = BusinessSkillsPackService.checkAccess(req.organizationId, "pricing");
+    const rfp = BusinessSkillsPackService.checkAccess(req.organizationId, "rfp");
+    const localMk = BusinessSkillsPackService.checkAccess(req.organizationId, "local_marketing");
+    res.json({
+      soft_launch: BusinessSkillsPackService.isSoftLaunch(),
+      pricing: { allowed: pricing.allowed, code: pricing.code },
+      rfp: { allowed: rfp.allowed, code: rfp.code },
+      local_marketing: { allowed: localMk.allowed, code: localMk.code },
     });
   } catch (e: any) {
     res.status(500).json({ error: e?.message || "internal_error" });

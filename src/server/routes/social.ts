@@ -32,6 +32,20 @@ import { logAuthEvent } from "../auditLog.js";
  */
 const router = Router();
 
+/**
+ * Middleware que marca os endpoints Content/Growth-domain herdados como
+ * DEPRECATED. Consumidores devem migrar pra `/api/growth/*` (rota
+ * consolidada — PR #1424). Segue RFC 8594 (Sunset), RFC 9745 (Deprecation)
+ * e RFC 8288 (Link successor-version). Sem data de sunset fixada — vira
+ * hard-remove quando inventário concreto de consumidores estiver limpo.
+ * Nada quebra hoje; sinal observável pra clients em logs/interceptors.
+ */
+const deprecateTo = (successor: string) => (_req: AuthRequest, res: any, next: any) => {
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Link", `<${successor}>; rel="successor-version"`);
+  next();
+};
+
 // GET /api/social/connections — lista REDIGIDA das conexões da org.
 router.get("/connections", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
@@ -326,14 +340,14 @@ router.get("/proactive", requireRole("owner", "admin"), (req: AuthRequest, res):
 // ── Growth Autopilot shadow (PRD 11 / ADR-168 F15) — propõe, NUNCA executa (RN-CG-08/10) ──
 
 // GET /api/social/growth-autopilot — o que o autopilot FARIA (read-only, shadow)
-router.get("/growth-autopilot", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/growth-autopilot", requireRole("owner", "admin"), deprecateTo("/api/growth/autopilot"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(GrowthAutopilotService.plan(orgId));
 });
 
 // POST /api/social/growth-autopilot/mode { mode: 'off'|'shadow' } — só shadow-first (RN-CG-10)
-router.post("/growth-autopilot/mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/growth-autopilot/mode", requireRole("owner", "admin"), deprecateTo("/api/growth/autopilot/mode"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(GrowthAutopilotService.setMode(orgId, String(req.body?.mode || ""))); }
@@ -342,7 +356,7 @@ router.post("/growth-autopilot/mode", requireRole("owner", "admin"), (req: AuthR
 
 // GET /api/social/growth-optimizations — propostas do autopilot ANOTADAS com o estado de
 // governança (já viraram ação? qual status?). Read-only (F16).
-router.get("/growth-optimizations", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/growth-optimizations", requireRole("owner", "admin"), deprecateTo("/api/growth/optimizations"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(GrowthOptimizationService.list(orgId));
@@ -351,7 +365,7 @@ router.get("/growth-optimizations", requireRole("owner", "admin"), (req: AuthReq
 // POST /api/social/growth-optimizations/propose { kind, ref } — aceita uma proposta do
 // autopilot e a PROPÕE como comando GOVERNADO (nasce awaiting_approval — nunca executa
 // direto, RN-CG-08/10). Grounded no plano vivo (RN-CG-09); idempotente por (kind, ref).
-router.post("/growth-optimizations/propose", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/growth-optimizations/propose", requireRole("owner", "admin"), deprecateTo("/api/growth/optimizations/propose"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(GrowthOptimizationService.propose(orgId, { kind: String(req.body?.kind || ""), ref: String(req.body?.ref || "") }, (req as any).user?.userId || "growth_autopilot")); }
@@ -360,7 +374,7 @@ router.post("/growth-optimizations/propose", requireRole("owner", "admin"), (req
 
 // POST /api/social/growth-optimizations/:actionId/execute — roda o efeito de uma otimização
 // APROVADA (pelo choke-point governado; o executor barra ação não-aprovada) (F16).
-router.post("/growth-optimizations/:actionId/execute", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/growth-optimizations/:actionId/execute", requireRole("owner", "admin"), deprecateTo("/api/growth/optimizations/:actionId/execute"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(await GrowthOptimizationService.execute(orgId, String(req.params.actionId))); }
@@ -369,7 +383,7 @@ router.post("/growth-optimizations/:actionId/execute", requireRole("owner", "adm
 
 // GET /api/social/growth-brief — o que postar + impacto esperado + campeão (F13; role-gated,
 // carrega números de meta = dinheiro RN-CG-06). Read-only.
-router.get("/growth-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/growth-brief", requireRole("owner", "admin"), deprecateTo("/api/growth/brief"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(SocialProactivityService.growthBrief(orgId));
@@ -453,7 +467,7 @@ router.get("/experiments/:id/outcome", requireRole("owner", "admin"), (req: Auth
 // ── Content→Lead Attribution (PRD 11 / ADR-168 F7) — 1º elo do fio de negócio ──
 
 // POST /api/social/attribution/lead { correlationId, contactId, actionId?, source? }
-router.post("/attribution/lead", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/attribution/lead", requireRole("owner", "admin"), deprecateTo("/api/growth/attribution/lead"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -468,7 +482,7 @@ router.post("/attribution/lead", requireRole("owner", "admin"), (req: AuthReques
 });
 
 // GET /api/social/attribution/leads?correlationId=...
-router.get("/attribution/leads", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/attribution/leads", requireRole("owner", "admin"), deprecateTo("/api/growth/attribution/leads"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const correlationId = String(req.query?.correlationId || "").trim();
@@ -479,7 +493,7 @@ router.get("/attribution/leads", requireRole("owner", "admin"), (req: AuthReques
 // ── Lead→Sale→Revenue→Margin (PRD 11 / ADR-168 F8) — dinheiro role-gated (RN-CG-06) ──
 
 // POST /api/social/attribution/revenue { correlationId } — resolve venda dos leads do conteúdo
-router.post("/attribution/revenue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/attribution/revenue", requireRole("owner", "admin"), deprecateTo("/api/growth/attribution/revenue"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const correlationId = String(req.body?.correlationId || "").trim();
@@ -488,7 +502,7 @@ router.post("/attribution/revenue", requireRole("owner", "admin"), (req: AuthReq
 });
 
 // GET /api/social/attribution/revenue?correlationId=... — resumo receita/margem (fact≠estimate)
-router.get("/attribution/revenue", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/attribution/revenue", requireRole("owner", "admin"), deprecateTo("/api/growth/attribution/revenue"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const correlationId = String(req.query?.correlationId || "").trim();

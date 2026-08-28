@@ -137,6 +137,34 @@ router.post("/rfp/create", (req: AuthRequest, res): any => {
   }
 });
 
+// ── F3: Local Marketing — enrichment contact↔competitor ──
+
+// POST /api/bsp/local-marketing/enrich — dispara o batch de matching
+router.post("/local-marketing/enrich", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(BusinessSkillsPackService.enrichContactsWithCompetitor(req.organizationId));
+  } catch (e: any) {
+    if (e instanceof BusinessSkillsPackError) {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/bsp/local-marketing/matches?limit=200 — lista matches cacheados
+router.get("/local-marketing/matches", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    res.json({
+      matches: BusinessSkillsPackService.listContactCompetitorMatches(req.organizationId, { limit }),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
 // GET /api/bsp/rfp/metrics/by-agent?days=30 — métricas por vendedor (RN-BSP-05)
 router.get("/rfp/metrics/by-agent", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });

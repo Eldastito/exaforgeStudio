@@ -11057,6 +11057,26 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_bsp_org ON business_skills_pack_org_config (organization_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar business_skills_pack_org_config', e); }
+
+  // Track C do PRD-PEL-01, F3 (Local Marketing).
+  // Cache dos matches contact↔competitor produzidos por
+  // BSP.enrichContactsWithCompetitor. Adição aditiva — não muda contacts nem
+  // competitor_accounts (RN-BSP-02 fachada aditiva). Chave composta permite
+  // um contato aparecer como match de vários competitors (raro, mas
+  // possível se handles se repetem entre plataformas).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bsp_contact_competitor_match (
+        organization_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        competitor_id TEXT NOT NULL,
+        matched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, contact_id, competitor_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bsp_ccm_org ON bsp_contact_competitor_match (organization_id);
+      CREATE INDEX IF NOT EXISTS idx_bsp_ccm_contact ON bsp_contact_competitor_match (organization_id, contact_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar bsp_contact_competitor_match', e); }
 };
 
 initDb();

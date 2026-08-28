@@ -91,6 +91,7 @@ import productionRoutes from "./src/server/routes/production.js";
 import signalsRoutes from "./src/server/routes/signals.js";
 import reputationRoutes from "./src/server/routes/reputation.js";
 import socialRoutes from "./src/server/routes/social.js";
+import growthRoutes from "./src/server/routes/growth.js";
 import decisionIntelligenceRoutes from "./src/server/routes/decisionIntelligence.js";
 import recommendationsRoutes from "./src/server/routes/recommendations.js";
 import actionsRoutes from "./src/server/routes/actions.js";
@@ -717,6 +718,10 @@ async function startServer() {
   protectedApi.use("/signals", signalsRoutes);
   protectedApi.use("/reputation", reputationRoutes);
   protectedApi.use("/social", socialRoutes);
+  // Superfície consolidada Content & Growth (ADR-168) — mesmos services
+  // que `/api/social/{growth-*, attribution/*}`, mas sob prefixo próprio
+  // do domínio. Legado permanece pra compat retroativa.
+  protectedApi.use("/growth", growthRoutes);
   protectedApi.use("/decision-intelligence", decisionIntelligenceRoutes);
   // ADR-153 F7.3 — recomendações de upgrade + cooldown (LGPD §14 / PRD §15).
   protectedApi.use("/billing/recommendations", recommendationsRoutes);

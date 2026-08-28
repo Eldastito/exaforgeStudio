@@ -119,8 +119,10 @@ async function main() {
   check("7.2 IDEA não aparece em gaps",
     !gaps.some(i => i.evolution_key === "BUSINESS_SKILLS_PACK") &&
     !gaps.some(i => i.evolution_key === "VISION_EDGE_PERCEPTION"));
-  check("7.3 TESTED sem evid. aparece em gaps",
-    gaps.some(i => i.evolution_key === "CONTENT_GROWTH_ENGINE"));
+  check("7.3 TESTED sem evid. aparece em gaps (SOCIAL_PROVIDERS ainda gapped)",
+    gaps.some(i => i.evolution_key === "SOCIAL_PROVIDERS"));
+  check("7.3.1 CONTENT_GROWTH_ENGINE fora de gaps (PRODUCTION após consolidar /api/growth)",
+    !gaps.some(i => i.evolution_key === "CONTENT_GROWTH_ENGINE"));
   check("7.4 VISUAL_RECIPE_ENGINE agora fora dos gaps (PRODUCTION após Track A)",
     !gaps.some(i => i.evolution_key === "VISUAL_RECIPE_ENGINE"));
 

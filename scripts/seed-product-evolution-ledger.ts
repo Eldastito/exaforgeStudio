@@ -194,13 +194,14 @@ const SEED: SeedItem[] = [
     evolution_key: "CONTENT_GROWTH_ENGINE",
     title: "Content & Growth Engine",
     domain: "growth",
-    summary: "Content*/Growth* services + tabelas de atribuição. Falta rota consolidada — endpoints dispersos.",
+    summary: "Content*/Growth* services + tabelas de atribuição. Superfície consolidada em `/api/growth/*` (autopilot, optimizations, brief, attribution/lead, attribution/revenue) delegando aos mesmos services do legado `/api/social/*`.",
     source_of_truth: "ADR-168",
-    target_status: "TESTED",
-    blocked_reason: "Consolidar rota /api/content ou /api/growth antes de exposição externa",
+    target_status: "PRODUCTION",
     sources: [
       { source_type: "adr", title: "ADR-168 — Content Growth Intelligence Loop", source_reference: "docs/adr/ADR-168-content-growth-intelligence-loop.md" },
       { source_type: "prd", title: "Análise PRD11 vs Codebase", source_reference: "docs/prd/ANALISE-PRD11-vs-CODEBASE.md" },
+      { source_type: "file", title: "Rota consolidada /api/growth/*", source_reference: "src/server/routes/growth.ts" },
+      { source_type: "file", title: "Runbook Growth Operação", source_reference: "docs/runbook/growth-operacao.md" },
     ],
   },
   {

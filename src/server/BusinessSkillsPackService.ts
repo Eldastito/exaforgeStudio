@@ -21,6 +21,7 @@
 import db from "./db.js";
 import { suggestSalePrice } from "./pricing.js";
 import { ComigoPricingService } from "./ComigoPricingService.js";
+import { QuoteService } from "./QuoteService.js";
 
 export const SUPPORTED_VERTICALS = [
   "retail", "loja_virtual", "comigo", "falatu", "beauty", "advocacia", "clinic",
@@ -57,6 +58,24 @@ export interface OrgBspConfig {
   created_at: string;
   updated_at: string;
 }
+
+// F2 — RFP: templates de orçamento
+export interface QuoteTemplate {
+  header?: string;                  // texto no topo (aceita {{placeholders}})
+  greeting?: string;                // linha de saudação
+  footer?: string;                  // rodapé
+  conditions?: string[];            // bullets de condições
+  signature?: string;               // assinatura
+}
+
+// Template default quando a org não configurou o próprio.
+export const DEFAULT_QUOTE_TEMPLATE: QuoteTemplate = {
+  header: "*Orçamento — {{org_name}}*",
+  greeting: "Olá{{contact_line}}!",
+  footer: "Válido até {{valid_until}}. Aguardo seu retorno.",
+  conditions: ["Prazo de entrega: 5 dias úteis", "Pagamento: PIX ou boleto"],
+  signature: "Equipe {{org_name}}",
+};
 
 export class BusinessSkillsPackError extends Error {
   code: string;
@@ -253,5 +272,152 @@ export class BusinessSkillsPackService {
     }
 
     return suggestion;
+  }
+
+  // ═══════════════ RFP (F2) — templates de orçamento ═══════════════
+
+  /**
+   * Retorna o template de orçamento da org, ou DEFAULT_QUOTE_TEMPLATE
+   * se não configurado. Sempre retorna algo — nunca null.
+   */
+  static getQuoteTemplate(orgId: string): QuoteTemplate {
+    if (!orgId) return { ...DEFAULT_QUOTE_TEMPLATE };
+    const config = this.getOrgConfig(orgId);
+    const template = config?.quote_template as QuoteTemplate | null;
+    if (!template) return { ...DEFAULT_QUOTE_TEMPLATE };
+    // Merge com default pra garantir todos os campos
+    return { ...DEFAULT_QUOTE_TEMPLATE, ...template };
+  }
+
+  /**
+   * Renderiza texto com placeholders `{{var}}` substituídos por context[var].
+   * Placeholders desconhecidos viram string vazia. Escape mínimo: apenas
+   * remove backticks e HTML tags do INPUT (não do template — template é
+   * confiável, controlado pela org). Isso é intencional: templates são
+   * texto plano (WhatsApp/PDF), não HTML.
+   */
+  static renderTemplateString(template: string, context: Record<string, string>): string {
+    if (!template) return "";
+    // Escape simples do valor do context: remove HTML tags e backticks
+    // (WhatsApp usa markdown simples; deixamos passar * _ ~).
+    const sanitize = (v: any): string => {
+      if (v == null) return "";
+      return String(v).replace(/<[^>]*>/g, "").replace(/`/g, "'");
+    };
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+      return context[key] !== undefined ? sanitize(context[key]) : "";
+    });
+  }
+
+  /**
+   * Compõe um orçamento completo a partir do template configurado.
+   * Delega pra `QuoteService.buildAndSave` (que persiste em `quotes`) e
+   * concatena o texto do template ao redor.
+   *
+   * Contexto disponível nos placeholders:
+   *   {{org_name}}, {{contact_name}}, {{contact_line}}, {{valid_until}},
+   *   {{total}}, {{item_count}}
+   */
+  static createQuoteFromTemplate(input: {
+    orgId: string;
+    items: any[];
+    contactId?: string;
+    ticketId?: string;
+    createdBy?: string;
+    contactName?: string;
+    orgName?: string;
+    templateOverrides?: Partial<QuoteTemplate>;
+  }): {
+    quote_id: string;
+    rendered_text: string;
+    total: number;
+    item_count: number;
+  } {
+    if (!input.orgId) throw new BusinessSkillsPackError("missing_org", "orgId é obrigatório");
+    if (!Array.isArray(input.items) || input.items.length === 0) {
+      throw new BusinessSkillsPackError("missing_items", "items é obrigatório");
+    }
+
+    const base = this.getQuoteTemplate(input.orgId);
+    const template: QuoteTemplate = { ...base, ...(input.templateOverrides || {}) };
+
+    // Persiste o quote via QuoteService (reuso — RN-BSP-02).
+    const built = QuoteService.buildAndSave(input.orgId, input.items, {
+      contactId: input.contactId,
+      ticketId: input.ticketId,
+      createdBy: input.createdBy,
+    });
+    if (!built) {
+      throw new BusinessSkillsPackError("quote_failed", "Falha ao construir orçamento (itens inválidos ou catálogo vazio)");
+    }
+
+    // Contexto pros placeholders
+    const validityHours = QuoteService.validityHours(input.orgId);
+    const validUntil = new Date(Date.now() + validityHours * 3600 * 1000)
+      .toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    const context: Record<string, string> = {
+      org_name: input.orgName || "sua marca",
+      contact_name: input.contactName || "",
+      contact_line: input.contactName ? ` ${input.contactName}` : "",
+      valid_until: validUntil,
+      total: `R$ ${built.total.toFixed(2).replace(".", ",")}`,
+      item_count: String(built.itemCount),
+    };
+
+    // Compõe texto final: header, greeting, quote_text (do QuoteService),
+    // condições, footer, signature. Cada parte só entra se estiver
+    // preenchida.
+    const parts: string[] = [];
+    if (template.header) parts.push(this.renderTemplateString(template.header, context));
+    if (template.greeting) parts.push(this.renderTemplateString(template.greeting, context));
+    parts.push(built.text);
+    if (template.conditions && template.conditions.length > 0) {
+      parts.push("*Condições:*\n" + template.conditions.map(c =>
+        `• ${this.renderTemplateString(c, context)}`).join("\n"));
+    }
+    if (template.footer) parts.push(this.renderTemplateString(template.footer, context));
+    if (template.signature) parts.push(this.renderTemplateString(template.signature, context));
+
+    return {
+      quote_id: built.id,
+      rendered_text: parts.filter(Boolean).join("\n\n"),
+      total: built.total,
+      item_count: built.itemCount,
+    };
+  }
+
+  /**
+   * Métricas por vendedor (RN-BSP-05). Agrupa `quotes.created_by` na
+   * janela `days` (default 30). Retorna [{agent, sent, accepted, declined,
+   * conversion_rate}].
+   */
+  static salesMetricsByAgent(orgId: string, opts: { days?: number } = {}): Array<{
+    agent: string;
+    sent: number;
+    accepted: number;
+    declined: number;
+    conversion_rate: number;
+  }> {
+    if (!orgId) return [];
+    const days = Math.max(1, opts.days || 30);
+    const rows = db.prepare(`
+      SELECT
+        COALESCE(created_by, 'unknown') AS agent,
+        SUM(CASE WHEN status IN ('sent','viewed','accepted','declined','expired') THEN 1 ELSE 0 END) AS sent,
+        SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+        SUM(CASE WHEN status = 'declined' THEN 1 ELSE 0 END) AS declined
+      FROM quotes
+      WHERE organization_id = ?
+        AND sent_at >= datetime('now', '-' || ? || ' days')
+      GROUP BY COALESCE(created_by, 'unknown')
+      ORDER BY sent DESC, agent
+    `).all(orgId, days) as Array<{ agent: string; sent: number; accepted: number; declined: number }>;
+    return rows.map(r => ({
+      agent: r.agent,
+      sent: r.sent,
+      accepted: r.accepted,
+      declined: r.declined,
+      conversion_rate: r.sent > 0 ? r.accepted / r.sent : 0,
+    }));
   }
 }

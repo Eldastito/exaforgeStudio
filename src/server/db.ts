@@ -11038,6 +11038,25 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_cpc_recipe ON competitor_post_classifications (recipe_key, classified_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar competitor_post_classifications', e); }
+
+  // Track C F1 (ADR-195 D2) — Business Skills Pack config por org.
+  // Uma linha por org com colunas JSON pelas 3 dimensões. Fatia F1 só usa
+  // pricing_prefs_json e enabled_dimensions_json; quote_template_json e
+  // outreach_pack_json ficam nulos até F2/F3.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS business_skills_pack_org_config (
+        organization_id TEXT PRIMARY KEY,
+        quote_template_json TEXT,           -- Template de orçamento (F2)
+        outreach_pack_json TEXT,            -- Skill pack de outreach (F3)
+        pricing_prefs_json TEXT,            -- Overrides de markup, arredondamento (F1)
+        enabled_dimensions_json TEXT,       -- JSON array: ["pricing","rfp","local_marketing"]
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_bsp_org ON business_skills_pack_org_config (organization_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar business_skills_pack_org_config', e); }
 };
 
 initDb();

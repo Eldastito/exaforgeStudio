@@ -144,16 +144,20 @@ export class StudioVisualRecipeService {
     return rows.map(rowToRecipe);
   }
 
-  /** Get 1 recipe por key OU por alias. Retorna null se não achou. */
-  static get(keyOrAlias: string): Recipe | null {
+  /**
+   * Get 1 recipe por key OU por alias. Retorna null se não achou.
+   * `orgId` opcional (F5): quando informado, aliases da organização
+   * têm prioridade sobre aliases globais.
+   */
+  static get(keyOrAlias: string, orgId?: string | null): Recipe | null {
     // Tenta como key direta
     const direct = db.prepare(
       "SELECT * FROM studio_visual_recipes WHERE recipe_key = ? AND active = 1"
     ).get(keyOrAlias) as RecipeRow | undefined;
     if (direct) return rowToRecipe(direct);
 
-    // Tenta como alias
-    const resolved = this.resolveAlias(keyOrAlias);
+    // Tenta como alias (org > global)
+    const resolved = this.resolveAlias(keyOrAlias, orgId);
     if (!resolved) return null;
 
     const byKey = db.prepare(
@@ -164,18 +168,100 @@ export class StudioVisualRecipeService {
 
   /**
    * Resolve alias (case-insensitive, slash opcional) para recipe_key.
+   * `orgId` opcional (F5): quando informado, tenta primeiro em
+   * studio_visual_recipe_org_aliases; se não achou, cai no global.
    * Retorna a key ou null.
    */
-  static resolveAlias(input: string): string | null {
+  static resolveAlias(input: string, orgId?: string | null): string | null {
     if (!input) return null;
     // Normalização: lowercase + strip do slash inicial. Aplicada nos dois
     // lados pra que "/3Dbillboard" (input) case com "/3Dbillboard" (armazenado)
     // e também com "3dbillboard" (input alternativo).
     const normalized = input.trim().replace(/^\//, "").toLowerCase();
+
+    // 1) Org override tem prioridade
+    if (orgId) {
+      const orgRow = db.prepare(
+        "SELECT recipe_key FROM studio_visual_recipe_org_aliases WHERE organization_id = ? AND LOWER(REPLACE(alias, '/', '')) = ?"
+      ).get(orgId, normalized) as any;
+      if (orgRow?.recipe_key) return orgRow.recipe_key;
+    }
+
+    // 2) Global fallback
     const row = db.prepare(
       "SELECT recipe_key FROM studio_visual_recipe_aliases WHERE LOWER(REPLACE(alias, '/', '')) = ?"
     ).get(normalized) as any;
     return row?.recipe_key || null;
+  }
+
+  // ═══════════════ Org-scoped aliases (F5) ═══════════════
+
+  /**
+   * Adiciona um alias per-org. `alias` obrigatório; `recipe_key` DEVE
+   * existir e estar active. Rejeita duplicata na mesma org com
+   * VisualRecipeError('duplicate_alias').
+   */
+  static addOrgAlias(orgId: string, alias: string, recipe_key: string): {
+    id: string; organization_id: string; alias: string; recipe_key: string;
+  } {
+    if (!orgId) throw new VisualRecipeError("missing_org", "orgId é obrigatório");
+    const trimmed = (alias || "").trim();
+    if (!trimmed) throw new VisualRecipeError("missing_alias", "alias é obrigatório");
+    if (!recipe_key) throw new VisualRecipeError("missing_key", "recipe_key é obrigatório");
+
+    const exists = db.prepare(
+      "SELECT 1 FROM studio_visual_recipes WHERE recipe_key = ? AND active = 1"
+    ).get(recipe_key);
+    if (!exists) {
+      throw new VisualRecipeError("recipe_not_found", `recipe_key não encontrada: ${recipe_key}`);
+    }
+
+    // Duplicata na mesma org (case-insensitive, slash opcional)
+    const normalized = trimmed.replace(/^\//, "").toLowerCase();
+    const dup = db.prepare(
+      "SELECT id FROM studio_visual_recipe_org_aliases WHERE organization_id = ? AND LOWER(REPLACE(alias, '/', '')) = ?"
+    ).get(orgId, normalized);
+    if (dup) {
+      throw new VisualRecipeError("duplicate_alias", `alias já existe nesta organização: ${trimmed}`);
+    }
+
+    const id = uuidv4();
+    db.prepare(
+      "INSERT INTO studio_visual_recipe_org_aliases (id, organization_id, alias, recipe_key) VALUES (?, ?, ?, ?)"
+    ).run(id, orgId, trimmed, recipe_key);
+    return { id, organization_id: orgId, alias: trimmed, recipe_key };
+  }
+
+  /**
+   * Remove um alias per-org. Só remove se a org for a dona.
+   * Retorna true se removeu; false se não achou.
+   */
+  static removeOrgAlias(orgId: string, aliasId: string): boolean {
+    if (!orgId || !aliasId) return false;
+    const info = db.prepare(
+      "DELETE FROM studio_visual_recipe_org_aliases WHERE id = ? AND organization_id = ?"
+    ).run(aliasId, orgId);
+    return info.changes > 0;
+  }
+
+  /**
+   * Lista aliases visíveis pra org: globais (id null) + os próprios da org.
+   * `own_only=true` filtra pra só os da org (útil pra UI de gerenciamento).
+   */
+  static listAliasesForOrg(orgId: string | null | undefined, ownOnly = false): Array<{
+    id: string; alias: string; recipe_key: string; scope: "global" | "org"; created_at: string;
+  }> {
+    const own = orgId ? (db.prepare(
+      "SELECT id, alias, recipe_key, created_at FROM studio_visual_recipe_org_aliases WHERE organization_id = ? ORDER BY alias"
+    ).all(orgId) as any[]).map(r => ({ ...r, scope: "org" as const })) : [];
+
+    if (ownOnly) return own;
+
+    const global = (db.prepare(
+      "SELECT id, alias, recipe_key, created_at FROM studio_visual_recipe_aliases ORDER BY alias"
+    ).all() as any[]).map(r => ({ ...r, scope: "global" as const }));
+
+    return [...own, ...global];
   }
 
   /**
@@ -274,8 +360,9 @@ export class StudioVisualRecipeService {
     recipe_key_or_alias: string;
     inputs: Record<string, any>;         // produto, marca, público, cta, etc.
     format: SupportedFormat;
+    orgId?: string | null;               // F5: aliases da org têm prioridade
   }): PromptPlan {
-    const recipe = this.get(input.recipe_key_or_alias);
+    const recipe = this.get(input.recipe_key_or_alias, input.orgId);
     if (!recipe) {
       throw new VisualRecipeError("recipe_not_found",
         `recipe não encontrada: ${input.recipe_key_or_alias}`);
@@ -364,6 +451,7 @@ export class StudioVisualRecipeService {
       recipe_key_or_alias: input.recipe_key_or_alias,
       inputs: input.inputs || {},
       format: input.format,
+      orgId: input.orgId,
     });
 
     // Compose prompt final. plan.prompt_seed já é a base; brand_hint entra na frente

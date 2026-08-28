@@ -37,12 +37,13 @@ async function main() {
   // ═══════════════ 1. runSeed() executa ═══════════════
   const summary1 = await runSeed({ silent: true });
   check("1.1 runSeed() sem erros", summary1.errors.length === 0);
-  check("1.2 cria 25 items", summary1.created.length === 25);
-  check("1.3 22 status ajustados (3 permanecem em IDEA por design: Vision Edge/WiFi/Sense)", summary1.status_bumped.length === 22);
+  check("1.2 cria 28 items (25 ativos + 3 SUPERSEDED legados)", summary1.created.length === 28);
+  check("1.3 25 status ajustados (3 permanecem em IDEA + 22 ativos avançam + 3 SUPERSEDED)",
+    summary1.status_bumped.length === 25);
   check("1.4 fontes anexadas > 40", summary1.sources_added.reduce((a, b) => a + b.count, 0) > 40);
 
   const total1 = (db.prepare("SELECT COUNT(*) as n FROM product_evolution_items").get() as any).n;
-  check("1.5 total no db = 25", total1 === 25);
+  check("1.5 total no db = 28", total1 === 28);
 
   // ═══════════════ 2. Chaves presentes ═══════════════
   const expected = [
@@ -54,9 +55,13 @@ async function main() {
     "ZAPFLOW_SENSE", "PLATFORM_RELIABILITY_CAPACITY", "INTEGRATION_FACTORY",
     "RECLAME_AQUI_INTELLIGENCE", "ENTERPRISE_INTELLIGENCE_CONTROLER", "AI_RELIABILITY",
     "STUDIO_IMAGE_GEN_CORE",
+    // SUPERSEDED legacy (STATUS-DE-EXECUCAO §5.5)
+    "SOCIAL_INTELLIGENCE_PRD10_LEGACY",
+    "VERTICAL_INTELLIGENCE_HUB_LEGACY",
+    "ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY",
   ];
   const allPresent = expected.every(k => PEL.getItem(k) !== null);
-  check("2.1 todas as 25 chaves esperadas foram criadas", allPresent);
+  check("2.1 todas as 28 chaves esperadas foram criadas", allPresent);
 
   // ═══════════════ 3. Estados finais ═══════════════
   check("3.1 CEO_OPERATING_LAYER em PRODUCTION", PEL.getItem("CEO_OPERATING_LAYER")?.status === "PRODUCTION");
@@ -94,7 +99,7 @@ async function main() {
   // ═══════════════ 6. Idempotência: segundo run ═══════════════
   const summary2 = await runSeed({ silent: true });
   check("6.1 segundo run: 0 criados", summary2.created.length === 0);
-  check("6.2 segundo run: 25 já existiam", summary2.skipped_existing.length === 25);
+  check("6.2 segundo run: 28 já existiam", summary2.skipped_existing.length === 28);
   check("6.3 segundo run: 0 status ajustados (já no alvo)", summary2.status_bumped.length === 0);
   check("6.4 segundo run: 0 fontes novas", summary2.sources_added.reduce((a, b) => a + b.count, 0) === 0);
 
@@ -137,6 +142,32 @@ async function main() {
   check("8.3 busca por 'studio' retorna VISUAL_RECIPE_ENGINE e STUDIO_IMAGE_GEN_CORE",
     studio.some(i => i.evolution_key === "VISUAL_RECIPE_ENGINE") &&
     studio.some(i => i.evolution_key === "STUDIO_IMAGE_GEN_CORE"));
+
+  // ═══════════════ 8.5 SUPERSEDED legacy (STATUS §5.5) ═══════════════
+  const socLegacy = PEL.getItem("SOCIAL_INTELLIGENCE_PRD10_LEGACY");
+  const vihLegacy = PEL.getItem("VERTICAL_INTELLIGENCE_HUB_LEGACY");
+  const eiLegacy = PEL.getItem("ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY");
+  check("8.5.1 SOCIAL_INTELLIGENCE_PRD10_LEGACY em SUPERSEDED",
+    socLegacy?.status === "SUPERSEDED");
+  check("8.5.2 SOCIAL_INTELLIGENCE_PRD10_LEGACY.superseded_by = INTELLIGENCE_HUB",
+    socLegacy?.superseded_by === "INTELLIGENCE_HUB");
+  check("8.5.3 VERTICAL_INTELLIGENCE_HUB_LEGACY em SUPERSEDED",
+    vihLegacy?.status === "SUPERSEDED");
+  check("8.5.4 VERTICAL_INTELLIGENCE_HUB_LEGACY.superseded_by = INTELLIGENCE_HUB",
+    vihLegacy?.superseded_by === "INTELLIGENCE_HUB");
+  check("8.5.5 ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY em SUPERSEDED",
+    eiLegacy?.status === "SUPERSEDED");
+  check("8.5.6 ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY.superseded_by = ENTERPRISE_INTELLIGENCE_CONTROLER",
+    eiLegacy?.superseded_by === "ENTERPRISE_INTELLIGENCE_CONTROLER");
+  // SUPERSEDED não deve aparecer em gaps
+  check("8.5.7 SUPERSEDED não aparece em gaps",
+    !gaps.some(i => i.evolution_key === "SOCIAL_INTELLIGENCE_PRD10_LEGACY") &&
+    !gaps.some(i => i.evolution_key === "VERTICAL_INTELLIGENCE_HUB_LEGACY") &&
+    !gaps.some(i => i.evolution_key === "ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY"));
+  // Fontes preservadas
+  const socSources = PEL.listSources("SOCIAL_INTELLIGENCE_PRD10_LEGACY");
+  check("8.5.8 SUPERSEDED items têm sources anexadas",
+    socSources.length >= 2);
 
   // ═══════════════ 9. seedProgressTo respeita grafo ═══════════════
   PEL.createItem({ evolution_key: "PROGRESS_TEST", title: "progressão" });

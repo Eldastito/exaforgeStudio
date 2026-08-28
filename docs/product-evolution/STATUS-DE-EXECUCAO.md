@@ -151,7 +151,7 @@ do Ledger:
    - `ZAPFLOW_SENSE` requires `VISION_EDGE_PERCEPTION`, `WIFI_PRESENCE_CSI`
    - `VISION_VMS_CONTROL_PLANE` → `PILOT`/`PRODUCTION` requires `VISION_EDGE_PERCEPTION`
    - `VISUAL_RECIPE_ENGINE` requires `STUDIO_IMAGE_GEN_CORE` (relação `enhances`, não `requires` — motor base é opcional se decidirem trocar depois)
-5. **Registrar PRDs superseded**: (a) PRD 10 Social Intelligence, (b) Vertical Intelligence Hub histórico, (c) Enterprise Intelligence pré-ADR-166. Registrar como `SUPERSEDED` com `superseded_by` apontando para as iniciativas atuais evita re-abertura.
+5. ~~**Registrar PRDs superseded**: (a) PRD 10 Social Intelligence, (b) Vertical Intelligence Hub histórico, (c) Enterprise Intelligence pré-ADR-166.~~ **RESOLVIDO** (2026-08-28): 3 items SUPERSEDED registrados no seed do ledger (`SOCIAL_INTELLIGENCE_PRD10_LEGACY` → `INTELLIGENCE_HUB`; `VERTICAL_INTELLIGENCE_HUB_LEGACY` → `INTELLIGENCE_HUB`; `ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY` → `ENTERPRISE_INTELLIGENCE_CONTROLER`). Seed loop estendido pra suportar `target_status: SUPERSEDED` via `IMPLEMENTING → setStatus(SUPERSEDED, superseded_by)`.
 
 ## 6. Métricas do PRD-PEL-01 §25 (critérios de aceite do próprio Ledger)
 

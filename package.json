@@ -87,6 +87,7 @@
     "test:studio-visual-recipes-suggest": "tsx scripts/test-studio-visual-recipes-suggest.ts",
     "test:studio-visual-recipes-aliases": "tsx scripts/test-studio-visual-recipes-aliases.ts",
     "test:competitor-intelligence": "tsx scripts/test-competitor-intelligence.ts",
+    "test:competitor-posts": "tsx scripts/test-competitor-posts.ts",
     "seed:product-evolution-ledger": "tsx scripts/seed-product-evolution-ledger.ts",
     "seed:studio-visual-recipes": "tsx scripts/seed-studio-visual-recipes.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X, Eye, TrendingUp } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -20,6 +20,19 @@ type RecipeAnalytics = {
   total_uses: number;
   by_recipe: Array<{ recipe_key: string; name: string | null; vertical_hints: string[]; uses: number; last_used: string }>;
   by_vertical: Array<{ vertical: string; uses: number }>;
+};
+type CompetitorComparison = {
+  own_total: number;
+  competitor_total: number;
+  by_recipe: Array<{
+    recipe_key: string;
+    name: string | null;
+    own_uses: number;
+    own_share: number;
+    competitor_uses: number;
+    competitor_share: number;
+    delta_share: number;
+  }>;
 };
 
 const RECIPE_FORMAT_LABELS: Record<string, string> = {
@@ -129,6 +142,8 @@ export function StudioView() {
     suggestion: { recipe_key: string; name: string; reasoning: string; confidence: number } | null;
     alternatives: Array<{ recipe_key: string; name: string; reasoning: string }>;
   } | null>(null);
+  // Track B UI — insights de concorrentes no Estúdio.
+  const [competitorComparison, setCompetitorComparison] = useState<CompetitorComparison | null>(null);
   // F5 — Atalhos per-org (aliases customizados).
   const [orgAliases, setOrgAliases] = useState<Array<{ id: string; alias: string; recipe_key: string }>>([]);
   const [newAliasText, setNewAliasText] = useState('');
@@ -154,7 +169,9 @@ export function StudioView() {
     .then(d => setRecipeAnalytics(d && typeof d.total_uses === 'number' ? d : null)).catch(() => {});
   const loadOrgAliases = () => apiFetch('/api/studio/recipes/aliases?scope=own').then(r => r.json())
     .then(d => setOrgAliases(Array.isArray(d?.aliases) ? d.aliases : [])).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); loadRecipeAnalytics(); loadOrgAliases(); }, []);
+  const loadCompetitorComparison = () => apiFetch('/api/competitors/insights/comparison').then(r => r.json())
+    .then(d => setCompetitorComparison(d && typeof d.own_total === 'number' ? d : null)).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); loadRecipeAnalytics(); loadOrgAliases(); loadCompetitorComparison(); }, []);
 
   // Auto-seleciona primeira receita disponível quando o catálogo chega.
   useEffect(() => {
@@ -329,6 +346,7 @@ export function StudioView() {
       loadCreations();
       loadLimits();
       loadRecipeAnalytics();
+      loadCompetitorComparison();
       toast.success(`Arte criada com ${data.recipe_key}! 🎨`);
     } catch (e: any) { toast.error(e.message); } finally { setRecipeGenerating(false); }
   };
@@ -742,6 +760,103 @@ export function StudioView() {
           <p className="mt-1 text-[10px] text-zinc-600">Vazio na receita → usa a que está selecionada acima. Atalho da org tem prioridade sobre os globais.</p>
         </div>
       </div>
+
+      {/* O que seus concorrentes estão usando (Track B → StudioView) */}
+      {competitorComparison && competitorComparison.competitor_total > 0 && (
+        <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+              <Eye className="w-4 h-4 text-fuchsia-400" /> O que seus concorrentes estão usando
+            </h3>
+            <span className="text-[11px] text-zinc-500">
+              <span className="text-zinc-300 font-medium">{competitorComparison.competitor_total}</span> posts classificados ·
+              <span className="text-zinc-300 font-medium ml-1">{competitorComparison.own_total}</span> gerações suas
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Compara o mix de receitas dos concorrentes cadastrados com o seu.
+            Delta positivo = eles usam mais do que você.
+          </p>
+
+          {(() => {
+            // Top 5 recipes por gap positivo (concorrentes usam mais).
+            const gaps = competitorComparison.by_recipe
+              .filter(r => r.delta_share > 0.01)
+              .slice(0, 5);
+            const advantages = competitorComparison.by_recipe
+              .filter(r => r.delta_share < -0.01)
+              .slice(0, 3);
+
+            if (gaps.length === 0 && advantages.length === 0) {
+              return (
+                <p className="text-xs text-zinc-500 italic">
+                  Você e seus concorrentes estão com mixes parecidos. Sem gaps claros no momento.
+                </p>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {gaps.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <TrendingUp className="w-3 h-3 text-fuchsia-300" />
+                      <span className="text-[11px] text-fuchsia-300 font-medium">Onde eles investem mais</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {gaps.map(g => (
+                        <div key={g.recipe_key} className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-xs text-zinc-100 font-medium truncate">{g.name || g.recipe_key}</span>
+                              <span className="text-[10px] text-zinc-500 shrink-0">
+                                {(g.competitor_share * 100).toFixed(0)}% deles · {(g.own_share * 100).toFixed(0)}% seu
+                              </span>
+                            </div>
+                            <div className="mt-1 h-1 rounded-full bg-zinc-800 overflow-hidden">
+                              <div
+                                className="h-full bg-fuchsia-500"
+                                style={{ width: `${Math.min(100, g.competitor_share * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                          {recipes.find(r => r.key === g.recipe_key) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRecipeKey(g.recipe_key);
+                                toast.success(`Selecionado: ${g.name || g.recipe_key} — ajuste inputs acima e gere.`);
+                              }}
+                              title="Selecionar essa receita no gerador acima"
+                              className="shrink-0 text-[10px] px-2 py-1 rounded border border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10"
+                            >
+                              Experimentar
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {advantages.length > 0 && (
+                  <div>
+                    <div className="text-[11px] text-emerald-400 font-medium mb-1.5">Onde você usa mais que eles</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {advantages.map(a => (
+                        <span key={a.recipe_key} className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 py-1 text-[11px]">
+                          <span className="text-emerald-300 font-medium">{a.name || a.recipe_key}</span>
+                          <span className="text-emerald-400">+{Math.abs(a.delta_share * 100).toFixed(0)}%</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Gerar vídeo (Veo) */}
       <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">

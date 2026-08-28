@@ -113,7 +113,79 @@ function rowToConfig(r: OrgConfigRow): OrgBspConfig {
 const DEFAULT_MARKUP = 40;
 const DEFAULT_TARGET_MARGIN = 0.3;
 
+// F4 — Gate de plano (RN-BSP-08).
+// Feature flag global de soft launch: durante bake-in, o gate é bypassado pra
+// qualquer org testar. Env var `BSP_SOFT_LAUNCH`:
+//   - undefined/"1"/"true" → soft launch ON (default; gate desligado)
+//   - "0"/"false"          → soft launch OFF (gate ligado; enabled_dimensions vale)
+const readSoftLaunch = (): boolean => {
+  const v = (process.env.BSP_SOFT_LAUNCH ?? "1").toString().toLowerCase();
+  return v !== "0" && v !== "false";
+};
+
+export interface BspAccessCheck {
+  allowed: boolean;
+  code?: "soft_launch_disabled" | "dimension_disabled" | "missing_org";
+  reason?: string;
+  soft_launch: boolean;
+}
+
 export class BusinessSkillsPackService {
+
+  // ═══════════════ Gate de plano (F4) ═══════════════
+
+  /**
+   * Estado atual do soft launch. Lido a cada chamada — testes conseguem
+   * mexer no env var sem restart.
+   */
+  static isSoftLaunch(): boolean {
+    return readSoftLaunch();
+  }
+
+  /**
+   * Verifica se a org pode usar o BSP (opcionalmente uma dimensão específica).
+   * Regras:
+   *  - Soft launch ON → sempre allowed (bake-in).
+   *  - Soft launch OFF + orgId vazio → missing_org.
+   *  - Soft launch OFF + config null → default (todas as 3 dimensões ligadas),
+   *    pra novo cliente não ficar trancado na primeira request.
+   *  - Soft launch OFF + dimension informada → allowed se `enabled_dimensions`
+   *    inclui a dimensão.
+   *  - Soft launch OFF + dimension nula → allowed se `enabled_dimensions` não
+   *    está vazio (pelo menos uma dimensão ligada).
+   */
+  static checkAccess(orgId: string, dimension?: Dimension): BspAccessCheck {
+    const softLaunch = this.isSoftLaunch();
+    if (softLaunch) return { allowed: true, soft_launch: true };
+
+    if (!orgId) {
+      return { allowed: false, code: "missing_org", reason: "orgId é obrigatório", soft_launch: false };
+    }
+
+    const config = this.getOrgConfig(orgId);
+    const enabled = config?.enabled_dimensions
+      ?? ([...DIMENSIONS] as Dimension[]);
+
+    if (dimension && !enabled.includes(dimension)) {
+      return {
+        allowed: false,
+        code: "dimension_disabled",
+        reason: `Dimensão "${dimension}" desligada para a organização`,
+        soft_launch: false,
+      };
+    }
+
+    if (!dimension && enabled.length === 0) {
+      return {
+        allowed: false,
+        code: "dimension_disabled",
+        reason: "Nenhuma dimensão do BSP está habilitada para a organização",
+        soft_launch: false,
+      };
+    }
+
+    return { allowed: true, soft_launch: false };
+  }
 
   // ═══════════════ Config CRUD ═══════════════
 

@@ -142,11 +142,36 @@ Estas são as decisões que **precisam de humano** antes de avançar para F1
 do Ledger:
 
 1. ~~**Confirmar §Gap-2**: PRD-BSP-01 está fora do repo (drive/notion/conversa) e precisa ser importado, ou o pacote precisa ser reescrito consolidando serviços verticais existentes?~~ **RESOLVIDO** (2026-08-28): PRD-BSP-01 e ADR-195 escritos e mergeados; Track C F1-F5 entregues em `main` (ver §4.5). Gap-2 fechado.
-2. **Reclassificar prioridades do PRD-PEL-01 §11 vs realidade** (§Gap-7 da matriz):
-   - `PLATFORM_RELIABILITY_CAPACITY` foi classificada como "parcial/ausente" no PRD-PEL-01; na verdade está F0–F14 em produção.
-   - `RECLAME_AQUI_INTELLIGENCE` foi P3 backlog "ausente"; espinha está COMPLETA, falta só conector.
-   - `VISION_VMS_CONTROL_PLANE` "parcial/avançado" é acurado, mas o bloqueador real é o Edge Perception não existir.
+2. ~~**Reclassificar prioridades do PRD-PEL-01 §11 vs realidade** (§Gap-7 da matriz):~~
+   - ~~`PLATFORM_RELIABILITY_CAPACITY` foi classificada como "parcial/ausente" no PRD-PEL-01; na verdade está F0–F14 em produção.~~
+   - ~~`RECLAME_AQUI_INTELLIGENCE` foi P3 backlog "ausente"; espinha está COMPLETA, falta só conector.~~
+   - ~~`VISION_VMS_CONTROL_PLANE` "parcial/avançado" é acurado, mas o bloqueador real é o Edge Perception não existir.~~
+
+   **RESOLVIDO NO SEED** (2026-08-28): as 3 reclassificações estão
+   refletidas no `scripts/seed-product-evolution-ledger.ts` (fonte
+   corrente do estado no ledger runtime):
+   - `PLATFORM_RELIABILITY_CAPACITY` → `target_status: "PRODUCTION"` +
+     `source_of_truth: "ADR-164"` (F0–F14 em produção; sem blocked_reason).
+   - `RECLAME_AQUI_INTELLIGENCE` → `target_status: "TESTED"` (F0–F14 completo)
+     + `blocked_reason` explicitando o gate externo (contrato Reclame AQUI).
+   - `VISION_VMS_CONTROL_PLANE` → `target_status: "TESTED"` +
+     `blocked_reason` apontando pra Edge Perception + aresta `requires
+     VISION_EDGE_PERCEPTION` no grafo de dependência (§5.4 acima).
+
+   O PRD-PEL-01 §11 propriamente dito não está checked-in no repo — a
+   reclassificação portanto vive no ledger runtime, que é a autoridade
+   sobre estado atual. Quando/se o PRD entrar, deve refletir o seed.
+
 3. **Decidir tratamento de Enterprise Intelligence / CONTROLER**: 1 iniciativa combinada (§23 atual) ou 2 iniciativas separadas (`ENTERPRISE_LEARNING` + `CONTROLER_OPERATIONAL`)?
+
+   **PENDENTE — decisão do dono** (2026-08-28): esta é a única pendência
+   de decisão pura. Ambas as opções são estruturalmente viáveis. Se o
+   dono decidir separar, o caminho é: (a) atualizar seed pra dividir
+   `ENTERPRISE_INTELLIGENCE_CONTROLER` em 2 items, (b) atualizar
+   `ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY.superseded_by` pra apontar
+   pra iniciativa correta (provavelmente `ENTERPRISE_LEARNING`),
+   (c) reajustar sources. Se decidir manter combinado, o estado atual
+   permanece — nada a fazer.
 4. ~~**Confirmar dependências** que serão registradas na F1 do Ledger como `requires`:~~
    - ~~`ZAPFLOW_SENSE` requires `VISION_EDGE_PERCEPTION`, `WIFI_PRESENCE_CSI`~~
    - ~~`VISION_VMS_CONTROL_PLANE` → `PILOT`/`PRODUCTION` requires `VISION_EDGE_PERCEPTION`~~

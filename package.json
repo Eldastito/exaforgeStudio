@@ -175,6 +175,7 @@
     "test:product-opportunity": "tsx scripts/test-product-opportunity.ts",
     "test:growth-goal": "tsx scripts/test-growth-goal.ts",
     "test:growth-brief": "tsx scripts/test-growth-brief.ts",
+    "test:growth-routes": "tsx scripts/test-growth-routes.ts",
     "test:social-provider-facebook": "tsx scripts/test-social-provider-facebook.ts",
     "test:growth-autopilot": "tsx scripts/test-growth-autopilot.ts",
     "test:growth-optimization": "tsx scripts/test-growth-optimization.ts",

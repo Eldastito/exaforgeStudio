@@ -31,6 +31,12 @@ interface SeedSource {
   notes?: string;
 }
 
+interface SeedDependency {
+  depends_on_key: string;
+  dependency_type: "requires" | "enhances" | "blocks" | "related";
+  notes?: string;
+}
+
 interface SeedItem {
   evolution_key: string;
   title: string;
@@ -45,6 +51,9 @@ interface SeedItem {
    *  `evolution_key` que substituiu esta iniciativa. */
   superseded_by?: string;
   sources: SeedSource[];
+  /** Arestas do grafo de dependência (STATUS-DE-EXECUCAO §5.4).
+   *  Idempotente via UNIQUE (item, depends_on, type). */
+  dependencies?: SeedDependency[];
 }
 
 // Dados curados a partir de docs/product-evolution/INITIAL-GAP-MATRIX.md.
@@ -236,6 +245,10 @@ const SEED: SeedItem[] = [
       { source_type: "file", title: "StudioVisualRecipeService", source_reference: "src/server/StudioVisualRecipeService.ts" },
       { source_type: "file", title: "UI no StudioView (Track A F3-F5)", source_reference: "src/features/StudioView.tsx" },
     ],
+    dependencies: [
+      { depends_on_key: "STUDIO_IMAGE_GEN_CORE", dependency_type: "enhances",
+        notes: "STATUS §5.4 — motor base do Studio é opcional; VRE reusa o pipeline Imagen/Veo mas pode ser trocado." },
+    ],
   },
   {
     evolution_key: "BUSINESS_SKILLS_PACK",
@@ -265,6 +278,10 @@ const SEED: SeedItem[] = [
     sources: [
       { source_type: "adr", title: "ADR-001..008 — Vision VMS foundation", source_reference: "docs/adr/ADR-001-vision-edge-runtime.md" },
       { source_type: "prd", title: "PRD Vision VMS", source_reference: "docs/PRD-VISION-VMS.md" },
+    ],
+    dependencies: [
+      { depends_on_key: "VISION_EDGE_PERCEPTION", dependency_type: "requires",
+        notes: "STATUS §5.4 — Vision VMS Control Plane só sai de TESTED (PILOT/PRODUCTION) quando houver runtime de Edge Perception real (câmera ONVIF/RTSP publicando ocupação)." },
     ],
   },
   {
@@ -302,6 +319,12 @@ const SEED: SeedItem[] = [
     blocked_reason: "Depende de Vision Edge Perception e Wi-Fi CSI (ambos NÃO EXISTE)",
     sources: [
       { source_type: "prd", title: "PRD-PEL-01 §18 Closure Track G", notes: "Não checked-in" },
+    ],
+    dependencies: [
+      { depends_on_key: "VISION_EDGE_PERCEPTION", dependency_type: "requires",
+        notes: "STATUS §5.4 — ZAPFLOW_SENSE depende de observações físicas de Vision Edge (câmera/pessoa)." },
+      { depends_on_key: "WIFI_PRESENCE_CSI", dependency_type: "requires",
+        notes: "STATUS §5.4 — ZAPFLOW_SENSE depende do sinal Wi-Fi/CSI pra fusão sensorial." },
     ],
   },
   {
@@ -433,11 +456,36 @@ interface Summary {
   skipped_existing: string[];
   status_bumped: Array<{ key: string; from: string; to: string }>;
   sources_added: Array<{ key: string; count: number }>;
+  dependencies_added: Array<{ key: string; count: number }>;
   errors: Array<{ key: string; error: string }>;
 }
 
 function sourceKey(itemKey: string, src: SeedSource): string {
   return `${itemKey}::${src.source_type}::${src.source_reference || src.title}`;
+}
+
+/** Upsert idempotente das arestas de dependência.
+ *  `addDependency` já é idempotente por UNIQUE (item, depends_on, type)
+ *  — usamos `listDependencies.outgoing` pra saber quantas SÃO novas. */
+function upsertDependencies(itemKey: string, deps: SeedDependency[]): number {
+  if (!deps || deps.length === 0) return 0;
+  const before = new Set(PEL.listDependencies(itemKey).outgoing.map(
+    d => `${d.depends_on_key}::${d.dependency_type}`,
+  ));
+  let added = 0;
+  for (const d of deps) {
+    const k = `${d.depends_on_key}::${d.dependency_type}`;
+    if (before.has(k)) continue;
+    if (DRY_RUN) { added++; continue; }
+    PEL.addDependency({
+      evolution_key: itemKey,
+      depends_on_key: d.depends_on_key,
+      dependency_type: d.dependency_type,
+      notes: d.notes ?? null,
+    });
+    added++;
+  }
+  return added;
 }
 
 function upsertSources(itemKey: string, sources: SeedSource[]): number {
@@ -469,7 +517,8 @@ function upsertSources(itemKey: string, sources: SeedSource[]): number {
  */
 export async function runSeed(opts: { silent?: boolean } = {}): Promise<Summary> {
   const s: Summary = {
-    created: [], skipped_existing: [], status_bumped: [], sources_added: [], errors: [],
+    created: [], skipped_existing: [], status_bumped: [], sources_added: [],
+    dependencies_added: [], errors: [],
   };
 
   const log = opts.silent ? () => {} : console.log.bind(console);
@@ -501,6 +550,9 @@ export async function runSeed(opts: { silent?: boolean } = {}): Promise<Summary>
 
       const added = upsertSources(seed.evolution_key, seed.sources);
       if (added > 0) s.sources_added.push({ key: seed.evolution_key, count: added });
+      // Dependências ficam pra um 2º passo — ambos os endpoints do edge
+      // precisam existir antes de addDependency, e o SEED não está em
+      // ordem topológica (ex.: VRE aparece antes de STUDIO_IMAGE_GEN_CORE).
 
       if (!DRY_RUN && item) {
         const before = item.status;
@@ -537,6 +589,17 @@ export async function runSeed(opts: { silent?: boolean } = {}): Promise<Summary>
     }
   }
 
+  // ── 2º passo: dependências (após todos os items existirem) ──
+  for (const seed of SEED) {
+    if (!seed.dependencies || seed.dependencies.length === 0) continue;
+    try {
+      const depsAdded = upsertDependencies(seed.evolution_key, seed.dependencies);
+      if (depsAdded > 0) s.dependencies_added.push({ key: seed.evolution_key, count: depsAdded });
+    } catch (e: any) {
+      s.errors.push({ key: `${seed.evolution_key} (deps)`, error: e?.message || String(e) });
+    }
+  }
+
   // Verifica coerência: quantos items existem no ledger agora
   const total = (db.prepare("SELECT COUNT(*) AS n FROM product_evolution_items").get() as any).n;
 
@@ -546,6 +609,7 @@ export async function runSeed(opts: { silent?: boolean } = {}): Promise<Summary>
   log(`status ajustado: ${s.status_bumped.length}`);
   for (const b of s.status_bumped) log(`   ${b.key}: ${b.from} → ${b.to}`);
   log(`fontes anexadas: ${s.sources_added.reduce((a, b) => a + b.count, 0)}`);
+  log(`dependências anexadas: ${s.dependencies_added.reduce((a, b) => a + b.count, 0)}`);
   log(`erros:         ${s.errors.length}`);
   for (const e of s.errors) log(`   ✗ ${e.key}: ${e.error}`);
   log(`\ntotal no ledger: ${total} items ${DRY_RUN ? "(dry-run — sem escrita)" : ""}`);

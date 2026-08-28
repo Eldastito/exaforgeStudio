@@ -41,6 +41,8 @@ async function main() {
   check("1.3 25 status ajustados (3 permanecem em IDEA + 22 ativos avançam + 3 SUPERSEDED)",
     summary1.status_bumped.length === 25);
   check("1.4 fontes anexadas > 40", summary1.sources_added.reduce((a, b) => a + b.count, 0) > 40);
+  check("1.4.1 dependências anexadas = 4 (VRE→STUDIO, VMS→VE, SENSE→VE, SENSE→WIFI)",
+    summary1.dependencies_added.reduce((a: number, b: any) => a + b.count, 0) === 4);
 
   const total1 = (db.prepare("SELECT COUNT(*) as n FROM product_evolution_items").get() as any).n;
   check("1.5 total no db = 28", total1 === 28);
@@ -102,6 +104,8 @@ async function main() {
   check("6.2 segundo run: 28 já existiam", summary2.skipped_existing.length === 28);
   check("6.3 segundo run: 0 status ajustados (já no alvo)", summary2.status_bumped.length === 0);
   check("6.4 segundo run: 0 fontes novas", summary2.sources_added.reduce((a, b) => a + b.count, 0) === 0);
+  check("6.4.1 segundo run: 0 dependências novas (idempotência)",
+    summary2.dependencies_added.reduce((a: number, b: any) => a + b.count, 0) === 0);
 
   const total2 = (db.prepare("SELECT COUNT(*) as n FROM product_evolution_items").get() as any).n;
   check("6.5 total inalterado após 2º run", total2 === total1);
@@ -142,6 +146,42 @@ async function main() {
   check("8.3 busca por 'studio' retorna VISUAL_RECIPE_ENGINE e STUDIO_IMAGE_GEN_CORE",
     studio.some(i => i.evolution_key === "VISUAL_RECIPE_ENGINE") &&
     studio.some(i => i.evolution_key === "STUDIO_IMAGE_GEN_CORE"));
+
+  // ═══════════════ 8.4 Dependencies (STATUS §5.4) ═══════════════
+  const vreDeps = PEL.listDependencies("VISUAL_RECIPE_ENGINE");
+  check("8.4.1 VRE→STUDIO_IMAGE_GEN_CORE (enhances)",
+    vreDeps.outgoing.some((d: any) =>
+      d.depends_on_key === "STUDIO_IMAGE_GEN_CORE" &&
+      d.dependency_type === "enhances"));
+
+  const vmsDeps = PEL.listDependencies("VISION_VMS_CONTROL_PLANE");
+  check("8.4.2 VISION_VMS→VISION_EDGE_PERCEPTION (requires)",
+    vmsDeps.outgoing.some((d: any) =>
+      d.depends_on_key === "VISION_EDGE_PERCEPTION" &&
+      d.dependency_type === "requires"));
+
+  const senseDeps = PEL.listDependencies("ZAPFLOW_SENSE");
+  check("8.4.3 ZAPFLOW_SENSE→VISION_EDGE_PERCEPTION (requires)",
+    senseDeps.outgoing.some((d: any) =>
+      d.depends_on_key === "VISION_EDGE_PERCEPTION" &&
+      d.dependency_type === "requires"));
+  check("8.4.4 ZAPFLOW_SENSE→WIFI_PRESENCE_CSI (requires)",
+    senseDeps.outgoing.some((d: any) =>
+      d.depends_on_key === "WIFI_PRESENCE_CSI" &&
+      d.dependency_type === "requires"));
+
+  // Incoming edges no VISION_EDGE_PERCEPTION (2 items requerem)
+  const veIncoming = PEL.listDependencies("VISION_EDGE_PERCEPTION").incoming;
+  const incomingKeys = new Set(veIncoming.map((d: any) => d.item_key));
+  check("8.4.5 VISION_EDGE_PERCEPTION.incoming inclui VMS e SENSE",
+    incomingKeys.has("VISION_VMS_CONTROL_PLANE") &&
+    incomingKeys.has("ZAPFLOW_SENSE"));
+
+  // Notes preservadas
+  const vreEnh = vreDeps.outgoing.find((d: any) =>
+    d.depends_on_key === "STUDIO_IMAGE_GEN_CORE");
+  check("8.4.6 dependency.notes preservado no seed",
+    typeof vreEnh?.notes === "string" && vreEnh.notes.includes("STATUS §5.4"));
 
   // ═══════════════ 8.5 SUPERSEDED legacy (STATUS §5.5) ═══════════════
   const socLegacy = PEL.getItem("SOCIAL_INTELLIGENCE_PRD10_LEGACY");

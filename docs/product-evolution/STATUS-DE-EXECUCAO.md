@@ -147,10 +147,19 @@ do Ledger:
    - `RECLAME_AQUI_INTELLIGENCE` foi P3 backlog "ausente"; espinha está COMPLETA, falta só conector.
    - `VISION_VMS_CONTROL_PLANE` "parcial/avançado" é acurado, mas o bloqueador real é o Edge Perception não existir.
 3. **Decidir tratamento de Enterprise Intelligence / CONTROLER**: 1 iniciativa combinada (§23 atual) ou 2 iniciativas separadas (`ENTERPRISE_LEARNING` + `CONTROLER_OPERATIONAL`)?
-4. **Confirmar dependências** que serão registradas na F1 do Ledger como `requires`:
-   - `ZAPFLOW_SENSE` requires `VISION_EDGE_PERCEPTION`, `WIFI_PRESENCE_CSI`
-   - `VISION_VMS_CONTROL_PLANE` → `PILOT`/`PRODUCTION` requires `VISION_EDGE_PERCEPTION`
-   - `VISUAL_RECIPE_ENGINE` requires `STUDIO_IMAGE_GEN_CORE` (relação `enhances`, não `requires` — motor base é opcional se decidirem trocar depois)
+4. ~~**Confirmar dependências** que serão registradas na F1 do Ledger como `requires`:~~
+   - ~~`ZAPFLOW_SENSE` requires `VISION_EDGE_PERCEPTION`, `WIFI_PRESENCE_CSI`~~
+   - ~~`VISION_VMS_CONTROL_PLANE` → `PILOT`/`PRODUCTION` requires `VISION_EDGE_PERCEPTION`~~
+   - ~~`VISUAL_RECIPE_ENGINE` requires `STUDIO_IMAGE_GEN_CORE` (relação `enhances`, não `requires` — motor base é opcional se decidirem trocar depois)~~
+
+   **RESOLVIDO** (2026-08-28): 4 arestas de dependência registradas no
+   seed do ledger via `SeedItem.dependencies[]` + 2º passo do runner
+   (após todos os items existirem). Registradas exatamente como acima:
+   `ZAPFLOW_SENSE requires VISION_EDGE_PERCEPTION`, `ZAPFLOW_SENSE
+   requires WIFI_PRESENCE_CSI`, `VISION_VMS_CONTROL_PLANE requires
+   VISION_EDGE_PERCEPTION`, `VISUAL_RECIPE_ENGINE enhances
+   STUDIO_IMAGE_GEN_CORE`. Todas com `notes` referenciando §5.4 e
+   idempotentes por UNIQUE (item, depends_on, type).
 5. ~~**Registrar PRDs superseded**: (a) PRD 10 Social Intelligence, (b) Vertical Intelligence Hub histórico, (c) Enterprise Intelligence pré-ADR-166.~~ **RESOLVIDO** (2026-08-28): 3 items SUPERSEDED registrados no seed do ledger (`SOCIAL_INTELLIGENCE_PRD10_LEGACY` → `INTELLIGENCE_HUB`; `VERTICAL_INTELLIGENCE_HUB_LEGACY` → `INTELLIGENCE_HUB`; `ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY` → `ENTERPRISE_INTELLIGENCE_CONTROLER`). Seed loop estendido pra suportar `target_status: SUPERSEDED` via `IMPLEMENTING → setStatus(SUPERSEDED, superseded_by)`.
 
 ## 6. Métricas do PRD-PEL-01 §25 (critérios de aceite do próprio Ledger)

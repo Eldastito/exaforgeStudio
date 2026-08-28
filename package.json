@@ -90,6 +90,7 @@
     "test:competitor-posts": "tsx scripts/test-competitor-posts.ts",
     "test:competitor-classification": "tsx scripts/test-competitor-classification.ts",
     "test:competitor-insights": "tsx scripts/test-competitor-insights.ts",
+    "test:bsp-pricing": "tsx scripts/test-bsp-pricing.ts",
     "seed:product-evolution-ledger": "tsx scripts/seed-product-evolution-ledger.ts",
     "seed:studio-visual-recipes": "tsx scripts/seed-studio-visual-recipes.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",

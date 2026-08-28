@@ -38,6 +38,7 @@ async function main() {
   await import("../src/server/db.js");
   const { requireAuth } = await import("../src/server/middleware/auth.js");
   const growthRoutes = (await import("../src/server/routes/growth.js")).default;
+  const socialRoutes = (await import("../src/server/routes/social.js")).default;
 
   const ORG_ID = "org-growth-rt";
 
@@ -45,6 +46,8 @@ async function main() {
   const app = express();
   app.use(express.json());
   app.use("/api/growth", requireAuth, growthRoutes);
+  // Monta o legado pra validar que os aliases emitem Deprecation header
+  app.use("/api/social", requireAuth, socialRoutes);
 
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -60,7 +63,7 @@ async function main() {
   );
 
   async function req(method: string, path: string, opts: { token?: string; body?: any } = {}) {
-    return new Promise<{ status: number; body: any }>((resolve, reject) => {
+    return new Promise<{ status: number; body: any; headers: Record<string, string | string[] | undefined> }>((resolve, reject) => {
       const headers: Record<string, string> = {};
       if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
       const bodyStr = opts.body != null ? JSON.stringify(opts.body) : undefined;
@@ -71,7 +74,7 @@ async function main() {
         res.on("end", () => {
           const raw = Buffer.concat(chunks).toString("utf8");
           let body: any = null; try { body = JSON.parse(raw); } catch { body = raw; }
-          resolve({ status: res.statusCode || 0, body });
+          resolve({ status: res.statusCode || 0, body, headers: res.headers });
         });
       });
       r.on("error", reject);
@@ -175,6 +178,41 @@ async function main() {
   const bogus = await req("GET", "/api/growth/does-not-exist", { token: ownerToken });
   check("10.1 GET /does-not-exist → 404",
     bogus.status === 404);
+
+  // ═══════════════ 11. Deprecation headers no legado /api/social/* ═══════════════
+  // Endpoints movidos pra /api/growth/* devem emitir header RFC 9745 no legado.
+  const legacyAutopilot = await req("GET", "/api/social/growth-autopilot", { token: ownerToken });
+  check("11.1 /api/social/growth-autopilot emite Deprecation: true",
+    legacyAutopilot.headers.deprecation === "true");
+  check("11.2 /api/social/growth-autopilot emite Link successor-version",
+    typeof legacyAutopilot.headers.link === "string" &&
+    (legacyAutopilot.headers.link as string).includes("/api/growth/autopilot") &&
+    (legacyAutopilot.headers.link as string).includes('rel="successor-version"'));
+
+  const legacyBrief = await req("GET", "/api/social/growth-brief", { token: ownerToken });
+  check("11.3 /api/social/growth-brief emite Deprecation",
+    legacyBrief.headers.deprecation === "true" &&
+    (legacyBrief.headers.link as string || "").includes("/api/growth/brief"));
+
+  const legacyLeads = await req("GET", "/api/social/attribution/leads?correlationId=abc",
+    { token: ownerToken });
+  check("11.4 /api/social/attribution/leads emite Deprecation",
+    legacyLeads.headers.deprecation === "true" &&
+    (legacyLeads.headers.link as string || "").includes("/api/growth/attribution/leads"));
+
+  const legacyOptList = await req("GET", "/api/social/growth-optimizations", { token: ownerToken });
+  check("11.5 /api/social/growth-optimizations emite Deprecation",
+    legacyOptList.headers.deprecation === "true");
+
+  // A rota nova NÃO deve emitir Deprecation (contra-prova)
+  const newAutopilot = await req("GET", "/api/growth/autopilot", { token: ownerToken });
+  check("11.6 /api/growth/autopilot NÃO emite Deprecation (é a atual)",
+    !newAutopilot.headers.deprecation);
+
+  // Endpoint social NÃO-deprecated (ex.: /connections) segue sem header
+  const socialConnections = await req("GET", "/api/social/connections", { token: ownerToken });
+  check("11.7 /api/social/connections NÃO emite Deprecation (endpoint social-native)",
+    !socialConnections.headers.deprecation);
 
   server.close();
 

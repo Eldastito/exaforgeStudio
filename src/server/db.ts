@@ -10965,6 +10965,30 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_svroa_key ON studio_visual_recipe_org_aliases (recipe_key);
     `);
   } catch (e) { console.error('[DB] Falha ao criar studio_visual_recipes', e); }
+
+  // ═══════════════ Closure Track B F1 — Competitor Accounts ═══════════════
+  // Ledger per-org de contas de concorrentes que a organização monitora.
+  // Fatias posteriores adicionam scraping/ingestão (F2), classificação por
+  // recipe do VRE (F3), insights agregados (F4). Esta fatia é só o cadastro.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS competitor_accounts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        platform TEXT NOT NULL,                  -- 'instagram' | 'tiktok' | 'youtube' | 'linkedin' | 'x' | 'facebook'
+        handle TEXT NOT NULL,                    -- username público (sem @); resolve case-insensitive
+        display_name TEXT,                       -- rótulo opcional
+        notes TEXT,                              -- observações livres do usuário
+        tags_json TEXT,                          -- JSON array de tags livres (max ~20)
+        active INTEGER NOT NULL DEFAULT 1,       -- 0/1; soft delete
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, platform, handle)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ca_org_active ON competitor_accounts (organization_id, active);
+      CREATE INDEX IF NOT EXISTS idx_ca_org_platform_lower ON competitor_accounts (organization_id, platform, LOWER(handle));
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar competitor_accounts', e); }
 };
 
 initDb();

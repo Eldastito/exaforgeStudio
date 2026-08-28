@@ -37,6 +37,7 @@ import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
 import studioRoutes from "./src/server/routes/studio.js";
+import competitorsRoutes from "./src/server/routes/competitors.js";
 import taskRoutes from "./src/server/routes/tasks.js";
 import prospectRoutes from "./src/server/routes/prospect.js";
 import radarB2BRoutes from "./src/server/routes/radarB2B.js";
@@ -644,6 +645,7 @@ async function startServer() {
   protectedApi.use("/integrations", instagramOAuthRoutes);
   protectedApi.use("/analytics", analyticsRoutes);
   protectedApi.use("/studio", studioRoutes);
+  protectedApi.use("/competitors", competitorsRoutes);
   // ADR-169 F7 (BEAUTY-007) — Beauty AI (Simulador de Cabelo). O gate de
   // módulo é `estudio` (MODULE_BY_ROUTE[beauty]=estudio, F1 já lista no
   // preset da vertical beleza). Cada handler valida vertical=beleza +

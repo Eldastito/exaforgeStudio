@@ -386,6 +386,107 @@ export class BusinessSkillsPackService {
     };
   }
 
+  // ═══════════════ Local Marketing (F3) — contact ↔ competitor ═══════════════
+
+  /**
+   * Cruza `contacts.identifier` × `competitor_accounts.handle` da mesma org e
+   * persiste os matches em `bsp_contact_competitor_match`. Sinal-chave pra
+   * Local Marketing: um contato do CRM cujo handle é um concorrente que a
+   * org monitora vale outreach diferenciado.
+   *
+   * Case-insensitive. Multi-plataforma (não filtra por provider do canal —
+   * um contato WhatsApp cujo `identifier` casa com um handle Instagram
+   * monitorado ainda é sinal válido; o platform do competitor fica no
+   * match pra o caller decidir).
+   *
+   * Idempotente: reroda o batch reinsere os mesmos matches sem duplicar
+   * (INSERT OR IGNORE + PRIMARY KEY composta).
+   */
+  static enrichContactsWithCompetitor(orgId: string): {
+    matched: number;
+    contacts_checked: number;
+    competitors_active: number;
+  } {
+    if (!orgId) throw new BusinessSkillsPackError("missing_org", "orgId é obrigatório");
+
+    const contactsChecked = (db.prepare(
+      "SELECT COUNT(*) c FROM contacts WHERE organization_id = ?"
+    ).get(orgId) as any).c as number;
+
+    const competitorsActive = (db.prepare(
+      "SELECT COUNT(*) c FROM competitor_accounts WHERE organization_id = ? AND active = 1"
+    ).get(orgId) as any).c as number;
+
+    // Insert-or-ignore acumula matches idempotentemente. `matched_at` fica
+    // do primeiro match; se quiser refresh, delete antes.
+    const result = db.prepare(`
+      INSERT OR IGNORE INTO bsp_contact_competitor_match (organization_id, contact_id, competitor_id)
+      SELECT c.organization_id, c.id, ca.id
+      FROM contacts c
+      JOIN competitor_accounts ca
+        ON ca.organization_id = c.organization_id
+       AND ca.active = 1
+       AND lower(c.identifier) = lower(ca.handle)
+      WHERE c.organization_id = ?
+    `).run(orgId);
+
+    // matched total (não só o delta desta chamada) — o caller quer saber o
+    // estado atual, não o "quantos foram novos".
+    const matched = (db.prepare(
+      "SELECT COUNT(*) c FROM bsp_contact_competitor_match WHERE organization_id = ?"
+    ).get(orgId) as any).c as number;
+
+    // silenciar warning de result não usado
+    void result;
+
+    return { matched, contacts_checked: contactsChecked, competitors_active: competitorsActive };
+  }
+
+  /**
+   * Lista os matches contact↔competitor já persistidos, com detalhes de
+   * cada lado. Usado pela UI de Local Marketing (F5) pra mostrar
+   * "esses X contatos são concorrentes que você monitora".
+   */
+  static listContactCompetitorMatches(orgId: string, opts: { limit?: number } = {}): Array<{
+    contact_id: string;
+    contact_name: string | null;
+    contact_identifier: string;
+    competitor_id: string;
+    competitor_handle: string;
+    competitor_platform: string;
+    competitor_display_name: string | null;
+    matched_at: string;
+  }> {
+    if (!orgId) return [];
+    const limit = Math.max(1, Math.min(500, opts.limit ?? 200));
+    return db.prepare(`
+      SELECT
+        c.id AS contact_id,
+        c.name AS contact_name,
+        c.identifier AS contact_identifier,
+        ca.id AS competitor_id,
+        ca.handle AS competitor_handle,
+        ca.platform AS competitor_platform,
+        ca.display_name AS competitor_display_name,
+        m.matched_at AS matched_at
+      FROM bsp_contact_competitor_match m
+      JOIN contacts c ON c.id = m.contact_id
+      JOIN competitor_accounts ca ON ca.id = m.competitor_id
+      WHERE m.organization_id = ?
+      ORDER BY m.matched_at DESC
+      LIMIT ?
+    `).all(orgId, limit) as any[];
+  }
+
+  /** Lookup rápido: esse contact é um concorrente monitorado? */
+  static isContactWatchedCompetitor(orgId: string, contactId: string): boolean {
+    if (!orgId || !contactId) return false;
+    const row = db.prepare(
+      "SELECT 1 FROM bsp_contact_competitor_match WHERE organization_id = ? AND contact_id = ? LIMIT 1"
+    ).get(orgId, contactId);
+    return !!row;
+  }
+
   /**
    * Métricas por vendedor (RN-BSP-05). Agrupa `quotes.created_by` na
    * janela `days` (default 30). Retorna [{agent, sent, accepted, declined,

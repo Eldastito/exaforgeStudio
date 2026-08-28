@@ -15,6 +15,12 @@ type RecipeSummary = {
   composition: any; constraints: any;
   supported_formats: string[]; vertical_hints: string[];
 };
+type RecipeAnalytics = {
+  scope: 'org' | 'global';
+  total_uses: number;
+  by_recipe: Array<{ recipe_key: string; name: string | null; vertical_hints: string[]; uses: number; last_used: string }>;
+  by_vertical: Array<{ vertical: string; uses: number }>;
+};
 
 const RECIPE_FORMAT_LABELS: Record<string, string> = {
   feed_1_1: 'Feed 1:1',
@@ -114,6 +120,7 @@ export function StudioView() {
     mediaUrl: string; id: string; prompt: string;
     recipe_key: string; recipe_version: number;
   } | null>(null);
+  const [recipeAnalytics, setRecipeAnalytics] = useState<RecipeAnalytics | null>(null);
   const selectedRecipe = recipes.find(r => r.key === selectedRecipeKey) || null;
 
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
@@ -130,7 +137,9 @@ export function StudioView() {
     .then(d => setScheduled(Array.isArray(d) ? d : [])).catch(() => {});
   const loadRecipes = () => apiFetch('/api/studio/recipes').then(r => r.json())
     .then(d => setRecipes(Array.isArray(d?.recipes) ? d.recipes : [])).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); }, []);
+  const loadRecipeAnalytics = () => apiFetch('/api/studio/recipes/analytics').then(r => r.json())
+    .then(d => setRecipeAnalytics(d && typeof d.total_uses === 'number' ? d : null)).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); loadRecipeAnalytics(); }, []);
 
   // Auto-seleciona primeira receita disponível quando o catálogo chega.
   useEffect(() => {
@@ -247,6 +256,7 @@ export function StudioView() {
       setRecipeResult(data);
       loadCreations();
       loadLimits();
+      loadRecipeAnalytics();
       toast.success(`Arte criada com ${data.recipe_key}! 🎨`);
     } catch (e: any) { toast.error(e.message); } finally { setRecipeGenerating(false); }
   };
@@ -533,6 +543,25 @@ export function StudioView() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Insights (F4) — só aparece com uso registrado. */}
+        {recipeAnalytics && recipeAnalytics.total_uses > 0 && (
+          <div className="mt-4 pt-3 border-t border-zinc-800/70">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-[11px] text-zinc-500">Suas receitas mais usadas</span>
+              <span className="text-[10px] text-zinc-500">{recipeAnalytics.total_uses} geração(ões)</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {recipeAnalytics.by_recipe.slice(0, 3).map(r => (
+                <span key={r.recipe_key} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px]">
+                  <span className="text-zinc-200 font-medium">{r.name || r.recipe_key}</span>
+                  <span className="text-zinc-500">·</span>
+                  <span className="text-fuchsia-300">{r.uses}×</span>
+                </span>
+              ))}
             </div>
           </div>
         )}

@@ -401,6 +401,102 @@ export class StudioVisualRecipeService {
     };
   }
 
+  // ═══════════════ Analytics (F4) ═══════════════
+
+  /**
+   * Agrega uso de receitas a partir do prompt marcado em `studio_creations`
+   * (formato `[KEY@vN] ...` gravado por `generate()` na F2).
+   *
+   * Retorno inclui top por recipe (uses desc, tie-break por last_used desc),
+   * rollup por vertical (uma receita com N verticais conta em cada uma), e
+   * total_uses. Junção com `studio_visual_recipes` é best-effort — se a
+   * receita foi removida/renomeada, `name` fica null e vertical_hints=[].
+   *
+   * @param opts.orgId  — quando informado, filtra por organização; senão global.
+   * @param opts.since  — ISO opcional pra limitar janela (created_at ≥ since).
+   */
+  static usageStats(opts: {
+    orgId?: string | null;
+    since?: string | null;
+  } = {}): {
+    scope: "org" | "global";
+    total_uses: number;
+    by_recipe: Array<{
+      recipe_key: string;
+      name: string | null;
+      vertical_hints: string[];
+      uses: number;
+      last_used: string;
+    }>;
+    by_vertical: Array<{ vertical: string; uses: number }>;
+  } {
+    const orgId = opts.orgId || null;
+    const since = opts.since || null;
+
+    const wheres: string[] = [
+      "prompt LIKE '[%@v%]%'",
+      "INSTR(prompt, '@') > 2",
+      "kind = 'image'",
+    ];
+    const params: any[] = [];
+    if (orgId) { wheres.push("organization_id = ?"); params.push(orgId); }
+    if (since) { wheres.push("created_at >= ?"); params.push(since); }
+
+    const rows = db.prepare(`
+      SELECT
+        SUBSTR(prompt, 2, INSTR(prompt, '@') - 2) AS recipe_key,
+        COUNT(*) AS uses,
+        MAX(created_at) AS last_used
+      FROM studio_creations
+      WHERE ${wheres.join(" AND ")}
+      GROUP BY recipe_key
+      ORDER BY uses DESC, last_used DESC
+    `).all(...params) as Array<{ recipe_key: string; uses: number; last_used: string }>;
+
+    // Junta com o catálogo pra puxar name/vertical_hints. Uma query só, mapa em JS.
+    const recipeRows = db.prepare(
+      `SELECT recipe_key, name, vertical_hints_json
+         FROM studio_visual_recipes
+        WHERE active = 1`
+    ).all() as Array<{ recipe_key: string; name: string; vertical_hints_json: string }>;
+    const catalog = new Map(recipeRows.map(r => {
+      let verts: string[] = [];
+      try { verts = JSON.parse(r.vertical_hints_json || "[]"); } catch { /* keep [] */ }
+      return [r.recipe_key, { name: r.name, verticals: verts }];
+    }));
+
+    const by_recipe = rows.map(r => {
+      const meta = catalog.get(r.recipe_key) || null;
+      return {
+        recipe_key: r.recipe_key,
+        name: meta?.name ?? null,
+        vertical_hints: meta?.verticals ?? [],
+        uses: r.uses,
+        last_used: r.last_used,
+      };
+    });
+
+    // Rollup por vertical — uma receita com N verticais soma em cada uma.
+    const vertMap = new Map<string, number>();
+    for (const stat of by_recipe) {
+      for (const v of stat.vertical_hints) {
+        vertMap.set(v, (vertMap.get(v) || 0) + stat.uses);
+      }
+    }
+    const by_vertical = Array.from(vertMap.entries())
+      .map(([vertical, uses]) => ({ vertical, uses }))
+      .sort((a, b) => b.uses - a.uses || a.vertical.localeCompare(b.vertical));
+
+    const total_uses = by_recipe.reduce((acc, r) => acc + r.uses, 0);
+
+    return {
+      scope: orgId ? "org" : "global",
+      total_uses,
+      by_recipe,
+      by_vertical,
+    };
+  }
+
   // ═══════════════ Seed (idempotente) ═══════════════
 
   /**

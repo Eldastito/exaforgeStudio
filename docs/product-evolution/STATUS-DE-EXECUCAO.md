@@ -162,16 +162,28 @@ do Ledger:
    reclassificação portanto vive no ledger runtime, que é a autoridade
    sobre estado atual. Quando/se o PRD entrar, deve refletir o seed.
 
-3. **Decidir tratamento de Enterprise Intelligence / CONTROLER**: 1 iniciativa combinada (§23 atual) ou 2 iniciativas separadas (`ENTERPRISE_LEARNING` + `CONTROLER_OPERATIONAL`)?
+3. ~~**Decidir tratamento de Enterprise Intelligence / CONTROLER**: 1 iniciativa combinada (§23 atual) ou 2 iniciativas separadas (`ENTERPRISE_LEARNING` + `CONTROLER_OPERATIONAL`)?~~
 
-   **PENDENTE — decisão do dono** (2026-08-28): esta é a única pendência
-   de decisão pura. Ambas as opções são estruturalmente viáveis. Se o
-   dono decidir separar, o caminho é: (a) atualizar seed pra dividir
-   `ENTERPRISE_INTELLIGENCE_CONTROLER` em 2 items, (b) atualizar
-   `ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY.superseded_by` pra apontar
-   pra iniciativa correta (provavelmente `ENTERPRISE_LEARNING`),
-   (c) reajustar sources. Se decidir manter combinado, o estado atual
-   permanece — nada a fazer.
+   **RESOLVIDO — SPLIT em 2 iniciativas** (2026-08-28): a análise de código
+   confirma dois concerns genuinamente distintos:
+
+   - `ENTERPRISE_INTELLIGENCE_CONTROLER` (fica; refocada em ADR-135):
+     camada operacional transversal do Diretor/CEO —
+     `BusinessSnapshotV2Service` + adapters (finanças, vendas, estoque,
+     compras, operação, tarefas) + `ExecutiveAdvisorService`. Alimenta
+     o CEO Operating Layer (ADR-190).
+   - `ENTERPRISE_LEARNING` (nova, source ADR-166): loop de aprendizado
+     outcome→prior. `PatternMemoryService` (motor único genérico) +
+     `LearningEpisodeService` + `LearningMetricsService` +
+     `PatternLearningFromAssuranceService` + intelligence externa com
+     procedência (LiveSearchResearchProvider, ContextualFusionService).
+
+   Como `evolution_key` é imutável (RN-PEL-1), a chave existente
+   `ENTERPRISE_INTELLIGENCE_CONTROLER` foi mantida e refocada em ADR-135
+   (kernel); `ENTERPRISE_LEARNING` entra como item novo com ADR-166. O
+   `ENTERPRISE_INTELLIGENCE_PRE_ADR166_LEGACY.superseded_by` foi
+   atualizado de `ENTERPRISE_INTELLIGENCE_CONTROLER` → `ENTERPRISE_LEARNING`
+   (o design pré-ADR-166 era exatamente sobre o loop, não sobre o kernel).
 4. ~~**Confirmar dependências** que serão registradas na F1 do Ledger como `requires`:~~
    - ~~`ZAPFLOW_SENSE` requires `VISION_EDGE_PERCEPTION`, `WIFI_PRESENCE_CSI`~~
    - ~~`VISION_VMS_CONTROL_PLANE` → `PILOT`/`PRODUCTION` requires `VISION_EDGE_PERCEPTION`~~

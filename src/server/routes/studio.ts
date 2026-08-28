@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
 import { BrandDnaService, BrandDnaPatch } from "../BrandDnaService.js";
@@ -97,6 +98,30 @@ router.post("/recipes/generate", async (req: AuthRequest, res): Promise<any> => 
         : 400;
       return res.status(s).json({ error: e.message, code: e.code });
     }
+    res.status(500).json({ error: e?.message || "internal_error" });
+  }
+});
+
+// GET /api/studio/recipes/analytics — F4. Uso agregado por recipe/vertical.
+// Escopo default = organização do caller. `?scope=global` só quando o caller é
+// admin master (mesmo padrão de outros endpoints cross-org). `?since=ISO`
+// limita a janela.
+router.get("/recipes/analytics", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const scope = (req.query.scope === "global") ? "global" : "org";
+    const since = typeof req.query.since === "string" && req.query.since ? req.query.since : null;
+
+    if (scope === "global") {
+      const isMaster = !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL);
+      if (!isMaster) {
+        return res.status(403).json({ error: "Escopo global restrito ao admin master.", code: "forbidden_scope" });
+      }
+      return res.json(StudioVisualRecipeService.usageStats({ since }));
+    }
+
+    return res.json(StudioVisualRecipeService.usageStats({ orgId: req.organizationId, since }));
+  } catch (e: any) {
     res.status(500).json({ error: e?.message || "internal_error" });
   }
 });

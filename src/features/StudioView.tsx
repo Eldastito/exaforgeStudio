@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2 } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -9,6 +9,20 @@ type Brand = { palette: string[]; tone: string; style: string; summary: string }
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
 type Objective = { id: string; label: string };
 type Scheduled = { id: string; creation_id: string; objective: string; caption: string; scheduled_at: string; status: string; error?: string; media_url?: string; kind?: string };
+type RecipeSummary = {
+  id: string; key: string; version: number; name: string;
+  description: string | null; intent: string | null;
+  composition: any; constraints: any;
+  supported_formats: string[]; vertical_hints: string[];
+};
+
+const RECIPE_FORMAT_LABELS: Record<string, string> = {
+  feed_1_1: 'Feed 1:1',
+  story_9_16: 'Story 9:16',
+  landscape_16_9: 'Paisagem 16:9',
+  square_1_1: 'Quadrado 1:1',
+  portrait_4_5: 'Retrato 4:5',
+};
 
 // Reduz a imagem no navegador (máx. 768px, JPEG) para enviar payload pequeno.
 const fileToB64 = (file: File): Promise<{ base64: string; mime: string }> => new Promise((resolve, reject) => {
@@ -89,6 +103,19 @@ export function StudioView() {
   const [vUrl, setVUrl] = useState<string | null>(null);
   const pollRef = useRef<any>(null);
 
+  // Receitas visuais (ADR-194 F3) — catálogo + geração via /api/studio/recipes/generate.
+  const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
+  const [selectedRecipeKey, setSelectedRecipeKey] = useState<string>('');
+  const [recipeFormat, setRecipeFormat] = useState<string>('feed_1_1');
+  const [recipeCtx, setRecipeCtx] = useState('');
+  const [recipeBrandHint, setRecipeBrandHint] = useState('');
+  const [recipeGenerating, setRecipeGenerating] = useState(false);
+  const [recipeResult, setRecipeResult] = useState<{
+    mediaUrl: string; id: string; prompt: string;
+    recipe_key: string; recipe_version: number;
+  } | null>(null);
+  const selectedRecipe = recipes.find(r => r.key === selectedRecipeKey) || null;
+
   const loadBrand = () => apiFetch('/api/studio/brand').then(r => r.json()).then(d => setBrand(d && Array.isArray(d.palette) ? d : null)).catch(() => {});
   const loadCreations = () => apiFetch('/api/studio/creations').then(r => r.json()).then((d) => setCreations(Array.isArray(d) ? d : [])).catch(() => {});
   // Só adota os limites quando vierem no formato esperado (evita crash se a rota
@@ -101,7 +128,23 @@ export function StudioView() {
     .then(d => setObjectives(Array.isArray(d) ? d : [])).catch(() => {});
   const loadScheduled = () => apiFetch('/api/studio/scheduled').then(r => r.json())
     .then(d => setScheduled(Array.isArray(d) ? d : [])).catch(() => {});
-  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); }, []);
+  const loadRecipes = () => apiFetch('/api/studio/recipes').then(r => r.json())
+    .then(d => setRecipes(Array.isArray(d?.recipes) ? d.recipes : [])).catch(() => {});
+  useEffect(() => { loadBrand(); loadCreations(); loadLimits(); loadIg(); loadObjectives(); loadScheduled(); loadRecipes(); }, []);
+
+  // Auto-seleciona primeira receita disponível quando o catálogo chega.
+  useEffect(() => {
+    if (!selectedRecipeKey && recipes.length > 0) setSelectedRecipeKey(recipes[0].key);
+  }, [recipes, selectedRecipeKey]);
+
+  // Ao trocar de receita, ajusta o formato pra um suportado se o atual não estiver.
+  useEffect(() => {
+    if (!selectedRecipe) return;
+    if (!selectedRecipe.supported_formats.includes(recipeFormat) && selectedRecipe.supported_formats[0]) {
+      setRecipeFormat(selectedRecipe.supported_formats[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRecipeKey]);
 
   const analyzeInstagram = async () => {
     setIgAnalyzing(true);
@@ -186,6 +229,27 @@ export function StudioView() {
     } catch (e: any) { setVStatus('error'); toast.error(e.message); }
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const generateFromRecipe = async () => {
+    if (!selectedRecipeKey) { toast.error('Escolha uma receita.'); return; }
+    setRecipeGenerating(true); setRecipeResult(null);
+    try {
+      const inputs: Record<string, string> = {};
+      if (recipeCtx.trim()) inputs.description = recipeCtx.trim();
+      const body: any = { recipe: selectedRecipeKey, format: recipeFormat, inputs };
+      if (recipeBrandHint.trim()) body.brand_hint = recipeBrandHint.trim();
+      const res = await apiFetch('/api/studio/recipes/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao gerar com receita.');
+      setRecipeResult(data);
+      loadCreations();
+      loadLimits();
+      toast.success(`Arte criada com ${data.recipe_key}! 🎨`);
+    } catch (e: any) { toast.error(e.message); } finally { setRecipeGenerating(false); }
+  };
 
   const openPublish = (id: string, prompt: string) => {
     setPubId(id); setPubPrompt(prompt || ''); setPubCaption(prompt || '');
@@ -351,6 +415,127 @@ export function StudioView() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Gerar com receita visual (ADR-194 F3) */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-fuchsia-400" /> Gerar com receita visual
+          </h3>
+          {limits?.images && (
+            <span className="text-[11px] text-zinc-500">Imagens este mês: <span className="text-zinc-300 font-medium">{limits.images.used}/{limits.images.limit}</span></span>
+          )}
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">
+          Receitas prontas com composição, iluminação e restrições curadas — como slash-commands
+          (/ProductExplosion, /3Dbillboard etc.). Consomem o mesmo limite mensal do Estúdio.
+        </p>
+
+        {recipes.length === 0 ? (
+          <p className="text-xs text-zinc-500">Nenhuma receita disponível.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Coluna esquerda: seleção + inputs */}
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Receita</label>
+                <select value={selectedRecipeKey} onChange={e => setSelectedRecipeKey(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-fuchsia-500 outline-none">
+                  {recipes.map(r => (
+                    <option key={r.key} value={r.key}>{r.name} — v{r.version}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedRecipe && (
+                <>
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1 block">Formato</label>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedRecipe.supported_formats.map(f => (
+                        <button key={f} type="button" onClick={() => setRecipeFormat(f)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${recipeFormat === f ? 'bg-fuchsia-600 border-fuchsia-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                          {RECIPE_FORMAT_LABELS[f] || f}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1 block">Contexto (produto, cenário, mensagem)</label>
+                    <textarea value={recipeCtx} onChange={e => setRecipeCtx(e.target.value)}
+                      placeholder="Ex.: Tênis esportivo azul cobalto, foco na sola de amortecimento, campanha inverno."
+                      className="w-full h-20 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-fuchsia-500 outline-none" />
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1 block">Dica de marca (opcional)</label>
+                    <input type="text" value={recipeBrandHint} onChange={e => setRecipeBrandHint(e.target.value)}
+                      placeholder={brand?.summary || 'Ex.: paleta azul cobalto + branco, tom esportivo e confiável'}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-fuchsia-500 outline-none" />
+                  </div>
+
+                  <Button onClick={generateFromRecipe} disabled={recipeGenerating || !selectedRecipeKey}
+                    className="bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
+                    {recipeGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                    {recipeGenerating ? 'Gerando…' : 'Gerar com receita'}
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {/* Coluna direita: detalhes do recipe + preview do resultado */}
+            <div className="space-y-3">
+              {selectedRecipe && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
+                  {selectedRecipe.description && <p className="text-xs text-zinc-300">{selectedRecipe.description}</p>}
+                  {selectedRecipe.intent && (
+                    <p className="text-[11px] text-zinc-500"><span className="text-zinc-400">Intenção:</span> {selectedRecipe.intent}</p>
+                  )}
+                  {selectedRecipe.vertical_hints?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 items-center">
+                      <span className="text-[11px] text-zinc-500">Ideal para:</span>
+                      {selectedRecipe.vertical_hints.map(v => (
+                        <span key={v} className="text-[10px] px-1.5 py-0.5 rounded border border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300">{v}</span>
+                      ))}
+                    </div>
+                  )}
+                  {selectedRecipe.constraints && Object.keys(selectedRecipe.constraints).length > 0 && (
+                    <div className="pt-1 border-t border-zinc-800/70">
+                      <p className="text-[11px] text-zinc-500 mb-1">Restrições:</p>
+                      <ul className="text-[10px] text-zinc-400 space-y-0.5">
+                        {selectedRecipe.constraints.preserve_product_identity && <li>• Preserva identidade do produto</li>}
+                        {selectedRecipe.constraints.allow_text_on_image === false && <li>• Sem texto sobre a imagem</li>}
+                        {selectedRecipe.constraints.allow_text_on_image === true && <li>• Aceita texto sobre a imagem</li>}
+                        {typeof selectedRecipe.constraints.max_people_in_scene === 'number' && (
+                          <li>• Até {selectedRecipe.constraints.max_people_in_scene} pessoa(s) na cena</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {recipeResult && (
+                <div>
+                  <img src={recipeResult.mediaUrl} alt="arte gerada" className="w-full max-w-sm rounded-lg border border-zinc-800" />
+                  <p className="mt-1 text-[10px] text-zinc-500">{recipeResult.recipe_key} · v{recipeResult.recipe_version}</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <a href={recipeResult.mediaUrl} download className="inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300">
+                      <Download className="w-3.5 h-3.5" /> Baixar
+                    </a>
+                    {ig.connected && (
+                      <button onClick={() => openPublish(recipeResult.id, recipeResult.prompt)} className="inline-flex items-center gap-1 text-xs text-pink-400 hover:text-pink-300">
+                        <Instagram className="w-3.5 h-3.5" /> Publicar no Instagram
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Gerar vídeo (Veo) */}

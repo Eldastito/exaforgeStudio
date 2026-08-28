@@ -202,7 +202,7 @@ Para cada linha da tabela acima, seção com evidência concreta.
 - **Tabelas**: nenhuma `proposals`, `rfp`, `rfq`, `local_marketing`. `manager_solution_proposals` é contexto diferente.
 - **Testes**: `test-comigo-pricing.ts`, `test-retail-pricing.ts`, `test-pricing.ts`, `test-quote-service.ts`
 - **Justificativa do estado (PRECISA ADAPTAR)**: as 3 sub-capacidades existem espalhadas por vertical, sem pacote unificado. Marketing Local & Conversão praticamente ausente como capability nomeada.
-- **Bloqueadores**: **falta PRD-BSP-01 no repo** (ver `Gap estrutural §Gap-2` abaixo); decisão pendente entre compor/rebrandar serviços verticais existentes vs construir pacote transversal novo.
+- **Bloqueadores**: ~~falta PRD-BSP-01 no repo~~ **destravado** — ver `docs/prd/PRD-BSP-01-business-skills-pack.md` (rascunho inicial, ADR-BSP-01 pendente antes de F1). Decisão sobre compor/rebrandar serviços verticais foi tomada em favor de fachada aditiva (RN-BSP-02).
 
 ### 16. `VISION_VMS_CONTROL_PLANE`
 - **ADRs**: ADR-001..ADR-008 (Vision Edge Runtime, Tenant Isolation, Media Pipeline, Recording/Evidence, Vision AI Inference, Access Control, Edge-Cloud Sync, Process Supervisor)
@@ -311,15 +311,15 @@ Para cada linha da tabela acima, seção com evidência concreta.
 ### Gap-1: Vision Edge / Wi-Fi / Sensor Fusion — 3 iniciativas em cascata sem código
 Iniciativas §17, §18, §19 estão todas em `NÃO EXISTE`. §19 depende transitivamente das outras duas. O PRD-PEL-01 já reconhece isso ao colocar Track G após E e F. A cascata implica que qualquer sinalização de "Sensor Fusion pronto" antes de §17 e §18 é falsa. Registrar dependências no Ledger na Fase 1 como `requires`.
 
-### Gap-2: PRD-BSP-01 não está checked-in no repositório
-O PRD-PEL-01 §14 diz textualmente:
-> Fonte autoritativa: **PRD-BSP-01 — ZapFlow Business Skills Pack**
+### Gap-2: ~~PRD-BSP-01 não está checked-in no repositório~~ — **RESOLVIDO**
+~~O PRD-PEL-01 §14 diz textualmente:~~
+~~> Fonte autoritativa: **PRD-BSP-01 — ZapFlow Business Skills Pack**~~
 
-E instrui: *"Importar o PRD para o Ledger e executar a Fase 0 descrita nele"*.
+~~E instrui: *"Importar o PRD para o Ledger e executar a Fase 0 descrita nele"*.~~
 
-**Grep case-insensitive em `docs/` retorna vazio para `BSP-01`, `Business Skills Pack`, `Precificação Inteligente 360`.** Apenas `docs/PRD-REVENUE-INTELLIGENCE-CENTER.md` tangencia (Pricing 360). Sub-capacidades existem espalhadas em services de vertical (`ComigoPricingService`, `RetailPricingService`, `pricing.ts`, `QuoteService`).
+~~**Grep case-insensitive em `docs/` retorna vazio para `BSP-01`, `Business Skills Pack`, `Precificação Inteligente 360`.** Apenas `docs/PRD-REVENUE-INTELLIGENCE-CENTER.md` tangencia (Pricing 360). Sub-capacidades existem espalhadas em services de vertical (`ComigoPricingService`, `RetailPricingService`, `pricing.ts`, `QuoteService`).~~
 
-**Ação recomendada (não desta fatia)**: antes de abrir Track C, checar se PRD-BSP-01 existe fora do repo (drive/notion/conversa) e importá-lo, ou escrever PRD novo consolidando serviços verticais existentes num pacote unificado. Sem o PRD, "Business Skills Pack" não tem contrato — não dá pra afirmar completude nem gap.
+**Resolvido em `docs/prd/PRD-BSP-01-business-skills-pack.md`** — PRD escrito consolidando as 3 sub-capacidades (Pricing 360, RFP, Local Marketing) como bundle transversal, com fatiamento F0-F5 sugerido, arquitetura de fachada e RN-BSP-01..12. `BUSINESS_SKILLS_PACK` no ledger pode agora ir de `PRECISA_ADAPTAR` → `PRD_READY`, destravando Track C.
 
 ### Gap-3: Vision Edge Perception (Track E) não pode começar sem decisão de runtime
 ADR-001 explicitamente adia a escolha de runtime (Node/Go/Rust) para pós-laboratório. Track E (P1) depende dessa decisão. Registrar como bloqueador do próprio track, não da Fase 0.

@@ -11197,6 +11197,31 @@ const initDb = () => {
         ON alterdata_module_policy(organization_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar alterdata_module_policy', e); }
+
+  // RF-16 (PR 6): registro de aprovação LGPD para dados pessoais capturados
+  // pela integração (ex.: pdvCustomerImport). Toda aprovação fica no histórico
+  // (nunca DELETE) — auditoria precisa provar quando/quem/por quanto tempo. A
+  // ativação da flag (via /alterdata/settings ou promote) exige a linha
+  // correspondente aqui pra org+purpose antes de ser aceita.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS alterdata_lgpd_approvals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        purpose TEXT NOT NULL,                   -- ex.: 'pdvCustomerImport'
+        legal_basis TEXT NOT NULL,               -- ex.: 'legitimo_interesse' | 'consentimento' | 'execucao_contrato'
+        approved_by TEXT NOT NULL,               -- user_id do responsável
+        approved_by_email TEXT,                  -- email pra rastro
+        approved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        retention_days INTEGER,                  -- ex.: 365 (0/null = sem retenção declarada)
+        access_profile TEXT,                     -- ex.: 'admin,owner,dpo'
+        notes TEXT,
+        revoked_at DATETIME                      -- preenchido se revogado (aprovação futura vira nova linha)
+      );
+      CREATE INDEX IF NOT EXISTS idx_alterdata_lgpd_org_purpose
+        ON alterdata_lgpd_approvals(organization_id, purpose, approved_at DESC);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar alterdata_lgpd_approvals', e); }
 };
 
 initDb();

@@ -13,6 +13,9 @@ import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReportsService } from "../ReportsService.js";
 import { AlterdataConnectorService } from "../AlterdataConnectorService.js";
 import { AlterdataSyncRunner } from "../AlterdataSyncRunner.js";
+import { AlterdataReadinessService } from "../AlterdataReadinessService.js";
+import { AlterdataSyncLedgerService } from "../AlterdataSyncLedgerService.js";
+import type { AlterdataEnvironment } from "../AlterdataProfileService.js";
 import { JobQueueService } from "../JobQueueService.js";
 
 const router = Router();
@@ -538,6 +541,43 @@ router.post("/alterdata/probe", async (req: AuthRequest, res): Promise<any> => {
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "Falha ao testar os módulos da Alterdata." });
   }
+});
+
+// GATE de go-live (PRD-ZF-ALTERDATA-GOLIVE-01 RF-10): consulta o readiness
+// da organização para o env escolhido — devolve status geral, política por
+// módulo, último status por resource, blockers com responsável+ação e o
+// resumo da última run do ledger. UI + ativação automática usam pra decidir
+// se pode subir prod.
+router.get("/alterdata/readiness", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = String((req.query.environment as string | undefined) || "").toLowerCase();
+  const environment: AlterdataEnvironment = raw === "prod" ? "prod" : "homolog";
+  try {
+    const readiness = AlterdataReadinessService.compute(req.organizationId, environment);
+    res.json({ ok: true, readiness });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "Falha ao calcular readiness." });
+  }
+});
+
+// Últimas runs do ledger (RF-06) — cabeçalho + contagem de resources. Usado
+// pela tela de Integrações pra mostrar histórico. Detalhes por run vêm em
+// GET /alterdata/runs/:id.
+router.get("/alterdata/runs", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = String((req.query.environment as string | undefined) || "").toLowerCase();
+  const environment: AlterdataEnvironment = raw === "prod" ? "prod" : "homolog";
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+  const runs = AlterdataSyncLedgerService.listRecentRuns(req.organizationId, environment, limit);
+  res.json({ ok: true, runs });
+});
+
+router.get("/alterdata/runs/:id", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const detail = AlterdataSyncLedgerService.getRun(String(req.params.id));
+  if (!detail) return res.status(404).json({ ok: false, error: "run não encontrada" });
+  if (detail.run.organization_id !== req.organizationId) return res.status(403).json({ ok: false, error: "run de outra org" });
+  res.json({ ok: true, ...detail });
 });
 
 // Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).

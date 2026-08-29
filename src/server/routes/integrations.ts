@@ -18,6 +18,7 @@ import { AlterdataSyncLedgerService, type LedgerRunStatus } from "../AlterdataSy
 import { formatSyncOutcome } from "../AlterdataSyncMessage.js";
 import { AlterdataPromotionService } from "../AlterdataPromotionService.js";
 import { AlterdataLgpdApprovalService } from "../AlterdataLgpdApprovalService.js";
+import { AlterdataRevenueBridgeService } from "../AlterdataRevenueBridgeService.js";
 import type { AlterdataEnvironment } from "../AlterdataProfileService.js";
 import { JobQueueService } from "../JobQueueService.js";
 
@@ -644,6 +645,30 @@ router.get("/alterdata/lgpd-approvals", (req: AuthRequest, res): any => {
   const purpose = req.query.purpose ? String(req.query.purpose) : undefined;
   const rows = AlterdataLgpdApprovalService.listHistory(req.organizationId, purpose, 100);
   res.json({ ok: true, approvals: rows });
+});
+
+// PRD RF-15 (PR 8): visão auditável da ponte Fechamento → Faturamento.
+// Devolve enabled + breakdown de receita por mês por source (pdv=Alterdata
+// via PDV, manual, whatsapp, other) + amostra dos últimos fechamentos
+// elegíveis. Usado pelo Diretor IA / DRE / snapshot pra provar origem do dado.
+router.get("/alterdata/revenue-bridge", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const months = req.query.months ? Math.max(1, Math.min(24, Number(req.query.months))) : 3;
+  const recentLimit = req.query.recent ? Math.max(1, Math.min(500, Number(req.query.recent))) : 50;
+  const audit = AlterdataRevenueBridgeService.audit(req.organizationId, { months, recentLimit });
+  res.json({ ok: true, audit });
+});
+
+// Liga/desliga a ponte (RF-15: decisão explícita registrada). Grava audit
+// log; o efeito só aparece na próxima passagem do FinancialLedgerService.
+router.put("/alterdata/revenue-bridge", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const userId = (req as any).userId;
+  if (!userId) return res.status(401).json({ ok: false, error: "user id ausente" });
+  const on = !!req.body?.enabled;
+  const enabled = AlterdataRevenueBridgeService.setEnabled(req.organizationId, on);
+  logAuthEvent(req.organizationId, userId, null, 'ALTERDATA_REVENUE_BRIDGE_TOGGLE', { enabled });
+  res.json({ ok: true, enabled });
 });
 
 // Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).

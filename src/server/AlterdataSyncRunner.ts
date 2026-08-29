@@ -29,7 +29,7 @@ import {
   type LedgerRunHandle,
   type LedgerRunTrigger,
 } from "./AlterdataSyncLedgerService.js";
-import type { AlterdataEnvironment } from "./AlterdataProfileService.js";
+import { AlterdataProfileService, type AlterdataEnvironment } from "./AlterdataProfileService.js";
 
 export interface SyncRunSummary {
   referencias: number;
@@ -231,19 +231,29 @@ export class AlterdataSyncRunner {
     const precos = { applied: 0, skippedNoProduct: 0, sampleNoProduct: [] as string[] };
     const table = str(settings.priceTable);
     if (table) {
-      const candidates: Array<(c: string) => string> = [
-        (c) => `/api/v1/Preco/versao/${table}/${c}`,
-        (c) => `/api/v1/Preco/versao/${c}`,
-      ];
-      if (rede) candidates.push((c) => `/api/v1/Preco/versao/${rede}/${table}/${c}`);
+      // RF-14: mapa de formatos suportados. Chave = string estável guardada
+      // no profile (`price_path_format`) pra que a próxima execução vá
+      // DIRETO no formato que já funcionou — sem repetir 2-3 tentativas.
+      const FORMATS: Record<string, (c: string) => string> = {
+        "tabelaVersao":       (c) => `/api/v1/Preco/versao/${table}/${c}`,
+        "versao":             (c) => `/api/v1/Preco/versao/${c}`,
+        ...(rede ? { "redeTabelaVersao": (c: string) => `/api/v1/Preco/versao/${rede}/${table}/${c}` } : {}),
+      };
+      const cachedFormat = AlterdataProfileService.getPricePathFormat(orgId, environment);
+      const orderedKeys = cachedFormat && FORMATS[cachedFormat]
+        ? [cachedFormat, ...Object.keys(FORMATS).filter(k => k !== cachedFormat)]
+        : Object.keys(FORMATS);
+      const candidates: Array<{ key: string; build: (c: string) => string }> =
+        orderedKeys.map(k => ({ key: k, build: FORMATS[k] }));
       let priceStatus: "ready" | "empty_but_valid" | "server_error" = "empty_but_valid";
       let lastError: any = null;
       let lastHttp: number | null = null;
+      let winnerKey: string | null = null;
       for (let i = 0; i < candidates.length; i++) {
         try {
           await AlterdataSyncService.syncResource(orgId, {
             moduleKey: "price", resource: "Preco", filial: `${table}~${i}`,
-            buildPath: candidates[i],
+            buildPath: candidates[i].build,
             onItems: (items) => {
               const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);
               precos.applied += r.applied; precos.skippedNoProduct += r.skippedNoProduct;
@@ -256,7 +266,17 @@ export class AlterdataSyncRunner {
           lastHttp = extractHttpStatus(e);
           // formato inexistente nesta instalação (404/500) — tenta o próximo
         }
-        if (precos.applied + precos.skippedNoProduct > 0) { priceStatus = "ready"; break; }
+        if (precos.applied + precos.skippedNoProduct > 0) {
+          priceStatus = "ready";
+          winnerKey = candidates[i].key;
+          break;
+        }
+      }
+      // RF-14: persistir o formato vencedor NO PROFILE — próximo sync começa
+      // direto por ele. Se o vencedor mudou (ex.: cliente reconfigurou), a
+      // cache é atualizada; se o cache falhou e outro formato ganhou, sobrescreve.
+      if (winnerKey && winnerKey !== cachedFormat) {
+        try { AlterdataProfileService.setPricePathFormat(orgId, environment, winnerKey); } catch { /* noop */ }
       }
       if (priceStatus === "ready") {
         ledger.record({

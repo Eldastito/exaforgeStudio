@@ -151,6 +151,69 @@ export class RetailSellerDirectoryService {
     const r = db.prepare(`SELECT 1 FROM retail_seller_store_assignments WHERE organization_id = ? AND active = 1 LIMIT 1`).get(orgId);
     return !!r;
   }
+
+  /**
+   * Sugere a PRÓXIMA matrícula seguindo o PADRÃO DA REDE (auto-preenchimento no
+   * cadastro de um vendedor novo). Regra determinística:
+   *  1. incrementa a MAIOR matrícula numérica já vista na loja escolhida — os
+   *     códigos `CAI_USUARIO` do PDV daquela filial + os vendedores já lotados —
+   *     preservando prefixo e largura (zero-pad). Ex.: 10650047 → 10650048;
+   *  2. sem base numérica na loja, usa o CÓDIGO DA FILIAL como prefixo + `0001`
+   *     (ex.: filial 1065 → 10650001);
+   *  3. por fim, um contador simples de 4 dígitos.
+   * Sempre devolve uma matrícula que AINDA NÃO existe em `retail_sellers` (a
+   * chave única por org), incrementando até achar uma livre.
+   */
+  static nextMatricula(orgId: string, storeId: string): string {
+    const store = db.prepare(`SELECT code FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const code = String(store.code || "").trim();
+
+    const taken = (m: string) => !!db.prepare(`SELECT 1 FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, m);
+    // Devolve `base` se estiver livre; senão incrementa (preservando a largura) até achar uma livre.
+    const free = (base: string): string => {
+      const width = base.length;
+      let n = BigInt(base);
+      let cand = base;
+      while (taken(cand)) { n += 1n; cand = n.toString().padStart(width, "0"); }
+      return cand;
+    };
+
+    // Pool de matrículas numéricas ligadas à loja: códigos do PDV da filial +
+    // vendedores já lotados nela.
+    const pool = new Set<string>();
+    if (code) {
+      for (const r of db.prepare(
+        `SELECT DISTINCT COALESCE(NULLIF(vendedor_codigo, ''), vendedor) AS m FROM retail_pdv_sales
+          WHERE organization_id = ? AND filial = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor, '') <> ''`
+      ).all(orgId, code) as any[]) pool.add(String(r.m));
+    }
+    for (const r of this.sellersForStore(orgId, storeId)) pool.add(String(r.matricula));
+    const numeric = [...pool].filter((m) => /^\d+$/.test(m));
+
+    if (numeric.length) {
+      const max = numeric.reduce((a, b) => (BigInt(a) >= BigInt(b) ? a : b));
+      return free((BigInt(max) + 1n).toString().padStart(max.length, "0"));
+    }
+    if (/^\d+$/.test(code)) return free(code + "0001"); // 1ª matrícula da loja no padrão da filial
+    return free("0001"); // sem qualquer base numérica: contador simples
+  }
+
+  /**
+   * "Excluir" um vendedor = DESATIVA a identidade (active=0) e ENCERRA todas as
+   * lotações ativas. Nunca DELETE físico: a comissão/venda histórica continua
+   * ligada pela matrícula (RN-SELL-2 — identidade canônica). Idempotente.
+   */
+  static deactivateSeller(orgId: string, sellerId: string, actorId?: string): void {
+    const seller = db.prepare(`SELECT id, matricula FROM retail_sellers WHERE organization_id = ? AND id = ?`).get(orgId, sellerId) as any;
+    if (!seller) throw new Error("Vendedor não encontrado.");
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE retail_sellers SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, sellerId);
+      db.prepare(`UPDATE retail_seller_store_assignments SET active = 0, effective_to = CURRENT_TIMESTAMP WHERE organization_id = ? AND seller_id = ? AND active = 1`).run(orgId, sellerId);
+    });
+    tx();
+    try { logAuthEvent(orgId, actorId || "system", sellerId, "RETAIL_SELLER_DEACTIVATED", { matricula: seller.matricula }); } catch { /* noop */ }
+  }
 }
 
 export default RetailSellerDirectoryService;

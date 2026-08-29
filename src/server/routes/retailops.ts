@@ -42,6 +42,7 @@ import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
+import { RetailPdvSaleLinesService } from "../RetailPdvSaleLinesService.js";
 import { RetailScanService } from "../RetailScanService.js";
 import { RetailReceivingService } from "../RetailReceivingService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
@@ -706,7 +707,7 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
       `SELECT g.produto,
               COALESCE(rpv.name, rprod.name, pv.name, ps.name, p2.name) AS nome_variante,
               COALESCE(rprod.name, pp.name, p2.name) AS nome_produto,
-              COALESCE(rpv.sku, pv.sku) AS sku,
+              COALESCE(rpv.sku, pv.sku, rprod.external_ref, pp.external_ref, ps.external_ref, p2.external_ref) AS sku,
               COALESCE(rprod.ean, pp.ean, ps.ean, p2.ean) AS ean_produto,
               COALESCE(rpv.external_ref, pv.external_ref) AS ean_variante,
               g.pecas AS pecas, g.valor AS valor
@@ -752,6 +753,26 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
     };
     RetailAnalyticsCache.set(orgId, cacheKey, payload);
     res.json(payload);
+  } catch (e: any) { return analyticsError(res, e); }
+});
+
+// DRILL-DOWN "vendas do dia" — linhas INDIVIDUAIS do PDV, CADA UMA com a DATA da
+// venda (as abas Mais vendidos/Por vendedor mostram só totais do período). Filtra
+// por produto (código do ERP), vendedor (CAI_USUARIO) e/ou loja. Isolado por org.
+router.get("/pdv-sale-lines", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const start = String(req.query.start || "").slice(0, 10);
+  const end = String(req.query.end || "").slice(0, 10);
+  if (!start || !end) return res.status(400).json({ error: "start e end são obrigatórios (YYYY-MM-DD)" });
+  try {
+    res.json(RetailPdvSaleLinesService.lines(orgId, {
+      start, end,
+      produto: String(req.query.produto || "").trim() || undefined,
+      vendedor: String(req.query.vendedor || "").trim() || undefined,
+      store: String(req.query.store || "").trim() || undefined,
+      limit: req.query.limit ? parseInt(String(req.query.limit), 10) : undefined,
+    }));
   } catch (e: any) { return analyticsError(res, e); }
 });
 
@@ -988,7 +1009,7 @@ router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthReque
        name = excluded.name, user_id = COALESCE(excluded.user_id, retail_sellers.user_id),
        active = excluded.active, updated_at = CURRENT_TIMESTAMP`
   ).run(randomUUID(), orgId, matricula, name, req.body?.userId || null, req.body?.active === false ? 0 : 1);
-  res.json(db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
+  res.json(db.prepare(`SELECT id, matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
 });
 
 // SELL-002 — lotação do vendedor por loja (owner/admin). sellerId = retail_sellers.id.

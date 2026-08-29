@@ -3427,6 +3427,7 @@ function TopProductsTab() {
       return [r.nome, r.produto, r.sku, r.ean].some(v => String(v || '').toLowerCase().includes(s));
     });
   const unmatched = rows.filter(r => !r.catalogHit).length;
+  const [detail, setDetail] = useState<any | null>(null);
   return (
     <div>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
@@ -3438,6 +3439,7 @@ function TopProductsTab() {
         {rows.length > 0 && <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrar por nome, SKU, EAN ou código ERP…" className="flex-1 min-w-[180px] bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />}
       </div>
       {rows.length >= 100 && <p className="mb-2 text-[11px] text-amber-300/80">Mostrando os 100 produtos mais vendidos do período. Use o filtro para encontrar um item específico.</p>}
+      {rows.length > 0 && <p className="mb-2 text-[11px] text-zinc-500">Clique numa linha para ver as vendas do período com a <strong className="text-zinc-400">data de cada uma</strong>.</p>}
       {unmatched > 0 && <p className="mb-2 text-[11px] text-amber-300/80">{unmatched} item(ns) sem match no catálogo — aparecem em âmbar com só o código do ERP; cadastre a variante em Estoque pra o nome/SKU/barras baterem.</p>}
       {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
       {loading && !isStale ? (
@@ -3452,7 +3454,7 @@ function TopProductsTab() {
             <thead className="bg-zinc-900/60 text-zinc-400"><tr>
               <th className="px-3 py-2 text-left font-medium">#</th>
               <th className="px-3 py-2 text-left font-medium">Produto</th>
-              <th className="px-3 py-2 text-left font-medium" title="SKU do cadastro da variante">SKU</th>
+              <th className="px-3 py-2 text-left font-medium" title="SKU do cadastro da variante; na falta, a referência do produto (Alterdata) — preenchido automaticamente, sem digitar nada">SKU</th>
               <th className="px-3 py-2 text-left font-medium" title="EAN/GTIN — o código de barras impresso na etiqueta">Barras</th>
               <th className="px-3 py-2 text-left font-medium" title="Código de 13 dígitos que sai no cupom do PDV (Alterdata)">ERP</th>
               <th className="px-3 py-2 text-right font-medium">Peças</th>
@@ -3461,9 +3463,9 @@ function TopProductsTab() {
             </tr></thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.produto} className={`border-t border-zinc-800/70 ${!r.catalogHit ? 'bg-amber-500/5' : ''}`}>
+                <tr key={r.produto} onClick={() => setDetail(r)} className={`border-t border-zinc-800/70 cursor-pointer hover:bg-zinc-800/40 ${!r.catalogHit ? 'bg-amber-500/5' : ''}`} title="Clique para ver as vendas do período com a data de cada uma">
                   <td className="px-3 py-2 text-zinc-500">{r._rank}</td>
-                  <td className={`px-3 py-2 ${r.catalogHit ? 'text-zinc-200' : 'text-amber-300'}`} title={!r.catalogHit ? 'Sem cadastro no catálogo — mostra só o código do ERP' : ''}>
+                  <td className={`px-3 py-2 ${r.catalogHit ? 'text-zinc-200' : 'text-amber-300'}`}>
                     {r.nome || <span className="font-mono">{r.produto}</span>}
                     {r.variante && r.nome && r.variante !== r.nome && <span className="ml-1 text-[10px] text-zinc-500">· {r.variante}</span>}
                   </td>
@@ -3479,6 +3481,67 @@ function TopProductsTab() {
           </table>
         </div>
       )}
+      {detail && <TopProductLinesModal row={detail} start={start} end={end} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+// Drill-down "vendas do dia": as linhas INDIVIDUAIS de UM produto, cada uma com a
+// DATA (as linhas da tabela acima são somas do período). Abre ao clicar no produto.
+function TopProductLinesModal({ row, start, end, onClose }: { row: any; start: string; end: string; onClose: () => void }) {
+  const [lines, setLines] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/retailops/pdv-sale-lines?produto=${encodeURIComponent(row.produto)}&start=${start}&end=${end}`)
+      .then(r => r.json()).then(d => { if (!alive) return; setLines(Array.isArray(d?.lines) ? d.lines : []); setTotal(Number(d?.total) || 0); })
+      .catch(() => { if (alive) toast.error('Falha ao carregar as vendas do produto.'); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [row.produto, start, end]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <div className="mb-1 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-zinc-100">{row.nome || <span className="font-mono">{row.produto}</span>}</h3>
+            <p className="text-[11px] text-zinc-500">Vendas de {start} a {end} · código ERP <span className="font-mono">{row.produto}</span></p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+        </div>
+        {loading ? (
+          <div className="py-10 text-center text-zinc-500 text-sm"><Loader2 className="w-5 h-5 animate-spin inline" /> Carregando…</div>
+        ) : lines.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhuma linha de venda individual para este produto no período.</div>
+        ) : (
+          <div className="max-h-[60vh] overflow-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-zinc-900/95 text-zinc-400"><tr>
+                <th className="px-3 py-2 text-left font-medium">Data</th>
+                <th className="px-3 py-2 text-left font-medium">Loja</th>
+                <th className="px-3 py-2 text-left font-medium">Boleta</th>
+                <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                <th className="px-3 py-2 text-right font-medium">Peças</th>
+                <th className="px-3 py-2 text-right font-medium">Valor</th>
+              </tr></thead>
+              <tbody>
+                {lines.map((l, i) => (
+                  <tr key={`${l.boleta}-${l.date}-${i}`} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-1.5 text-zinc-200 font-mono text-[12px]">{l.date}</td>
+                    <td className="px-3 py-1.5 text-zinc-300">{l.loja}</td>
+                    <td className="px-3 py-1.5 text-zinc-500 font-mono text-[11px]">{l.boleta}</td>
+                    <td className="px-3 py-1.5 text-zinc-300">{l.vendedorNome || <span className="text-zinc-600">—</span>}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-100">{l.pecas}</td>
+                    <td className="px-3 py-1.5 text-right text-emerald-300">{brl(l.valor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!loading && total > lines.length && <p className="mt-2 text-[11px] text-amber-300/80">Mostrando as {lines.length} vendas mais recentes de {total}. Estreite o período para ver as demais.</p>}
+      </div>
     </div>
   );
 }
@@ -4347,6 +4410,7 @@ function CommissionTab() {
   const [sellerSalesModal, setSellerSalesModal] = useState(false);
   const [editSale, setEditSale] = useState<any | null>(null);
   const [folhaQ, setFolhaQ] = useState('');
+  const [nameSeller, setNameSeller] = useState<any | null>(null); // modal "dar nome" (sem window.prompt)
 
   // Extrato por LOJA e por VENDEDOR ("rodar o comando" do dono da rede):
   // escolhe a loja (ou todas), o vendedor (ou todos) e o período — inclusive
@@ -4378,13 +4442,9 @@ function CommissionTab() {
     } finally { setLoadingExtract(false); }
   };
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
-  // vendedor" ativa, a apuração oficial passa a usar esse nome.
-  const nomearVendedor = async (v: any) => {
-    const name = window.prompt(`Nome do vendedor da matrícula ${v.vendedor}:`, v.seller_name || '');
-    if (name == null) return;
-    const res = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(v.vendedor)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
-    if (res.ok) { toast.success('Vendedor atualizado.'); loadReport(); } else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar o vendedor.'); }
-  };
+  // vendedor" ativa, a apuração oficial passa a usar esse nome. Abre o formulário
+  // (SellerNameModal) em vez de window.prompt.
+  const nomearVendedor = (v: any) => setNameSeller(v);
   const loadReport = async () => {
     setLoadingReport(true);
     try {
@@ -4874,6 +4934,7 @@ function CommissionTab() {
       )}
 
       {detail && <RunDetailModal run={detail} onClose={() => setDetail(null)} onSaved={(r) => { setDetail(r); load(); }} onStatus={(action) => setStatus(detail, action)} />}
+      {nameSeller && <SellerNameModal codigo={nameSeller.vendedor} initialName={nameSeller.seller_name} onClose={() => setNameSeller(null)} onSaved={() => { setNameSeller(null); loadReport(); }} />}
     </div>
   );
 }
@@ -5054,6 +5115,9 @@ function ReconciliationTab() {
         </div>
       )}
 
+      {data && Number(data.totalRows) > (data.rows?.length || 0) && (
+        <p className="mb-2 text-[11px] text-amber-300/80">Mostrando as primeiras {data.rows.length} de {data.totalRows} linhas do mês. Use “Só divergentes” ou troque de mês para ver as demais.</p>
+      )}
       {loading ? <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
         : !data?.rows?.length ? (
           <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum fechamento conferido neste mês. Importe o CSV do sistema para comparar.</div>
@@ -5252,21 +5316,14 @@ function SellersDirectoryTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [assignFor, setAssignFor] = useState<any>(null);
+  // Modal de cadastro/nome: { codigo, initialName, allowCodeEdit }. Sem window.prompt.
+  const [nameModal, setNameModal] = useState<{ codigo: string; initialName?: string; allowCodeEdit?: boolean } | null>(null);
 
   useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!storeId && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
   const { data: cov, status, corr, isStale, loadedAt, reload: load } =
     useAnalytics(() => storeId ? `/api/retailops/seller-coverage?storeId=${storeId}` : '', [storeId]);
   const showData = status === 'ok' || isStale;
-
-  const nameCode = async (codigo: string) => {
-    const nome = window.prompt(`Nome do vendedor da matrícula ${codigo}:`, '');
-    if (nome == null || !nome.trim()) return;
-    try {
-      const r = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(codigo)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome.trim() }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
-      toast.success('Nome atribuído.'); load();
-    } catch (e: any) { toast.error(e.message); }
-  };
+  const storeName = stores.find((s: any) => s.id === storeId)?.name || '';
 
   return (
     <div>
@@ -5276,8 +5333,9 @@ function SellersDirectoryTab() {
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+        <button onClick={() => setNameModal({ codigo: '', allowCodeEdit: true })} disabled={!storeId} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"><Plus className="w-4 h-4" /> Cadastrar vendedor</button>
       </div>
-      <p className="mb-3 text-[11px] text-zinc-500">Matrícula sem nome é <strong>pendência</strong> — dê o nome para a comissão sair certa. Código único com muito volume pode ser <strong>caixa compartilhado</strong> (não é uma pessoa): use lançamento manual/foto nessa loja.</p>
+      <p className="mb-3 text-[11px] text-zinc-500">Cadastre cada vendedor pela <strong>matrícula (código do PDV)</strong> + nome — dá pra registrar antes mesmo de aparecer nas vendas. Matrícula sem nome é <strong>pendência</strong> (a comissão não sai certa). Código único com muito volume pode ser <strong>caixa compartilhado</strong> (não é uma pessoa): use lançamento manual/foto nessa loja.</p>
 
       {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
       {!showData && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
@@ -5307,7 +5365,7 @@ function SellersDirectoryTab() {
                   <div key={p.codigo} className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5">
                     <span className="font-mono text-[13px] text-zinc-200">Matrícula {p.codigo}</span>
                     <span className="text-[11px] text-zinc-500">{p.sales} venda(s){p.lastSale ? ` · última ${p.lastSale}` : ''}</span>
-                    <button onClick={() => nameCode(p.codigo)} className="ml-auto rounded-md border border-indigo-500/30 px-2 py-0.5 text-[12px] text-indigo-300 hover:bg-indigo-500/10">Dar nome</button>
+                    <button onClick={() => setNameModal({ codigo: p.codigo })} className="ml-auto rounded-md border border-indigo-500/30 px-2 py-0.5 text-[12px] text-indigo-300 hover:bg-indigo-500/10">Dar nome</button>
                   </div>
                 ))}
               </div>
@@ -5331,6 +5389,58 @@ function SellersDirectoryTab() {
         </div>
       )}
       {assignFor && <SellerStoresModal seller={assignFor} stores={stores} onClose={() => setAssignFor(null)} onSaved={() => { setAssignFor(null); load(); }} />}
+      {nameModal && <SellerNameModal codigo={nameModal.codigo} initialName={nameModal.initialName} allowCodeEdit={nameModal.allowCodeEdit} storeId={storeId} storeName={storeName} onClose={() => setNameModal(null)} onSaved={() => { setNameModal(null); load(); }} />}
+    </div>
+  );
+}
+
+// Formulário de cadastro/nome de vendedor (substitui o window.prompt). Dá nome a
+// uma matrícula do PDV e, opcionalmente, LOTA o vendedor na loja atual (SELL-002).
+// Em modo "cadastrar" (allowCodeEdit) a matrícula é digitável — dá pra registrar
+// um vendedor antes mesmo de ele aparecer nas vendas.
+function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeName, onClose, onSaved }: { codigo: string; initialName?: string; allowCodeEdit?: boolean; storeId?: string; storeName?: string; onClose: () => void; onSaved: () => void }) {
+  const [mat, setMat] = useState(codigo || '');
+  const [name, setName] = useState(initialName || '');
+  const [lotar, setLotar] = useState(!!storeId);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    const matricula = mat.trim();
+    if (!matricula) { toast.error('Informe a matrícula (código do vendedor no PDV).'); return; }
+    if (!name.trim()) { toast.error('Informe o nome do vendedor.'); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Falha ao salvar o vendedor.');
+      // Lotação na loja atual (opcional) — usa o id devolvido pelo upsert.
+      if (lotar && storeId && d?.id) {
+        const rs = await apiFetch(`/api/retailops/sellers/${d.id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [storeId], primaryStoreId: storeId }) });
+        if (!rs.ok) toast.error('Vendedor salvo, mas a lotação na loja falhou.');
+      }
+      toast.success('Vendedor salvo.'); onSaved();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">{allowCodeEdit ? 'Cadastrar vendedor' : `Dar nome à matrícula ${codigo}`}</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">A matrícula é o <strong>código do vendedor no PDV</strong> (CAI_USUARIO da Alterdata). O nome sai na comissão e nos relatórios.</p>
+        <label className="block text-[12px] text-zinc-400 mb-2">Matrícula
+          <input value={mat} onChange={e => setMat(e.target.value)} disabled={!allowCodeEdit} placeholder="Ex.: 1024" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 disabled:opacity-60 font-mono" />
+        </label>
+        <label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
+          <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="Ex.: Maria Souza" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" onKeyDown={e => { if (e.key === 'Enter') save(); }} />
+        </label>
+        {storeId && (
+          <label className="mb-3 flex items-center gap-2 text-[12px] text-zinc-300">
+            <input type="checkbox" checked={lotar} onChange={e => setLotar(e.target.checked)} /> Lotar em <strong>{storeName || 'loja atual'}</strong>
+          </label>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar'}</button>
+        </div>
+      </div>
     </div>
   );
 }

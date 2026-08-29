@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
 
 interface FilterOptions {
   period: "today" | "week" | "month" | "all";
@@ -290,10 +291,19 @@ export class AnalyticsService {
         hospitality.eventsWon = ev?.won || 0;
       } catch (e) { /* tabelas podem não existir ainda */ }
 
+      // ===== VAREJO (Alterdata/PDV) — só quando a ponte de faturamento está ligada.
+      // É a MESMA flag do Caixa/Diretor (retail_revenue_bridge): o dono liga uma
+      // vez e a receita/vendas das lojas aparecem no Dashboard também. Empresas
+      // sem a ponte (a maioria) não são afetadas.
+      const retailOn = RetailRevenueBridgeService.isEnabled(orgId);
+      const retailRevenue = retailOn ? RetailRevenueBridgeService.revenueForPeriod(orgId, options.period) : 0;
+      const retailSalesCount = retailOn ? RetailRevenueBridgeService.salesCountForPeriod(orgId, options.period) : 0;
+      paidRevenue = Math.round((paidRevenue + retailRevenue) * 100) / 100;
+
       return {
         totalTickets,
         newLeadsCount,
-        salesCount,
+        salesCount: salesCount + retailSalesCount,
         handoffCount,
         appointmentCount,
         chartData: mappedChartData,

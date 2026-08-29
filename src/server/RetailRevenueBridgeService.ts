@@ -73,4 +73,39 @@ export class RetailRevenueBridgeService {
       return round2(r.s);
     } catch { return 0; }
   }
+
+  /**
+   * Janela relativa (today/week/month/all) sobre uma coluna de data — espelha os
+   * filtros de período do Dashboard/Analytics (currentFilter), mas por
+   * `closing_date`/`sale_date` em vez de `created_at`.
+   */
+  private static periodWhere(col: string, period: string): string {
+    if (period === "today") return `AND date(${col}) = date('now')`;
+    if (period === "week") return `AND date(${col}) >= date('now', '-7 days')`;
+    if (period === "month") return `AND date(${col}) >= date('now', '-30 days')`;
+    return ""; // all
+  }
+
+  /** Faturamento das lojas (fechamentos elegíveis) no período do Dashboard. */
+  static revenueForPeriod(orgId: string, period: string): number {
+    try {
+      const r = db.prepare(
+        `SELECT COALESCE(SUM(${VALUE_EXPR}), 0) s
+           FROM retail_daily_closings
+          WHERE organization_id = ? AND status IN ${ELIGIBLE_STATUSES} AND ${VALUE_EXPR} > 0
+            ${this.periodWhere("closing_date", period)}`
+      ).get(orgId) as any;
+      return round2(r.s);
+    } catch { return 0; }
+  }
+
+  /** Nº de vendas do PDV (boletas) no período — para a contagem de "vendas". */
+  static salesCountForPeriod(orgId: string, period: string): number {
+    try {
+      const r = db.prepare(
+        `SELECT COUNT(*) n FROM retail_pdv_sales WHERE organization_id = ? ${this.periodWhere("sale_date", period)}`
+      ).get(orgId) as any;
+      return Number(r?.n || 0);
+    } catch { return 0; }
+  }
 }

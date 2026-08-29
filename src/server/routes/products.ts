@@ -16,8 +16,33 @@ import { uniqueProductSlug } from "../productSlug.js";
 import { sanitizeGtin } from "../eanUtil.js";
 import { verifyNFeSignature } from "../nfeSignature.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
+import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 
 const router = Router();
+
+/**
+ * Vendas por produto no período (para o relatório "mais/menos vendidos" e o CSV).
+ * Fonte: pedidos próprios (`order_items`, com custo capturado) +, SÓ quando a
+ * ponte de faturamento (`retail_revenue_bridge`) está ligada, as vendas do PDV
+ * (`retail_pdv_sale_items`, Alterdata) — que entram com unidades e receita mas
+ * SEM custo por item (cost 0), pois o ERP não manda CMV por linha. Named params:
+ * @org, @since. Empresas sem a ponte só veem os pedidos próprios (0-regressão).
+ */
+export function productSalesSubquery(retailOn: boolean): string {
+  const pdv = retailOn ? `
+      UNION ALL
+      SELECT i.product_service_id AS pid, i.quantidade AS q, i.valor AS rev, 0 AS cost, i.sale_date AS at
+        FROM retail_pdv_sale_items i
+       WHERE i.organization_id = @org AND i.product_service_id IS NOT NULL
+         AND date(i.sale_date) >= date('now', @since)` : "";
+  return `
+    SELECT pid AS product_service_id, SUM(q) units, SUM(rev) revenue, SUM(cost) cost_total, MAX(at) last_sale_at FROM (
+      SELECT oi.product_service_id AS pid, oi.quantity AS q, oi.line_total AS rev, oi.unit_cost * oi.quantity AS cost, o.created_at AS at
+        FROM order_items oi JOIN orders o ON o.id = oi.order_id
+       WHERE o.organization_id = @org AND o.status IN ('pago','em_preparo','entregue','concluido')
+         AND o.created_at >= datetime('now', @since)${pdv}
+    ) GROUP BY pid`;
+}
 
 // SEC-F13 (FE3/RN-CG-06/§73): CUSTO é dinheiro role-gated. O catálogo (`GET /`) é lido
 // por qualquer papel (vendedor precisa da lista pra vender), então em vez de bloquear a
@@ -628,6 +653,8 @@ router.get("/sales-analytics", requireRole("owner", "admin"), (req: AuthRequest,
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
+  const retailOn = RetailRevenueBridgeService.isEnabled(orgId);
+  const since = `-${days} days`;
   try {
     const rows = db.prepare(`
       SELECT ps.id, ps.name, ps.price,
@@ -638,34 +665,33 @@ router.get("/sales-analytics", requireRole("owner", "admin"), (req: AuthRequest,
         s.last_sale_at AS last_sale_at
       FROM products_services ps
       LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
-      LEFT JOIN (
-        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue,
-          SUM(oi.unit_cost * oi.quantity) cost_total, MAX(o.created_at) last_sale_at
-        FROM order_items oi JOIN orders o ON o.id = oi.order_id
-        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
-          AND o.created_at >= datetime('now', ?)
-        GROUP BY oi.product_service_id
-      ) s ON s.product_service_id = ps.id
-      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+      LEFT JOIN (${productSalesSubquery(retailOn)}) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = @org AND ps.type = 'product' AND ps.active = 1
       ORDER BY units_sold DESC, revenue DESC
-    `).all(orgId, `-${days} days`, orgId) as any[];
+    `).all({ org: orgId, since }) as any[];
 
+    // Margem só quando há CUSTO capturado (pedidos próprios). Venda de PDV entra
+    // sem CMV por item, então margem fica indefinida (null) em vez de fingir 100%.
     const enrich = (r: any) => {
-      const margin = r.revenue > 0 ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : null;
+      const margin = (r.revenue > 0 && r.cost_total > 0) ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : null;
       return { ...r, margin_percent: margin };
     };
     const withSales = rows.filter((r) => r.units_sold > 0);
 
+    const fmt = days <= 30 ? '%Y-%m-%d' : '%Y-%W';
+    const pdvTrend = retailOn ? `
+      UNION ALL
+      SELECT strftime(@fmt, i.sale_date) AS period, i.valor AS rev, 0 AS cost, i.quantidade AS q
+        FROM retail_pdv_sale_items i
+       WHERE i.organization_id = @org AND date(i.sale_date) >= date('now', @since)` : "";
     const trendRows = db.prepare(`
-      SELECT strftime(?, o.created_at) AS period,
-        SUM(oi.line_total) AS revenue,
-        SUM(oi.unit_cost * oi.quantity) AS cost,
-        SUM(oi.quantity) AS units
-      FROM order_items oi JOIN orders o ON o.id = oi.order_id
-      WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
-        AND o.created_at >= datetime('now', ?)
-      GROUP BY period ORDER BY period
-    `).all(days <= 30 ? '%Y-%m-%d' : '%Y-%W', orgId, `-${days} days`) as any[];
+      SELECT period, SUM(rev) AS revenue, SUM(cost) AS cost, SUM(q) AS units FROM (
+        SELECT strftime(@fmt, o.created_at) AS period, oi.line_total AS rev, oi.unit_cost * oi.quantity AS cost, oi.quantity AS q
+          FROM order_items oi JOIN orders o ON o.id = oi.order_id
+         WHERE o.organization_id = @org AND o.status IN ('pago','em_preparo','entregue','concluido')
+           AND o.created_at >= datetime('now', @since)${pdvTrend}
+      ) GROUP BY period ORDER BY period
+    `).all({ fmt, org: orgId, since }) as any[];
 
     res.json({
       days,
@@ -697,6 +723,7 @@ router.get("/sales-analytics/csv", requireRole("owner", "admin"), (req: AuthRequ
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || "30"), 10) || 30));
+  const retailOn = RetailRevenueBridgeService.isEnabled(orgId);
   try {
     const rows = db.prepare(`
       SELECT ps.name, ps.price,
@@ -707,21 +734,14 @@ router.get("/sales-analytics/csv", requireRole("owner", "admin"), (req: AuthRequ
         s.last_sale_at
       FROM products_services ps
       LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
-      LEFT JOIN (
-        SELECT oi.product_service_id, SUM(oi.quantity) units, SUM(oi.line_total) revenue,
-          SUM(oi.unit_cost * oi.quantity) cost_total, MAX(o.created_at) last_sale_at
-        FROM order_items oi JOIN orders o ON o.id = oi.order_id
-        WHERE o.organization_id = ? AND o.status IN ('pago','em_preparo','entregue','concluido')
-          AND o.created_at >= datetime('now', ?)
-        GROUP BY oi.product_service_id
-      ) s ON s.product_service_id = ps.id
-      WHERE ps.organization_id = ? AND ps.type = 'product' AND ps.active = 1
+      LEFT JOIN (${productSalesSubquery(retailOn)}) s ON s.product_service_id = ps.id
+      WHERE ps.organization_id = @org AND ps.type = 'product' AND ps.active = 1
       ORDER BY units_sold DESC, revenue DESC
-    `).all(orgId, `-${days} days`, orgId) as any[];
+    `).all({ org: orgId, since: `-${days} days` }) as any[];
 
     const header = 'Produto;Preço;Custo Médio;Unidades Vendidas;Receita;Custo Total;Margem %;Última Venda\n';
     const csv = rows.map((r: any) => {
-      const margin = r.revenue > 0 ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : '';
+      const margin = (r.revenue > 0 && r.cost_total > 0) ? Math.round((r.revenue - r.cost_total) / r.revenue * 1000) / 10 : '';
       return `"${(r.name || '').replace(/"/g, '""')}";${Number(r.price || 0).toFixed(2)};${Number(r.avg_cost).toFixed(2)};${r.units_sold};${Number(r.revenue).toFixed(2)};${Number(r.cost_total).toFixed(2)};${margin};${r.last_sale_at || ''}`;
     }).join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

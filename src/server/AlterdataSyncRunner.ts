@@ -49,6 +49,12 @@ export interface SyncRunSummary {
   clientes: { imported: number };
   filiais: string[];
   ranAt: string;
+  /** RF-06/12: status geral do ledger — 'success' | 'partial_failure' | 'failed' | 'cancelled'. */
+  runStatus?: string;
+  /** ID da run no ledger (RF-06), pra a UI cruzar com detalhes. */
+  runId?: string;
+  /** Correlation ID (RF-06) — viaja em logs e no ledger. */
+  correlationId?: string;
 }
 
 function str(v: any): string { return v == null ? "" : String(v).trim(); }
@@ -645,7 +651,10 @@ export class AlterdataSyncRunner {
     // cache das telas analíticas pra elas recomputarem com o dado fresco.
     try { const { RetailAnalyticsCache } = await import("./RetailAnalyticsCache.js"); RetailAnalyticsCache.invalidate(orgId); } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "alterdata", "ALTERDATA_SYNC_RUN", summary as any); } catch { /* noop */ }
-    ledger.finish();
+    const finalStatus = ledger.finish();
+    summary.runStatus = finalStatus;
+    summary.runId = ledger.runId;
+    summary.correlationId = ledger.correlationId;
     return summary;
     } catch (e: any) {
       // RF-08: qualquer erro que escapou fica REGISTRADO como ZAPFLOW_CODE (bug

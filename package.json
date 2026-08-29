@@ -95,6 +95,7 @@
     "test:bsp-outreach": "tsx scripts/test-bsp-outreach.ts",
     "test:bsp-gate": "tsx scripts/test-bsp-gate.ts",
     "test:alterdata-golive-schema": "tsx scripts/test-alterdata-golive-schema.ts",
+    "test:alterdata-golive-profiles-isolation": "tsx scripts/test-alterdata-golive-profiles-isolation.ts",
     "seed:product-evolution-ledger": "tsx scripts/seed-product-evolution-ledger.ts",
     "seed:studio-visual-recipes": "tsx scripts/seed-studio-visual-recipes.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",

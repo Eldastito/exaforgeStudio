@@ -1,19 +1,31 @@
-import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { EncryptionService } from "./EncryptionService.js";
+import { AlterdataProfileService, type AlterdataEnvironment } from "./AlterdataProfileService.js";
 
 /**
- * Conector Alterdata/ModaUp — FUNDAÇÃO (ADR-105).
+ * Conector Alterdata/ModaUp — FACHADA legada (ADR-105 + ADR-198).
  *
- * Guarda a config da integração por organização (com segredos CIFRADOS), resolve
- * as base URLs por módulo e mantém o cursor do delta-sync por versão. É a base
- * plugável: NÃO faz chamadas HTTP à ModaUp ainda — a autenticação real (emissão/
- * renovação do token) e os jobs de sincronização entram na Fase 1, quando a
- * Alterdata fornecer o contrato do token + o ambiente de homologação.
+ * A partir de PRD-ZF-ALTERDATA-GOLIVE-01 PR 2, este serviço vira uma
+ * FACHADA ADITIVA sobre {@link AlterdataProfileService}. Preserva a API antiga
+ * (chamadas por `orgId` sem `environment`) resolvendo o environment corrente
+ * a partir de `alterdata_integration_settings.environment` e delegando todas
+ * as operações env-escopadas (token, cursor, URL, credencial) pro profile
+ * correspondente.
  *
- * Segurança: `auth_config` e `access_token` nunca trafegam em texto para fora
- * (ver `publicSettings`); o token é decifrado só no momento do uso. Nada roda
- * enquanto `enabled = 0` (padrão).
+ * Resultado prático:
+ *   - Trocar `environment` no dropdown troca INSTANTANEAMENTE token, cursor,
+ *     credencial e URL usados — antes ficavam grudados no que foi salvo uma
+ *     vez.
+ *   - Homolog e prod ficam isolados: cursor que avançou em homolog NUNCA é
+ *     lido em prod.
+ *   - `enabled` e `sync_interval_minutes` seguem globais por org (não
+ *     env-escopados) — continuam na tabela legada.
+ *
+ * Compatibilidade:
+ *   - Callers antigos (`AlterdataSyncRunner`, `AlterdataSyncService`, UI)
+ *     continuam chamando `getCursor(org, mod, res, fil)` sem alteração.
+ *   - Backfill on-demand: primeira leitura do profile do env corrente
+ *     copia a linha do legado (idempotente).
  */
 
 // Os microserviços da ModaUp e o subdomínio padrão (o base_pattern substitui
@@ -34,7 +46,7 @@ export const ALTERDATA_MODULES: Record<string, string> = {
 
 export interface AlterdataSettingsInput {
   enabled?: boolean;
-  environment?: "homolog" | "prod";
+  environment?: AlterdataEnvironment;
   rede?: string | null;
   filiais?: string[];
   basePattern?: string | null;        // ex.: 'toulon-{module}.apimodaup.com.br'
@@ -49,22 +61,38 @@ export class AlterdataConnectorService {
     return db.prepare(`SELECT * FROM alterdata_integration_settings WHERE organization_id = ?`).get(orgId) as any;
   }
 
+  /**
+   * Environment corrente da org (baseado na linha legada, que é a "seleção
+   * ativa" do dropdown). Fallback pra 'homolog' quando não há linha.
+   */
+  private static currentEnv(orgId: string): AlterdataEnvironment {
+    const r = this.row(orgId);
+    return r?.environment === "prod" ? "prod" : "homolog";
+  }
+
   static isEnabled(orgId: string): boolean {
     const r = this.row(orgId);
     return !!(r && r.enabled);
   }
 
-  /** Cria/atualiza a config. Cifra os segredos antes de gravar. */
+  /**
+   * Cria/atualiza a config. `enabled` e `sync_interval_minutes` são globais
+   * por org (permanecem na tabela legada). O restante é env-escopado e vai
+   * pro profile do env resolvido (input.environment ou o corrente).
+   */
   static saveSettings(orgId: string, input: AlterdataSettingsInput): void {
     const cur = this.row(orgId);
-    const next = {
+    const nextEnv: AlterdataEnvironment = input.environment && ["homolog", "prod"].includes(input.environment)
+      ? input.environment
+      : (cur?.environment === "prod" ? "prod" : "homolog");
+
+    const legacyNext = {
       enabled: input.enabled != null ? (input.enabled ? 1 : 0) : (cur?.enabled ?? 0),
-      environment: input.environment && ["homolog", "prod"].includes(input.environment) ? input.environment : (cur?.environment ?? "homolog"),
+      environment: nextEnv,
       rede: input.rede !== undefined ? (input.rede || null) : (cur?.rede ?? null),
       filiais_json: input.filiais !== undefined ? JSON.stringify(input.filiais || []) : (cur?.filiais_json ?? null),
       base_pattern: input.basePattern !== undefined ? (input.basePattern || null) : (cur?.base_pattern ?? null),
       module_base_urls_json: input.moduleBaseUrls !== undefined ? JSON.stringify(input.moduleBaseUrls || {}) : (cur?.module_base_urls_json ?? null),
-      // Segredo cifrado: só reescreve se veio no input (null explícito limpa).
       auth_config_enc: input.authConfig !== undefined ? (input.authConfig ? EncryptionService.encrypt(JSON.stringify(input.authConfig)) : null) : (cur?.auth_config_enc ?? null),
       sync_interval_minutes: input.syncIntervalMinutes != null ? Math.max(1, Math.floor(input.syncIntervalMinutes)) : (cur?.sync_interval_minutes ?? 15),
       price_table: input.priceTable !== undefined ? (input.priceTable ? String(input.priceTable).trim() : null) : (cur?.price_table ?? null),
@@ -72,11 +100,24 @@ export class AlterdataConnectorService {
     if (cur) {
       db.prepare(
         `UPDATE alterdata_integration_settings SET enabled=?, environment=?, rede=?, filiais_json=?, base_pattern=?, module_base_urls_json=?, auth_config_enc=?, sync_interval_minutes=?, price_table=?, updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`
-      ).run(next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes, next.price_table, orgId);
+      ).run(legacyNext.enabled, legacyNext.environment, legacyNext.rede, legacyNext.filiais_json, legacyNext.base_pattern, legacyNext.module_base_urls_json, legacyNext.auth_config_enc, legacyNext.sync_interval_minutes, legacyNext.price_table, orgId);
     } else {
       db.prepare(
         `INSERT INTO alterdata_integration_settings (organization_id, enabled, environment, rede, filiais_json, base_pattern, module_base_urls_json, auth_config_enc, sync_interval_minutes, price_table) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(orgId, next.enabled, next.environment, next.rede, next.filiais_json, next.base_pattern, next.module_base_urls_json, next.auth_config_enc, next.sync_interval_minutes, next.price_table);
+      ).run(orgId, legacyNext.enabled, legacyNext.environment, legacyNext.rede, legacyNext.filiais_json, legacyNext.base_pattern, legacyNext.module_base_urls_json, legacyNext.auth_config_enc, legacyNext.sync_interval_minutes, legacyNext.price_table);
+    }
+
+    // Espelha os campos env-escopados no profile do env resolvido. Só
+    // repassa o que veio no input — não sobrescreve outros campos do profile.
+    const profilePatch: Parameters<typeof AlterdataProfileService.saveProfile>[2] = {};
+    if (input.basePattern !== undefined) profilePatch.basePattern = input.basePattern;
+    if (input.moduleBaseUrls !== undefined) profilePatch.moduleBaseUrls = input.moduleBaseUrls;
+    if (input.authConfig !== undefined) profilePatch.authConfig = input.authConfig;
+    if (input.rede !== undefined) profilePatch.rede = input.rede;
+    if (input.filiais !== undefined) profilePatch.filiais = input.filiais;
+    if (input.priceTable !== undefined) profilePatch.priceTable = input.priceTable;
+    if (Object.keys(profilePatch).length > 0) {
+      AlterdataProfileService.saveProfile(orgId, nextEnv, profilePatch);
     }
   }
 
@@ -86,26 +127,35 @@ export class AlterdataConnectorService {
     if (!r) {
       return { configured: false, enabled: false, environment: "homolog", rede: null, filiais: [], hasCredentials: false, hasToken: false, tokenExpiresAt: null, syncIntervalMinutes: 15, modules: Object.keys(ALTERDATA_MODULES) };
     }
-    let filiais: string[] = [];
-    try { filiais = JSON.parse(r.filiais_json || "[]"); } catch { /* noop */ }
+    const env: AlterdataEnvironment = r.environment === "prod" ? "prod" : "homolog";
+    // Prefere dados do profile do env corrente; cai no legado se profile não existir.
+    const profile = AlterdataProfileService.publicProfileFor(orgId, env);
+    let legacyFiliais: string[] = [];
+    try { legacyFiliais = JSON.parse(r.filiais_json || "[]"); } catch { /* noop */ }
     return {
       configured: true,
       enabled: !!r.enabled,
-      environment: r.environment || "homolog",
-      rede: r.rede || null,
-      filiais,
-      basePattern: r.base_pattern || null,
-      priceTable: r.price_table || null,
-      hasCredentials: !!r.auth_config_enc,
-      hasToken: !!r.access_token_enc,
-      tokenExpiresAt: r.token_expires_at || null,
+      environment: env,
+      rede: profile.configured ? profile.rede : (r.rede || null),
+      filiais: profile.configured ? profile.filiais : legacyFiliais,
+      basePattern: profile.configured ? profile.basePattern : (r.base_pattern || null),
+      priceTable: profile.configured ? profile.priceTable : (r.price_table || null),
+      hasCredentials: profile.hasCredentials || !!r.auth_config_enc,
+      hasToken: profile.hasToken || !!r.access_token_enc,
+      tokenExpiresAt: profile.tokenExpiresAt || r.token_expires_at || null,
       syncIntervalMinutes: r.sync_interval_minutes || 15,
       modules: Object.keys(ALTERDATA_MODULES),
     };
   }
 
-  /** Credencial decifrada (client_id/secret ou api key) — uso interno na Fase 1. */
+  /**
+   * Credencial decifrada do env corrente. Prefere profile (isolado por env);
+   * cai no legado se profile ainda não tem — mantém zero-regressão.
+   */
   static getAuthConfig(orgId: string): Record<string, any> | null {
+    const env = this.currentEnv(orgId);
+    const fromProfile = AlterdataProfileService.getAuthConfig(orgId, env);
+    if (fromProfile) return fromProfile;
     const r = this.row(orgId);
     if (!r?.auth_config_enc) return null;
     const dec = EncryptionService.decrypt(r.auth_config_enc);
@@ -113,24 +163,36 @@ export class AlterdataConnectorService {
     try { return JSON.parse(dec); } catch { return null; }
   }
 
-  /** Grava o token corrente (cifrado) + validade. Chamado pela rotina de auth (Fase 1). */
+  /**
+   * Grava o token corrente (cifrado) + validade NO PROFILE do env corrente.
+   * Homolog e prod ficam isolados: nunca mais sobrescreve o token do outro.
+   */
   static setAccessToken(orgId: string, token: string, expiresAt: Date | string | null): void {
-    if (!this.row(orgId)) this.saveSettings(orgId, {}); // garante a linha
-    const exp = expiresAt ? (typeof expiresAt === "string" ? expiresAt : expiresAt.toISOString()) : null;
-    db.prepare(`UPDATE alterdata_integration_settings SET access_token_enc=?, token_expires_at=?, updated_at=CURRENT_TIMESTAMP WHERE organization_id=?`)
-      .run(EncryptionService.encrypt(token), exp, orgId);
+    if (!this.row(orgId)) this.saveSettings(orgId, {}); // garante a linha legada
+    const env = this.currentEnv(orgId);
+    AlterdataProfileService.setAccessToken(orgId, env, token, expiresAt);
   }
 
-  /** Token válido decifrado, ou null se ausente/expirado. NÃO renova (Fase 1). */
+  /**
+   * Token válido do env corrente. Prefere profile; cai no legado só se
+   * ninguém escreveu no profile ainda (compat).
+   */
   static getAccessToken(orgId: string): string | null {
+    const env = this.currentEnv(orgId);
+    const fromProfile = AlterdataProfileService.getAccessToken(orgId, env);
+    if (fromProfile) return fromProfile;
     const r = this.row(orgId);
     if (!r?.access_token_enc) return null;
     if (r.token_expires_at && new Date(r.token_expires_at).getTime() <= Date.now()) return null;
     return EncryptionService.decrypt(r.access_token_enc);
   }
 
-  /** Base URL (https) de um módulo, a partir do override ou do base_pattern. */
+  /** Base URL (https) de um módulo no env corrente. */
   static moduleBaseUrl(orgId: string, moduleKey: string): string | null {
+    const env = this.currentEnv(orgId);
+    const fromProfile = AlterdataProfileService.moduleBaseUrl(orgId, env, moduleKey, ALTERDATA_MODULES);
+    if (fromProfile) return fromProfile;
+    // Fallback pro legado (zero-regressão pra org que ainda não tem profile).
     const sub = ALTERDATA_MODULES[moduleKey];
     if (!sub) return null;
     const r = this.row(orgId);
@@ -164,34 +226,25 @@ export class AlterdataConnectorService {
     this.setCursor(orgId, "_meta", "pdvCustomerImport", "", on ? "1" : "0");
   }
 
-  // ---- cursor do delta-sync ----
+  // ---- cursor do delta-sync (env-escopado via profile) ----
 
   static getCursor(orgId: string, module: string, resource: string, filial = ""): string {
-    const r = db.prepare(`SELECT version FROM alterdata_sync_cursors WHERE organization_id=? AND module=? AND resource=? AND filial=?`).get(orgId, module, resource, filial) as any;
-    return r?.version ?? "0";
+    const env = this.currentEnv(orgId);
+    return AlterdataProfileService.getCursor(orgId, env, module, resource, filial);
   }
 
   /**
-   * Zera os cursores de delta da org (menos o `_meta`/lastRun do scheduler), para
-   * FORÇAR um pull completo do zero. Necessário quando a config foi corrigida
-   * DEPOIS de uma sincronização que já avançou o cursor (ex.: lojas cadastradas
-   * só depois do 1º sync — o saldo daquelas versões nunca mais seria reprocessado
-   * porque o cursor só avança). Retorna quantos cursores foram limpos.
+   * Zera os cursores de delta do ENV CORRENTE (menos o `_meta`/lastRun). O
+   * outro env fica intacto — troca no dropdown pra limpar aquele.
    */
   static clearCursors(orgId: string): number {
-    const r = db.prepare(`DELETE FROM alterdata_sync_cursors WHERE organization_id=? AND module<>'_meta'`).run(orgId);
-    return Number(r.changes || 0);
+    const env = this.currentEnv(orgId);
+    return AlterdataProfileService.clearCursors(orgId, env);
   }
 
   static setCursor(orgId: string, module: string, resource: string, filial: string, version: string | number): void {
-    const v = String(version);
-    const existing = db.prepare(`SELECT id FROM alterdata_sync_cursors WHERE organization_id=? AND module=? AND resource=? AND filial=?`).get(orgId, module, resource, filial) as any;
-    if (existing) {
-      db.prepare(`UPDATE alterdata_sync_cursors SET version=?, last_synced_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(v, existing.id);
-    } else {
-      db.prepare(`INSERT INTO alterdata_sync_cursors (id, organization_id, module, resource, filial, version, last_synced_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
-        .run(uuidv4(), orgId, module, resource, filial, v);
-    }
+    const env = this.currentEnv(orgId);
+    AlterdataProfileService.setCursor(orgId, env, module, resource, filial, version);
   }
 
   /**

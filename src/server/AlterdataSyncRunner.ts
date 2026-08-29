@@ -22,6 +22,14 @@ import { logAuthEvent } from "./auditLog.js";
 import { RetailReconciliationService } from "./RetailReconciliationService.js";
 import { RetailClosingService } from "./RetailOpsService.js";
 import { RetailErpSellerSalesService, type ErpSellerSaleRow } from "./RetailErpSellerSalesService.js";
+import {
+  AlterdataSyncLedgerService,
+  classifyError,
+  extractHttpStatus,
+  type LedgerRunHandle,
+  type LedgerRunTrigger,
+} from "./AlterdataSyncLedgerService.js";
+import type { AlterdataEnvironment } from "./AlterdataProfileService.js";
 
 export interface SyncRunSummary {
   referencias: number;
@@ -58,7 +66,7 @@ export class AlterdataSyncRunner {
   /** A tela usa para mostrar "em andamento" de verdade (sobrevive à navegação). */
   static isRunning(orgId: string): boolean { return this.running.has(orgId); }
 
-  static async runOrg(orgId: string, opts: { manual?: boolean } = {}): Promise<SyncRunSummary> {
+  static async runOrg(orgId: string, opts: { manual?: boolean; trigger?: LedgerRunTrigger; initiatedBy?: string } = {}): Promise<SyncRunSummary> {
     if (!opts.manual && !AlterdataConnectorService.isEnabled(orgId)) {
       throw new Error("Alterdata: integração desligada para esta organização (ative em Integrações).");
     }
@@ -67,32 +75,57 @@ export class AlterdataSyncRunner {
     }
     this.running.add(orgId);
     try {
-      return await this.runOrgInner(orgId);
+      const trigger: LedgerRunTrigger = opts.trigger ?? (opts.manual ? "manual" : "scheduler");
+      return await this.runOrgInner(orgId, { trigger, initiatedBy: opts.initiatedBy ?? "system" });
     } finally {
       this.running.delete(orgId);
     }
   }
 
-  private static async runOrgInner(orgId: string): Promise<SyncRunSummary> {
+  private static async runOrgInner(orgId: string, ctx: { trigger: LedgerRunTrigger; initiatedBy: string }): Promise<SyncRunSummary> {
     const settings = AlterdataConnectorService.publicSettings(orgId);
+    // RF-06: abre a run no ledger. env vem da linha legada (fonte da verdade
+    // do dropdown até PR 5). correlationId viaja em cada resource.
+    const environment: AlterdataEnvironment = settings.environment === "prod" ? "prod" : "homolog";
+    const ledger = AlterdataSyncLedgerService.begin(orgId, environment, ctx.trigger, ctx.initiatedBy);
     const filiais: string[] = Array.isArray(settings.filiais) && settings.filiais.length ? settings.filiais : [""];
     const rede = str(settings.rede);
 
+    try {
     // 1) Referências (produtos). Coleta os códigos de referência sincronizados
-    //    para, em seguida, puxar os códigos de barras POR referência.
+    //    para, em seguida, puxar os códigos de barras POR referência. RF-08:
+    //    falha aqui é REGISTRADA (não silenciosa) e ainda propaga, porque as
+    //    fases seguintes dependem do catálogo.
     const refCodes = new Set<string>();
-    const ref = await AlterdataSyncService.syncResource(orgId, {
-      moduleKey: "supply", resource: "Referencia",
-      // A ModaUp devolve ~20 itens/página (ignora o itensPorPagina): 300 páginas
-      // ≈ 6000 referências por execução — catálogos maiores completam nas
-      // execuções seguintes (o cursor de versão continua de onde parou).
-      maxPages: 300,
-      buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
-      onItems: (items) => {
-        for (const it of items) { const c = str(it?.referenciaId ?? it?.referencia ?? it?.codigo); if (c) refCodes.add(c); }
-        return AlterdataSupplyMapper.upsertReferencias(orgId, items);
-      },
-    });
+    let ref = { imported: 0, pages: 0, fromVersion: "0", toVersion: "0" };
+    try {
+      ref = await AlterdataSyncService.syncResource(orgId, {
+        moduleKey: "supply", resource: "Referencia",
+        // A ModaUp devolve ~20 itens/página (ignora o itensPorPagina): 300 páginas
+        // ≈ 6000 referências por execução — catálogos maiores completam nas
+        // execuções seguintes (o cursor de versão continua de onde parou).
+        maxPages: 300,
+        buildPath: (c) => `/api/v1/Referencia/versao/${c}`,
+        onItems: (items) => {
+          for (const it of items) { const c = str(it?.referenciaId ?? it?.referencia ?? it?.codigo); if (c) refCodes.add(c); }
+          return AlterdataSupplyMapper.upsertReferencias(orgId, items);
+        },
+      });
+      ledger.record({
+        module: "supply", resource: "Referencia", required: true,
+        status: ref.imported > 0 ? "ready" : "empty_but_valid",
+        cursorBefore: ref.fromVersion, cursorAfter: ref.toVersion,
+        pages: ref.pages, imported: ref.imported,
+      });
+    } catch (e: any) {
+      const http = extractHttpStatus(e);
+      ledger.record({
+        module: "supply", resource: "Referencia", required: true,
+        status: http === 401 ? "auth_failed" : "server_error",
+        httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+      });
+      throw e;
+    }
 
     // 2) Códigos de barras (variantes/EAN). O supply da ModaUp NÃO expõe delta
     //    `/versao` para barras — a leitura é POR REFERÊNCIA:
@@ -127,22 +160,58 @@ export class AlterdataSyncRunner {
             page++;
           }
           bar.refs++;
-        } catch { bar.errors++; /* uma referência sem barras/erro não derruba o sync */ }
+        } catch (e: any) {
+          bar.errors++;
+          const http = extractHttpStatus(e);
+          ledger.record({
+            module: "supply", resource: `CodigoDeBarras/${referencia}`,
+            required: false,
+            status: http === 401 ? "auth_failed" : (http === 404 ? "not_found" : "server_error"),
+            httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+          });
+        }
       }
+      ledger.record({
+        module: "supply", resource: "CodigoDeBarras", required: true,
+        status: bar.imported > 0 ? "ready" : (bar.errors > 0 ? "server_error" : "empty_but_valid"),
+        imported: bar.imported, mappingErrors: bar.errors, pages: bar.refs,
+        errorCode: bar.errors > 0 ? "ALTERDATA_API" : null,
+      });
+    } else {
+      ledger.record({
+        module: "supply", resource: "CodigoDeBarras", required: true,
+        status: "skipped_by_policy",
+        errorCode: "TOULON_CONFIGURATION", errorMessage: "campo 'rede' vazio",
+      });
     }
 
     const saldos = { applied: 0, skippedNoStore: 0, skippedNoProduct: 0, sampleNoProduct: [] as string[] };
     for (const filial of filiais) {
-      await AlterdataSyncService.syncResource(orgId, {
-        moduleKey: "supply", resource: "Saldo", filial,
-        buildPath: (c) => (filial ? `/api/v1/Saldo/versao/${filial}/${c}` : `/api/v1/Saldo/versao/${c}`),
-        onItems: (items) => {
-          const r = AlterdataStockMapper.upsertSaldos(orgId, items);
-          saldos.applied += r.applied; saldos.skippedNoStore += r.skippedNoStore; saldos.skippedNoProduct += r.skippedNoProduct;
-          for (const p of r.sampleNoProduct) if (saldos.sampleNoProduct.length < 5 && !saldos.sampleNoProduct.includes(p)) saldos.sampleNoProduct.push(p);
-          return r.applied;
-        },
-      });
+      try {
+        const res = await AlterdataSyncService.syncResource(orgId, {
+          moduleKey: "supply", resource: "Saldo", filial,
+          buildPath: (c) => (filial ? `/api/v1/Saldo/versao/${filial}/${c}` : `/api/v1/Saldo/versao/${c}`),
+          onItems: (items) => {
+            const r = AlterdataStockMapper.upsertSaldos(orgId, items);
+            saldos.applied += r.applied; saldos.skippedNoStore += r.skippedNoStore; saldos.skippedNoProduct += r.skippedNoProduct;
+            for (const p of r.sampleNoProduct) if (saldos.sampleNoProduct.length < 5 && !saldos.sampleNoProduct.includes(p)) saldos.sampleNoProduct.push(p);
+            return r.applied;
+          },
+        });
+        ledger.record({
+          module: "supply", resource: "Saldo", filial, required: true,
+          status: res.imported > 0 ? "ready" : "empty_but_valid",
+          cursorBefore: res.fromVersion, cursorAfter: res.toVersion,
+          pages: res.pages, imported: res.imported,
+        });
+      } catch (e: any) {
+        const http = extractHttpStatus(e);
+        ledger.record({
+          module: "supply", resource: "Saldo", filial, required: true,
+          status: http === 401 ? "auth_failed" : "server_error",
+          httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+        });
+      }
     }
 
     // 4) Preço (módulo Price) — só quando a tabela de preço da rede está definida.
@@ -161,6 +230,9 @@ export class AlterdataSyncRunner {
         (c) => `/api/v1/Preco/versao/${c}`,
       ];
       if (rede) candidates.push((c) => `/api/v1/Preco/versao/${rede}/${table}/${c}`);
+      let priceStatus: "ready" | "empty_but_valid" | "server_error" = "empty_but_valid";
+      let lastError: any = null;
+      let lastHttp: number | null = null;
       for (let i = 0; i < candidates.length; i++) {
         try {
           await AlterdataSyncService.syncResource(orgId, {
@@ -173,9 +245,36 @@ export class AlterdataSyncRunner {
               return r.applied;
             },
           });
-        } catch { /* formato inexistente nesta instalação (404/500) — tenta o próximo */ }
-        if (precos.applied + precos.skippedNoProduct > 0) break; // achou o formato com linhas de preço
+        } catch (e: any) {
+          lastError = e;
+          lastHttp = extractHttpStatus(e);
+          // formato inexistente nesta instalação (404/500) — tenta o próximo
+        }
+        if (precos.applied + precos.skippedNoProduct > 0) { priceStatus = "ready"; break; }
       }
+      if (priceStatus === "ready") {
+        ledger.record({
+          module: "price", resource: "Preco", filial: table, required: true,
+          status: "ready", imported: precos.applied, skipped: precos.skippedNoProduct,
+        });
+      } else if (lastError) {
+        ledger.record({
+          module: "price", resource: "Preco", filial: table, required: true,
+          status: lastHttp === 401 ? "auth_failed" : "server_error",
+          httpStatus: lastHttp, errorCode: classifyError(lastError, lastHttp), errorMessage: lastError,
+        });
+      } else {
+        ledger.record({
+          module: "price", resource: "Preco", filial: table, required: true,
+          status: "empty_but_valid",
+        });
+      }
+    } else {
+      ledger.record({
+        module: "price", resource: "Preco", required: true,
+        status: "skipped_by_policy",
+        errorCode: "TOULON_CONFIGURATION", errorMessage: "priceTable ausente",
+      });
     }
 
     // 5) FECHAMENTO DO PDV (módulo Sales — Fase 2): DataCaixa/versao é o stream
@@ -241,7 +340,16 @@ export class AlterdataSyncRunner {
               if (titulo === "total de vendas") { total += valor; got = true; }
               else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
             }
-          } catch { caixas.errors++; /* um turno com erro não derruba o dia */ }
+          } catch (e: any) {
+            caixas.errors++;
+            const http = extractHttpStatus(e);
+            ledger.record({
+              module: "sales", resource: `DataCaixa/ResumoFecharMovimento/${g.filial}/${g.date}/${turno}`,
+              filial: g.filial, required: false,
+              status: http === 401 ? "auth_failed" : "server_error",
+              httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+            });
+          }
         }
         if (!got) continue;
         const totalR = Math.round(total * 100) / 100;
@@ -275,7 +383,20 @@ export class AlterdataSyncRunner {
           caixas.applied++;
         }
       }
-    } catch { /* módulo Sales indisponível nesta instalação — segue sem PDV */ }
+      ledger.record({
+        module: "sales", resource: "DataCaixa", required: true,
+        status: caixas.applied > 0 ? "ready" : "empty_but_valid",
+        imported: caixas.applied, skipped: caixas.skippedNoStore,
+        mappingErrors: caixas.errors,
+      });
+    } catch (e: any) {
+      const http = extractHttpStatus(e);
+      ledger.record({
+        module: "sales", resource: "DataCaixa", required: true,
+        status: http === 401 ? "auth_failed" : "server_error",
+        httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+      });
+    }
 
     // 6) VENDAS DO PDV (módulo Sales — Fase 4): VendaMalote/versao é o stream
     //    venda a venda do caixa, com a MATRÍCULA do vendedor, valor, peças e
@@ -365,7 +486,19 @@ export class AlterdataSyncRunner {
           return n;
         },
       });
-    } catch { /* endpoint indisponível nesta instalação — segue sem vendas PDV */ }
+      ledger.record({
+        module: "sales", resource: "VendaMalote", required: true,
+        status: vendas.imported > 0 ? "ready" : "empty_but_valid",
+        imported: vendas.imported,
+      });
+    } catch (e: any) {
+      const http = extractHttpStatus(e);
+      ledger.record({
+        module: "sales", resource: "VendaMalote", required: true,
+        status: http === 401 ? "auth_failed" : "server_error",
+        httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+      });
+    }
 
     // 6b) COMISSÃO POR VENDEDOR do ERP (módulo Sales — Cenário A): o VendaMalote
     //    traz só o OPERADOR do caixa; o vendedor individual e a comissão JÁ
@@ -406,7 +539,19 @@ export class AlterdataSyncRunner {
         }
       }
       if (byKey.size) erpComissao.imported += RetailErpSellerSalesService.ingest(orgId, Array.from(byKey.values()));
-    } catch { /* endpoint de comissão indisponível nesta instalação — segue sem ele */ }
+      ledger.record({
+        module: "sales", resource: "Venda/ComissaoVendasPorPeriodo", required: false,
+        status: erpComissao.imported > 0 ? "ready" : "empty_but_valid",
+        imported: erpComissao.imported,
+      });
+    } catch (e: any) {
+      const http = extractHttpStatus(e);
+      ledger.record({
+        module: "sales", resource: "Venda/ComissaoVendasPorPeriodo", required: false,
+        status: http === 401 ? "auth_failed" : "server_error",
+        httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+      });
+    }
 
     // 7) CLIENTES DO PDV (módulo CRM — Fase 3, OPT-IN por LGPD): ClienteMalote/
     //    versao é o stream de clientes (item embrulha em `cliente`). Vai para uma
@@ -446,7 +591,26 @@ export class AlterdataSyncRunner {
             return n;
           },
         });
-      } catch { /* módulo CRM indisponível — segue sem clientes */ }
+        ledger.record({
+          module: "crm", resource: "ClienteMalote", required: false,
+          status: clientes.imported > 0 ? "ready" : "empty_but_valid",
+          imported: clientes.imported,
+        });
+      } catch (e: any) {
+        const http = extractHttpStatus(e);
+        ledger.record({
+          module: "crm", resource: "ClienteMalote", required: false,
+          status: http === 401 ? "auth_failed" : "server_error",
+          httpStatus: http, errorCode: classifyError(e, http), errorMessage: e,
+        });
+      }
+    } else {
+      // CRM tem policy 'conditional' (RF-05): sem opt-in do PDV, é skip legítimo.
+      ledger.record({
+        module: "crm", resource: "ClienteMalote", required: false,
+        status: "skipped_by_policy",
+        errorCode: "LGPD_APPROVAL", errorMessage: "pdvCustomerImport off",
+      });
     }
 
     // Preço de EXIBIÇÃO do produto: o ERP precifica por VARIANTE (grade), mas o
@@ -481,7 +645,19 @@ export class AlterdataSyncRunner {
     // cache das telas analíticas pra elas recomputarem com o dado fresco.
     try { const { RetailAnalyticsCache } = await import("./RetailAnalyticsCache.js"); RetailAnalyticsCache.invalidate(orgId); } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "alterdata", "ALTERDATA_SYNC_RUN", summary as any); } catch { /* noop */ }
+    ledger.finish();
     return summary;
+    } catch (e: any) {
+      // RF-08: qualquer erro que escapou fica REGISTRADO como ZAPFLOW_CODE (bug
+      // interno) antes de propagar — a run fecha como `failed`.
+      ledger.record({
+        module: "_meta", resource: "runOrgInner", required: true,
+        status: "server_error",
+        errorCode: classifyError(e), errorMessage: e,
+      });
+      ledger.finish({ status: "failed" });
+      throw e;
+    }
   }
 
   /**

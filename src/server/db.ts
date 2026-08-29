@@ -5470,6 +5470,8 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar disguised_opportunities', e); }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN opportunity_radar_last_run DATETIME`); } catch(e){}
+  // Dedupe do aprendizado semanal de padrões de varejo (Scheduler.retailPatternLearnPass).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_pattern_last_learn DATETIME`); } catch(e){}
 
   // Backup automático (ADR-097): backup programado por org (destino Drive do
   // dono) + redundância da plataforma (nossa infra, independente do cliente).

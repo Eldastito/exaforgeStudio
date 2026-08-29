@@ -52,6 +52,7 @@ import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
+import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
 import { LegacyReductionReminderService } from "./LegacyReductionReminderService.js";
 import { PlatformTelemetryService } from "./PlatformTelemetryService.js";
@@ -1042,6 +1043,7 @@ export class Scheduler {
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     try { this.retailOpsSignalsPass(); } catch (e: any) { console.error('[Scheduler] retailOpsSignalsPass error', e.message); }
+    await this.retailPatternLearnPass().catch(e => console.error('[Scheduler] aprendizado de padrões falhou', e));
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     // Depois do sync Alterdata: concilia atendimento declarado × vendas do PDV
     // (ADR-150 Fatia 6). Idempotente e só-promove.
@@ -1477,6 +1479,32 @@ export class Scheduler {
     } catch { /* tabela ainda não migrada */ }
     for (const orgId of ids) {
       try { RetailOpsSignalPublisher.run(orgId); } catch (e) { console.error('[Retail] ops signals falhou', orgId, e); }
+    }
+  }
+
+  /**
+   * Aprendizado de padrões de varejo (RetailPatternMemoryService.learnPass) —
+   * SEMANAL e automático, só para orgs que ligaram o aprendizado
+   * (`retail_pattern_memory = 1`). Usa a IA pra descrever os padrões (tem CUSTO),
+   * por isso é gated por org (sem consumo pra quem não ligou) + dedupe de 7 dias
+   * (`retail_pattern_last_learn`). Padrões são sobre recorrência ao longo de
+   * semanas — semanal é a cadência certa. Best-effort: falha de uma org não
+   * derruba o tick nem marca o last_learn (retenta no próximo tick).
+   */
+  static async retailPatternLearnPass() {
+    let orgs: any[] = [];
+    try {
+      orgs = db.prepare(`
+        SELECT organization_id FROM organization_settings
+         WHERE COALESCE(retail_pattern_memory,0)=1
+           AND (retail_pattern_last_learn IS NULL OR retail_pattern_last_learn < datetime('now','-7 days'))
+      `).all() as any[];
+    } catch { return; } // colunas ainda não migradas
+    for (const o of orgs) {
+      try {
+        await RetailPatternMemoryService.learnPass(o.organization_id);
+        db.prepare(`UPDATE organization_settings SET retail_pattern_last_learn = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(o.organization_id);
+      } catch (e) { console.error('[Retail] aprendizado de padrões falhou', o.organization_id, e); }
     }
   }
 

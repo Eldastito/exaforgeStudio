@@ -72,6 +72,13 @@ async function main() {
   db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, size, color, external_ref) VALUES (?, ?, ?, 'M / Azul', 'M', 'Azul', ?)`).run(varM, A, prodCamisa, eanVar);
   db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, ean) VALUES (?, ?, 'product', 'Boné Logo', 59.9, ?)`).run(prodBone, A, eanProd);
   db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, ean) VALUES (?, ?, 'product', 'Peça Esgotada', 99.9, ?)`).run(prodDead, A, eanDead);
+  // Código INTERNO da ModaUp (prefixo 2, NÃO fecha o dígito verificador GS1) — é
+  // o código REAL da etiqueta/ERP, gravado no external_ref da variante. O scan
+  // NÃO pode recusá-lo como "inválido" (era o bug do Atendimento de Loja).
+  const internalCode = "2971090622711"; // reprova de propósito no checksum GTIN
+  const prodInt = randomUUID(), varInt = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price) VALUES (?, ?, 'product', 'Vestido Interno', 199.9)`).run(prodInt, A);
+  db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, size, color, external_ref) VALUES (?, ?, ?, 'P / Preto', 'P', 'Preto', ?)`).run(varInt, A, prodInt, internalCode);
 
   // Estoque sombra: camisa M/Azul — loja1: 2; loja2: 5; loja3: -3 (negativo NÃO conta).
   const inv = db.prepare(`INSERT INTO retail_store_inventory (id, organization_id, store_id, product_service_id, variant_id, quantity_available) VALUES (?, ?, ?, ?, ?, ?)`);
@@ -83,6 +90,8 @@ async function main() {
   inv.run(randomUUID(), A, store2, prodBone, null, 3);
   // Peça esgotada — zero em todas.
   inv.run(randomUUID(), A, store1, prodDead, null, 0);
+  // Vestido interno com estoque local (pra não virar demanda).
+  inv.run(randomUUID(), A, store1, prodInt, varInt, 4);
   // Cursor Alterdata recente (carimbo de sync).
   db.prepare(`INSERT INTO alterdata_sync_cursors (id, organization_id, module, resource, filial, version, last_synced_at) VALUES (?, ?, 'supply', 'Saldo', '1005', '42', datetime('now', '-2 hours'))`).run(randomUUID(), A);
 
@@ -103,6 +112,12 @@ async function main() {
   const s2 = RetailFloorScanService.scan(A, att.id, eanProd, {}, sellerU1);
   check("scan: produto sem grade por products_services.ean", s2.found && s2.product?.name === "Boné Logo" && s2.variant === null);
   check("scan: sem local mas COM rede → sugere loja, SEM demanda", s2.localStock === 0 && s2.networkStock === 3 && s2.otherStores.length === 1 && s2.unmetDemand === null);
+
+  // Código interno da ModaUp (reprova no checksum GTIN) DEVE resolver — era
+  // recusado como "Código de barras inválido" antes do fix.
+  const sInt = RetailFloorScanService.scan(A, att.id, internalCode, {}, sellerU1);
+  check("scan: código interno (não-GTIN) resolvido por external_ref", sInt.found && sInt.product?.name === "Vestido Interno" && sInt.variant?.color === "Preto", `found=${sInt.found}`);
+  check("scan: código interno com estoque local (sem demanda)", sInt.localStock === 4 && sInt.unmetDemand === null);
 
   // Congelamento: estoque muda depois, o scan gravado não.
   db.prepare(`UPDATE retail_store_inventory SET quantity_available = 99 WHERE organization_id = ? AND store_id = ? AND product_service_id = ?`).run(A, store1, prodCamisa);
@@ -141,13 +156,13 @@ async function main() {
   check("guard: action inválida rejeitada", badAction);
   let badEan = false;
   try { RetailFloorScanService.scan(A, att.id, "123", {}, sellerU1); } catch (e: any) { badEan = /inválido/.test(e.message); }
-  check("guard: EAN inválido (dígito verificador) rejeitado", badEan);
+  check("guard: código curto (< 6 dígitos) rejeitado", badEan);
   let noScope = false;
   try { RetailFloorScanService.scan(A, att.id, eanVar, {}, { userId: randomUUID(), role: "agent" }); } catch (e: any) { noScope = e.message === "store_scope_denied"; }
   check("guard: terceiro sem escopo não bipa (RN-150-005)", noScope);
 
   const timeline = RetailFloorScanService.scans(A, att.id);
-  check("timeline: 5 scans em ordem (a leitura fica ligada ao atendimento)", timeline.length === 5 && timeline[0].id === s1.scanId);
+  check("timeline: 6 scans em ordem (a leitura fica ligada ao atendimento)", timeline.length === 6 && timeline[0].id === s1.scanId);
 
   RetailFloorAttendanceService.finish(A, att.id, { outcome: "not_converted", reason: { category: "product", productDetail: { reason: "missing_size", size: "G" } } }, sellerU1);
   let closedScan = false;

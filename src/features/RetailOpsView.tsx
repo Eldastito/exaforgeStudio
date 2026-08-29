@@ -3454,7 +3454,7 @@ function TopProductsTab() {
             <thead className="bg-zinc-900/60 text-zinc-400"><tr>
               <th className="px-3 py-2 text-left font-medium">#</th>
               <th className="px-3 py-2 text-left font-medium">Produto</th>
-              <th className="px-3 py-2 text-left font-medium" title="SKU do cadastro da variante; na falta, a referência do produto (Alterdata) — preenchido automaticamente, sem digitar nada">SKU</th>
+              <th className="px-3 py-2 text-left font-medium" title="SKU do cadastro da variante; na falta, o código do ERP da variante (Alterdata) — preenchido automaticamente, sem digitar nada">SKU</th>
               <th className="px-3 py-2 text-left font-medium" title="EAN/GTIN — o código de barras impresso na etiqueta">Barras</th>
               <th className="px-3 py-2 text-left font-medium" title="Código de 13 dígitos que sai no cupom do PDV (Alterdata)">ERP</th>
               <th className="px-3 py-2 text-right font-medium">Peças</th>

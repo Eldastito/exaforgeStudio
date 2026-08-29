@@ -707,7 +707,7 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
       `SELECT g.produto,
               COALESCE(rpv.name, rprod.name, pv.name, ps.name, p2.name) AS nome_variante,
               COALESCE(rprod.name, pp.name, p2.name) AS nome_produto,
-              COALESCE(rpv.sku, pv.sku, rprod.external_ref, pp.external_ref, ps.external_ref, p2.external_ref) AS sku,
+              COALESCE(rpv.sku, pv.sku, rpv.external_ref, pv.external_ref) AS sku,
               COALESCE(rprod.ean, pp.ean, ps.ean, p2.ean) AS ean_produto,
               COALESCE(rpv.external_ref, pv.external_ref) AS ean_variante,
               g.pecas AS pecas, g.valor AS valor

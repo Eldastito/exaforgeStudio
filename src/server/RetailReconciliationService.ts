@@ -174,6 +174,11 @@ export class RetailReconciliationService {
       totalDivergenceBRL: Math.round(divergent.reduce((a, r) => a + Math.abs(Number(r.divergence || 0)), 0) * 100) / 100,
       systemTotalBRL: Math.round(rows.reduce((a, r) => a + r.system, 0) * 100) / 100,
     };
-    return { month, summary, rows: onlyDivergent ? divergent : rows };
+    // Limite de linhas exibidas — mesmo teto das outras abas (ex.: Mais vendidos).
+    // O RESUMO acima é sempre sobre o mês inteiro; só a LISTA é truncada, com o
+    // total real devolvido em `totalRows` pra a UI avisar quando cortar.
+    const CAP = 100;
+    const selected = onlyDivergent ? divergent : rows;
+    return { month, summary, rows: selected.slice(0, CAP), totalRows: selected.length, cap: CAP };
   }
 }

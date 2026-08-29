@@ -365,6 +365,7 @@
     "test:retail-financial-settings": "tsx scripts/test-retail-financial-settings.ts",
     "test:retail-pos-fees": "tsx scripts/test-retail-pos-fees.ts",
     "test:retail-pdv-catalog-resolver": "tsx scripts/test-retail-pdv-catalog-resolver.ts",
+    "test:retail-pdv-sale-lines": "tsx scripts/test-retail-pdv-sale-lines.ts",
     "test:retail-store-result-setbased": "tsx scripts/test-retail-store-result-setbased.ts",
     "test:retail-analytics-cache": "tsx scripts/test-retail-analytics-cache.ts",
     "test:health-probe": "tsx scripts/test-health-probe.ts",

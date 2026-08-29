@@ -59,6 +59,25 @@ async function main() {
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);
   check("Isolamento: org B vem vazia", RetailReconciliationService.report(B, "2026-07").summary.reconciledCount === 0);
 
+  // ===== Limite de linhas exibidas (mesmo teto das outras abas) =====
+  const C = `org_C_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'C', 'active')`).run(randomUUID(), C);
+  const sc = RetailStoreService.create(C, { name: "Loja C" });
+  // 130 fechamentos conciliados no mês pra passar do teto de 100. closing_date é
+  // a chave (UNIQUE org+store+date) — usa valores distintos dentro de 2026-09.
+  const closeC = db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total, divergence_status) VALUES (?, ?, ?, ?, 'received', ?, ?, 'ok')`);
+  const insMany = db.transaction(() => {
+    for (let i = 0; i < 130; i++) {
+      const day = String((i % 28) + 1).padStart(2, "0");
+      closeC.run(randomUUID(), C, sc.id, `2026-09-${day}T${i}`, 1000 + i, 1000 + i);
+    }
+  });
+  insMany();
+  const capRep = RetailReconciliationService.report(C, "2026-09");
+  check("Resumo conta o mês inteiro (130 conciliados)", capRep.summary.reconciledCount === 130, `reconciledCount=${capRep.summary.reconciledCount}`);
+  check("Lista é truncada no teto (rows.length === 100)", capRep.rows.length === 100, `rows=${capRep.rows.length}`);
+  check("totalRows devolve o total real (130) e cap=100", capRep.totalRows === 130 && capRep.cap === 100, `totalRows=${capRep.totalRows} cap=${capRep.cap}`);
+
   console.log("\n=== ADR-083 Fase E: painel de conciliação (divergências) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);

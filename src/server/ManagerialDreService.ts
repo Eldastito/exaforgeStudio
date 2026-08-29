@@ -1,6 +1,8 @@
 import db from "./db.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
+import { RetailRevenueBridgeService } from "./RetailRevenueBridgeService.js";
+import { RetailStoreCostService } from "./RetailStoreCostService.js";
 
 /**
  * DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa em linguagem
@@ -37,6 +39,24 @@ export class ManagerialDreService {
     } catch { return { revenue: 0, cost: 0 }; }
   }
 
+  /**
+   * Receita e CMV das LOJAS (varejo/Alterdata) no mês — SÓ quando a ponte opt-in
+   * `retail_revenue_bridge` está ligada (mesma flag do Caixa/Diretor). Receita =
+   * faturamento dos fechamentos (não-rejeitados); CMV = custo real dos itens do
+   * PDV. As DUAS entram juntas, então a margem bruta continua honesta (nunca
+   * receita sem o custo correspondente). Mesma base do resultado consolidado.
+   */
+  private static storesRevCost(orgId: string, period: string): { revenue: number; cost: number } {
+    if (!RetailRevenueBridgeService.isEnabled(orgId)) return { revenue: 0, cost: 0 };
+    try {
+      let revenue = 0;
+      for (const v of RetailStoreCostService.monthlyRevenueAll(orgId, period).values()) revenue += Number(v) || 0;
+      let cost = 0;
+      for (const bd of RetailStoreCostService.monthlyCogsBreakdownAll(orgId, period).values()) cost += Number(bd?.cmvReal) || 0;
+      return { revenue: round2(revenue), cost: round2(cost) };
+    } catch { return { revenue: 0, cost: 0 }; }
+  }
+
   private static lossDriver(orgId: string, period: string, driver: string): number {
     try { return round2((db.prepare("SELECT COALESCE(SUM(amount),0) s FROM loss_events WHERE organization_id = ? AND driver = ? AND period = ?").get(orgId, driver, period) as any).s); } catch { return 0; }
   }
@@ -62,12 +82,13 @@ export class ManagerialDreService {
     const { from, to } = monthBounds(period);
     const core = this.coreRevCost(orgId, period);
     const comigo = ComigoHealthService.rangeResult(orgId, from, to);
+    const lojas = this.storesRevCost(orgId, period);
 
-    const receitaBruta = round2(core.revenue + comigo.revenue);
+    const receitaBruta = round2(core.revenue + comigo.revenue + lojas.revenue);
     const descontos = this.lossDriver(orgId, period, "desconto");
     const devolucoes = this.lossDriver(orgId, period, "devolucao");
     const receitaLiquida = round2(receitaBruta - descontos - devolucoes);
-    const cmv = round2(core.cost + comigo.cost);
+    const cmv = round2(core.cost + comigo.cost + lojas.cost);
     const margemBruta = round2(receitaLiquida - cmv);
     const margemPct = receitaLiquida > 0 ? round2((margemBruta / receitaLiquida) * 100) : null;
     const desp = this.despesasSplit(orgId, period);
@@ -85,6 +106,7 @@ export class ManagerialDreService {
       breakdown: {
         core: { revenue: core.revenue, cost: core.cost },
         comigo: { revenue: round2(comigo.revenue), cost: round2(comigo.cost) },
+        lojas: { revenue: lojas.revenue, cost: lojas.cost },
       },
     };
   }

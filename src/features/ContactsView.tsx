@@ -43,6 +43,14 @@ export function ContactsView() {
   const [filter, setFilter] = useState('todos');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
+  // Aba "Clientes do PDV" (Alterdata) — LEITURA, base separada do CRM de
+  // propósito. Só aparece quando há clientes do PDV importados (o piloto roda
+  // sem importar clientes, então normalmente fica oculta).
+  const [tab, setTab] = useState<'crm' | 'pdv'>('crm');
+  const [pdvTotal, setPdvTotal] = useState(0);
+  useEffect(() => {
+    apiFetch('/api/retailops/pdv-customers?limit=1').then(r => r.ok ? r.json() : null).then(d => setPdvTotal(Number(d?.total) || 0)).catch(() => {});
+  }, []);
 
   const load = () => {
     setLoading(true);
@@ -113,6 +121,16 @@ export function ContactsView() {
         </div>
       </div>
 
+      {pdvTotal > 0 && (
+        <div className="flex gap-1 mb-4 border-b border-zinc-800">
+          <TabBtn active={tab === 'crm'} onClick={() => setTab('crm')}>Contatos &amp; CRM</TabBtn>
+          <TabBtn active={tab === 'pdv'} onClick={() => setTab('pdv')}>Clientes do PDV ({pdvTotal})</TabBtn>
+        </div>
+      )}
+
+      {tab === 'pdv' && <PdvCustomersSection />}
+
+      {tab === 'crm' && (<>
       {/* Segmentos */}
       {segments && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -299,6 +317,78 @@ export function ContactsView() {
         })}
         <ShowMore page={contactsPage} noun="contatos" className="col-span-full" />
       </div>
+      </>)}
+    </div>
+  );
+}
+
+// Botão de aba (Contatos × Clientes do PDV).
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${active ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-400 hover:text-zinc-200'}`}>{children}</button>
+  );
+}
+
+// Clientes importados do PDV (Alterdata) — SÓ LEITURA. Base separada dos
+// contatos do WhatsApp de propósito (decisão do import da Alterdata); aqui
+// apenas exibimos, sem misturar com o CRM. Reusa /api/retailops/pdv-customers.
+function PdvCustomersSection() {
+  const [rows, setRows] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState('');
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading(true);
+      apiFetch(`/api/retailops/pdv-customers?limit=100${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { setRows(Array.isArray(d?.customers) ? d.customers : []); setTotal(Number(d?.total) || 0); })
+        .catch(() => setRows([]))
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  const dt = (s?: string) => s ? String(s).slice(0, 10) : '—';
+  return (
+    <div>
+      <div className="mb-3 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-[12px] text-sky-200/90">
+        Clientes importados do <strong>PDV (Alterdata)</strong> — base só-leitura, separada dos contatos do WhatsApp. A loja mostrada é a de <strong>cadastro</strong>, não de compra.
+      </div>
+      <div className="mb-4 relative">
+        <Search className="w-5 h-5 absolute left-3 top-2.5 text-zinc-500" />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nome, CPF ou celular..." className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500" />
+      </div>
+      {loading ? (
+        <p className="py-10 text-center text-sm text-zinc-500">Carregando…</p>
+      ) : rows.length === 0 ? (
+        <div className="py-12 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/30">Nenhum cliente do PDV {q ? 'nesta busca' : 'importado ainda'}.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Nome</th>
+              <th className="px-3 py-2 text-left font-medium">CPF</th>
+              <th className="px-3 py-2 text-left font-medium">Celular</th>
+              <th className="px-3 py-2 text-left font-medium">Cidade</th>
+              <th className="px-3 py-2 text-left font-medium">Loja (cadastro)</th>
+              <th className="px-3 py-2 text-left font-medium">Última compra</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((c, i) => (
+                <tr key={c.codigo_n || i} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-1.5 text-zinc-200">{c.nome || '—'}</td>
+                  <td className="px-3 py-1.5 text-zinc-400 font-mono text-[12px]">{c.cpf || '—'}</td>
+                  <td className="px-3 py-1.5 text-zinc-300">{c.celular || '—'}</td>
+                  <td className="px-3 py-1.5 text-zinc-400">{c.cidade || '—'}</td>
+                  <td className="px-3 py-1.5 text-zinc-400">{c.store_name || <span className="text-zinc-600">{c.filial || '—'}</span>}</td>
+                  <td className="px-3 py-1.5 text-zinc-400">{dt(c.ultima_compra)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!loading && total > rows.length && <p className="mt-2 text-[11px] text-amber-300/80">Mostrando {rows.length} de {total}. Refine a busca para ver os demais.</p>}
     </div>
   );
 }

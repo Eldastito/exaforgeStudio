@@ -600,6 +600,7 @@
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",
     "test:backlog-radar-infra": "tsx scripts/test-backlog-radar-infra.ts",
     "test:sales-analytics": "tsx scripts/test-sales-analytics.ts",
+    "test:catalog-topproducts-pdv": "tsx scripts/test-catalog-topproducts-pdv.ts",
     "test:backlog-loja": "tsx scripts/test-backlog-loja.ts",
     "test:plan-gating-autofill": "tsx scripts/test-plan-gating-autofill-alerts.ts",
     "test:nfe-signature": "tsx scripts/test-nfe-signature.ts",

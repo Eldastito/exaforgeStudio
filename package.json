@@ -102,6 +102,7 @@
     "test:alterdata-golive-promotion-lgpd": "tsx scripts/test-alterdata-golive-promotion-lgpd.ts",
     "test:alterdata-golive-price-path-cache": "tsx scripts/test-alterdata-golive-price-path-cache.ts",
     "test:alterdata-golive-revenue-bridge": "tsx scripts/test-alterdata-golive-revenue-bridge.ts",
+    "test:alterdata-golive-e2e": "tsx scripts/test-alterdata-golive-e2e.ts",
     "seed:product-evolution-ledger": "tsx scripts/seed-product-evolution-ledger.ts",
     "seed:studio-visual-recipes": "tsx scripts/seed-studio-visual-recipes.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",

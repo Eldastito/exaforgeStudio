@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -684,6 +684,16 @@ function AlterdataConnectorPanel() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [testing, setTesting] = useState(false);
+  // RF-10/11: readiness do env atual — o card do topo mostra o gate de go-live.
+  const [readiness, setReadiness] = useState<any>(null);
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const loadReadiness = useCallback(async (env: string) => {
+    try {
+      const r = await apiFetch(`/api/integrations/alterdata/readiness?environment=${encodeURIComponent(env)}`);
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok) setReadiness(j.readiness);
+    } catch { /* mantém último estado */ }
+  }, []);
 
   const [syncing, setSyncing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
@@ -786,7 +796,18 @@ function AlterdataConnectorPanel() {
         return; // mantém o botão "em andamento" até o job terminar
       }
       if (res.ok && d.ok) {
-        applySummary(d.summary || {});
+        // RF-12: mensagem honesta vem do backend (baseada no ledger).
+        if (d.outcome) {
+          const { severity, title, detail } = d.outcome;
+          const line = `${title}: ${detail}`;
+          if (severity === 'ok') toast.success(line);
+          else if (severity === 'partial') toast.info(line);
+          else toast.error(line);
+          setLastSync({ at: (d.summary?.ranAt) || new Date().toISOString(), ok: severity === 'ok', text: line });
+        } else {
+          applySummary(d.summary || {});
+        }
+        loadReadiness(environment); // atualiza gate após sync
       } else {
         const err = d.error || 'Falha ao sincronizar.';
         toast.error(err);
@@ -837,8 +858,12 @@ function AlterdataConnectorPanel() {
     setEnvironment(d.environment || 'homolog');
     setBasePattern(d.basePattern || 'toulon-{module}.apimodaup.com.br');
     setPriceTable(d.priceTable || '');
+    loadReadiness(d.environment || 'homolog');
   }).catch(() => {});
   useEffect(() => { load(); }, []);
+  // Recarrega readiness quando o usuário troca de env no dropdown, mesmo antes
+  // de salvar — cada perfil (homolog/prod) tem seu próprio gate.
+  useEffect(() => { if (environment) loadReadiness(environment); }, [environment, loadReadiness]);
 
   const save = async (patch: any = {}) => {
     setSaving(true);
@@ -883,6 +908,71 @@ function AlterdataConnectorPanel() {
       <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-[12px] text-sky-200/90">
         O token é emitido pelo <strong>Guardian da ModaUp</strong>: o <strong>Client ID é o e-mail</strong> e o <strong>Client Secret é a senha</strong> de um usuário de <strong>retaguarda com acesso total</strong>. Salve as credenciais (guardadas cifradas) e clique em <strong>Testar conexão</strong> para validar.
       </div>
+
+      {/* RF-10/11: Prontidão do go-live. Cada blocker mostra responsável + ação. */}
+      {readiness && (
+        <div className={`mt-3 rounded-lg border p-3 text-[12px] ${
+          readiness.status === 'ready' ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200/90'
+          : readiness.status === 'blocked' ? 'border-rose-500/30 bg-rose-500/5 text-rose-200/90'
+          : 'border-amber-500/30 bg-amber-500/5 text-amber-200/90'
+        }`}>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <strong>Prontidão {environment === 'prod' ? 'produção' : 'homologação'}:</strong>{' '}
+              {readiness.status === 'ready' ? 'pronto para go-live'
+                : readiness.status === 'blocked' ? `${readiness.blockers.filter((b: any) => b.severity === 'blocker').length} bloqueio(s) pendente(s)`
+                : 'perfil não configurado'}
+              {readiness.lastRun ? (
+                <span className="ml-2 text-zinc-400">
+                  · última run: {String(readiness.lastRun.status)} em {new Date(readiness.lastRun.startedAt).toLocaleString('pt-BR')}
+                </span>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => setReadinessOpen(v => !v)}
+              className="text-zinc-300 hover:text-white underline decoration-dotted underline-offset-2"
+            >
+              {readinessOpen ? 'ocultar detalhes' : 'ver detalhes'}
+            </button>
+          </div>
+          {readinessOpen && (
+            <div className="mt-2 space-y-2">
+              {readiness.blockers.length === 0 ? (
+                <div className="text-zinc-400">Nenhum bloqueio pendente.</div>
+              ) : (
+                <ul className="space-y-1">
+                  {readiness.blockers.map((b: any, i: number) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                        b.severity === 'blocker' ? 'bg-rose-500/20 text-rose-200 border border-rose-500/40'
+                        : b.severity === 'warning' ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+                        : 'bg-sky-500/20 text-sky-200 border border-sky-500/40'
+                      }`}>{b.severity}</span>
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                        b.responsible === 'toulon' ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/40'
+                        : b.responsible === 'alterdata' ? 'bg-orange-500/20 text-orange-200 border border-orange-500/40'
+                        : 'bg-zinc-500/20 text-zinc-200 border border-zinc-500/40'
+                      }`}>{b.responsible}</span>
+                      <div>
+                        <div className="text-zinc-100">{b.message}</div>
+                        <div className="text-zinc-400">Ação: {b.action}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {readiness.lastRun?.correlationId ? (
+                <div className="pt-1 text-[10px] text-zinc-500">
+                  correlation_id: <code className="text-zinc-400">{readiness.lastRun.correlationId}</code>
+                  {' '}· required_failures: {readiness.lastRun.requiredFailures}
+                  {' '}· optional_failures: {readiness.lastRun.optionalFailures}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="text-xs text-zinc-400">Rede

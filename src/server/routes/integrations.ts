@@ -14,7 +14,8 @@ import { ReportsService } from "../ReportsService.js";
 import { AlterdataConnectorService } from "../AlterdataConnectorService.js";
 import { AlterdataSyncRunner } from "../AlterdataSyncRunner.js";
 import { AlterdataReadinessService } from "../AlterdataReadinessService.js";
-import { AlterdataSyncLedgerService } from "../AlterdataSyncLedgerService.js";
+import { AlterdataSyncLedgerService, type LedgerRunStatus } from "../AlterdataSyncLedgerService.js";
+import { formatSyncOutcome } from "../AlterdataSyncMessage.js";
 import type { AlterdataEnvironment } from "../AlterdataProfileService.js";
 import { JobQueueService } from "../JobQueueService.js";
 
@@ -494,9 +495,11 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
 router.post("/alterdata/sync", async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const summary = await AlterdataSyncRunner.runOrg(req.organizationId, { manual: true });
-    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SYNC_MANUAL', { referencias: summary.referencias, variantes: summary.variantes });
-    res.json({ ok: true, summary });
+    const summary = await AlterdataSyncRunner.runOrg(req.organizationId, { manual: true, initiatedBy: (req as any).userId || "manual" });
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SYNC_MANUAL', { referencias: summary.referencias, variantes: summary.variantes, runStatus: summary.runStatus, correlationId: summary.correlationId });
+    // RF-12: mensagem honesta — ok | partial | failed baseado no ledger.
+    const outcome = formatSyncOutcome(summary, (summary.runStatus as LedgerRunStatus | undefined) ?? null);
+    res.json({ ok: true, summary, outcome });
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "Falha ao sincronizar com a Alterdata." });
   }

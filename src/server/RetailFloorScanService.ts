@@ -29,7 +29,6 @@
  */
 import db from "./db.js";
 import { randomUUID } from "crypto";
-import { sanitizeGtin } from "./eanUtil.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailFloorService, PRODUCT_REASONS } from "./RetailFloorService.js";
 import { RetailFloorQueueService } from "./RetailFloorShiftService.js";
@@ -53,21 +52,37 @@ export class RetailFloorScanService {
     const action = opts.action == null ? "viewed" : String(opts.action);
     if (!SCAN_ACTIONS.includes(action)) throw new Error(`action inválida (${SCAN_ACTIONS.join("|")}).`);
 
-    const ean = sanitizeGtin(rawEan);
-    if (!ean) throw new Error("Código de barras inválido.");
+    // Código como vem do LEITOR (BarcodeDetector/ZXing) ou digitado à mão: só
+    // dígitos. NÃO exige dígito verificador GTIN — os códigos internos da ModaUp
+    // (etiqueta de prefixo 2, código do ERP de 13 díg.) NÃO fecham o checksum
+    // GS1 e mesmo assim são os códigos REAIS das peças (é o `produto` que Saldo/
+    // Preco/Venda usam, gravado em product_variants.external_ref). O sanitizeGtin
+    // (com checksum) existe pro fluxo de FOTO/IA — aqui o leitor já decodifica o
+    // código com exatidão, então bloquear pelo checksum recusava peça legítima.
+    const ean = String(rawEan ?? "").replace(/\D/g, "");
+    if (ean.length < 6) throw new Error("Código de barras inválido.");
 
-    // Lookup: variante (grade) primeiro, produto depois.
+    // Lookup: variante (grade) primeiro, produto depois. Casa pelo código do ERP
+    // (external_ref) OU pelo EAN/sku — o que a etiqueta trouxer.
     let product: any = null, variant: any = null;
     const v = db.prepare(
       `SELECT v.id, v.product_service_id, v.name, v.size, v.color, p.name AS product_name, p.price AS product_price, v.price AS variant_price
          FROM product_variants v JOIN products_services p ON p.id = v.product_service_id AND p.organization_id = v.organization_id
-        WHERE v.organization_id = ? AND v.external_ref = ? AND v.active = 1 LIMIT 1`
-    ).get(orgId, ean) as any;
+        WHERE v.organization_id = ? AND (v.external_ref = ? OR v.sku = ?) AND v.active = 1 LIMIT 1`
+    ).get(orgId, ean, ean) as any;
     if (v) {
       variant = { id: v.id, name: v.name, size: v.size || null, color: v.color || null };
       product = { id: v.product_service_id, name: v.product_name, price: Number(v.variant_price ?? v.product_price ?? 0) };
     } else {
-      const p = db.prepare(`SELECT id, name, price FROM products_services WHERE organization_id = ? AND ean = ? LIMIT 1`).get(orgId, ean) as any;
+      // Produto por EAN ou pelo código do ERP (external_ref); por fim, o prefixo
+      // (EAN13 do caixa começa com o external_ref de 12 do catálogo — ADR-105).
+      let p = db.prepare(`SELECT id, name, price FROM products_services WHERE organization_id = ? AND (ean = ? OR external_ref = ?) LIMIT 1`).get(orgId, ean, ean) as any;
+      if (!p) {
+        const pref = db.prepare(
+          `SELECT id, name, price FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND length(external_ref) >= 4 AND ? LIKE external_ref || '%' ORDER BY length(external_ref) DESC LIMIT 2`
+        ).all(orgId, ean) as any[];
+        if (pref.length === 1) p = pref[0]; // só associa quando não é ambíguo
+      }
       if (p) product = { id: p.id, name: p.name, price: Number(p.price || 0) };
     }
 

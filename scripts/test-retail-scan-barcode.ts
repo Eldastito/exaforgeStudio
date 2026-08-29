@@ -42,11 +42,20 @@ async function main() {
   const prodId = randomUUID();
   db.prepare(`INSERT INTO products_services (id, organization_id, type, name, ean, price) VALUES (?, ?, 'product', 'Achocolatado 1kg', ?, 12.9)`).run(prodId, A, EAN);
 
+  // Código INTERNO da ModaUp (prefixo 2, NÃO fecha o checksum GS1) numa variante
+  // (grade) — é o código real da etiqueta/ERP, gravado no external_ref.
+  const internalCode = "2971090622711";
+  const prodInt = randomUUID(), varInt = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price) VALUES (?, ?, 'product', 'Vestido Interno', 199.9)`).run(prodInt, A);
+  db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, external_ref, active) VALUES (?, ?, ?, 'P / Preto', ?, 1)`).run(varInt, A, prodInt, internalCode);
+
   // ---- Lookup ----
   const hit = RetailScanService.lookupByEan(A, EAN);
   check("Lookup: acha o produto pelo EAN", hit.found === true && hit.product.id === prodId);
-  check("Lookup: EAN inválido → invalid", RetailScanService.lookupByEan(A, "123").invalid === true);
-  check("Lookup: EAN válido não cadastrado → não encontrado", RetailScanService.lookupByEan(A, "7891000053508").found === false);
+  check("Lookup: código curto (< 6 díg.) → invalid", RetailScanService.lookupByEan(A, "123").invalid === true);
+  check("Lookup: código válido não cadastrado → não encontrado", RetailScanService.lookupByEan(A, "7891000053508").found === false);
+  const hitInt = RetailScanService.lookupByEan(A, internalCode);
+  check("Lookup: código interno (não-GTIN) resolve por external_ref da variante", hitInt.found === true && hitInt.product.id === prodInt && hitInt.variant?.id === varInt, `found=${hitInt.found}`);
 
   // ---- Entrada NATIVE → núcleo ----
   const r1 = RetailScanService.scanReceive(A, EAN, 5, {}, "u1");

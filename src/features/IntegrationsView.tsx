@@ -695,6 +695,52 @@ function AlterdataConnectorPanel() {
     } catch { /* mantém último estado */ }
   }, []);
 
+  // RF-16: aprovações LGPD para pdvCustomerImport (import de clientes do PDV).
+  // Sem uma aprovação ativa, promover pra produção com CRM ligado bloqueia.
+  const [lgpdApprovals, setLgpdApprovals] = useState<any[]>([]);
+  const [lgpdOpen, setLgpdOpen] = useState(false);
+  const [lgpdSaving, setLgpdSaving] = useState(false);
+  const [lgpdLegalBasis, setLgpdLegalBasis] = useState('legitimo_interesse');
+  const [lgpdEmail, setLgpdEmail] = useState('');
+  const [lgpdRetention, setLgpdRetention] = useState('730');
+  const [lgpdAccessProfile, setLgpdAccessProfile] = useState('owner,admin,dpo');
+  const [lgpdNotes, setLgpdNotes] = useState('');
+  const loadLgpd = useCallback(async () => {
+    try {
+      const r = await apiFetch('/api/integrations/alterdata/lgpd-approvals?purpose=pdvCustomerImport');
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.ok && Array.isArray(j.approvals)) setLgpdApprovals(j.approvals);
+    } catch { /* mantém último estado */ }
+  }, []);
+  const lgpdActive = lgpdApprovals.length > 0 && !lgpdApprovals[0].revoked_at;
+  const saveLgpd = async () => {
+    setLgpdSaving(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/lgpd-approvals', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          purpose: 'pdvCustomerImport',
+          legalBasis: lgpdLegalBasis,
+          approvedByEmail: lgpdEmail.trim() || null,
+          retentionDays: lgpdRetention ? Number(lgpdRetention) : null,
+          accessProfile: lgpdAccessProfile.trim() || null,
+          notes: lgpdNotes.trim() || null,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) {
+        toast.success('Aprovação LGPD registrada.');
+        setLgpdNotes('');
+        await loadLgpd();
+        loadReadiness(environment);
+      } else {
+        toast.error(d.error || 'Falha ao registrar aprovação LGPD.');
+      }
+    } catch {
+      toast.error('Falha ao registrar aprovação LGPD.');
+    } finally { setLgpdSaving(false); }
+  };
+
   const [syncing, setSyncing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
@@ -859,6 +905,7 @@ function AlterdataConnectorPanel() {
     setBasePattern(d.basePattern || 'toulon-{module}.apimodaup.com.br');
     setPriceTable(d.priceTable || '');
     loadReadiness(d.environment || 'homolog');
+    loadLgpd();
   }).catch(() => {});
   useEffect(() => { load(); }, []);
   // Recarrega readiness quando o usuário troca de env no dropdown, mesmo antes
@@ -879,7 +926,7 @@ function AlterdataConnectorPanel() {
       if (clientId.trim() || clientSecret.trim()) body.authConfig = { clientId: clientId.trim(), clientSecret: clientSecret.trim() };
       const res = await apiFetch('/api/integrations/alterdata/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success('Configuração da Alterdata salva.'); setClientId(''); setClientSecret(''); setSt(d); }
+      if (res.ok) { toast.success('Configuração da Alterdata salva.'); setClientId(''); setClientSecret(''); setSt(d); loadReadiness(environment); loadLgpd(); }
       else toast.error(d.error || 'Falha ao salvar.');
     } finally { setSaving(false); }
   };
@@ -969,6 +1016,88 @@ function AlterdataConnectorPanel() {
                   {' '}· optional_failures: {readiness.lastRun.optionalFailures}
                 </div>
               ) : null}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* RF-16: Aprovação LGPD para import de clientes do PDV (dados pessoais).
+          Só aparece quando "Importar clientes do PDV" está ligado — sem uma
+          aprovação ativa, promover pra produção bloqueia. */}
+      {st?.pdvCustomerImport && (
+        <div className={`mt-3 rounded-lg border p-3 text-[12px] ${
+          lgpdActive
+            ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200/90'
+            : 'border-amber-500/30 bg-amber-500/5 text-amber-200/90'
+        }`}>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <strong>Aprovação LGPD (import de clientes do PDV):</strong>{' '}
+              {lgpdActive
+                ? `ativa desde ${new Date(lgpdApprovals[0].approved_at).toLocaleDateString('pt-BR')} (base: ${lgpdApprovals[0].legal_basis})`
+                : 'pendente — dados pessoais só entram em produção com autorização registrada'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setLgpdOpen(v => !v)}
+              className="text-zinc-300 hover:text-white underline decoration-dotted underline-offset-2"
+            >
+              {lgpdOpen ? 'ocultar' : (lgpdActive ? 'ver histórico' : 'registrar aprovação')}
+            </button>
+          </div>
+          {lgpdOpen && (
+            <div className="mt-3 space-y-3">
+              {/* Formulário de nova aprovação */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className="text-[11px] text-zinc-400">Base legal
+                  <select className={inputCls} value={lgpdLegalBasis} onChange={e => setLgpdLegalBasis(e.target.value)}>
+                    <option value="legitimo_interesse">Legítimo interesse</option>
+                    <option value="consentimento">Consentimento</option>
+                    <option value="execucao_contrato">Execução de contrato</option>
+                    <option value="obrigacao_legal">Obrigação legal</option>
+                    <option value="protecao_credito">Proteção ao crédito</option>
+                  </select>
+                </label>
+                <label className="text-[11px] text-zinc-400">E-mail do responsável (DPO)
+                  <input className={inputCls} value={lgpdEmail} onChange={e => setLgpdEmail(e.target.value)} placeholder="dpo@toulon.com.br" />
+                </label>
+                <label className="text-[11px] text-zinc-400">Retenção (dias)
+                  <input className={inputCls} value={lgpdRetention} onChange={e => setLgpdRetention(e.target.value.replace(/[^0-9]/g, ''))} placeholder="730" />
+                </label>
+                <label className="text-[11px] text-zinc-400">Perfil de acesso
+                  <input className={inputCls} value={lgpdAccessProfile} onChange={e => setLgpdAccessProfile(e.target.value)} placeholder="owner,admin,dpo" />
+                </label>
+              </div>
+              <label className="text-[11px] text-zinc-400 block">Observações (ata/documento de referência)
+                <input className={inputCls} value={lgpdNotes} onChange={e => setLgpdNotes(e.target.value)} placeholder="Ata nº XXX de DD/MM/YYYY" />
+              </label>
+              <Button onClick={saveLgpd} disabled={lgpdSaving} className="zf-button zf-button-secondary">
+                {lgpdSaving ? 'Registrando…' : 'Registrar aprovação LGPD'}
+              </Button>
+
+              {/* Histórico (trilha de auditoria — nunca some) */}
+              {lgpdApprovals.length > 0 && (
+                <div className="pt-2 border-t border-zinc-800">
+                  <div className="text-[11px] text-zinc-500 mb-1">Histórico ({lgpdApprovals.length}):</div>
+                  <ul className="space-y-1">
+                    {lgpdApprovals.map((a: any) => (
+                      <li key={a.id} className="flex items-start gap-2 text-[11px]">
+                        <span className={`inline-flex items-center rounded px-1.5 py-0.5 uppercase tracking-wide ${
+                          a.revoked_at
+                            ? 'bg-zinc-700/40 text-zinc-400 border border-zinc-600/40'
+                            : 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                        }`}>{a.revoked_at ? 'revogada' : 'ativa'}</span>
+                        <span className="text-zinc-300">
+                          {new Date(a.approved_at).toLocaleString('pt-BR')} · {a.legal_basis}
+                          {a.approved_by_email ? ` · ${a.approved_by_email}` : ''}
+                          {a.retention_days ? ` · retenção ${a.retention_days}d` : ''}
+                          {a.notes ? ` · ${a.notes}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1463,10 +1463,20 @@ export class Scheduler {
    * ligada. É a IA vigiando a operação sem o gestor precisar clicar.
    */
   static retailOpsSignalsPass() {
-    let orgs: any[] = [];
-    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(online_store_reserve,0)=1`).all() as any[]; } catch { return; }
-    for (const o of orgs) {
-      try { RetailOpsSignalPublisher.run(o.organization_id); } catch (e) { console.error('[Retail] ops signals falhou', o.organization_id, e); }
+    // Audiência: quem tem loja online (reservas) E as redes de varejo integradas
+    // ao Alterdata (físicas). O publisher gera sinais de ESTOQUE/ruptura/
+    // transferência/comissão (não só loja online), então uma rede física como a
+    // Toulon também precisa da vigilância automática. Cada fonte numa query
+    // própria: um esquema antigo sem a tabela do Alterdata não zera o resto.
+    const ids = new Set<string>();
+    try {
+      for (const o of db.prepare(`SELECT organization_id FROM organization_settings WHERE COALESCE(online_store_reserve,0)=1`).all() as any[]) ids.add(o.organization_id);
+    } catch { /* coluna ainda não migrada */ }
+    try {
+      for (const o of db.prepare(`SELECT organization_id FROM alterdata_integration_settings WHERE COALESCE(enabled,0)=1`).all() as any[]) ids.add(o.organization_id);
+    } catch { /* tabela ainda não migrada */ }
+    for (const orgId of ids) {
+      try { RetailOpsSignalPublisher.run(orgId); } catch (e) { console.error('[Retail] ops signals falhou', orgId, e); }
     }
   }
 

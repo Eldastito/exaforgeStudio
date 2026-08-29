@@ -1012,6 +1012,27 @@ router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthReque
   res.json(db.prepare(`SELECT id, matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
 });
 
+// Sugere a PRÓXIMA matrícula no padrão da rede (auto-preencher no cadastro de
+// vendedor novo). Registrado ANTES de `/sellers/:sellerId/*` — `next-matricula`
+// é um único segmento e não colide com as rotas de lotação.
+router.get("/sellers/next-matricula", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  try { res.json({ matricula: RetailSellerDirectoryService.nextMatricula(orgId, storeId) }); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+// "Excluir" vendedor = desativa a identidade + encerra as lotações (soft delete,
+// preserva histórico de comissão/venda pela matrícula). owner/admin.
+router.delete("/sellers/:sellerId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { RetailSellerDirectoryService.deactivateSeller(orgId, String(req.params.sellerId), req.user?.userId); res.json({ ok: true }); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
 // SELL-002 — lotação do vendedor por loja (owner/admin). sellerId = retail_sellers.id.
 router.get("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

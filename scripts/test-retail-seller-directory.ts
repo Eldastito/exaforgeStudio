@@ -74,6 +74,38 @@ async function main() {
   check("orgUsesAssignments true quando há lotação", cov.orgUsesAssignments === true);
   check("org B (sem lotação) → orgUsesAssignments false", Dir.orgUsesAssignments(B) === false);
 
+  // ===== 3.5. próxima matrícula no padrão da rede =====
+  // AV: pool numérico {1001 (Ana), 1002} → próxima = 1003 (maior + 1, largura 4).
+  check("nextMatricula AV = 1003 (maior do pool + 1)", Dir.nextMatricula(A, avBrasil) === "1003", Dir.nextMatricula(A, avBrasil));
+  // Colisão: se 1003 já existir em retail_sellers, pula para 1004.
+  db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name, active) VALUES (?, ?, '1003', 'Bia', 1)`).run(randomUUID(), A);
+  check("nextMatricula pula matrícula já usada (→ 1004)", Dir.nextMatricula(A, avBrasil) === "1004", Dir.nextMatricula(A, avBrasil));
+  // BR: pool {9999} → próxima = 10000 (preserva prefixo/ordem numérica).
+  check("nextMatricula BR = 10000 (9999 + 1)", Dir.nextMatricula(A, barra) === "10000", Dir.nextMatricula(A, barra));
+  // Loja NOVA, código numérico de filial, sem base numérica → filial + 0001.
+  const nova = randomUUID();
+  db.prepare(`INSERT INTO retail_stores (id, organization_id, name, code, active) VALUES (?, ?, 'Nova Iguaçu', '1065', 1)`).run(nova, A);
+  check("nextMatricula loja nova = filial + 0001 (10650001)", Dir.nextMatricula(A, nova) === "10650001", Dir.nextMatricula(A, nova));
+  let matIso = false;
+  try { Dir.nextMatricula(B, avBrasil); } catch { matIso = true; }
+  check("nextMatricula isola por org (loja de A invisível para B)", matIso);
+
+  // ===== 3.6. excluir (soft delete) vendedor =====
+  const carla = randomUUID();
+  db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name, active) VALUES (?, ?, '2001', 'Carla', 1)`).run(carla, A);
+  Dir.setStores(A, carla, [avBrasil, barra], avBrasil, "boss");
+  check("pré-exclusão: Carla lotada em 2 lojas", Dir.storesForSeller(A, carla).length === 2);
+  Dir.deactivateSeller(A, carla, "boss");
+  const carlaRow = db.prepare(`SELECT active FROM retail_sellers WHERE organization_id = ? AND id = ?`).get(A, carla) as any;
+  check("exclusão desativa a identidade (active=0)", Number(carlaRow.active) === 0);
+  check("exclusão encerra todas as lotações", Dir.storesForSeller(A, carla).length === 0);
+  check("loja não vê mais o vendedor excluído no roster", !Dir.sellersForStore(A, avBrasil).some((s: any) => s.seller_id === carla));
+  const carlaAssignRaw = db.prepare(`SELECT COUNT(*) AS n FROM retail_seller_store_assignments WHERE organization_id = ? AND seller_id = ?`).get(A, carla) as any;
+  check("vínculos preservados no banco (histórico, nunca DELETE)", Number(carlaAssignRaw.n) === 2);
+  let delIso = false;
+  try { Dir.deactivateSeller(B, carla, "x"); } catch { delIso = true; }
+  check("excluir isola por org (vendedor de A invisível para B)", delIso);
+
   // ===== 4. isolamento =====
   let iso = false;
   try { Dir.coverage(B, avBrasil); } catch { iso = true; }

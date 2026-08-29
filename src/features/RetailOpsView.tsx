@@ -5316,6 +5316,7 @@ function SellersDirectoryTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [assignFor, setAssignFor] = useState<any>(null);
+  const [deleteFor, setDeleteFor] = useState<any>(null);
   // Modal de cadastro/nome: { codigo, initialName, allowCodeEdit }. Sem window.prompt.
   const [nameModal, setNameModal] = useState<{ codigo: string; initialName?: string; allowCodeEdit?: boolean } | null>(null);
 
@@ -5349,9 +5350,12 @@ function SellersDirectoryTab() {
             {cov.lotados.length === 0 ? <p className="text-[13px] text-zinc-500">Nenhum vendedor lotado. Confirme os nomes abaixo e depois atribua as lojas.</p> : (
               <div className="flex flex-wrap gap-1.5">
                 {cov.lotados.map((s: any) => (
-                  <button key={s.seller_id} onClick={() => setAssignFor(s)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1 text-[13px] text-zinc-200 hover:bg-zinc-800">
-                    {s.is_primary ? <Store className="w-3 h-3 text-emerald-400" /> : null}{s.name || `Matrícula ${s.matricula}`} <Pencil className="w-3 h-3 text-zinc-500" />
-                  </button>
+                  <div key={s.seller_id} className="inline-flex items-center gap-0.5 rounded-lg border border-zinc-800 bg-zinc-900/40 pl-2.5 pr-1 py-1 text-[13px] text-zinc-200">
+                    {s.is_primary ? <Store className="w-3 h-3 text-emerald-400 mr-1" /> : null}
+                    <span>{s.name || `Matrícula ${s.matricula}`}</span>
+                    <button onClick={() => setAssignFor(s)} title="Editar vendedor / transferir de loja" className="ml-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-indigo-300"><Pencil className="w-3 h-3" /></button>
+                    <button onClick={() => setDeleteFor(s)} title="Excluir vendedor" className="rounded p-1 text-zinc-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="w-3 h-3" /></button>
+                  </div>
                 ))}
               </div>
             )}
@@ -5389,7 +5393,8 @@ function SellersDirectoryTab() {
         </div>
       )}
       {assignFor && <SellerStoresModal seller={assignFor} stores={stores} onClose={() => setAssignFor(null)} onSaved={() => { setAssignFor(null); load(); }} />}
-      {nameModal && <SellerNameModal codigo={nameModal.codigo} initialName={nameModal.initialName} allowCodeEdit={nameModal.allowCodeEdit} storeId={storeId} storeName={storeName} onClose={() => setNameModal(null)} onSaved={() => { setNameModal(null); load(); }} />}
+      {deleteFor && <SellerDeleteModal seller={deleteFor} onClose={() => setDeleteFor(null)} onDeleted={() => { setDeleteFor(null); load(); }} />}
+      {nameModal && <SellerNameModal codigo={nameModal.codigo} initialName={nameModal.initialName} allowCodeEdit={nameModal.allowCodeEdit} storeId={storeId} storeName={storeName} stores={stores} onClose={() => setNameModal(null)} onSaved={() => { setNameModal(null); load(); }} />}
     </div>
   );
 }
@@ -5398,11 +5403,35 @@ function SellersDirectoryTab() {
 // uma matrícula do PDV e, opcionalmente, LOTA o vendedor na loja atual (SELL-002).
 // Em modo "cadastrar" (allowCodeEdit) a matrícula é digitável — dá pra registrar
 // um vendedor antes mesmo de ele aparecer nas vendas.
-function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeName, onClose, onSaved }: { codigo: string; initialName?: string; allowCodeEdit?: boolean; storeId?: string; storeName?: string; onClose: () => void; onSaved: () => void }) {
+function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeName, stores, onClose, onSaved }: { codigo: string; initialName?: string; allowCodeEdit?: boolean; storeId?: string; storeName?: string; stores?: any[]; onClose: () => void; onSaved: () => void }) {
   const [mat, setMat] = useState(codigo || '');
+  const [matTouched, setMatTouched] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [name, setName] = useState(initialName || '');
+  // No cadastro, a loja é escolhida aqui (define onde o vendedor é lotado). No
+  // modo "dar nome" segue a loja atual da aba.
+  const [store, setStore] = useState(storeId || '');
   const [lotar, setLotar] = useState(!!storeId);
   const [saving, setSaving] = useState(false);
+  const storeList = stores || [];
+  const lotStore = allowCodeEdit ? store : storeId;
+  const lotStoreName = allowCodeEdit ? (storeList.find((s: any) => s.id === store)?.name || 'loja escolhida') : (storeName || 'loja atual');
+
+  // Auto-preenche a matrícula no padrão da rede — só no cadastro e enquanto o
+  // gestor não digitar à mão. Re-sugere ao trocar de loja (o padrão é por filial).
+  useEffect(() => {
+    if (!allowCodeEdit || matTouched || !store) return;
+    let alive = true;
+    setSuggesting(true);
+    apiFetch(`/api/retailops/sellers/next-matricula?storeId=${encodeURIComponent(store)}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { if (alive && !matTouched && d?.matricula) setMat(String(d.matricula)); })
+      .catch(() => {})
+      .finally(() => { if (alive) setSuggesting(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowCodeEdit, store, matTouched]);
+
   const save = async () => {
     const matricula = mat.trim();
     if (!matricula) { toast.error('Informe a matrícula (código do vendedor no PDV).'); return; }
@@ -5412,9 +5441,9 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
       const r = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Falha ao salvar o vendedor.');
-      // Lotação na loja atual (opcional) — usa o id devolvido pelo upsert.
-      if (lotar && storeId && d?.id) {
-        const rs = await apiFetch(`/api/retailops/sellers/${d.id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [storeId], primaryStoreId: storeId }) });
+      // Lotação na loja escolhida (opcional) — usa o id devolvido pelo upsert.
+      if (lotar && lotStore && d?.id) {
+        const rs = await apiFetch(`/api/retailops/sellers/${d.id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [lotStore], primaryStoreId: lotStore }) });
         if (!rs.ok) toast.error('Vendedor salvo, mas a lotação na loja falhou.');
       }
       toast.success('Vendedor salvo.'); onSaved();
@@ -5425,15 +5454,23 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
       <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-zinc-100 mb-1">{allowCodeEdit ? 'Cadastrar vendedor' : `Dar nome à matrícula ${codigo}`}</h3>
         <p className="text-[11px] text-zinc-500 mb-3">A matrícula é o <strong>código do vendedor no PDV</strong> (CAI_USUARIO da Alterdata). O nome sai na comissão e nos relatórios.</p>
+        {allowCodeEdit && storeList.length > 0 && (
+          <label className="block text-[12px] text-zinc-400 mb-2">Loja do vendedor
+            <select value={store} onChange={e => setStore(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+              {storeList.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
+        )}
         <label className="block text-[12px] text-zinc-400 mb-2">Matrícula
-          <input value={mat} onChange={e => setMat(e.target.value)} disabled={!allowCodeEdit} placeholder="Ex.: 1024" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 disabled:opacity-60 font-mono" />
+          <input value={mat} onChange={e => { setMat(e.target.value); setMatTouched(true); }} disabled={!allowCodeEdit} placeholder="Ex.: 1024" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 disabled:opacity-60 font-mono" />
+          {allowCodeEdit && <span className="mt-1 block text-[10px] text-zinc-500">{suggesting ? 'Sugerindo no padrão da rede…' : 'Sugerida automaticamente no padrão da rede — pode editar.'}</span>}
         </label>
         <label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
           <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="Ex.: Maria Souza" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" onKeyDown={e => { if (e.key === 'Enter') save(); }} />
         </label>
-        {storeId && (
+        {lotStore && (
           <label className="mb-3 flex items-center gap-2 text-[12px] text-zinc-300">
-            <input type="checkbox" checked={lotar} onChange={e => setLotar(e.target.checked)} /> Lotar em <strong>{storeName || 'loja atual'}</strong>
+            <input type="checkbox" checked={lotar} onChange={e => setLotar(e.target.checked)} /> Lotar em <strong>{lotStoreName}</strong>
           </label>
         )}
         <div className="flex justify-end gap-2">
@@ -5445,8 +5482,37 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
   );
 }
 
+// Confirmação de exclusão (soft delete: desativa a identidade + encerra lotações;
+// o histórico de comissão/venda continua pela matrícula).
+function SellerDeleteModal({ seller, onClose, onDeleted }: { seller: any; onClose: () => void; onDeleted: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const label = seller.name || `Matrícula ${seller.matricula}`;
+  const del = async () => {
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/retailops/sellers/${seller.seller_id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao excluir.');
+      toast.success('Vendedor excluído.'); onDeleted();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">Excluir vendedor</h3>
+        <p className="text-[13px] text-zinc-300 mb-2">Remover <strong>{label}</strong> da lista e encerrar as lotações dele nas lojas?</p>
+        <p className="text-[11px] text-zinc-500 mb-4">O histórico de comissão e vendas continua preservado pela matrícula. Se a matrícula voltar a vender no PDV, ela reaparece como pendência de nome.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+          <button onClick={del} disabled={saving} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50">{saving ? 'Excluindo…' : 'Excluir'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Modal de lotação: em quais lojas o vendedor atua + qual é a principal.
 function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; stores: any[]; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(seller.name || '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [primary, setPrimary] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -5459,18 +5525,28 @@ function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; 
   }, [seller.seller_id]);
   const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const save = async () => {
+    if (!name.trim()) { toast.error('Informe o nome do vendedor.'); return; }
     setSaving(true);
     try {
+      // Nome (opcional editar) — grava pela matrícula antes de reconciliar as lojas.
+      if (name.trim() !== (seller.name || '') && seller.matricula) {
+        const rn = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(seller.matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+        if (!rn.ok) throw new Error((await rn.json().catch(() => ({}))).error || 'Falha ao salvar o nome.');
+      }
       const r = await apiFetch(`/api/retailops/sellers/${seller.seller_id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [...selected], primaryStoreId: primary && selected.has(primary) ? primary : null }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
-      toast.success('Lotação atualizada.'); onSaved();
+      toast.success('Vendedor atualizado.'); onSaved();
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-zinc-100 mb-1">Lojas de {seller.name || `Matrícula ${seller.matricula}`}</h3>
-        <p className="text-[11px] text-zinc-500 mb-3">Marque as lojas onde este vendedor atua. A principal é onde ele fica lotado; as demais são de apoio.</p>
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">Editar vendedor <span className="font-mono text-[13px] text-zinc-400">· {seller.matricula}</span></h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Ajuste o nome e as lojas onde ele atua. A principal é onde ele fica lotado; para <strong>transferir de loja</strong>, marque a nova e torne-a principal (desmarque a antiga).</p>
+        <label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Maria Souza" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+        </label>
+        <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">Lojas</div>
         <div className="space-y-1.5 max-h-[50vh] overflow-auto">
           {stores.map((s: any) => (
             <div key={s.id} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-3 py-1.5">
@@ -5484,7 +5560,7 @@ function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; 
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar lotação'}</button>
+          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar'}</button>
         </div>
       </div>
     </div>

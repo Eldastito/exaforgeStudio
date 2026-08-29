@@ -69,7 +69,8 @@ async function main() {
   // ===== token: gravado cifrado, expira, sem renovação automática =====
   check("sem token ainda", AlterdataConnectorService.getAccessToken(orgId) === null);
   AlterdataConnectorService.setAccessToken(orgId, "tok-123", new Date(Date.now() + 60_000));
-  const tokRow = db.prepare(`SELECT access_token_enc FROM alterdata_integration_settings WHERE organization_id=?`).get(orgId) as any;
+  // Pós ADR-198/PR2: token vai pro profile do env corrente, não mais pro legado.
+  const tokRow = db.prepare(`SELECT access_token_enc FROM alterdata_integration_profiles WHERE organization_id=? AND environment='homolog'`).get(orgId) as any;
   check("token gravado CIFRADO", EncryptionService.isEncrypted(tokRow.access_token_enc) && !String(tokRow.access_token_enc).includes("tok-123"));
   check("getAccessToken decifra token válido", AlterdataConnectorService.getAccessToken(orgId) === "tok-123");
   AlterdataConnectorService.setAccessToken(orgId, "tok-exp", new Date(Date.now() - 1000));
@@ -108,7 +109,8 @@ async function main() {
   check("body inclui o scope padrão (módulos)", String(captured?.init?.body).includes(encodeURIComponent("APISupplyModule")) || String(captured?.init?.body).includes("APISupplyModule"));
   check("scope padrão cobre Supply/Price/CRM/eCommerce", ["APISupplyModule", "APIPriceModule", "APICRMModule", "APIeCommerceModule"].every((s) => GUARDIAN_DEFAULT_SCOPE.includes(s)));
   check("token do Guardian gravado e recuperável", AlterdataConnectorService.getAccessToken(orgId) === "guardian-XYZ");
-  const tokRow2 = db.prepare(`SELECT access_token_enc FROM alterdata_integration_settings WHERE organization_id=?`).get(orgId) as any;
+  // Pós ADR-198/PR2: token do Guardian também vai pro profile do env corrente.
+  const tokRow2 = db.prepare(`SELECT access_token_enc FROM alterdata_integration_profiles WHERE organization_id=? AND environment='homolog'`).get(orgId) as any;
   check("token do Guardian gravado CIFRADO", EncryptionService.isEncrypted(tokRow2.access_token_enc) && !String(tokRow2.access_token_enc).includes("guardian-XYZ"));
 
   // getOrRefreshToken reaproveita o token válido (não chama o Guardian de novo).

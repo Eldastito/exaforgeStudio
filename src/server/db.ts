@@ -11077,6 +11077,126 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_bsp_ccm_contact ON bsp_contact_competitor_match (organization_id, contact_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar bsp_contact_competitor_match', e); }
+
+  // ADR-198 (PRD-ZF-ALTERDATA-GOLIVE-01, PR 1): Alterdata Go-Live — fundação
+  // schema. 4 tabelas novas, 1 ALTER + índice novo, tudo aditivo. NENHUM código
+  // do runner/connector muda neste PR — chegam nos PRs 2..5. Objetivo: separar
+  // homolog/prod de verdade (perfis, cursors, tokens por env), criar ledger de
+  // execuções auditável e formalizar política por módulo (required/conditional/
+  // unsupported). Ver docs/adr/ADR-198 pro racional completo.
+  try {
+    // RF-01 do PRD: perfis independentes por (org, environment). Coexistem com
+    // alterdata_integration_settings (legado) até o PR 2 migrar. Fachada de
+    // leitura no connector escolhe qual usar.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS alterdata_integration_profiles (
+        organization_id TEXT NOT NULL,
+        environment TEXT NOT NULL,               -- 'homolog' | 'prod'
+        base_pattern TEXT,
+        module_base_urls_json TEXT,
+        auth_config_enc TEXT,                    -- CIFRADO (EncryptionService), por env
+        access_token_enc TEXT,                   -- CIFRADO, por env
+        token_expires_at DATETIME,
+        scopes_json TEXT,                        -- scopes Guardian confirmados
+        rede TEXT,
+        filiais_json TEXT,
+        price_table TEXT,
+        validation_status TEXT DEFAULT 'unvalidated', -- 'unvalidated' | 'validated' | 'failed'
+        last_validated_at DATETIME,
+        approved_by TEXT,                        -- só prod: user_id que promoveu
+        approved_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, environment)
+      );
+      CREATE INDEX IF NOT EXISTS idx_alterdata_profiles_org
+        ON alterdata_integration_profiles(organization_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar alterdata_integration_profiles', e); }
+
+  // RF-03: cursor por ambiente. ALTER + índice novo, e DROP do índice antigo
+  // (idx_alterdata_cursor_uniq, sem environment). Seguro: código antigo que
+  // inserir sem environment usa DEFAULT 'homolog' e continua respeitando
+  // unicidade via idx_v2. Sem drop, inserts pra ambientes diferentes com mesma
+  // tripla (module,resource,filial) violariam o índice antigo — que é o
+  // problema exato que este PR resolve.
+  try { db.exec(`ALTER TABLE alterdata_sync_cursors ADD COLUMN environment TEXT DEFAULT 'homolog'`); } catch(e){}
+  try {
+    db.exec(`
+      DROP INDEX IF EXISTS idx_alterdata_cursor_uniq;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_alterdata_cursor_uniq_v2
+        ON alterdata_sync_cursors(organization_id, environment, module, resource, filial);
+    `);
+  } catch (e) { console.error('[DB] Falha ao migrar índice alterdata_sync_cursors', e); }
+
+  // RF-06: ledger de execuções (cabeçalho + detalhes por recurso). Tabelas
+  // ficam inertes até o PR 3 (runner) começar a escrever. Populamos schema
+  // agora pra evitar migration coordination depois.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS alterdata_sync_runs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        trigger TEXT NOT NULL,                   -- 'manual' | 'scheduler' | 'resync'
+        status TEXT NOT NULL,                    -- ver RF-07
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        finished_at DATETIME,
+        required_failures INTEGER DEFAULT 0,
+        optional_failures INTEGER DEFAULT 0,
+        correlation_id TEXT NOT NULL,
+        initiated_by TEXT                        -- user_id ou 'system'
+      );
+      CREATE INDEX IF NOT EXISTS idx_alterdata_runs_org_env_started
+        ON alterdata_sync_runs(organization_id, environment, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_alterdata_runs_correlation
+        ON alterdata_sync_runs(correlation_id);
+
+      CREATE TABLE IF NOT EXISTS alterdata_sync_run_resources (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        module TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        filial TEXT DEFAULT '',
+        required INTEGER NOT NULL DEFAULT 0,     -- 1=required, 0=optional
+        status TEXT NOT NULL,                    -- ver RF-09 (ready, empty_but_valid, auth_failed, ...)
+        http_status INTEGER,
+        cursor_before TEXT,
+        cursor_after TEXT,
+        pages INTEGER DEFAULT 0,
+        received INTEGER DEFAULT 0,
+        imported INTEGER DEFAULT 0,
+        skipped INTEGER DEFAULT 0,
+        mapping_errors INTEGER DEFAULT 0,
+        error_code TEXT,                         -- RF-17: ZAPFLOW_CODE | ALTERDATA_AUTH | ...
+        error_message_sanitized TEXT,            -- sem token, sem PII
+        started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        finished_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_alterdata_run_resources_run
+        ON alterdata_sync_run_resources(run_id);
+      CREATE INDEX IF NOT EXISTS idx_alterdata_run_resources_status
+        ON alterdata_sync_run_resources(status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar alterdata_sync_runs/resources', e); }
+
+  // RF-05: política por módulo. Chave (org, module). Seed inicial vem do código
+  // (AlterdataModulePolicy.DEFAULT_POLICY_BY_VERTICAL) no PR 4 quando readiness
+  // for consultado pela primeira vez — schema só reserva o espaço.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS alterdata_module_policy (
+        organization_id TEXT NOT NULL,
+        module TEXT NOT NULL,
+        policy TEXT NOT NULL,                    -- 'required' | 'conditional' | 'optional' | 'unsupported' | 'disabled'
+        condition_flag TEXT,                     -- ex.: 'pdvCustomerImport' pra crm condicional
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, module)
+      );
+      CREATE INDEX IF NOT EXISTS idx_alterdata_policy_org
+        ON alterdata_module_policy(organization_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar alterdata_module_policy', e); }
 };
 
 initDb();

@@ -289,6 +289,34 @@ export class AlterdataProfileService {
     return `https://${host.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
   }
 
+  /**
+   * RF-14: formato de path do módulo Price validado com sucesso pra este
+   * (org, env). null quando ainda não detectado. Salvar aqui evita repetir
+   * 2-3 tentativas por sync. Uso: `tabelaVersao` | `versao` | `redeTabelaVersao`.
+   */
+  static getPricePathFormat(orgId: string, environment: AlterdataEnvironment): string | null {
+    const r = db.prepare(
+      `SELECT price_path_format FROM alterdata_integration_profiles
+       WHERE organization_id=? AND environment=?`
+    ).get(orgId, environment) as any;
+    return r?.price_path_format || null;
+  }
+
+  static setPricePathFormat(orgId: string, environment: AlterdataEnvironment, format: string | null): void {
+    // Garante linha (raro chegar aqui sem profile, mas defensivo)
+    const has = db.prepare(
+      `SELECT organization_id FROM alterdata_integration_profiles WHERE organization_id=? AND environment=?`
+    ).get(orgId, environment);
+    if (!has) {
+      db.prepare(`INSERT INTO alterdata_integration_profiles (organization_id, environment) VALUES (?, ?)`).run(orgId, environment);
+    }
+    db.prepare(
+      `UPDATE alterdata_integration_profiles
+       SET price_path_format=?, updated_at=CURRENT_TIMESTAMP
+       WHERE organization_id=? AND environment=?`
+    ).run(format, orgId, environment);
+  }
+
   /** Visão pública de UM env específico. Sem segredos. */
   static publicProfileFor(orgId: string, environment: AlterdataEnvironment): any {
     const p = this.getProfile(orgId, environment);

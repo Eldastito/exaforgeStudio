@@ -11222,6 +11222,11 @@ const initDb = () => {
         ON alterdata_lgpd_approvals(organization_id, purpose, approved_at DESC);
     `);
   } catch (e) { console.error('[DB] Falha ao criar alterdata_lgpd_approvals', e); }
+
+  // RF-14 (PR 7): cacheia o formato do path do Preço que foi validado com
+  // sucesso pra evitar 2-3 tentativas por sync. Aditivo — perfil velho sem
+  // essa coluna continua funcionando (fallback pra probe de formatos).
+  try { db.exec(`ALTER TABLE alterdata_integration_profiles ADD COLUMN price_path_format TEXT`); } catch(e){}
 };
 
 initDb();

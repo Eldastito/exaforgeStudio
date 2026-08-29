@@ -44,9 +44,10 @@ async function main() {
   mk("2026-07-01", "approved", 1000, 0);      // elegível → 1000 (usa informado)
   mk("2026-07-02", "reconciled", 2000, 1900); // elegível → 1900 (prefere sistema/PDV)
   mk("2026-07-03", "divergent", 500, 480);    // elegível → 480 (prefere sistema)
-  mk("2026-07-04", "pending", 999, 0);        // NÃO elegível
-  mk("2026-07-05", "rejected", 777, 0);       // NÃO elegível
-  const ELIGIBLE_TOTAL = 1000 + 1900 + 480;   // 3380
+  mk("2026-07-04", "pending", 999, 0);        // NÃO elegível (informado sem PDV nem aprovação)
+  mk("2026-07-05", "rejected", 777, 0);       // NÃO elegível (humano recusou)
+  mk("2026-07-06", "pending", 0, 3000);       // elegível → 3000 (PDV CONFIRMOU, mesmo 'pending' — caso Toulon)
+  const ELIGIBLE_TOTAL = 1000 + 1900 + 480 + 3000; // 6380
 
   // ===== 1. Flag OFF (default) — nada de caixa/receita =====
   check("flag nasce desligada (default off)", RetailRevenueBridgeService.isEnabled(A) === false);
@@ -58,21 +59,24 @@ async function main() {
   // ===== 2. Liga a ponte =====
   RetailRevenueBridgeService.setEnabled(A, true);
   check("liga a flag", RetailRevenueBridgeService.isEnabled(A) === true);
-  check("elegíveis: 3 fechamentos (approved/reconciled/divergent)", RetailRevenueBridgeService.eligibleClosings(A).length === 3);
+  check("elegíveis: 4 fechamentos (approved/reconciled/divergent + PDV-confirmado)", RetailRevenueBridgeService.eligibleClosings(A).length === 4, `viu ${RetailRevenueBridgeService.eligibleClosings(A).length}`);
+  // O caso Toulon: fechamento 'pending' que o PDV confirmou (system_total) conta
+  // AUTOMATICAMENTE, sem aprovação manual loja-a-loja.
+  check("PDV-confirmado ('pending' + system_total) é elegível", RetailRevenueBridgeService.eligibleClosings(A).some((c) => c.value === 3000));
 
   FinancialLedgerService.summary(A); // agora posta os elegíveis como entrada de caixa
   const onEvents = db.prepare(`SELECT amount FROM cash_events WHERE organization_id=? AND source_type='retail_closing' ORDER BY event_date`).all(A) as any[];
-  check("ON: 3 cash_events de fechamento", onEvents.length === 3, `viu ${onEvents.length}`);
+  check("ON: 4 cash_events de fechamento", onEvents.length === 4, `viu ${onEvents.length}`);
   check("ON: prefere system_total (1900, não 2000)", onEvents.some((e) => Number(e.amount) === 1900) && !onEvents.some((e) => Number(e.amount) === 2000));
   const inflow = FinancialLedgerService.realizedCash(A, "2026-07-01", "2026-07-31").inflow;
-  check("ON: caixa realizado do mês = 3380", inflow === ELIGIBLE_TOTAL, `viu ${inflow}`);
-  check("ON: faturamento do mês = 3380", LossMarginService.monthlyRevenue(A, "2026-07") === ELIGIBLE_TOTAL, `viu ${LossMarginService.monthlyRevenue(A, "2026-07")}`);
+  check("ON: caixa realizado do mês = 6380", inflow === ELIGIBLE_TOTAL, `viu ${inflow}`);
+  check("ON: faturamento do mês = 6380", LossMarginService.monthlyRevenue(A, "2026-07") === ELIGIBLE_TOTAL, `viu ${LossMarginService.monthlyRevenue(A, "2026-07")}`);
 
   // ===== 3. Idempotência (re-sync não duplica) =====
   FinancialLedgerService.summary(A);
   FinancialLedgerService.summary(A);
   const dupCount = (db.prepare(`SELECT COUNT(*) c FROM cash_events WHERE organization_id=? AND source_type='retail_closing'`).get(A) as any).c;
-  check("idempotente: re-sync mantém 3 eventos", dupCount === 3, `viu ${dupCount}`);
+  check("idempotente: re-sync mantém 4 eventos", dupCount === 4, `viu ${dupCount}`);
   check("idempotente: caixa ainda = 3380", FinancialLedgerService.realizedCash(A, "2026-07-01", "2026-07-31").inflow === ELIGIBLE_TOTAL);
 
   // ===== 4. Desligar volta a receita a 0 (gate do faturamento) =====

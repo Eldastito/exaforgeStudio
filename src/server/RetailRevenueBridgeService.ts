@@ -25,10 +25,20 @@ import db from "./db.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Fechamentos cujo total de venda é confiável (humano aprovou OU PDV conciliou).
-const ELIGIBLE_STATUSES = "('approved','reconciled','divergent')";
 // Prefere o total do sistema (PDV) quando presente; senão o informado pela loja.
 const VALUE_EXPR = "COALESCE(NULLIF(system_total, 0), informed_total)";
+// Fechamento cujo total de venda é CONFIÁVEL — vira caixa/receita SEM aprovação
+// manual. Duas fontes de confiança (a doc do serviço: "ou um humano aprovou, ou
+// o SISTEMA DO PDV confirmou"):
+//   1. `system_total > 0` → o PDV/Alterdata reportou o total do dia (verdade do
+//      caixa). É o caso da Toulon: o sync grava system_total e o fechamento nasce
+//      'pending' — mas o PDV já confirmou, então conta automaticamente.
+//   2. status aprovado/conciliado por um humano (sem PDV, usa o informado).
+// `rejected` NUNCA conta (um humano recusou). Mesma régua do resultado
+// consolidado (RetailStoreCostService.monthlyRevenueAll usa status != 'rejected'),
+// então Caixa/Diretor/DRE-consolidado batem entre si.
+const ELIGIBLE_PREDICATE =
+  `status != 'rejected' AND (system_total > 0 OR status IN ('approved','reconciled','divergent')) AND ${VALUE_EXPR} > 0`;
 
 export interface BridgeClosing { id: string; store_id: string; closing_date: string; value: number; }
 
@@ -55,7 +65,7 @@ export class RetailRevenueBridgeService {
       const rows = db.prepare(
         `SELECT id, store_id, closing_date, ${VALUE_EXPR} AS value
            FROM retail_daily_closings
-          WHERE organization_id = ? AND status IN ${ELIGIBLE_STATUSES} AND ${VALUE_EXPR} > 0`
+          WHERE organization_id = ? AND ${ELIGIBLE_PREDICATE}`
       ).all(orgId) as any[];
       return rows.map((r) => ({ id: String(r.id), store_id: String(r.store_id), closing_date: String(r.closing_date).slice(0, 10), value: round2(r.value) }));
     } catch { return []; }
@@ -67,7 +77,7 @@ export class RetailRevenueBridgeService {
       const r = db.prepare(
         `SELECT COALESCE(SUM(${VALUE_EXPR}), 0) s
            FROM retail_daily_closings
-          WHERE organization_id = ? AND status IN ${ELIGIBLE_STATUSES}
+          WHERE organization_id = ? AND ${ELIGIBLE_PREDICATE}
             AND strftime('%Y-%m', closing_date) = ?`
       ).get(orgId, period) as any;
       return round2(r.s);
@@ -92,7 +102,7 @@ export class RetailRevenueBridgeService {
       const r = db.prepare(
         `SELECT COALESCE(SUM(${VALUE_EXPR}), 0) s
            FROM retail_daily_closings
-          WHERE organization_id = ? AND status IN ${ELIGIBLE_STATUSES} AND ${VALUE_EXPR} > 0
+          WHERE organization_id = ? AND ${ELIGIBLE_PREDICATE}
             ${this.periodWhere("closing_date", period)}`
       ).get(orgId) as any;
       return round2(r.s);

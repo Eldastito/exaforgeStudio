@@ -16,6 +16,8 @@ import { AlterdataSyncRunner } from "../AlterdataSyncRunner.js";
 import { AlterdataReadinessService } from "../AlterdataReadinessService.js";
 import { AlterdataSyncLedgerService, type LedgerRunStatus } from "../AlterdataSyncLedgerService.js";
 import { formatSyncOutcome } from "../AlterdataSyncMessage.js";
+import { AlterdataPromotionService } from "../AlterdataPromotionService.js";
+import { AlterdataLgpdApprovalService } from "../AlterdataLgpdApprovalService.js";
 import type { AlterdataEnvironment } from "../AlterdataProfileService.js";
 import { JobQueueService } from "../JobQueueService.js";
 
@@ -581,6 +583,67 @@ router.get("/alterdata/runs/:id", (req: AuthRequest, res): any => {
   if (!detail) return res.status(404).json({ ok: false, error: "run não encontrada" });
   if (detail.run.organization_id !== req.organizationId) return res.status(403).json({ ok: false, error: "run de outra org" });
   res.json({ ok: true, ...detail });
+});
+
+// PRD RF-11/RF-16 (PR 6): promoção formal do env pra 'validated' + registro
+// LGPD. `dry-run` (query ?dry=1) devolve blockers sem gravar — a UI usa esse
+// modo pra habilitar/desabilitar o botão "Promover".
+router.post("/alterdata/promote", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = String((req.body?.environment as string | undefined) || (req.query.environment as string | undefined) || "").toLowerCase();
+  const environment: AlterdataEnvironment = raw === "prod" ? "prod" : "homolog";
+  const dry = req.query.dry === "1" || req.body?.dry === true;
+  try {
+    if (dry) {
+      const r = AlterdataPromotionService.validate(req.organizationId, environment);
+      return res.json({ ok: true, dry: true, result: r });
+    }
+    const userId = (req as any).userId;
+    if (!userId) return res.status(401).json({ ok: false, error: "user id ausente pra registrar aprovação" });
+    const result = AlterdataPromotionService.promote(req.organizationId, environment, {
+      approvedBy: userId, note: String(req.body?.note || "").slice(0, 500),
+    });
+    logAuthEvent(req.organizationId, userId, null, 'ALTERDATA_PROMOTE', {
+      environment, outcome: result.outcome, blockers: result.blockers.length,
+    });
+    res.json({ ok: true, result });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "Falha ao promover." });
+  }
+});
+
+// PRD RF-16 (PR 6): registra aprovação LGPD pra dados pessoais capturados
+// pela integração. Sem essa aprovação, promote() e /settings bloqueiam
+// pdvCustomerImport em produção. Toda aprovação fica no histórico
+// (audit trail — nunca DELETE, só revoke).
+router.post("/alterdata/lgpd-approvals", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const userId = (req as any).userId;
+  if (!userId) return res.status(401).json({ ok: false, error: "user id ausente" });
+  const b = req.body || {};
+  try {
+    const rec = AlterdataLgpdApprovalService.record({
+      orgId: req.organizationId,
+      purpose: String(b.purpose || "").trim() || "pdvCustomerImport",
+      legalBasis: String(b.legalBasis || "").trim(),
+      approvedBy: userId,
+      approvedByEmail: b.approvedByEmail ? String(b.approvedByEmail) : null,
+      retentionDays: b.retentionDays != null ? Math.max(0, Math.floor(Number(b.retentionDays))) : null,
+      accessProfile: b.accessProfile ? String(b.accessProfile).slice(0, 200) : null,
+      notes: b.notes ? String(b.notes).slice(0, 2000) : null,
+    });
+    logAuthEvent(req.organizationId, userId, null, 'ALTERDATA_LGPD_APPROVAL', { purpose: b.purpose, legalBasis: b.legalBasis, id: rec.id });
+    res.json({ ok: true, ...rec });
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: e?.message || "Falha ao registrar aprovação LGPD." });
+  }
+});
+
+router.get("/alterdata/lgpd-approvals", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const purpose = req.query.purpose ? String(req.query.purpose) : undefined;
+  const rows = AlterdataLgpdApprovalService.listHistory(req.organizationId, purpose, 100);
+  res.json({ ok: true, approvals: rows });
 });
 
 // Testa a emissão do token no Guardian com as credenciais gravadas (ADR-105).

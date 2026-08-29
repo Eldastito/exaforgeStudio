@@ -99,6 +99,7 @@
     "test:alterdata-golive-ledger": "tsx scripts/test-alterdata-golive-ledger.ts",
     "test:alterdata-golive-readiness": "tsx scripts/test-alterdata-golive-readiness.ts",
     "test:alterdata-golive-sync-message": "tsx scripts/test-alterdata-golive-sync-message.ts",
+    "test:alterdata-golive-promotion-lgpd": "tsx scripts/test-alterdata-golive-promotion-lgpd.ts",
     "seed:product-evolution-ledger": "tsx scripts/seed-product-evolution-ledger.ts",
     "seed:studio-visual-recipes": "tsx scripts/seed-studio-visual-recipes.ts",
     "test:slo-definition": "tsx scripts/test-slo-definition.ts",

@@ -69,3 +69,16 @@ export function sumBandeiras(
   for (const b of knownBrands) total += parse(String(state[b] ?? ""));
   return Math.round(total * 100) / 100;
 }
+
+/**
+ * P.A do vendedor no ranking = PEÇAS ÷ ATENDIMENTOS (peças por atendimento).
+ * Ex.: 5 peças em 3 atendimentos → 1,67; 30 peças em 10 → 3,00. Sem
+ * atendimentos (ou peças), não há P.A (retorna null → a tela mostra "—").
+ * Arredonda em 2 casas.
+ */
+export function paDe(pecas: unknown, atendimentos: unknown): number | null {
+  const p = Number(pecas);
+  const a = Number(atendimentos);
+  if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0 || p <= 0) return null;
+  return Math.round((p / a) * 100) / 100;
+}

@@ -239,8 +239,8 @@ export class RetailClosingService {
       .map((d: any) => ({ descricao: String(d?.descricao || "").trim(), valor: num(d?.valor) }))
       .filter((d: any) => d.descricao && d.valor > 0);
     const ranking = (Array.isArray(details?.ranking) ? details.ranking : [])
-      .map((r: any) => ({ sellerName: String(r?.sellerName || "").trim(), valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0 }))
-      .filter((r: any) => r.sellerName && (r.valor > 0 || r.pecas > 0 || r.atendimentos > 0));
+      .map((r: any) => ({ sellerName: String(r?.sellerName || "").trim(), valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0, produtos: Number(r?.produtos || 0) || 0 }))
+      .filter((r: any) => r.sellerName && (r.valor > 0 || r.pecas > 0 || r.atendimentos > 0 || r.produtos > 0));
 
     const totalCredito = num(sumMap(credito));
     const totalDebito = num(sumMap(debito));

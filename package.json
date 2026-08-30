@@ -84,6 +84,7 @@
     "test:product-evolution-github-sync": "tsx scripts/test-product-evolution-github-sync.ts",
     "test:studio-visual-recipes": "tsx scripts/test-studio-visual-recipes.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",
+    "test:visual-generation-kernel": "tsx scripts/test-visual-generation-kernel.ts",
     "test:studio-visual-recipes-analytics": "tsx scripts/test-studio-visual-recipes-analytics.ts",
     "test:studio-visual-recipes-suggest": "tsx scripts/test-studio-visual-recipes-suggest.ts",
     "test:studio-visual-recipes-aliases": "tsx scripts/test-studio-visual-recipes-aliases.ts",

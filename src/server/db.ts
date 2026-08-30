@@ -169,6 +169,34 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_studio_creations_org ON studio_creations (organization_id, created_at);
 
+    -- DUP-004 — Cache canônico do VisualGenerationKernel (reuso de imagem
+    -- idêntica). Chave = (org, input_hash) do prompt+size+operação: a MESMA
+    -- entrada não paga geração no provider de novo — reaproveita a mídia já
+    -- gerada. Isolado por org. A coluna hits conta os reaproveitamentos.
+    CREATE TABLE IF NOT EXISTS visual_generation_cache (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      input_hash TEXT NOT NULL,
+      operation TEXT NOT NULL DEFAULT 'generate',
+      provider TEXT,
+      media_url TEXT NOT NULL,
+      size TEXT,
+      recipe_key TEXT,
+      hits INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(organization_id, input_hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_visual_gen_cache_org ON visual_generation_cache (organization_id, input_hash);
+
+    -- Marcador de migrações que rodam UMA vez no boot (rollouts que não devem
+    -- se repetir a cada reinício — ex.: ligar o Estúdio global respeitando quem
+    -- depois desligar). Presença da key = já rodou.
+    CREATE TABLE IF NOT EXISTS app_one_time_migrations (
+      key TEXT PRIMARY KEY,
+      done_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     -- Estúdio: agendamento de posts no Instagram por objetivo de campanha.
     CREATE TABLE IF NOT EXISTS scheduled_posts (
       id TEXT PRIMARY KEY,

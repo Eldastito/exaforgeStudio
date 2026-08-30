@@ -20,10 +20,9 @@
  */
 import { v4 as uuidv4 } from "uuid";
 import { randomUUID } from "crypto";
-import path from "path";
-import fs from "fs";
 import db from "./db.js";
 import { generateImageB64 as defaultGenerateImageB64, chat as llmChat, isAIConfigured } from "./llm.js";
+import { VisualGenerationKernel } from "./VisualGenerationKernel.js";
 
 export const RECIPE_KEY_REGEX = /^[A-Z][A-Z0-9_]{2,63}$/;
 
@@ -46,17 +45,7 @@ function mapFormatToSize(format: SupportedFormat): ImageSize {
   return "1024x1024";
 }
 
-// Diretório de mídia (mesmo padrão do StudioService).
-const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
-try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch { /* noop */ }
-
-/** Salva base64 → arquivo em MEDIA_DIR e retorna URL relativa (/media/xxx.png). */
-function saveMediaB64(b64: string, ext = "png"): string {
-  const name = `${randomUUID()}.${ext}`;
-  const buf = Buffer.from(b64, "base64");
-  fs.writeFileSync(path.join(MEDIA_DIR, name), buf);
-  return `/media/${name}`;
-}
+// A escrita da mídia agora é do VisualGenerationKernel (storage + cache/reuso).
 
 export interface RecipeRow {
   id: string;
@@ -443,7 +432,7 @@ export class StudioVisualRecipeService {
     brand_hint?: string;                 // texto opcional pra contextualizar marca
   }): Promise<{
     id: string; mediaUrl: string; prompt: string;
-    recipe_key: string; recipe_version: number;
+    recipe_key: string; recipe_version: number; reused: boolean;
   }> {
     if (!input.orgId) throw new VisualRecipeError("missing_org", "orgId é obrigatório");
 
@@ -467,13 +456,22 @@ export class StudioVisualRecipeService {
     }
     const finalPrompt = parts.join(". ");
 
-    // Mapeia formato → size do generateImageB64 (só 3 sizes suportados).
+    // Mapeia formato → size do provider (só 3 sizes suportados).
     const size = mapFormatToSize(input.format);
 
-    const b64 = await this.imageGenerator(finalPrompt, size);
-    if (!b64) throw new VisualRecipeError("provider_empty", "provider retornou vazio");
-
-    const mediaUrl = saveMediaB64(b64, "png");
+    // Geração via VisualGenerationKernel: entrada idêntica reaproveita a mídia
+    // já gerada (não paga provider de novo). Passa o `imageGenerator` do Studio
+    // como override para preservar a injeção de teste + o gate de plano da rota.
+    let result;
+    try {
+      result = await VisualGenerationKernel.generate(
+        { orgId: input.orgId, prompt: finalPrompt, size, recipeKey: plan.recipe_key },
+        (p, s) => this.imageGenerator(p, s as ImageSize),
+      );
+    } catch (e: any) {
+      throw new VisualRecipeError("provider_empty", e?.message || "provider retornou vazio");
+    }
+    const mediaUrl = result.mediaUrl;
     const id = randomUUID();
     // Registra em studio_creations com marcador do recipe usado no prompt
     // (não altera schema; a marca fica no prompt como comentário estruturado).
@@ -486,6 +484,7 @@ export class StudioVisualRecipeService {
       id, mediaUrl, prompt: finalPrompt,
       recipe_key: plan.recipe_key,
       recipe_version: plan.recipe_version,
+      reused: result.reused,
     };
   }
 

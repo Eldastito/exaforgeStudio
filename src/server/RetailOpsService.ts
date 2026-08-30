@@ -148,6 +148,11 @@ export class RetailClosingService {
   }, actorId?: string): any | null {
     const c = this.get(orgId, id);
     if (!c) return null;
+    // CLOSE-002: trava — não informar fechamento em loja de FOLGA GERAL no dia
+    // (tem escala no dia e ninguém 'work'). Evita lançamento no dia/loja errado.
+    if (this.isStoreClosedOnDate(orgId, c.store_id, c.closing_date)) {
+      throw new Error("Loja fechada nesse dia (todos de folga na escala) — não é possível informar fechamento. Ajuste a escala se alguém trabalhou.");
+    }
     const informed = Number(input.informedTotal || 0);
     const quota = Number(c.quota_amount || 0);
     const variance = informed - quota;
@@ -174,6 +179,39 @@ export class RetailClosingService {
     RetailAnalyticsCache.invalidate(orgId); // PERF-005: fechamento mudou o número
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_CLOSING_INFORMED", { informed, quota, variance }); } catch { /* noop */ }
     return this.get(orgId, id);
+  }
+
+  /**
+   * CLOSE-002 — a loja está FECHADA no dia? Verdadeiro quando HÁ escala nesse
+   * dia e ninguém está 'work' (folga geral). Sem escala lançada no dia →
+   * false (não trava à toa). Mesma regra da trava da cota (QUOTA-002).
+   */
+  static isStoreClosedOnDate(orgId: string, storeId: string, date: string): boolean {
+    const r = db.prepare(
+      `SELECT COUNT(*) total, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) working
+         FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ?`
+    ).get(orgId, storeId, date) as any;
+    return Number(r?.total || 0) > 0 && Number(r?.working || 0) === 0;
+  }
+
+  /**
+   * CLOSE-003 — Exclui o fechamento do dia da loja (status/informado/itens) E a
+   * cota daquele dia (o snapshot da tela some e não ressuscita ao reinformar).
+   * Usado pra limpar um lançamento errado. Retorna true se removeu algo.
+   */
+  static remove(orgId: string, id: string, actorId?: string): boolean {
+    const c = db.prepare(`SELECT store_id, closing_date FROM retail_daily_closings WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!c) return false;
+    const tx = db.transaction(() => {
+      db.prepare(`DELETE FROM retail_daily_closing_items WHERE closing_id = ?`).run(id);
+      db.prepare(`DELETE FROM retail_daily_closings WHERE organization_id = ? AND id = ?`).run(orgId, id);
+      // Também zera a cota do dia dessa loja (a coluna Cota da tela vem daqui).
+      db.prepare(`DELETE FROM retail_store_quotas WHERE organization_id = ? AND store_id = ? AND quota_date = ?`).run(orgId, c.store_id, c.closing_date);
+    });
+    tx();
+    RetailAnalyticsCache.invalidate(orgId);
+    try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_CLOSING_DELETED", { storeId: c.store_id, date: c.closing_date }); } catch { /* noop */ }
+    return true;
   }
 
   static setStatus(orgId: string, id: string, status: string, actorId?: string): any | null {
@@ -302,6 +340,10 @@ export class RetailClosingService {
    * registro — vira flag pra conferência humana na aprovação (D4).
    */
   static submitDetailed(orgId: string, storeId: string, date: string, details: any, opts: { source?: string; imageUrl?: string | null } = {}, actorId?: string): any | null {
+    // CLOSE-002: mesma trava do setInformed — loja de folga geral não informa.
+    if (this.isStoreClosedOnDate(orgId, storeId, date)) {
+      throw new Error("Loja fechada nesse dia (todos de folga na escala) — não é possível informar fechamento. Ajuste a escala se alguém trabalhou.");
+    }
     const closing = this.getOrCreate(orgId, storeId, date);
     const num = (v: any) => Math.round((Number(v) || 0) * 100) / 100;
     const sumMap = (m: any) => Object.values(m || {}).reduce((a: number, v: any) => a + num(v), 0);

@@ -1803,6 +1803,14 @@ function ClosingsTab() {
     if (res.ok) { toast.success(action === 'approve' ? 'Fechamento aprovado.' : 'Fechamento rejeitado.'); load(); }
     else toast.error('Falha ao atualizar o fechamento.');
   };
+  // CLOSE-003: apaga um fechamento errado (status/informado) E a cota do dia
+  // dessa loja — a coluna Cota da tela vem do snapshot do fechamento.
+  const removeClosing = async (c: any, storeName: string) => {
+    if (!window.confirm(`Excluir o fechamento de "${storeName}" no dia ${date.split('-').reverse().join('/')}?\n\nApaga o status/informado E a cota do dia desta loja. Use pra limpar um lançamento errado.`)) return;
+    const res = await apiFetch(`/api/retailops/closings/${c.id}`, { method: 'DELETE' });
+    if (res.ok) { toast.success('Fechamento excluído.'); load(); }
+    else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao excluir o fechamento.'); }
+  };
 
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 
@@ -1908,6 +1916,7 @@ function ClosingsTab() {
                             <button onClick={() => setStatus(c, 'reject')} title="Rejeitar" className="rounded border border-red-500/40 px-1.5 py-0.5 text-red-300 hover:bg-red-500/10"><X className="w-3.5 h-3.5" /></button>
                           </>
                         )}
+                        {c && <button onClick={() => removeClosing(c, s.name)} title="Excluir este fechamento e a cota do dia (limpar lançamento errado)" className="rounded border border-zinc-800 px-1.5 py-0.5 text-zinc-500 hover:text-red-300 hover:border-red-500/40"><Trash2 className="w-3.5 h-3.5" /></button>}
                       </div>
                     </td>
                   </tr>

@@ -1399,9 +1399,21 @@ router.post("/closings/:id/inform", requireRole("owner", "admin"), (req: AuthReq
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { informedTotal, items } = req.body || {};
-  const c = RetailClosingService.setInformed(orgId, req.params.id, { informedTotal: Number(informedTotal || 0), items, source: "manual" }, req.user?.userId);
-  if (!c) return res.status(404).json({ error: "closing_not_found" });
-  res.json(c);
+  try {
+    const c = RetailClosingService.setInformed(orgId, req.params.id, { informedTotal: Number(informedTotal || 0), items, source: "manual" }, req.user?.userId);
+    if (!c) return res.status(404).json({ error: "closing_not_found" });
+    res.json(c);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// CLOSE-003: exclui o fechamento do dia da loja (e a cota do dia) — pra limpar
+// um lançamento errado. A coluna Cota da tela vem do snapshot do fechamento.
+router.delete("/closings/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = RetailClosingService.remove(orgId, String(req.params.id), req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "closing_not_found" });
+  res.json({ ok: true });
 });
 
 router.post("/closings/:id/approve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -1545,6 +1557,10 @@ router.post("/closings/scan", (req: AuthRequest, res): any => {
     const date = String(req.body?.date || new Date().toISOString().slice(0, 10));
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
     if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    // CLOSE-002: trava — loja de folga geral no dia não recebe fechamento nem por foto.
+    if (RetailClosingService.isStoreClosedOnDate(orgId, storeId, String(date).slice(0, 10))) {
+      return res.status(400).json({ error: "Loja fechada nesse dia (todos de folga na escala) — não é possível informar fechamento." });
+    }
     try {
       const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
       let imageUrl: string | null = null;

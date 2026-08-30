@@ -82,3 +82,23 @@ export function paDe(pecas: unknown, atendimentos: unknown): number | null {
   if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0 || p <= 0) return null;
   return Math.round((p / a) * 100) / 100;
 }
+
+/**
+ * DUPLA CHECAGEM DA IA (pedido do lojista): quando o formulário foi
+ * pré-preenchido por uma foto (OCR), o humano PRECISA confirmar que os valores
+ * batem com a folha ANTES de salvar — a plataforma não pode gravar um número
+ * que ela mesma leu sem um "ok" humano. Preenchimento 100% manual não exige
+ * confirmação (não veio da IA). Retorna se o "Salvar" pode habilitar.
+ *
+ * `scanPending` = veio de foto e ainda não foi confirmado nesta leitura;
+ * `scanConfirmed` = o humano marcou "conferi os valores com a foto".
+ */
+export function canSaveClosing(input: {
+  totalVendas: number;
+  scanPending: boolean;
+  scanConfirmed: boolean;
+}): boolean {
+  if (!(Number(input.totalVendas) > 0)) return false; // sem valor não salva
+  if (input.scanPending && !input.scanConfirmed) return false; // IA sem conferência humana
+  return true;
+}

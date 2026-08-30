@@ -89,6 +89,7 @@
     "test:retail-closing-guard-delete": "tsx scripts/test-retail-closing-guard-delete.ts",
     "test:retail-closing-bandeiras": "tsx scripts/test-retail-closing-bandeiras.ts",
     "test:retail-ranking-pa": "tsx scripts/test-retail-ranking-pa.ts",
+    "test:retail-closing-savegate": "tsx scripts/test-retail-closing-savegate.ts",
     "test:retail-day-roster": "tsx scripts/test-retail-day-roster.ts",
     "test:retail-quota-for-date": "tsx scripts/test-retail-quota-for-date.ts",
     "test:retail-day-roster-infer": "tsx scripts/test-retail-day-roster-infer.ts",

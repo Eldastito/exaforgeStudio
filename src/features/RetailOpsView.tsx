@@ -5,6 +5,7 @@ import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 import { parseMoneyBR } from './retailMoney';
+import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2194,7 +2195,7 @@ function AddBrandRow({ onAdd }: { onAdd: (name: string) => void | Promise<void> 
 // POR BANDEIRA (configuráveis por loja), despesas, ranking por vendedor
 // (valor/AT/peças — pré-preenchido pela escala do dia), cadastros, boletas,
 // malote e conferência com o resumo do POS. Foto da folha pré-preenche (IA).
-type RankRow = { sellerName: string; valor: string; at: string; pecas: string };
+type RankRow = { sellerName: string; valor: string; at: string; pecas: string; produtos: string };
 type DespesaRow = { descricao: string; valor: string };
 // POS-003/004 (Fatia 3): custo esperado das tarifas do POS a partir do resumo.
 // Usa a regra detalhada (crédito/débito) quando existe, senão a taxa agregada.
@@ -2234,7 +2235,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [credito, setCredito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.credito || {}).map(([k, v]) => [k, String(v)])));
   const [debito, setDebito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.debito || {}).map(([k, v]) => [k, String(v)])));
   const [despesas, setDespesas] = useState<DespesaRow[]>(() => (existing.despesas || []).map((d: any) => ({ descricao: d.descricao, valor: String(d.valor) })));
-  const [ranking, setRanking] = useState<RankRow[]>(() => (existing.ranking || []).map((r: any) => ({ sellerName: r.sellerName, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' })));
+  const [ranking, setRanking] = useState<RankRow[]>(() => (existing.ranking || []).map((r: any) => ({ sellerName: r.sellerName, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' })));
   const [cadastros, setCadastros] = useState(existing.cadastros ? String(existing.cadastros) : '');
   const [boletaInicial, setBoletaInicial] = useState(existing.boletaInicial || '');
   const [boletaFinal, setBoletaFinal] = useState(existing.boletaFinal || '');
@@ -2359,7 +2360,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       // gerente. Mantém as linhas com dado e acrescenta só os vendedores da foto
       // que ainda não estão na lista (match por nome).
       if (Array.isArray(x.ranking) && x.ranking.length) {
-        const photoRows: RankRow[] = x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '' }));
+        const photoRows: RankRow[] = x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' }));
         setRanking(prev => {
           const typed = prev.filter(r => r.sellerName.trim() || r.valor || r.at || r.pecas);
           if (!typed.length) return photoRows;
@@ -2387,7 +2388,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         credito: Object.fromEntries(Object.entries(credito).map(([k, v]) => [k, n(String(v ?? ''))])),
         debito: Object.fromEntries(Object.entries(debito).map(([k, v]) => [k, n(String(v ?? ''))])),
         despesas: despesas.map(d => ({ descricao: d.descricao, valor: n(d.valor) })),
-        ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas) })).filter(r => r.sellerName),
+        ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas), produtos: parseInt(String(r.produtos).replace(/[^0-9]/g, ''), 10) || 0 })).filter(r => r.sellerName),
         cadastros: n(cadastros), boletaInicial, boletaFinal, malote, premioDia, obs,
         pos: n(posCred) > 0 || n(posDeb) > 0 ? { creditoValor: n(posCred), creditoQtd: n(posCredQtd), debitoValor: n(posDeb), debitoQtd: n(posDebQtd) } : null,
       };
@@ -2495,26 +2496,28 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         <div className="mt-3 rounded-lg border border-zinc-800 p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Ranking por vendedor · {brl(rankingTotal)}</span>
-            <button onClick={() => setRanking(p => [...p, { sellerName: '', valor: '', at: '', pecas: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
+            <button onClick={() => setRanking(p => [...p, { sellerName: '', valor: '', at: '', pecas: '', produtos: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
           </div>
-          <p className="mb-2 text-[10px] text-zinc-600">Na aprovação, essas linhas viram as vendas por vendedor da comissão/corrida (AT = atendimentos, o denominador do P.A).{escalados.length ? ' Pré-preenchido pela escala do dia.' : ''}</p>
+          <p className="mb-2 text-[10px] text-zinc-600">Na aprovação, essas linhas viram as vendas por vendedor da comissão/corrida (AT = atendimentos, o denominador do P.A). Prod = produtos DIFERENTES (códigos/nomes distintos) — usado pra contar as boletas ({PRODUTOS_POR_BOLETA} por boleta).{escalados.length ? ' Pré-preenchido pela escala do dia.' : ''}</p>
           {/* CLOSE-001: cabeçalho só no desktop; no mobile cada vendedor vira cartão */}
-          <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-zinc-500">
-            <span>Vendedor</span><span className="w-24 text-right">Valor</span><span className="w-12 text-right">AT</span><span className="w-12 text-right">Peças</span><span className="w-5"></span>
+          <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-zinc-500">
+            <span>Vendedor</span><span className="w-24 text-right">Valor</span><span className="w-12 text-right">AT</span><span className="w-12 text-right">Peças</span><span className="w-12 text-right">Prod</span><span className="w-5"></span>
           </div>
           {ranking.map((r, i) => (
-            <div key={i} className="mt-1.5 sm:mt-1 rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto] sm:gap-1.5 sm:items-center">
+            <div key={i} className="mt-1.5 sm:mt-1 rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto_auto] sm:gap-1.5 sm:items-center">
               <div className="flex items-center gap-1.5">
                 <input value={r.sellerName} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: e.target.value } : x))} placeholder="Nome do vendedor" className={`${inp} flex-1`} />
                 <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="shrink-0 text-zinc-600 hover:text-red-300 sm:hidden"><Trash2 className="w-4 h-4" /></button>
               </div>
-              <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:mt-0 sm:contents">
+              <div className="mt-1.5 grid grid-cols-4 gap-1.5 sm:mt-0 sm:contents">
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Valor</span>
                   <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))} placeholder="0,00" className={`${inp} w-full text-right sm:w-24`} /></label>
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">AT</span>
                   <input inputMode="numeric" value={r.at} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, at: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Peças</span>
                   <input inputMode="numeric" value={r.pecas} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, pecas: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
+                <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Prod</span>
+                  <input inputMode="numeric" value={r.produtos} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, produtos: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
               </div>
               <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="hidden sm:block text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
@@ -2555,6 +2558,18 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
               <label className="text-xs text-zinc-400">Boleta final
                 <input value={boletaFinal} onChange={e => setBoletaFinal(e.target.value)} placeholder="017757" className={inp} />
               </label>
+              {/* BOL-007: estimativa AO VIVO pelos PRODUTOS lançados no ranking —
+                  nova boleta a cada 5, a partir da inicial (não espera o PDV). */}
+              {(() => {
+                const totalBol = boletasEsperadas(ranking.map(r => r.produtos));
+                if (totalBol <= 0) return null;
+                const finalEsp = boletaFinalEsperada(boletaInicial, totalBol);
+                const infFinal = String(boletaFinal).replace(/\D/g, '');
+                const bate = finalEsp && infFinal && parseInt(infFinal, 10) === parseInt(String(finalEsp).replace(/\D/g, ''), 10);
+                return <p className={`col-span-2 text-[11px] ${!boletaFinal ? 'text-cyan-300' : bate ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  Pelos produtos lançados: <strong>{totalBol}</strong> boleta(s) ({PRODUTOS_POR_BOLETA} produtos por boleta){boletaInicial && finalEsp ? <> — de <strong>{boletaInicial}</strong> a <strong>{finalEsp}</strong></> : ''}{boletaFinal && finalEsp ? (bate ? ' · bate com a boleta final informada.' : ' · difere da final informada — confira.') : ''}
+                </p>;
+              })()}
               {boletaClicks != null && boletaInicial && boletaFinal && (() => {
                 const range = parseInt(String(boletaFinal).replace(/\D/g, ''), 10) - parseInt(String(boletaInicial).replace(/\D/g, ''), 10) + 1;
                 const ok = range === boletaClicks;

@@ -6,6 +6,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 import { parseMoneyBR } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
+import { reconcileBandeiras, sumBandeiras } from './retailClosingForm';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2343,8 +2344,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   };
 
   const n = parseMoneyBR; // parser BR à prova de milhar (corrige o "Informado")
-  const totalCredito = useMemo(() => Object.values(credito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [credito]);
-  const totalDebito = useMemo(() => Object.values(debito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [debito]);
+  // Subtotais SOMENTE sobre as bandeiras cadastradas (visíveis) — nunca sobre
+  // chaves soltas do estado. Evita o "fantasma" (ex.: uma bandeira do POS que a
+  // IA injetou e não aparece como campo, mas inflava o débito). Ver retailClosingForm.
+  const totalCredito = useMemo(() => sumBandeiras(credito, brands?.credito || [], n), [credito, brands]);
+  const totalDebito = useMemo(() => sumBandeiras(debito, brands?.debito || [], n), [debito, brands]);
   const totalVendas = useMemo(() => n(dinheiro) + n(pix) + totalCredito + totalDebito + n(voucher) + n(troca) + n(outros), [dinheiro, pix, totalCredito, totalDebito, voucher, troca, outros]);
   const totalDespesas = useMemo(() => despesas.reduce((a, d) => a + n(d.valor), 0), [despesas]);
   const rankingTotal = useMemo(() => ranking.reduce((a, r) => a + n(r.valor), 0), [ranking]);
@@ -2380,9 +2384,19 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       if (x.pix != null) setPix(String(x.pix));
       if (x.voucher != null) setVoucher(String(x.voucher));
       if (x.troca != null) setTroca(String(x.troca));
-      if (x.creditoBandeiras) setCredito(Object.fromEntries(Object.entries(x.creditoBandeiras).map(([k, v]) => [k, String(v)])));
+      // Bandeiras: só entram as CADASTRADAS da loja — o resto (POS, rótulo de
+      // total "Débito"/"Crédito") é ignorado pra não virar fantasma no subtotal.
+      if (x.creditoBandeiras) {
+        const { values, ignored } = reconcileBandeiras(x.creditoBandeiras, brands?.credito || []);
+        setCredito(values);
+        if (ignored.length) toast.info(`Crédito: ignorei bandeira(s) não cadastrada(s): ${ignored.join(', ')}. Confira o subtotal.`);
+      }
       else if (x.credito != null && brands?.credito?.length) setCredito({ [brands.credito[0]]: String(x.credito) });
-      if (x.debitoBandeiras) setDebito(Object.fromEntries(Object.entries(x.debitoBandeiras).map(([k, v]) => [k, String(v)])));
+      if (x.debitoBandeiras) {
+        const { values, ignored } = reconcileBandeiras(x.debitoBandeiras, brands?.debito || []);
+        setDebito(values);
+        if (ignored.length) toast.info(`Débito: ignorei bandeira(s) não cadastrada(s): ${ignored.join(', ')}. Confira o subtotal.`);
+      }
       else if (x.debito != null && brands?.debito?.length) setDebito({ [brands.debito[0]]: String(x.debito) });
       if (Array.isArray(x.despesas) && x.despesas.length) setDespesas(x.despesas.map((dd: any) => ({ descricao: String(dd.descricao || ''), valor: dd.valor ? String(dd.valor) : '' })));
       // CLOSE-003: a foto ENRIQUECE o ranking — NÃO apaga linhas já digitadas pelo
@@ -2417,8 +2431,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
     try {
       const details = {
         dinheiro: n(dinheiro), pix: n(pix), voucher: n(voucher), troca: n(troca), outros: n(outros),
-        credito: Object.fromEntries(Object.entries(credito).map(([k, v]) => [k, n(String(v ?? ''))])),
-        debito: Object.fromEntries(Object.entries(debito).map(([k, v]) => [k, n(String(v ?? ''))])),
+        // Só as bandeiras cadastradas vão pro servidor — nada de chave fantasma.
+        credito: Object.fromEntries((brands?.credito || []).map(b => [b, n(String(credito[b] ?? ''))])),
+        debito: Object.fromEntries((brands?.debito || []).map(b => [b, n(String(debito[b] ?? ''))])),
         despesas: despesas.map(d => ({ descricao: d.descricao, valor: n(d.valor) })),
         ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas), produtos: parseInt(String(r.produtos).replace(/[^0-9]/g, ''), 10) || 0 })).filter(r => r.sellerName),
         cadastros: n(cadastros), boletaInicial, boletaFinal, malote, premioDia, obs,

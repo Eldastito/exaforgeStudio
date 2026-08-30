@@ -4129,10 +4129,13 @@ function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: stri
   );
 }
 
-// Card "quem folga hoje/amanhã" (Fase G2b) — reusável em ScheduleTab e ClosingsTab.
-// Junta grade lançada 'off' + template pra cada dia dos próximos 2 dias.
+// Card "escala do dia" (Fase G2b) — reusável em ScheduleTab e ClosingsTab.
+// Agrupa POR LOJA: quem TRABALHA (verde) e quem FOLGA (vermelho) hoje, mais
+// uma linha compacta de quem folga amanhã. Com muitas lojas, a lista chapada
+// virava um paredão de nomes — por isso cada loja é um bloco com seu nome no
+// topo. Dados vêm de /schedule/day-roster (hoje) e /schedule/who-off (amanhã).
 function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; className?: string }) {
-  const [today, setToday] = useState<any[]>([]);
+  const [stores, setStores] = useState<any[]>([]);
   const [tomorrow, setTomorrow] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const todayIso = todayStr();
@@ -4141,35 +4144,63 @@ function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; cl
     setLoading(true);
     const qs = (d: string) => `date=${d}${storeId ? `&storeId=${storeId}` : ''}`;
     Promise.all([
-      apiFetch(`/api/retailops/schedule/who-off?${qs(todayIso)}`).then(r => r.json()).catch(() => ({})),
+      apiFetch(`/api/retailops/schedule/day-roster?${qs(todayIso)}`).then(r => r.json()).catch(() => ({})),
       apiFetch(`/api/retailops/schedule/who-off?${qs(tomorrowIso)}`).then(r => r.json()).catch(() => ({})),
     ]).then(([t, m]) => {
-      setToday(Array.isArray(t?.sellers) ? t.sellers : []);
+      setStores(Array.isArray(t?.stores) ? t.stores : []);
       setTomorrow(Array.isArray(m?.sellers) ? m.sellers : []);
     }).finally(() => setLoading(false));
     // eslint-disable-next-line
   }, [storeId, todayIso]);
   if (loading) return null;
-  // Sempre exibe o card — mesmo com ninguém de folga; ver "ninguém" também é
-  // informação (confirma que não tem gap na equipe hoje).
-  const renderList = (list: any[]) => {
-    if (list.length === 0) return <span className="text-zinc-500">ninguém</span>;
-    return list.map((s, i) => (
-      <span key={`${s.storeId}-${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
-        {i > 0 && <span className="text-zinc-700">·</span>}
-        <span className="text-zinc-100">{s.sellerName || s.sellerKey}</span>
-        {!storeId && s.storeName && <span className="text-[10px] text-zinc-500">({s.storeName})</span>}
-        {s.source === 'template' && <span className="text-[9px] text-zinc-600" title="Vem do template — ainda não foi lançado na grade">tmpl</span>}
-      </span>
-    ));
-  };
+
+  // Uma pessoa (verde=trabalha, vermelho=folga). `tmpl` marca quem veio do
+  // template e ainda não foi lançado na grade.
+  const person = (s: any, tone: 'work' | 'off', i: number) => (
+    <span key={`${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
+      {i > 0 && <span className="text-zinc-700">·</span>}
+      <span className={tone === 'work' ? 'text-emerald-300' : 'text-red-300'}>{s.sellerName || s.sellerKey}</span>
+      {s.source === 'template' && <span className="text-[9px] text-zinc-600" title="Vem do template — ainda não foi lançado na grade">tmpl</span>}
+    </span>
+  );
+  const line = (label: string, dot: string, color: string, list: any[], tone: 'work' | 'off') => (
+    <div className="flex items-baseline gap-1.5 flex-wrap">
+      <span className={`text-[11px] ${color}`}>{dot} {label}</span>
+      {list.length === 0
+        ? <span className="text-zinc-600 text-[11px]">ninguém</span>
+        : list.map((s, i) => person(s, tone, i))}
+    </div>
+  );
+
   return (
-    <div className={`rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-[12px] ${className}`}>
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <span className="font-medium text-red-200">🌙 Quem folga:</span>
-        <span className="text-zinc-400">hoje</span> {renderList(today)}
-        <span className="text-zinc-600">|</span>
-        <span className="text-zinc-400">amanhã</span> {renderList(tomorrow)}
+    <div className={`rounded-xl border border-zinc-700/50 bg-zinc-900/40 px-3 py-2 text-[12px] ${className}`}>
+      <div className="font-medium text-zinc-300 mb-1.5">📅 Escala de hoje</div>
+      {stores.length === 0 ? (
+        <div className="text-zinc-500 text-[11px]">Nenhuma escala lançada para hoje.</div>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {stores.map((st) => (
+            <div key={st.storeId} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-2">
+              <div className="text-[11px] font-semibold text-zinc-200 mb-1 truncate" title={st.storeName || ''}>
+                🏬 {st.storeName || 'Loja'}
+              </div>
+              {line('Trabalhando', '🟢', 'text-emerald-400', st.working || [], 'work')}
+              {line('Folga', '🔴', 'text-red-400', st.off || [], 'off')}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 pt-1.5 border-t border-zinc-800 flex items-baseline gap-1.5 flex-wrap">
+        <span className="text-[11px] text-zinc-500">🌙 Folga amanhã</span>
+        {tomorrow.length === 0
+          ? <span className="text-zinc-600 text-[11px]">ninguém</span>
+          : tomorrow.map((s: any, i: number) => (
+            <span key={`${s.storeId}-${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
+              {i > 0 && <span className="text-zinc-700">·</span>}
+              <span className="text-zinc-300 text-[11px]">{s.sellerName || s.sellerKey}</span>
+              {!storeId && s.storeName && <span className="text-[10px] text-zinc-600">({s.storeName})</span>}
+            </span>
+          ))}
       </div>
     </div>
   );

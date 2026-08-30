@@ -170,4 +170,68 @@ export class RetailScheduleTemplateService {
     }
     return out.sort((a, b) => (a.storeName || "").localeCompare(b.storeName || "") || (a.sellerName || "").localeCompare(b.sellerName || ""));
   }
+
+  /**
+   * Escala do dia AGRUPADA POR LOJA — quem TRABALHA (verde) e quem FOLGA
+   * (vermelho) em uma data. Feito pro card do Fechamento/Escala: com muitas
+   * lojas, uma lista chapada de nomes fica enorme; aqui cada loja é um bloco
+   * com seu nome no topo e as duas colunas.
+   *
+   * - **working**: linhas 'work' lançadas na grade daquele dia.
+   * - **off**: reaproveita `whoIsOff` (grade 'off' + template dos que ainda
+   *   não têm linha na grade).
+   *
+   * Só entram lojas que têm ALGUÉM na escala do dia (trabalhando ou de folga);
+   * loja sem escala montada não vira bloco vazio. Retorna já ordenado por nome
+   * de loja e, dentro, por nome de vendedor.
+   * `storeId` opcional (sem loja = todas as lojas ativas da rede).
+   */
+  static dayRoster(orgId: string, date: string, opts?: { storeId?: string | null }): Array<{
+    storeId: string;
+    storeName: string | null;
+    working: Array<{ sellerKey: string; sellerName: string | null }>;
+    off: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "template" }>;
+  }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
+    const storeFilter = opts?.storeId ? " AND store_id = ?" : "";
+    const args = opts?.storeId ? [orgId, opts.storeId] : [orgId];
+    // Quem trabalha: linhas 'work' na grade do dia.
+    const work = db.prepare(
+      `SELECT store_id, seller_key, seller_name FROM retail_schedule_entries
+        WHERE organization_id = ? ${storeFilter} AND work_date = ? AND status = 'work'`
+    ).all(...args, date) as any[];
+    // Quem folga: já resolve grade 'off' + template + nome da loja.
+    const off = this.whoIsOff(orgId, date, opts);
+
+    type Bloco = {
+      storeId: string;
+      storeName: string | null;
+      working: Array<{ sellerKey: string; sellerName: string | null }>;
+      off: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "template" }>;
+    };
+    const map = new Map<string, Bloco>();
+    const bloco = (storeId: string): Bloco => {
+      let b = map.get(storeId);
+      if (!b) { b = { storeId, storeName: null, working: [], off: [] }; map.set(storeId, b); }
+      return b;
+    };
+    for (const w of work) bloco(w.store_id).working.push({ sellerKey: w.seller_key, sellerName: w.seller_name || null });
+    for (const o of off) {
+      const b = bloco(o.storeId);
+      b.storeName = o.storeName || b.storeName;
+      b.off.push({ sellerKey: o.sellerKey, sellerName: o.sellerName || null, source: o.source });
+    }
+    // Resolve nome das lojas que só têm gente trabalhando (não vieram do whoIsOff).
+    const semNome = Array.from(map.values()).filter((b) => !b.storeName).map((b) => b.storeId);
+    if (semNome.length) {
+      const ph = semNome.map(() => "?").join(",");
+      const rows = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id IN (${ph})`).all(orgId, ...semNome) as any[];
+      const names = new Map(rows.map((r) => [r.id, r.name]));
+      for (const b of map.values()) if (!b.storeName) b.storeName = names.get(b.storeId) || null;
+    }
+    const byName = (a: { sellerName: string | null }, b: { sellerName: string | null }) => (a.sellerName || "").localeCompare(b.sellerName || "");
+    const out = Array.from(map.values());
+    for (const b of out) { b.working.sort(byName); b.off.sort(byName); }
+    return out.sort((a, b) => (a.storeName || "").localeCompare(b.storeName || ""));
+  }
 }

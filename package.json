@@ -87,6 +87,7 @@
     "test:retail-money-parse": "tsx scripts/test-retail-money-parse.ts",
     "test:retail-boletas-rule": "tsx scripts/test-retail-boletas-rule.ts",
     "test:retail-closing-guard-delete": "tsx scripts/test-retail-closing-guard-delete.ts",
+    "test:retail-day-roster": "tsx scripts/test-retail-day-roster.ts",
     "test:retail-quota-suggest": "tsx scripts/test-retail-quota-suggest.ts",
     "test:retail-schedule-import": "tsx scripts/test-retail-schedule-import.ts",
     "test:retail-boleta-line-audit": "tsx scripts/test-retail-boleta-line-audit.ts",

@@ -312,12 +312,6 @@ export class RetailClosingService {
     const ranking: any[] = Array.isArray(details?.ranking) ? details.ranking : [];
     if (!ranking.length) return 0;
     const sellers = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
-    const byName = new Map<string, string[]>();
-    for (const s of sellers) {
-      const k = String(s.name || "").trim().toLowerCase();
-      if (!k) continue;
-      byName.set(k, [...(byName.get(k) || []), String(s.matricula)]);
-    }
     const tx = db.transaction(() => {
       db.prepare(`DELETE FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ? AND source = 'closing'`)
         .run(orgId, c.store_id, c.closing_date);
@@ -326,14 +320,42 @@ export class RetailClosingService {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'closing', ?)`
       );
       for (const r of ranking) {
-        const mats = byName.get(String(r.sellerName || "").trim().toLowerCase()) || [];
-        ins.run(randomUUID(), orgId, c.store_id, c.closing_date, r.sellerName, mats.length === 1 ? mats[0] : null, Number(r.valor) || 0, Number(r.pecas) || 0, Number(r.atendimentos) || 0, actorId || null);
+        const mat = resolveMatriculaByName(sellers, r.sellerName);
+        ins.run(randomUUID(), orgId, c.store_id, c.closing_date, r.sellerName, mat, Number(r.valor) || 0, Number(r.pecas) || 0, Number(r.atendimentos) || 0, actorId || null);
       }
     });
     tx();
     try { logAuthEvent(orgId, actorId || "system", closingId, "RETAIL_CLOSING_RANKING_SYNCED", { count: ranking.length, date: c.closing_date }); } catch { /* noop */ }
     return ranking.length;
   }
+}
+
+/**
+ * Casa o NOME do ranking (folha manuscrita, lido pela IA) → matrícula do
+ * cadastro. Tolerante a acento/caixa/pontuação; se o nome completo não bater,
+ * tenta pelo PRIMEIRO nome. Só casa quando há UM único candidato — nunca chuta
+ * em ambiguidade (RN-SELL-1). Corrige o "a IA não pegou o vendedor" quando a
+ * grafia manuscrita difere um pouco do cadastro (ex.: "Thamyres" vs "Tamires").
+ */
+export function resolveMatriculaByName(sellers: Array<{ matricula: any; name: any }>, rawName: any): string | null {
+  const norm = (s: any) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const target = norm(rawName);
+  if (!target) return null;
+  const full = new Map<string, Set<string>>();
+  const first = new Map<string, Set<string>>();
+  const put = (m: Map<string, Set<string>>, k: string, mat: string) => { if (!k) return; (m.get(k) || m.set(k, new Set()).get(k)!).add(mat); };
+  for (const s of sellers) {
+    const n = norm(s.name);
+    if (!n) continue;
+    const mat = String(s.matricula);
+    put(full, n, mat);
+    put(first, n.split(" ")[0], mat);
+  }
+  const exact = full.get(target);
+  if (exact && exact.size === 1) return [...exact][0];
+  const byFirst = first.get(target.split(" ")[0]);
+  if (byFirst && byFirst.size === 1) return [...byFirst][0];
+  return null;
 }
 
 /** Extrator de fechamento injetável (teste offline, sem provedor de visão). */

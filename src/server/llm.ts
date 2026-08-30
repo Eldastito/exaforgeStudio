@@ -467,7 +467,7 @@ export async function extractClosingFromImage(base64: string, mimetype = "image/
 "cadastros": <inteiro ou null>, "boletaInicial": <string ou null>, "boletaFinal": <string ou null>, "malote": <string ou null>,
 "pos": {"creditoValor": <número>, "creditoQtd": <inteiro ou null>, "debitoValor": <número>, "debitoQtd": <inteiro ou null>} ou null,
 "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
-Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente um valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Não some nem calcule o total por conta própria: só devolva "total" se houver linha de total escrita; senão null. Na coluna A/P do ranking, o valor é o número de ATENDIMENTOS do vendedor; P/A é o número de PEÇAS. Ignore a linha "LOJA" do ranking (é o total). Responda SOMENTE o JSON, sem texto ao redor.`;
+Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use separador de milhar (escreva 1250.50, nunca 1.250,50). NUNCA invente um valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Não some nem calcule o total por conta própria: só devolva "total" se houver linha de total escrita; senão null. Na coluna A/P do ranking, o valor é o número de ATENDIMENTOS do vendedor; P/A é o número de PEÇAS. Ignore a linha "LOJA" do ranking (é o total). LETRA MANUSCRITA: as colunas podem desalinhar — associe cada valor à linha do NOME mais próximo; leia dígito por dígito e não confunda 0/6/8/9 nem 1/7. O comprovante impresso (Clover) grampeado é o "vendas por forma de pagamento" do POS — use-o só para o campo "pos", não para os valores da folha manuscrita. Responda SOMENTE o JSON, sem texto ao redor.`;
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [
@@ -475,13 +475,13 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente 
       {
         role: "user",
         content: [
-          { type: "text", text: "Leia esta folha de fechamento e devolva o JSON pedido com os valores por forma de pagamento." },
-          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+          { type: "text", text: "Leia esta folha de fechamento (pode ser manuscrita) e devolva o JSON pedido com os valores por forma de pagamento." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail: "high" } },
         ],
       },
     ] as any,
-    temperature: 0.2,
-    max_tokens: 1400,
+    temperature: 0.1,
+    max_tokens: 1800,
     response_format: { type: "json_object" },
   });
   recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
@@ -496,7 +496,7 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente 
 export async function extractSellerSalesFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
   const system = `Você é um assistente de leitura de FOLHAS DE VENDAS POR VENDEDOR de loja no varejo brasileiro. Na folha, cada linha traz o NOME de um vendedor e o total vendido por ele (em reais), a quantidade de peças e, às vezes, o número de ATENDIMENTOS (coluna "AT" ou "A/P"). Extraia todas as linhas legíveis e devolva SOMENTE um JSON:
 {"vendedores": [{"nome": <string, nome do vendedor>, "valor": <número em reais ou null>, "pecas": <número inteiro de peças ou null>, "atendimentos": <número inteiro de atendimentos ou null>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
-Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente um nome ou valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Ignore linhas de total geral, cabeçalhos e anotações que não sejam de um vendedor. Não some nem calcule nada por conta própria. Responda SOMENTE o JSON, sem texto ao redor.`;
+Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use separador de milhar (1250.50, nunca 1.250,50). NUNCA invente um nome ou valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. LETRA MANUSCRITA: leia o nome com cuidado (pode ser só o primeiro nome ou apelido); as colunas podem desalinhar, então associe cada valor à linha do nome mais próximo; leia dígito por dígito. Ignore linhas de total geral, cabeçalhos e anotações que não sejam de um vendedor. Não some nem calcule nada por conta própria. Responda SOMENTE o JSON, sem texto ao redor.`;
   const res = await getClient().chat.completions.create({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [
@@ -504,13 +504,13 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50). NUNCA invente 
       {
         role: "user",
         content: [
-          { type: "text", text: "Leia esta folha de vendas por vendedor e devolva o JSON pedido com uma linha por vendedor (nome, valor, peças)." },
-          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}` } },
+          { type: "text", text: "Leia esta folha de vendas por vendedor (pode ser manuscrita) e devolva o JSON pedido com uma linha por vendedor (nome, valor, peças)." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail: "high" } },
         ],
       },
     ] as any,
-    temperature: 0.2,
-    max_tokens: 900,
+    temperature: 0.1,
+    max_tokens: 1200,
     response_format: { type: "json_object" },
   });
   recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);

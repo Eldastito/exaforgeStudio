@@ -1296,40 +1296,9 @@ router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest,
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.body?.date || today(req)).slice(0, 10);
   const apply = !!req.body?.apply;
-  const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
-  const suggestions: any[] = [];
-  for (const s of stores) {
-    // strftime('%w') = dia da semana (0=domingo) — compara com o do dia-alvo.
-    const dow = (db.prepare(`SELECT strftime('%w', ?) w`).get(date) as any)?.w;
-    const sameDow = db.prepare(
-      `SELECT AVG(system_total) avg, COUNT(*) n FROM retail_daily_closings
-        WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0
-          AND closing_date >= date(?, '-56 days') AND closing_date < ? AND strftime('%w', closing_date) = ?`
-    ).get(orgId, s.id, date, date, dow) as any;
-    const overall = db.prepare(
-      `SELECT AVG(system_total) avg, COUNT(*) n FROM retail_daily_closings
-        WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0
-          AND closing_date >= date(?, '-28 days') AND closing_date < ?`
-    ).get(orgId, s.id, date, date) as any;
-    const pick = Number(sameDow?.n || 0) >= 2 ? sameDow : overall;
-    const suggested = Math.round(Number(pick?.avg || 0) * 100) / 100;
-    if (suggested <= 0) continue; // sem histórico do PDV para esta loja
-    suggestions.push({ storeId: s.id, storeName: s.name, suggested, samples: Number(pick?.n || 0), basis: Number(sameDow?.n || 0) >= 2 ? "mesmo dia da semana (8 sem.)" : "média 28 dias" });
-    if (apply) {
-      RetailQuotaService.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: suggested, source: "pdv_suggest" }, req.user?.userId);
-      // O fechamento guarda a cota como SNAPSHOT na criação — fechamentos já
-      // existentes do dia ficariam com a cota antiga (0) e a tela "não muda".
-      // Atualiza o snapshot e recalcula o desvio de quem já informou.
-      db.prepare(
-        `UPDATE retail_daily_closings SET quota_amount = ?,
-            variance_amount = CASE WHEN COALESCE(informed_total, 0) > 0 THEN informed_total - ? ELSE variance_amount END,
-            variance_percent = CASE WHEN COALESCE(informed_total, 0) > 0 AND ? > 0 THEN (informed_total - ?) * 100.0 / ? ELSE variance_percent END,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE organization_id = ? AND store_id = ? AND closing_date = ?`
-      ).run(suggested, suggested, suggested, suggested, suggested, orgId, s.id, date);
-    }
-  }
-  res.json({ date, applied: apply, suggestions });
+  // QUOTA-002: a trava da escala (não sugerir cota em dia de folga geral) mora
+  // no serviço, testável offline.
+  res.json(RetailQuotaService.suggestForDate(orgId, date, { apply }, req.user?.userId));
 });
 
 // GRADE FURADA / REPOSIÇÃO (dados do estoque por loja do ERP): loja que

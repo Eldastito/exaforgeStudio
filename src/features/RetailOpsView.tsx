@@ -4208,13 +4208,15 @@ function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; cl
   }, [storeId, todayIso]);
   if (loading) return null;
 
-  // Uma pessoa (verde=trabalha, vermelho=folga). `tmpl` marca quem veio do
-  // template e ainda não foi lançado na grade.
+  // Uma pessoa (verde=trabalha, vermelho=folga). `tmpl` marca folga vinda do
+  // template (ainda não lançada); `esc` marca quem trabalha por inferência
+  // (lotado na loja e não está de folga), não por linha lançada na grade.
   const person = (s: any, tone: 'work' | 'off', i: number) => (
     <span key={`${s.sellerKey}-${i}`} className="inline-flex items-center gap-1">
       {i > 0 && <span className="text-zinc-700">·</span>}
       <span className={tone === 'work' ? 'text-emerald-300' : 'text-red-300'}>{s.sellerName || s.sellerKey}</span>
       {s.source === 'template' && <span className="text-[9px] text-zinc-600" title="Vem do template — ainda não foi lançado na grade">tmpl</span>}
+      {s.source === 'roster' && <span className="text-[9px] text-zinc-600" title="Inferido: está lotado na loja e não está de folga hoje">esc</span>}
     </span>
   );
   const line = (label: string, dot: string, color: string, list: any[], tone: 'work' | 'off') => (

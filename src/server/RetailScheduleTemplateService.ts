@@ -177,25 +177,30 @@ export class RetailScheduleTemplateService {
    * lojas, uma lista chapada de nomes fica enorme; aqui cada loja é um bloco
    * com seu nome no topo e as duas colunas.
    *
-   * - **working**: linhas 'work' lançadas na grade daquele dia.
+   * - **working**: linhas 'work' lançadas na grade (source 'grid') MAIS os
+   *   vendedores lotados na loja que NÃO estão de folga no dia (source
+   *   'roster') — "quem trabalha = todo mundo que não está de folga". Assim,
+   *   numa loja onde só as FOLGAS foram lançadas, o resto da equipe já aparece
+   *   trabalhando sem precisar marcar cada um.
    * - **off**: reaproveita `whoIsOff` (grade 'off' + template dos que ainda
    *   não têm linha na grade).
    *
    * Só entram lojas que têm ALGUÉM na escala do dia (trabalhando ou de folga);
-   * loja sem escala montada não vira bloco vazio. Retorna já ordenado por nome
-   * de loja e, dentro, por nome de vendedor.
-   * `storeId` opcional (sem loja = todas as lojas ativas da rede).
+   * loja sem escala montada não vira bloco vazio — a inferência preenche a
+   * equipe de lojas que JÁ aparecem, nunca ressuscita loja fechada (todos de
+   * folga → ninguém trabalha). Retorna ordenado por nome de loja e, dentro, por
+   * nome de vendedor. `storeId` opcional (sem loja = todas as lojas ativas).
    */
   static dayRoster(orgId: string, date: string, opts?: { storeId?: string | null }): Array<{
     storeId: string;
     storeName: string | null;
-    working: Array<{ sellerKey: string; sellerName: string | null }>;
+    working: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "roster" }>;
     off: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "template" }>;
   }> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
     const storeFilter = opts?.storeId ? " AND store_id = ?" : "";
     const args = opts?.storeId ? [orgId, opts.storeId] : [orgId];
-    // Quem trabalha: linhas 'work' na grade do dia.
+    // Quem trabalha (explícito): linhas 'work' na grade do dia.
     const work = db.prepare(
       `SELECT store_id, seller_key, seller_name FROM retail_schedule_entries
         WHERE organization_id = ? ${storeFilter} AND work_date = ? AND status = 'work'`
@@ -203,24 +208,54 @@ export class RetailScheduleTemplateService {
     // Quem folga: já resolve grade 'off' + template + nome da loja.
     const off = this.whoIsOff(orgId, date, opts);
 
+    type WorkItem = { sellerKey: string; sellerName: string | null; source: "grid" | "roster" };
     type Bloco = {
       storeId: string;
       storeName: string | null;
-      working: Array<{ sellerKey: string; sellerName: string | null }>;
+      working: WorkItem[];
       off: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "template" }>;
     };
+    const norm = (s: any) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
     const map = new Map<string, Bloco>();
     const bloco = (storeId: string): Bloco => {
       let b = map.get(storeId);
       if (!b) { b = { storeId, storeName: null, working: [], off: [] }; map.set(storeId, b); }
       return b;
     };
-    for (const w of work) bloco(w.store_id).working.push({ sellerKey: w.seller_key, sellerName: w.seller_name || null });
+    for (const w of work) bloco(w.store_id).working.push({ sellerKey: w.seller_key, sellerName: w.seller_name || null, source: "grid" });
     for (const o of off) {
       const b = bloco(o.storeId);
       b.storeName = o.storeName || b.storeName;
       b.off.push({ sellerKey: o.sellerKey, sellerName: o.sellerName || null, source: o.source });
     }
+
+    // INFERÊNCIA: pra cada loja que JÁ aparece, quem está lotado nela e não está
+    // de folga (nem já listado como 'work') entra como trabalhando (source
+    // 'roster'). Loja fechada (todos de folga) continua com working vazio.
+    const storeIds = Array.from(map.keys());
+    if (storeIds.length) {
+      const ph = storeIds.map(() => "?").join(",");
+      let roster: any[] = [];
+      try {
+        roster = db.prepare(
+          `SELECT a.store_id, s.matricula, s.name FROM retail_seller_store_assignments a
+             JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+            WHERE a.organization_id = ? AND a.active = 1 AND s.active = 1 AND a.store_id IN (${ph})`
+        ).all(orgId, ...storeIds) as any[];
+      } catch { roster = []; }
+      for (const r of roster) {
+        const b = map.get(r.store_id);
+        if (!b) continue;
+        const key = `mat:${r.matricula}`;
+        const nName = norm(r.name);
+        // Já está de folga? (por chave ou por nome) → não trabalha.
+        if (b.off.some((o) => o.sellerKey === key || (nName && norm(o.sellerName) === nName))) continue;
+        // Já listado como trabalhando? → não duplica.
+        if (b.working.some((w) => w.sellerKey === key || (nName && norm(w.sellerName) === nName))) continue;
+        b.working.push({ sellerKey: key, sellerName: r.name || null, source: "roster" });
+      }
+    }
+
     // Resolve nome das lojas que só têm gente trabalhando (não vieram do whoIsOff).
     const semNome = Array.from(map.values()).filter((b) => !b.storeName).map((b) => b.storeId);
     if (semNome.length) {

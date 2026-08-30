@@ -5352,11 +5352,13 @@ function SellerScoreboardTab() {
   const Cell = ({ p }: { p: any }) => {
     const a = p?.attainment;
     const cls = a == null ? 'text-zinc-500' : a >= 100 ? 'text-emerald-300' : a >= 60 ? 'text-amber-300' : 'text-red-300';
+    // Folga/férias no dia (pela escala): sem cota naquele dia — RN-G2-003.
+    const folga = p?.off && !(p?.sales > 0);
     return (
       <div className="text-right">
         <div className="text-[13px] font-medium text-zinc-100">{brl(p?.sales || 0)}</div>
-        <div className="text-[10px] text-zinc-500">de {p?.quota ? brl(p.quota) : '—'}</div>
-        <div className={`text-[11px] font-semibold ${cls}`}>{a == null ? 'sem cota' : `${a.toFixed(0)}%`}</div>
+        <div className="text-[10px] text-zinc-500">de {p?.quota ? brl(p.quota) : (folga ? 'folga' : '—')}</div>
+        <div className={`text-[11px] font-semibold ${folga ? 'text-sky-300/80' : cls}`}>{folga ? 'folga' : a == null ? 'sem cota' : `${a.toFixed(0)}%`}</div>
       </div>
     );
   };

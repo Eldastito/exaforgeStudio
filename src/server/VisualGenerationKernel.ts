@@ -19,7 +19,7 @@ import { randomUUID, createHash } from "crypto";
 import path from "path";
 import fs from "fs";
 import db from "./db.js";
-import { generateImageB64 as defaultGenerateImageB64 } from "./llm.js";
+import { generateImageB64 as defaultGenerateImageB64, editImagesB64 as defaultEditImages, editImagesGoogleB64 as defaultEditImagesGoogle } from "./llm.js";
 
 export type KernelSize = "1024x1024" | "1024x1536" | "1536x1024";
 
@@ -47,8 +47,41 @@ export interface KernelGenerateResult {
 type ImageProvider = (prompt: string, size: KernelSize) => Promise<string>;
 let moduleProvider: ImageProvider = (p, s) => defaultGenerateImageB64(p, s);
 
+// ── Gateway de EDIÇÃO multi-imagem (DUP-004): provador (Fashion) e simulador de
+// cabelo (Beauty) editam a foto real preservando a pessoa — não geram do zero.
+// O kernel é o ÚNICO ponto que fala com as primitivas de edição do llm.ts; os
+// domínios (Fashion/Beauty) viram fachadas e mantêm seus créditos/fila/hash/
+// storage próprios. Injetável p/ teste.
+export interface KernelEditImage { buffer: Buffer; name: string; mime: string }
+export interface KernelEditOpts {
+  inputFidelity?: "high" | "low";
+  quality?: "high" | "medium" | "low" | "auto";
+  size?: "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+}
+type EditProvider = (images: KernelEditImage[], prompt: string, opts?: KernelEditOpts) => Promise<string>;
+type EditGoogleProvider = (images: { buffer: Buffer; mime: string }[], prompt: string) => Promise<string>;
+let editProvider: EditProvider = (im, p, o) => defaultEditImages(im, p, o);
+let editGoogleProvider: EditGoogleProvider = (im, p) => defaultEditImagesGoogle(im, p);
+
 export class VisualGenerationKernel {
   static configureProvider(fn: ImageProvider): void { moduleProvider = fn; }
+  /** Injeta os providers de edição (testes). Passe só o que quiser trocar. */
+  static configureEditProviders(p: { openai?: EditProvider; google?: EditGoogleProvider }): void {
+    if (p.openai) editProvider = p.openai;
+    if (p.google) editGoogleProvider = p.google;
+  }
+  static resetEditProviders(): void {
+    editProvider = (im, p, o) => defaultEditImages(im, p, o);
+    editGoogleProvider = (im, p) => defaultEditImagesGoogle(im, p);
+  }
+  /** Edição multi-imagem via OpenAI gpt-image-1 (gateway único do edit). */
+  static editImages(images: KernelEditImage[], prompt: string, opts?: KernelEditOpts): Promise<string> {
+    return editProvider(images, prompt, opts);
+  }
+  /** Edição multi-imagem via Google Gemini (gateway único do edit). */
+  static editImagesGoogle(images: { buffer: Buffer; mime: string }[], prompt: string): Promise<string> {
+    return editGoogleProvider(images, prompt);
+  }
   static resetProvider(): void { moduleProvider = (p, s) => defaultGenerateImageB64(p, s); }
 
   /** Hash canônico determinístico da entrada — a chave de reuso. */

@@ -56,7 +56,7 @@ import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
-import { editImagesGoogleB64 } from "./llm.js";
+import { VisualGenerationKernel } from "./VisualGenerationKernel.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { BeautyVisualConsultationService } from "./BeautyVisualConsultationService.js";
 import { safeStorageKey } from "./fileSigning.js";
@@ -218,10 +218,9 @@ class OpenAIHairSimulationProvider implements HairSimulationProvider {
   available() { return !!process.env.OPENAI_API_KEY; }
   async generate(input: HairSimulationInput) {
     try {
-      const { editImagesB64 } = await import("./llm.js");
       const paramLine = describeParametersSafely(input.parameters);
       const finalPrompt = `${SAFETY_PROMPT_HAIR}\n\nPARÂMETROS DA MUDANÇA:\n${paramLine}`;
-      const b64 = await editImagesB64(
+      const b64 = await VisualGenerationKernel.editImages(
         [{ buffer: input.avatar, name: "avatar.jpg", mime: "image/jpeg" }],
         finalPrompt,
         { inputFidelity: "high", quality: "medium", size: "1024x1024" },
@@ -251,7 +250,7 @@ class GoogleGeminiHairSimulationProvider implements HairSimulationProvider {
       const images = [{ buffer: input.avatar, mime: "image/jpeg" }];
       const paramLine = describeParametersSafely(input.parameters);
       const finalPrompt = `${SAFETY_PROMPT_HAIR}\n\nPARÂMETROS DA MUDANÇA:\n${paramLine}`;
-      const b64 = await editImagesGoogleB64(images, finalPrompt);
+      const b64 = await VisualGenerationKernel.editImagesGoogle(images, finalPrompt);
       if (!b64) return { ok: false as const, error: "Provedor Google não retornou imagem.", retryable: true };
       return { ok: true as const, b64 };
     } catch (e: any) {

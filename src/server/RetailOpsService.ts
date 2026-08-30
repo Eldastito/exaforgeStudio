@@ -31,6 +31,27 @@ export class RetailQuotaService {
     return (db.prepare(`SELECT * FROM retail_store_quotas WHERE organization_id = ? AND store_id = ? AND quota_date = ?`).get(orgId, storeId, date) as any) || null;
   }
 
+  /**
+   * QUOTA-003 — Define a cota da loja no dia E atualiza o snapshot do
+   * fechamento (a coluna "Cota do dia" da tela lê `retail_daily_closings.
+   * quota_amount`, não a cota viva). Sem isto, corrigir a cota não mudava a
+   * tela. Usado quando o lojista digita/confirma a cota real da folha (ex.:
+   * 3.800), sobrepondo um palpite do PDV (source 'pdv_suggest'). Recalcula o
+   * desvio se já houver "informado". Devolve a cota gravada.
+   */
+  static setForDate(orgId: string, storeId: string, date: string, amount: number, source = "manual", actorId?: string): any {
+    const amt = Number(amount || 0);
+    const saved = this.set(orgId, { storeId, quotaDate: date, quotaAmount: amt, source }, actorId);
+    db.prepare(
+      `UPDATE retail_daily_closings SET quota_amount = ?,
+          variance_amount = CASE WHEN COALESCE(informed_total, 0) > 0 THEN informed_total - ? ELSE variance_amount END,
+          variance_percent = CASE WHEN COALESCE(informed_total, 0) > 0 AND ? > 0 THEN (informed_total - ?) * 100.0 / ? ELSE variance_percent END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE organization_id = ? AND store_id = ? AND closing_date = ?`
+    ).run(amt, amt, amt, amt, amt, orgId, storeId, date);
+    return saved;
+  }
+
   static listByDate(orgId: string, date: string): any[] {
     return db.prepare(
       `SELECT q.*, s.name AS store_name FROM retail_store_quotas q

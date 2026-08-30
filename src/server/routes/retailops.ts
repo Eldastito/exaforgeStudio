@@ -1406,6 +1406,20 @@ router.post("/closings/:id/inform", requireRole("owner", "admin"), (req: AuthReq
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// QUOTA-003: define/corrige a COTA DA LOJA no dia deste fechamento (ex.: digitar
+// os 3.800 da folha por cima de um palpite do PDV). Atualiza o snapshot do
+// fechamento pra tela refletir na hora. Devolve o fechamento atualizado.
+router.post("/closings/:id/quota", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: "amount (número >= 0) obrigatório" });
+  const c = RetailClosingService.get(orgId, String(req.params.id));
+  if (!c) return res.status(404).json({ error: "closing_not_found" });
+  RetailQuotaService.setForDate(orgId, c.store_id, c.closing_date, amount, "manual", req.user?.userId);
+  res.json(RetailClosingService.get(orgId, String(req.params.id)));
+});
+
 // CLOSE-003: exclui o fechamento do dia da loja (e a cota do dia) — pra limpar
 // um lançamento errado. A coluna Cota da tela vem do snapshot do fechamento.
 router.delete("/closings/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

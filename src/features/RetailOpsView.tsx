@@ -2262,6 +2262,13 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
+  // Cota do dia editável: a coluna "Cota" vem do snapshot do fechamento, que
+  // pode ter sido um palpite do PDV. O lojista digita a cota real (ou a IA lê
+  // da folha) e a gente grava por cima. `quotaAmt` é o valor exibido/vivo.
+  const [quotaAmt, setQuotaAmt] = useState<number>(Number(closing.quota_amount || 0));
+  const [editCota, setEditCota] = useState(false);
+  const [cotaInput, setCotaInput] = useState('');
+  const [savingCota, setSavingCota] = useState(false);
 
   useEffect(() => {
     apiFetch(`/api/retailops/stores/${storeId}/card-brands`).then(r => r.json()).then(d => {
@@ -2348,8 +2355,21 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
   const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
   const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
-  const quota = Number(closing.quota_amount || 0);
+  const quota = quotaAmt;
   const cotaPorVendedor = quota > 0 && escalados.length > 0 ? quota / escalados.length : null;
+
+  // Grava a cota real da loja no dia (por cima do palpite do PDV). Atualiza o
+  // snapshot no servidor e o valor exibido aqui na hora.
+  const saveCota = async () => {
+    const amount = n(cotaInput);
+    if (!(amount >= 0)) { toast.error('Digite um valor de cota válido.'); return; }
+    setSavingCota(true);
+    try {
+      const res = await apiFetch(`/api/retailops/closings/${closing.id}/quota`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount }) });
+      if (res.ok) { setQuotaAmt(amount); setEditCota(false); toast.success('Cota do dia atualizada.'); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao salvar a cota.'); }
+    } finally { setSavingCota(false); }
+  };
 
   // Foto da folha → IA pré-preenche o formulário inteiro (Fase C2).
   const onScan = async (file: File) => {
@@ -2391,6 +2411,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
           return [...typed, ...photoRows.filter(pr => !have.has(pr.sellerName.trim().toLowerCase()))];
         });
       }
+      // Cota da folha (ex.: "cota = 3.800"): abre o editor pré-preenchido pra
+      // o lojista CONFIRMAR — não grava sozinho (evita "inventar" cota).
+      if (x.cota != null && Number(x.cota) > 0) { setCotaInput(String(x.cota)); setEditCota(true); }
       if (x.cadastros != null) setCadastros(String(x.cadastros));
       if (x.boletaInicial) setBoletaInicial(String(x.boletaInicial));
       if (x.boletaFinal) setBoletaFinal(String(x.boletaFinal));
@@ -2434,10 +2457,26 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
           <h3 className="font-semibold text-zinc-100">Fechamento do dia — {closing.store_name} · {date?.slice(8)}/{date?.slice(5, 7)}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-5 h-5" /></button>
         </div>
-        <p className="mt-0.5 text-xs text-zinc-500">
-          Cota do dia: <strong className="text-zinc-300">{brl(quota)}</strong>
-          {cotaPorVendedor != null && <> ÷ {escalados.length} escalado(s) = <strong className="text-zinc-300">{brl(cotaPorVendedor)}</strong> por vendedor</>}
-        </p>
+        <div className="mt-0.5 text-xs text-zinc-500">
+          {editCota ? (
+            <span className="inline-flex items-center gap-1.5">
+              Cota do dia:
+              <input autoFocus inputMode="decimal" value={cotaInput} onChange={e => setCotaInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveCota(); if (e.key === 'Escape') setEditCota(false); }}
+                placeholder="0,00" className="w-28 bg-zinc-950 border border-zinc-700 rounded px-2 py-0.5 text-zinc-100" />
+              <button onClick={saveCota} disabled={savingCota} className="inline-flex items-center gap-1 rounded bg-emerald-600/80 px-2 py-0.5 text-white hover:bg-emerald-600 disabled:opacity-50">
+                {savingCota ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} Salvar
+              </button>
+              <button onClick={() => setEditCota(false)} className="text-zinc-500 hover:text-zinc-300">cancelar</button>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5">
+              Cota do dia: <strong className="text-zinc-300">{brl(quota)}</strong>
+              {cotaPorVendedor != null && <> ÷ {escalados.length} escalado(s) = <strong className="text-zinc-300">{brl(cotaPorVendedor)}</strong> por vendedor</>}
+              <button onClick={() => { setCotaInput(quota > 0 ? String(quota) : ''); setEditCota(true); }} title="Corrigir a cota do dia" className="text-zinc-500 hover:text-zinc-200"><Pencil className="w-3 h-3" /></button>
+            </span>
+          )}
+        </div>
 
         <div className="mt-3">
           <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">

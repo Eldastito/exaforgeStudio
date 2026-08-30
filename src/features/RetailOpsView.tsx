@@ -4,6 +4,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
+import { parseMoneyBR } from './retailMoney';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2316,7 +2317,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
     }
   };
 
-  const n = (v: string) => Number(String(v || '').replace(',', '.')) || 0;
+  const n = parseMoneyBR; // parser BR à prova de milhar (corrige o "Informado")
   const totalCredito = useMemo(() => Object.values(credito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [credito]);
   const totalDebito = useMemo(() => Object.values(debito).reduce((a: number, v) => a + n(String(v ?? '')), 0), [debito]);
   const totalVendas = useMemo(() => n(dinheiro) + n(pix) + totalCredito + totalDebito + n(voucher) + n(troca) + n(outros), [dinheiro, pix, totalCredito, totalDebito, voucher, troca, outros]);
@@ -2390,7 +2391,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
 
   const inp = 'w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100';
   const money = (v: string, set: (s: string) => void, ph = '0,00') => (
-    <input inputMode="decimal" value={v} onChange={e => set(e.target.value.replace(',', '.'))} placeholder={ph} className={inp} />
+    <input inputMode="decimal" value={v} onChange={e => set(e.target.value)} placeholder={ph} className={inp} />
   );
 
   return (
@@ -2435,7 +2436,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                     <button onClick={() => renameBrand('credito', b)} title="Renomear bandeira" className="truncate text-left hover:text-zinc-200">{b}</button>
                     <button onClick={() => removeBrand('credito', b)} title="Remover bandeira" className="text-zinc-600 hover:text-red-300"><X className="w-3 h-3" /></button>
                   </div>
-                  <input inputMode="decimal" value={credito[b] || ''} onChange={e => setCredito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
+                  <input inputMode="decimal" value={credito[b] || ''} onChange={e => setCredito(p => ({ ...p, [b]: e.target.value }))} placeholder="0,00" className={inp} />
                 </div>
               ))}
             </div>
@@ -2450,7 +2451,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                     <button onClick={() => renameBrand('debito', b)} title="Renomear bandeira" className="truncate text-left hover:text-zinc-200">{b}</button>
                     <button onClick={() => removeBrand('debito', b)} title="Remover bandeira" className="text-zinc-600 hover:text-red-300"><X className="w-3 h-3" /></button>
                   </div>
-                  <input inputMode="decimal" value={debito[b] || ''} onChange={e => setDebito(p => ({ ...p, [b]: e.target.value.replace(',', '.') }))} placeholder="0,00" className={inp} />
+                  <input inputMode="decimal" value={debito[b] || ''} onChange={e => setDebito(p => ({ ...p, [b]: e.target.value }))} placeholder="0,00" className={inp} />
                 </div>
               ))}
             </div>
@@ -2501,7 +2502,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
               </div>
               <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:mt-0 sm:contents">
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Valor</span>
-                  <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-full text-right sm:w-24`} /></label>
+                  <input inputMode="decimal" value={r.valor} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))} placeholder="0,00" className={`${inp} w-full text-right sm:w-24`} /></label>
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">AT</span>
                   <input inputMode="numeric" value={r.at} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, at: e.target.value.replace(/[^0-9]/g, '') } : x))} placeholder="0" className={`${inp} w-full text-right sm:w-12`} /></label>
                 <label className="sm:contents"><span className="mb-0.5 block text-[9px] uppercase text-zinc-500 sm:hidden">Peças</span>
@@ -2526,7 +2527,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
             {despesas.map((d, i) => (
               <div key={i} className="mt-1 grid grid-cols-[1fr_auto_auto] gap-1.5 items-center">
                 <input value={d.descricao} onChange={e => setDespesas(p => p.map((x, j) => j === i ? { ...x, descricao: e.target.value } : x))} placeholder="Descrição" className={inp} />
-                <input inputMode="decimal" value={d.valor} onChange={e => setDespesas(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value.replace(',', '.') } : x))} placeholder="0,00" className={`${inp} w-24 text-right`} />
+                <input inputMode="decimal" value={d.valor} onChange={e => setDespesas(p => p.map((x, j) => j === i ? { ...x, valor: e.target.value } : x))} placeholder="0,00" className={`${inp} w-24 text-right`} />
                 <button onClick={() => setDespesas(p => p.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             ))}

@@ -4182,6 +4182,8 @@ function ScheduleTab() {
   const [grid, setGrid] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
 
   // Cotas semanais do mês (semanas da CORRIDA — podem colar o começo quebrado).
   const [month, setMonth] = useState(() => todayStr().slice(0, 7));
@@ -4282,6 +4284,27 @@ function ScheduleTab() {
     if (res.ok) { toast.success('Escala copiada da semana anterior.'); loadWeek(); }
     else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao copiar.'); }
   };
+  // Importa a escala por FOTO: a IA lê a grade e pré-preenche a semana atual —
+  // o gestor CONFERE (clicando nas células) e depois clica "Salvar escala".
+  const importPhoto = async (file: File) => {
+    if (!file || !storeId) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file); fd.append('storeId', storeId); fd.append('weekStart', weekStart);
+      const res = await apiFetch('/api/retailops/schedule/scan', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao ler a escala.'); return; }
+      setGrid(prev => {
+        const next: Record<string, Record<string, string>> = { ...prev };
+        for (const [date, row] of Object.entries(d.grid || {})) next[date] = { ...(next[date] || {}), ...(row as Record<string, string>) };
+        return next;
+      });
+      const unm = Array.isArray(d.unmatched) ? d.unmatched : [];
+      toast.success(`Escala lida${d.confidence ? ` (${d.confidence}% de confiança)` : ''}. Confira as células e clique em Salvar escala.${unm.length ? ` Não achei no cadastro: ${unm.join(', ')} — adicione manualmente.` : ''}`);
+    } catch { toast.error('Falha ao ler a escala.'); }
+    finally { setImporting(false); }
+  };
 
   const saveQuotas = async () => {
     setSavingQuotas(true);
@@ -4321,6 +4344,8 @@ function ScheduleTab() {
             <option value="">+ de outra loja…</option>
             {allSellers.filter((s: any) => !sellers.some((x: any) => String(x.matricula) === String(s.matricula))).map((s: any) => <option key={s.matricula} value={s.matricula}>{s.name || `Matrícula ${s.matricula}`}</option>)}
           </select>
+          <input ref={importRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importPhoto(f); e.currentTarget.value = ''; }} />
+          <button onClick={() => importRef.current?.click()} disabled={importing || !storeId} title="Envie a foto da escala que a loja mandou — a IA lê e pré-preenche a semana" className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 px-2.5 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-50">{importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Importar de foto</button>
           <button onClick={copyPrevious} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Copiar semana anterior</button>
           <button onClick={saveWeek} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar escala</button>
         </div>

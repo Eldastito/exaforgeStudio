@@ -710,6 +710,100 @@ export class RetailCommissionRaceService {
   }
 
   /**
+   * PLACAR POR VENDEDOR (pedido do lojista): por vendedor da loja, o REALIZADO
+   * vs a COTA em quatro janelas — DIA / SEMANA / QUINZENA / MÊS — com a cota
+   * SEMANAL como BASE (decisão do dono):
+   *   - semana:   cota semanal resolvida (cadastrada > derivada da escala);
+   *   - dia:      cota da semana ÷ dias escalados 'work' do vendedor na semana
+   *               (fallback 6 quando não há escala);
+   *   - quinzena: 2 × cota semanal (semana atual + anterior); realizado = 14 dias;
+   *   - mês:      soma das cotas semanais do mês; realizado = mês inteiro.
+   * Só leitura, nada persiste. Isolado por org/loja. `refDate` = dia de referência.
+   */
+  static sellerPeriodScoreboard(orgId: string, storeId: string, refDate: string): any {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(refDate)) throw new Error("refDate deve ser YYYY-MM-DD");
+    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const addDays = (d: string, n: number) => new Date(Date.parse(d + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+    const dow = new Date(refDate + "T12:00:00Z").getUTCDay(); // 0 = domingo
+    const weekStart = addDays(refDate, -dow);
+    const weekEnd = addDays(weekStart, 6);
+    const prevWeekStart = addDays(weekStart, -7);
+    const month = refDate.slice(0, 7);
+    const { start: mStart, end: mEnd } = this.monthRange(month);
+    // Semanas domingo→sábado que TOCAM o mês — mesma régua da grade de cotas
+    // (o lojista cadastra a cota semanal por domingo), para o total do mês bater.
+    const monthWeekStarts: string[] = [];
+    { let ws = addDays(mStart, -new Date(mStart + "T12:00:00Z").getUTCDay()); while (ws <= mEnd) { monthWeekStarts.push(ws); ws = addDays(ws, 7); } }
+    const monthWeeks = monthWeekStarts.map((s) => ({ start: s, end: addDays(s, 6) }));
+
+    const schedule = this.getSchedule(orgId, storeId, mStart, mEnd);
+    const daily = this.storeDailyQuotas(orgId, storeId, mStart, mEnd);
+    const quotaWeekStarts = Array.from(new Set([weekStart, prevWeekStart, ...monthWeekStarts]));
+    const quotaRows = this.listSellerQuotas(orgId, storeId, quotaWeekStarts);
+    const explicit = new Map<string, { amount: number }>();
+    for (const q of quotaRows) explicit.set(`${q.week_start}::${q.seller_key}`, { amount: Number(q.quota_amount) || 0 });
+
+    const dayRows = RetailCommissionService.salesBySellerStore(orgId, refDate, refDate);
+    const weekRows = RetailCommissionService.salesBySellerStore(orgId, weekStart, weekEnd);
+    const fortRows = RetailCommissionService.salesBySellerStore(orgId, prevWeekStart, weekEnd);
+    const monthRows = RetailCommissionService.salesBySellerStore(orgId, mStart, mEnd);
+
+    // Roster: união de vendas do mês ∪ escala ∪ cotas (vendedor com cota e sem
+    // venda também aparece — cota não batida é informação).
+    type Roster = { aliases: string[]; name: string; userId: string | null; matricula: string | null };
+    const roster = new Map<string, Roster>();
+    const addRoster = (userId: string | null, matricula: string | null, name: string) => {
+      const aliases = aliasesOf(userId, matricula, name);
+      for (const a of aliases) if (roster.has(a)) { const r = roster.get(a)!; for (const al of aliases) if (!r.aliases.includes(al)) r.aliases.push(al); if (!r.userId && userId) r.userId = userId; if (!r.matricula && matricula) r.matricula = matricula; return; }
+      const r: Roster = { aliases, name, userId, matricula };
+      for (const a of aliases) roster.set(a, r);
+    };
+    for (const row of monthRows.filter((r) => r.storeId === storeId)) addRoster(row.sellerUserId, row.matricula, row.sellerName);
+    for (const e of schedule) { const mat = e.seller_key.startsWith("mat:") ? e.seller_key.slice(4) : null; const uid = e.seller_key.startsWith("user:") ? e.seller_key.slice(5) : null; addRoster(uid, mat, e.seller_name || e.seller_key); }
+    for (const q of quotaRows) { const mat = q.seller_key.startsWith("mat:") ? q.seller_key.slice(4) : null; const uid = q.seller_key.startsWith("user:") ? q.seller_key.slice(5) : null; addRoster(uid, mat, q.seller_name || q.seller_key); }
+    const rosterList = Array.from(new Set(roster.values()));
+
+    const salesOf = (rows: any[], r: Roster): number => {
+      const set = new Set(r.aliases);
+      const row = rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a)));
+      return round2(row?.sales || 0);
+    };
+    const pct = (sales: number, quota: number): number | null => (quota > 0 ? round2((sales / quota) * 10000) / 100 : null);
+    const curWeek = { start: weekStart, end: weekEnd };
+    const prevWeek = { start: prevWeekStart, end: addDays(prevWeekStart, 6) };
+
+    const sellers = rosterList.map((r) => {
+      const wq = this.resolveWeeklyQuota(orgId, storeId, curWeek, r.aliases, explicit, schedule, daily);
+      const pq = this.resolveWeeklyQuota(orgId, storeId, prevWeek, r.aliases, explicit, schedule, daily);
+      const aliasSet = new Set(r.aliases);
+      const scheduledDays = schedule.filter((e: any) => e.status === "work" && e.work_date >= weekStart && e.work_date <= weekEnd && aliasSet.has(e.seller_key)).length;
+      const dayDivisor = scheduledDays > 0 ? scheduledDays : 6;
+      const weekQuota = round2(wq.amount);
+      const dayQuota = round2(weekQuota / dayDivisor);
+      const fortnightQuota = round2(weekQuota + pq.amount);
+      let monthQuota = 0, anyExplicit = false, anyResolved = false;
+      for (const w of monthWeeks) { const q = this.resolveWeeklyQuota(orgId, storeId, w, r.aliases, explicit, schedule, daily); monthQuota += q.amount; if (q.source === "explicit") anyExplicit = true; if (q.source !== "none") anyResolved = true; }
+      monthQuota = round2(monthQuota);
+      const daySales = salesOf(dayRows, r), weekSales = salesOf(weekRows, r), fortSales = salesOf(fortRows, r), monthSales = salesOf(monthRows, r);
+      return {
+        sellerKey: primaryKeyOf(r.userId, r.matricula, r.name), sellerName: r.name, matricula: r.matricula,
+        quotaSource: wq.source, monthQuotaSource: anyExplicit ? "explicit" : (anyResolved ? "schedule" : "none"), scheduledDaysThisWeek: scheduledDays,
+        day: { sales: daySales, quota: dayQuota, attainment: pct(daySales, dayQuota) },
+        week: { sales: weekSales, quota: weekQuota, attainment: pct(weekSales, weekQuota) },
+        fortnight: { sales: fortSales, quota: fortnightQuota, attainment: pct(fortSales, fortnightQuota) },
+        month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota) },
+      };
+    }).sort((a, b) => b.month.sales - a.month.sales);
+
+    return {
+      storeId, storeName: store.name, refDate, month,
+      periods: { day: { start: refDate, end: refDate }, week: { start: weekStart, end: weekEnd }, fortnight: { start: prevWeekStart, end: weekEnd }, month: { start: mStart, end: mEnd } },
+      sellers,
+    };
+  }
+
+  /**
    * Materializa a corrida do mês num RUN draft da Fase G (aprovação humana —
    * D7). Um item por vendedor (com o detalhamento no JSON) + um por gerente.
    */

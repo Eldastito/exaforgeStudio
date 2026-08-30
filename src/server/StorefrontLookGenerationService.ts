@@ -2,7 +2,8 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
-import { chat, isAIConfigured, editImagesB64, editImagesGoogleB64 } from "./llm.js";
+import { chat, isAIConfigured } from "./llm.js";
+import { VisualGenerationKernel } from "./VisualGenerationKernel.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { PlanService } from "./PlanService.js";
 import { FashionPresetAvatarService } from "./FashionPresetAvatarService.js";
@@ -118,11 +119,11 @@ export class StorefrontLookGenerationService {
     const prompt = BASE_PROMPT + pose;
     try {
       if (usingGoogle()) {
-        const b64 = await editImagesGoogleB64([{ buffer: avatarBuf, mime: "image/jpeg" }, ...garments.map((g) => ({ buffer: g.buffer, mime: g.mime }))], prompt);
+        const b64 = await VisualGenerationKernel.editImagesGoogle([{ buffer: avatarBuf, mime: "image/jpeg" }, ...garments.map((g) => ({ buffer: g.buffer, mime: g.mime }))], prompt);
         return b64 || null;
       }
       const images = [{ buffer: avatarBuf, name: "modelo.jpg", mime: "image/jpeg" }, ...garments.map((g, i) => ({ buffer: g.buffer, name: `peca-${i + 1}.jpg`, mime: g.mime }))];
-      const b64 = await editImagesB64(images, prompt, { inputFidelity: "high", quality: "high", size: "1024x1536" });
+      const b64 = await VisualGenerationKernel.editImages(images, prompt, { inputFidelity: "high", quality: "high", size: "1024x1536" });
       return b64 || null;
     } catch (e) { console.error("[StorefrontLookGen] geração falhou", e); return null; }
   }

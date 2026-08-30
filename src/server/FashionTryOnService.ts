@@ -3,7 +3,8 @@ import path from "path";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
-import { editImagesB64, editImagesGoogleB64, isAIConfigured } from "./llm.js";
+import { isAIConfigured } from "./llm.js";
+import { VisualGenerationKernel } from "./VisualGenerationKernel.js";
 import { JobQueueService } from "./JobQueueService.js";
 import { FashionStudioService } from "./FashionStudioService.js";
 import { FashionAvatarService } from "./FashionAvatarService.js";
@@ -69,7 +70,7 @@ class OpenAIEditTryOnProvider implements TryOnProvider {
       ];
       // input_fidelity="high": preserva o rosto/identidade da foto (o ponto do
       // provador). quality="high" + retrato 1024x1536: corpo inteiro nítido.
-      const b64 = await editImagesB64(images, SAFETY_PROMPT, { inputFidelity: "high", quality: "high", size: "1024x1536" });
+      const b64 = await VisualGenerationKernel.editImages(images, SAFETY_PROMPT, { inputFidelity: "high", quality: "high", size: "1024x1536" });
       if (!b64) return { ok: false as const, error: "Provedor não retornou imagem.", retryable: true };
       return { ok: true as const, b64 };
     } catch (e: any) {
@@ -90,7 +91,7 @@ class GoogleGeminiTryOnProvider implements TryOnProvider {
         { buffer: input.avatar, mime: "image/jpeg" },
         ...input.garments.map((g) => ({ buffer: g.buffer, mime: g.mime })),
       ];
-      const b64 = await editImagesGoogleB64(images, SAFETY_PROMPT);
+      const b64 = await VisualGenerationKernel.editImagesGoogle(images, SAFETY_PROMPT);
       if (!b64) return { ok: false as const, error: "Provedor Google não retornou imagem.", retryable: true };
       return { ok: true as const, b64 };
     } catch (e: any) {

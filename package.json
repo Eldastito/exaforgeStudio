@@ -86,6 +86,7 @@
     "test:retail-schedule-dates": "tsx scripts/test-retail-schedule-dates.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",
     "test:visual-generation-kernel": "tsx scripts/test-visual-generation-kernel.ts",
+    "test:visual-kernel-edit-routing": "tsx scripts/test-visual-kernel-edit-routing.ts",
     "test:studio-visual-recipes-analytics": "tsx scripts/test-studio-visual-recipes-analytics.ts",
     "test:studio-visual-recipes-suggest": "tsx scripts/test-studio-visual-recipes-suggest.ts",
     "test:studio-visual-recipes-aliases": "tsx scripts/test-studio-visual-recipes-aliases.ts",

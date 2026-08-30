@@ -1878,6 +1878,18 @@ router.get("/commission/race", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// Placar por vendedor: realizado vs cota em DIA/SEMANA/QUINZENA/MÊS (cota semanal
+// como base). Só leitura. `date` opcional = dia de referência (default hoje).
+router.get("/seller-scoreboard", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  try { res.json(RetailCommissionRaceService.sellerPeriodScoreboard(orgId, storeId, date)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // Materializa a corrida num RUN draft (aprovação segue humana — D7).
 router.post("/commission/race/run", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

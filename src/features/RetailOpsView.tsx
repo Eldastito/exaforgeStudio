@@ -712,11 +712,12 @@ function PatternSolutions({ patternId, refreshKey }: { patternId: string; refres
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'metas' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
+  { key: 'metas', label: 'Metas do vendedor', icon: Scale },
   { key: 'escala', label: 'Escala & cotas', icon: Users },
   { key: 'resultado', label: 'Resultado por loja', icon: DollarSign },
   { key: 'precificar', label: 'Precificar', icon: Tag },
@@ -913,6 +914,7 @@ export function RetailOpsView() {
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'comissao' && <CommissionTab />}
+      {tab === 'metas' && <SellerScoreboardTab />}
       {tab === 'escala' && <ScheduleTab />}
       {tab === 'resultado' && <StoreResultTab />}
       {tab === 'maisvendidos' && <TopProductsTab />}
@@ -5313,6 +5315,82 @@ function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => v
 // Cobertura por loja: lotados + matrículas sem nome (pendência acionável) +
 // suspeitos de código compartilhado. Dar nome inline cria a identidade; atribuir
 // lojas define a lotação. Substitui o antigo prompt de nomear vendedor.
+// Metas do vendedor (pedido do lojista): realizado × cota de cada vendedor da
+// loja em DIA / SEMANA / QUINZENA / MÊS. Cota semanal é a base (Escala & cotas):
+// dia = semana ÷ dias escalados; quinzena = 2 semanas; mês = soma das semanas.
+function SellerScoreboardTab() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [date, setDate] = useState(todayStr());
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!storeId && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
+  const { data, status, corr, isStale, loadedAt, reload: load } =
+    useAnalytics(() => storeId ? `/api/retailops/seller-scoreboard?storeId=${storeId}&date=${date}` : '', [storeId, date]);
+  const showData = status === 'ok' || isStale;
+  const fmtDM = (d: string) => d ? `${d.slice(8)}/${d.slice(5, 7)}` : '';
+
+  // Célula de um período: realizado, cota e % de atingimento (cor por faixa).
+  const Cell = ({ p }: { p: any }) => {
+    const a = p?.attainment;
+    const cls = a == null ? 'text-zinc-500' : a >= 100 ? 'text-emerald-300' : a >= 60 ? 'text-amber-300' : 'text-red-300';
+    return (
+      <div className="text-right">
+        <div className="text-[13px] font-medium text-zinc-100">{brl(p?.sales || 0)}</div>
+        <div className="text-[10px] text-zinc-500">de {p?.quota ? brl(p.quota) : '—'}</div>
+        <div className={`text-[11px] font-semibold ${cls}`}>{a == null ? 'sem cota' : `${a.toFixed(0)}%`}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-zinc-300">Metas do vendedor</span>
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+        <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+      </div>
+      <p className="mb-3 text-[11px] text-zinc-500">Quanto cada vendedor fez <strong>vs a cota dele</strong>. A cota vem da aba <strong>Escala &amp; cotas</strong> (semanal): o <strong>dia</strong> usa a cota da semana ÷ dias escalados; a <strong>quinzena</strong> são 2 semanas; o <strong>mês</strong> é a soma das semanas. Verde ≥ 100%, amarelo ≥ 60%, vermelho abaixo.</p>
+
+      {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
+      {!showData && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
+      {status === 'loading' && !isStale && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>}
+
+      {showData && data && (
+        data.sellers.length === 0 ? (
+          <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum vendedor com venda ou cota nesta loja. Cadastre a cota em <strong>Escala &amp; cotas</strong> ou lance o ranking no <strong>Fechamento diário</strong>.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-zinc-400">
+                <tr className="text-[11px] uppercase tracking-wide">
+                  <th className="px-3 py-2 text-left font-medium">Vendedor</th>
+                  <th className="px-3 py-2 text-right font-medium">Dia<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.day?.start)}</span></th>
+                  <th className="px-3 py-2 text-right font-medium">Semana<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.week?.start)}–{fmtDM(data.periods?.week?.end)}</span></th>
+                  <th className="px-3 py-2 text-right font-medium">Quinzena<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.fortnight?.start)}–{fmtDM(data.periods?.fortnight?.end)}</span></th>
+                  <th className="px-3 py-2 text-right font-medium">Mês<br /><span className="text-[10px] normal-case text-zinc-600">{data.month}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sellers.map((s: any) => (
+                  <tr key={s.sellerKey} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-[13px] text-zinc-200">{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</td>
+                    <td className="px-3 py-2"><Cell p={s.day} /></td>
+                    <td className="px-3 py-2"><Cell p={s.week} /></td>
+                    <td className="px-3 py-2"><Cell p={s.fortnight} /></td>
+                    <td className="px-3 py-2"><Cell p={s.month} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function SellersDirectoryTab() {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');

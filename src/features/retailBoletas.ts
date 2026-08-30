@@ -29,3 +29,17 @@ export function boletasEsperadas(produtosPorVendedor: Array<unknown>, porBoleta 
   if (!Array.isArray(produtosPorVendedor)) return 0;
   return produtosPorVendedor.reduce<number>((acc, v) => acc + boletasDeVendedor(v, porBoleta), 0);
 }
+
+/**
+ * Último número de boleta a partir do INICIAL do talão, dado o total de boletas
+ * que serão usadas (nova boleta a cada 5 produtos). Preserva a largura dos zeros
+ * do talão ("018050" → largura 6). null quando o inicial não é numérico ou não
+ * há boletas. Ex.: inicial "018050", 3 boletas → "018052".
+ */
+export function boletaFinalEsperada(inicial: unknown, totalBoletas: number): string | null {
+  const digits = String(inicial ?? "").replace(/\D/g, "");
+  const n = Math.max(0, Math.floor(Number(totalBoletas) || 0));
+  if (!digits || n <= 0) return null;
+  const last = parseInt(digits, 10) + n - 1;
+  return String(last).padStart(digits.length, "0");
+}

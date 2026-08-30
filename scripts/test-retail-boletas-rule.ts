@@ -12,7 +12,7 @@ const results: { name: string; ok: boolean; detail?: string }[] = [];
 function check(name: string, ok: boolean, detail = "") { results.push({ name, ok, detail }); if (!ok) failures++; }
 
 async function main() {
-  const { boletasDeVendedor, boletasEsperadas, PRODUTOS_POR_BOLETA } = await import("../src/features/retailBoletas.js");
+  const { boletasDeVendedor, boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } = await import("../src/features/retailBoletas.js");
 
   check("0.1 constante = 5", PRODUTOS_POR_BOLETA === 5);
 
@@ -45,6 +45,16 @@ async function main() {
   // ===== 5. porBoleta customizado (defensivo) =====
   check("5.1 porBoleta=3: 7 → 3 boletas", boletasDeVendedor(7, 3) === 3);
   check("5.2 porBoleta inválido cai no default 5", boletasDeVendedor(6, 0) === 2);
+
+  // ===== 6. boletaFinalEsperada (nova boleta a cada 5, a partir da inicial) =====
+  check('6.1 "018050" + 3 boletas → "018052"', boletaFinalEsperada("018050", 3) === "018052");
+  check('6.2 "018050" + 1 boleta → "018050" (mesma)', boletaFinalEsperada("018050", 1) === "018050");
+  check('6.3 preserva largura dos zeros ("007" + 5 → "011")', boletaFinalEsperada("007", 5) === "011");
+  check('6.4 vira a casa ("099" + 2 → "100")', boletaFinalEsperada("099", 2) === "100");
+  check("6.5 0 boletas → null", boletaFinalEsperada("018050", 0) === null);
+  check("6.6 inicial não-numérico → null", boletaFinalEsperada("abc", 3) === null);
+  check("6.7 inicial vazio → null", boletaFinalEsperada("", 3) === null);
+  check('6.8 aceita nº com traço ("A-100" + 2 → "101")', boletaFinalEsperada("A-100", 2) === "101");
 
   console.log("\n=== TEST: boletasEsperadas (regra 5 produtos/boleta) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

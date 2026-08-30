@@ -725,21 +725,33 @@ export class RetailCommissionRaceService {
     const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
     if (!store) throw new Error("Loja não encontrada.");
     const addDays = (d: string, n: number) => new Date(Date.parse(d + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10);
-    const dow = new Date(refDate + "T12:00:00Z").getUTCDay(); // 0 = domingo
-    const weekStart = addDays(refDate, -dow);
-    const weekEnd = addDays(weekStart, 6);
-    const prevWeekStart = addDays(weekStart, -7);
     const month = refDate.slice(0, 7);
     const { start: mStart, end: mEnd } = this.monthRange(month);
-    // Semanas domingo→sábado que TOCAM o mês — mesma régua da grade de cotas
-    // (o lojista cadastra a cota semanal por domingo), para o total do mês bater.
-    const monthWeekStarts: string[] = [];
-    { let ws = addDays(mStart, -new Date(mStart + "T12:00:00Z").getUTCDay()); while (ws <= mEnd) { monthWeekStarts.push(ws); ws = addDays(ws, 7); } }
-    const monthWeeks = monthWeekStarts.map((s) => ({ start: s, end: addDays(s, 6) }));
+    // RN-G2c-003 — FECHA POR MÊS. O placar usa a MESMA régua da grade de cotas
+    // (weeksOfMonthFor: semanas fechadas no mês — a última de agosto termina em
+    // 31/08 — e respeita o override da org). Antes o placar montava semanas
+    // domingo→sábado cruas, que atravessavam o mês (a semana de 30/08 ia até
+    // 05/09, puxando setembro) e ainda desalinhavam as chaves de cota (a cota da
+    // 1ª semana ficava órfã). Assim placar + grade + corrida usam a mesma régua.
+    const monthWeeks = this.weeksOfMonthFor(orgId, month);
+    // Semana atual = a semana do mês que CONTÉM o refDate.
+    let curIdx = monthWeeks.findIndex((w) => w.start <= refDate && refDate <= w.end);
+    if (curIdx < 0) curIdx = refDate < (monthWeeks[0]?.start || refDate) ? 0 : Math.max(0, monthWeeks.length - 1);
+    const curWeek = monthWeeks[curIdx] || { start: mStart, end: mEnd };
+    // Semana anterior = a de antes no mês; se for a 1ª, a ÚLTIMA do mês anterior
+    // (quinzena = semana atual + anterior, pode cair no mês passado).
+    let prevWeek: { start: string; end: string };
+    if (curIdx > 0) prevWeek = monthWeeks[curIdx - 1];
+    else { const pmWeeks = this.weeksOfMonthFor(orgId, addDays(mStart, -1).slice(0, 7)); prevWeek = pmWeeks[pmWeeks.length - 1] || curWeek; }
+    const weekStart = curWeek.start, weekEnd = curWeek.end;
+    const prevWeekStart = prevWeek.start;
 
-    const schedule = this.getSchedule(orgId, storeId, mStart, mEnd);
-    const daily = this.storeDailyQuotas(orgId, storeId, mStart, mEnd);
-    const quotaWeekStarts = Array.from(new Set([weekStart, prevWeekStart, ...monthWeekStarts]));
+    // Carrega escala/cotas cobrindo desde a semana anterior (pode ser do mês
+    // passado, por causa da quinzena) até o fim do mês.
+    const loadStart = prevWeekStart < mStart ? prevWeekStart : mStart;
+    const schedule = this.getSchedule(orgId, storeId, loadStart, mEnd);
+    const daily = this.storeDailyQuotas(orgId, storeId, loadStart, mEnd);
+    const quotaWeekStarts = Array.from(new Set([curWeek.start, prevWeek.start, ...monthWeeks.map((w) => w.start)]));
     const quotaRows = this.listSellerQuotas(orgId, storeId, quotaWeekStarts);
     const explicit = new Map<string, { amount: number }>();
     for (const q of quotaRows) explicit.set(`${q.week_start}::${q.seller_key}`, { amount: Number(q.quota_amount) || 0 });
@@ -770,8 +782,7 @@ export class RetailCommissionRaceService {
       return round2(row?.sales || 0);
     };
     const pct = (sales: number, quota: number): number | null => (quota > 0 ? round2((sales / quota) * 10000) / 100 : null);
-    const curWeek = { start: weekStart, end: weekEnd };
-    const prevWeek = { start: prevWeekStart, end: addDays(prevWeekStart, 6) };
+    // curWeek / prevWeek já vêm das semanas fechadas no mês (acima).
 
     const sellers = rosterList.map((r) => {
       const wq = this.resolveWeeklyQuota(orgId, storeId, curWeek, r.aliases, explicit, schedule, daily);

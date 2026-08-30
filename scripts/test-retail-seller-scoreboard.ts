@@ -37,12 +37,13 @@ async function main() {
   const KEY = "mat:1024"; const NAME = "Maria"; const MAT = "1024";
   const refDate = "2026-08-15"; // sábado → semana domingo 09/08 → sábado 15/08
 
-  // Cotas semanais (grade por domingo). monthWeekStarts de agosto: 26/07, 02/08,
-  // 09/08, 16/08, 23/08, 30/08. Aug09=3500 (semana atual), Aug02=3000 (anterior),
-  // resto=1000 → cota do mês = 3500+3000+1000*4 = 10500.
+  // Cotas semanais na régua FECHADA NO MÊS (weeksOfMonthFor de agosto):
+  // 01→08, 09→15, 16→22, 23→29, 30→31 (starts 01,09,16,23,30). Sem semana de
+  // julho e sem vazar pra setembro. 1ª semana (01)=3000, atual (09)=3500,
+  // resto=1000 → cota do mês = 3000+3500+1000*3 = 9500.
   const setQ = (weekStart: string, amount: number) => Race.setSellerQuotas(A, store, weekStart, [{ sellerKey: KEY, sellerName: NAME, amount }]);
-  setQ("2026-07-26", 1000); setQ("2026-08-02", 3000); setQ("2026-08-09", 3500);
-  setQ("2026-08-16", 1000); setQ("2026-08-23", 1000); setQ("2026-08-30", 1000);
+  setQ("2026-08-01", 3000); setQ("2026-08-09", 3500); setQ("2026-08-16", 1000);
+  setQ("2026-08-23", 1000); setQ("2026-08-30", 1000);
 
   // João: SEM cota cadastrada → cota DERIVADA da escala (cota diária da loja ÷
   // escalados 'work' do dia). Prova a regra do lojista: cota conforme dias
@@ -108,10 +109,21 @@ async function main() {
   check("3.2 quinzena: cota = 6500 (3500+3000)", near(m.fortnight.quota, 6500), `${m.fortnight.quota}`);
   check("3.3 quinzena: atingimento ≈ 44,62%", near(m.fortnight.attainment, 44.62), `${m.fortnight.attainment}`);
 
-  // ===== MÊS (agosto) =====
+  // ===== MÊS (agosto) — só as 5 semanas fechadas no mês (sem julho) =====
   check("4.1 mês: realizado = 3400 (800+1200+900+500)", near(m.month.sales, 3400), `${m.month.sales}`);
-  check("4.2 mês: cota = 10500 (soma das semanas)", near(m.month.quota, 10500), `${m.month.quota}`);
-  check("4.3 mês: atingimento ≈ 32,38%", near(m.month.attainment, 32.38), `${m.month.attainment}`);
+  check("4.2 mês: cota = 9500 (3000+3500+1000*3, sem semana de julho)", near(m.month.quota, 9500), `${m.month.quota}`);
+  check("4.3 mês: atingimento ≈ 35,79% (3400/9500)", near(m.month.attainment, 35.79), `${m.month.attainment}`);
+
+  // ===== FECHA POR MÊS (RN-G2c-003): a semana do fim do mês NÃO vaza pra setembro =====
+  // Venda em 01/09 (setembro) — não pode entrar na semana nem no mês de agosto.
+  sale.run(randomUUID(), A, store, "2026-09-01", NAME, MAT, 300, 3);
+  const sb31 = Race.sellerPeriodScoreboard(A, store, "2026-08-31");
+  check("6.1 semana de 31/08 começa em 30/08", sb31.periods.week.start === "2026-08-30", sb31.periods.week.start);
+  check("6.2 semana de 31/08 FECHA em 31/08 (não vai até 05/09)", sb31.periods.week.end === "2026-08-31", sb31.periods.week.end);
+  const m31 = sb31.sellers.find((s: any) => s.matricula === MAT);
+  check("6.3 venda de 01/09 NÃO conta na semana de agosto", !!m31 && m31.week.sales === 0, `${m31?.week?.sales}`);
+  check("6.4 venda de 01/09 NÃO conta no mês de agosto (mês segue 3400)", !!m31 && near(m31.month.sales, 3400), `${m31?.month?.sales}`);
+  check("6.5 mês continua com cota 9500 (régua fechada no mês)", !!m31 && near(m31.month.quota, 9500), `${m31?.month?.quota}`);
 
   // ===== isolamento =====
   let isoOk = false;

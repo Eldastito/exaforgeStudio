@@ -780,7 +780,20 @@ export class RetailCommissionRaceService {
       const scheduledDays = schedule.filter((e: any) => e.status === "work" && e.work_date >= weekStart && e.work_date <= weekEnd && aliasSet.has(e.seller_key)).length;
       const dayDivisor = scheduledDays > 0 ? scheduledDays : 6;
       const weekQuota = round2(wq.amount);
-      const dayQuota = round2(weekQuota / dayDivisor);
+      // RN-G2-003: cota DIÁRIA alinhada à ESCALA. No dia de referência o
+      // vendedor só recebe cota se estiver escalado 'work' — folga/férias = 0
+      // (férias entra como 'off' na escala). Escalado: cota diária da loja ÷ nº
+      // de escalados do dia (mesma regra da semanal). Sem cota diária da loja
+      // (ou quando a cota é cadastrada semanal), espalha a semana pelos dias
+      // escalados como aproximação — mas ainda 0 na folga.
+      const worksRefDate = schedule.some((e: any) => e.status === "work" && e.work_date === refDate && aliasSet.has(e.seller_key));
+      const escaladosRefDate = schedule.filter((e: any) => e.status === "work" && e.work_date === refDate).length;
+      const storeDayQuota = daily.get(refDate) || 0;
+      const dayQuota = !worksRefDate
+        ? 0
+        : (wq.source === "schedule" && escaladosRefDate > 0 && storeDayQuota > 0)
+          ? round2(storeDayQuota / escaladosRefDate)
+          : round2(weekQuota / dayDivisor);
       const fortnightQuota = round2(weekQuota + pq.amount);
       let monthQuota = 0, anyExplicit = false, anyResolved = false;
       for (const w of monthWeeks) { const q = this.resolveWeeklyQuota(orgId, storeId, w, r.aliases, explicit, schedule, daily); monthQuota += q.amount; if (q.source === "explicit") anyExplicit = true; if (q.source !== "none") anyResolved = true; }
@@ -789,7 +802,7 @@ export class RetailCommissionRaceService {
       return {
         sellerKey: primaryKeyOf(r.userId, r.matricula, r.name), sellerName: r.name, matricula: r.matricula,
         quotaSource: wq.source, monthQuotaSource: anyExplicit ? "explicit" : (anyResolved ? "schedule" : "none"), scheduledDaysThisWeek: scheduledDays,
-        day: { sales: daySales, quota: dayQuota, attainment: pct(daySales, dayQuota) },
+        day: { sales: daySales, quota: dayQuota, attainment: pct(daySales, dayQuota), off: !worksRefDate },
         week: { sales: weekSales, quota: weekQuota, attainment: pct(weekSales, weekQuota) },
         fortnight: { sales: fortSales, quota: fortnightQuota, attainment: pct(fortSales, fortnightQuota) },
         month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota) },

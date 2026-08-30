@@ -6,7 +6,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 import { parseMoneyBR } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
-import { reconcileBandeiras, sumBandeiras } from './retailClosingForm';
+import { reconcileBandeiras, sumBandeiras, canSaveClosing } from './retailClosingForm';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2262,6 +2262,12 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
+  // Dupla checagem da IA: quando a foto pré-preenche, trava o "Salvar" até o
+  // humano confirmar que conferiu os valores com a folha (pedido do lojista —
+  // a plataforma não grava número lido por ela sem "ok" humano).
+  const [scanPending, setScanPending] = useState(false);
+  const [scanConfirmed, setScanConfirmed] = useState(false);
+  const [scanLowConf, setScanLowConf] = useState(false);
   // Cota do dia editável: a coluna "Cota" vem do snapshot do fechamento, que
   // pode ter sido um palpite do PDV. O lojista digita a cota real (ou a IA lê
   // da folha) e a gente grava por cima. `quotaAmt` é o valor exibido/vivo.
@@ -2422,6 +2428,10 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       setScanNote(x.needsReview
         ? `Leitura com baixa confiança (${x.confidence}%). CONFIRA cada campo antes de salvar.`
         : `IA leu a folha (confiança ${x.confidence}%). Confira e salve.`);
+      // Dupla checagem: trava o salvar até o humano confirmar os valores.
+      setScanPending(true);
+      setScanConfirmed(false);
+      setScanLowConf(!!x.needsReview);
     } catch { toast.error('Falha ao enviar a imagem.'); }
     finally { setScanning(false); }
   };
@@ -2675,9 +2685,23 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         {/* QUOTA-001: resumo único da cota da loja (mesmo componente da corrida) */}
         {quota > 0 && <div className="mt-2"><StoreQuotaSummary quota={quota} realized={totalVendas} /></div>}
 
+        {/* Dupla checagem da IA: enquanto a foto pré-preencheu e o humano não
+            confirmou, o "Salvar" fica travado (pedido do lojista — não gravar
+            valor lido pela IA sem conferência humana). */}
+        {scanPending && (
+          <label className={`mt-4 flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] cursor-pointer ${scanLowConf ? 'border-red-500/40 bg-red-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+            <input type="checkbox" checked={scanConfirmed} onChange={e => setScanConfirmed(e.target.checked)} className="mt-0.5 shrink-0" />
+            <span className={scanLowConf ? 'text-red-200' : 'text-amber-200'}>
+              {scanLowConf
+                ? <><strong>Leitura de baixa confiança.</strong> A IA pode ter errado os valores — confira (e redigite se preciso) CADA valor com a folha antes de marcar.</>
+                : <>Confirmo que <strong>conferi os valores com a foto</strong> e estão corretos.</>}
+              {' '}Sem isso o fechamento não pode ser salvo.
+            </span>
+          </label>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={save} disabled={saving || totalVendas <= 0} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+          <button onClick={save} disabled={saving || !canSaveClosing({ totalVendas, scanPending, scanConfirmed })} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar fechamento
           </button>
         </div>

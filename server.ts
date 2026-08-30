@@ -158,6 +158,7 @@ import { chatMediaEnforced, verifyChatMediaRequest, signChatMediaUrl } from "./s
 import { cookieToken } from "./src/server/sessionCookie.js";
 import { ModuleService } from "./src/server/ModuleService.js";
 import { EntitlementService } from "./src/server/EntitlementService.js";
+import { StudioVisualRecipeService } from "./src/server/StudioVisualRecipeService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
@@ -1729,6 +1730,19 @@ async function startServer() {
   // Backfill: torna explícitos os módulos de orgs que estavam sem config (evita
   // o antigo padrão "mostra tudo"). Idempotente — roda barato a cada boot.
   try { ModuleService.backfillNullModules(); } catch (e) { console.error('[Modules] Falha no backfill', e); }
+  // Estúdio de Criação: (1) semeia as receitas visuais (idempotente — inclui a
+  // receita de marca "Organismo Inteligente"); (2) UMA vez, liga o Estúdio para
+  // as orgs existentes (rollout global) — marcado em app_one_time_migrations pra
+  // não re-ligar em quem depois desligar na tela de Módulos. Substitui os
+  // comandos manuais `seed:studio-visual-recipes` e `backfill:studio-global`.
+  try { StudioVisualRecipeService.seedInitialRecipes(); } catch (e) { console.error('[Studio] Falha ao semear receitas visuais', e); }
+  try {
+    const already = db.prepare("SELECT 1 FROM app_one_time_migrations WHERE key = ?").get('studio_global_rollout_v1');
+    if (!already) {
+      ModuleService.enableOptionalModuleForAllOrgs('estudio');
+      db.prepare("INSERT OR IGNORE INTO app_one_time_migrations (key) VALUES (?)").run('studio_global_rollout_v1');
+    }
+  } catch (e) { console.error('[Studio] Falha no rollout global do Estúdio', e); }
   // RBAC granular (ADR-095): garante os 6 perfis de sistema em cada org. Idempotente.
   try { PermissionService.backfillSystemProfiles(); } catch (e) { console.error('[RBAC] Falha no backfill de perfis', e); }
   // Cifra segredos em repouso (token do gateway de pagamento, tokens Google) que

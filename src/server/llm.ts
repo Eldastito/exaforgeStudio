@@ -530,6 +530,37 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use sepa
 }
 
 /**
+ * Lê a ESCALA SEMANAL da loja por FOTO (grade que as lojas mandam no fim de
+ * semana: colunas = dias DOM→SÁB, linhas = turnos com o nome do vendedor, e uma
+ * linha "FOLGA" com quem está de folga). Devolve, por vendedor, se TRABALHA ou
+ * está de FOLGA em cada dia da semana. NÃO adivinha datas — o sistema casa o
+ * dia-da-semana com a semana que o gestor está vendo. Extrator injetável.
+ */
+export async function extractScheduleFromImage(base64: string, mimetype = "image/jpeg", sellerNames: Array<string | null | undefined> = []): Promise<string> {
+  const system = `Você é um assistente de leitura de ESCALAS SEMANAIS de loja no varejo brasileiro. A grade tem COLUNAS por dia da semana (DOMINGO, SEGUNDA, TERÇA, QUARTA, QUINTA, SEXTA, SÁBADO), LINHAS por turno (ex.: MANHÃ, INTER, TARDE) com o NOME do vendedor escalado naquele turno/dia, e geralmente uma linha "FOLGA" listando quem está de folga em cada dia. Extraia, para CADA vendedor que aparece, se ele TRABALHA ou está de FOLGA em cada dia. Devolva SOMENTE um JSON:
+{"vendedores": [{"nome": <string>, "dias": {"dom": <"trabalha"|"folga"|null>, "seg": <...>, "ter": <...>, "qua": <...>, "qui": <...>, "sex": <...>, "sab": <...>}}], "confidence": <inteiro 0 a 100>}
+Regras: se o NOME do vendedor aparece num turno (manhã/inter/tarde) daquele dia, o dia é "trabalha". Se o nome está na linha FOLGA daquele dia (ou marcado como FÉRIAS/atestado), o dia é "folga". Se não dá pra saber o dia, use null. FÉRIAS conta como "folga". Um mesmo vendedor pode trabalhar em vários turnos no mesmo dia — continua sendo um só "trabalha" naquele dia. Ignore células de cabeçalho, datas e o rótulo do turno. NÃO invente vendedores nem dias que não estejam legíveis (use null). LETRA MANUSCRITA: leia os nomes com cuidado.${sellerRosterHint(sellerNames)} Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Leia esta escala semanal (pode ser manuscrita) e devolva o JSON com, por vendedor, trabalha/folga em cada dia da semana." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail: "high" } },
+        ],
+      },
+    ] as any,
+    temperature: 0.1,
+    max_tokens: 1500,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * Cadastro por foto direto no WhatsApp (canal do gestor/lojista, separado da
  * IA de atendimento ao cliente): classificação BARATA e rápida (sem extrair
  * nada ainda) — só decide se a foto é de UM produto avulso (embalagem/rótulo)

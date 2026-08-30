@@ -168,8 +168,29 @@ export class RetailSellerSalesService {
    * salva nada. Extrator injetável (teste offline). O salvamento é o bulkCreate,
    * chamado só depois da confirmação humana.
    */
-  static async extractFromImage(base64: string, mimetype: string): Promise<{ entries: SellerSaleEntry[]; confidence: number; needsReview: boolean }> {
-    const extractor = _sellerSalesExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractSellerSalesFromImage(b, m));
+  /**
+   * Nomes dos vendedores da loja (fallback: org) para a IA casar o manuscrito
+   * com o cadastro — mesma ideia do fechamento. storeId vazio → só a org.
+   */
+  static rosterNamesForOcr(orgId: string, storeId?: string): string[] {
+    let rows: any[] = [];
+    if (storeId) {
+      try {
+        rows = db.prepare(
+          `SELECT s.name FROM retail_seller_store_assignments a
+             JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+            WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1`
+        ).all(orgId, storeId) as any[];
+      } catch { rows = []; }
+    }
+    if (!rows.length) {
+      try { rows = db.prepare(`SELECT name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[]; } catch { rows = []; }
+    }
+    return rows.map((r) => String(r?.name || "").trim()).filter(Boolean);
+  }
+
+  static async extractFromImage(base64: string, mimetype: string, sellerNames: string[] = []): Promise<{ entries: SellerSaleEntry[]; confidence: number; needsReview: boolean }> {
+    const extractor = _sellerSalesExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractSellerSalesFromImage(b, m, sellerNames));
     let parsed: any = {};
     try { parsed = JSON.parse((await extractor(base64, mimetype)) || "{}"); } catch { parsed = {}; }
     const list = Array.isArray(parsed?.vendedores) ? parsed.vendedores : [];

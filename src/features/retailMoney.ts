@@ -30,3 +30,30 @@ export function parseMoneyBR(v: unknown): number {
   const num = Number(s);
   return isFinite(num) ? num : 0;
 }
+
+/**
+ * Formata um valor (em reais) no padrão BR "20.000,00" — sem o "R$", pra caber
+ * em célula estreita. Vazio/NaN → "" (célula em branco continua significando
+ * "usa a derivada da escala"). Usado nos campos de cota semanal, que antes
+ * eram texto puro ("20000") e deixavam o usuário na dúvida se era valor.
+ */
+export function formatMoneyBR(value: unknown): string {
+  if (value === "" || value == null) return "";
+  const num = typeof value === "number" ? value : parseMoneyBR(value);
+  if (!isFinite(num) || num === 0) return "";
+  return num.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * Máscara de digitação de dinheiro estilo "calculadora": os dígitos entram da
+ * DIREITA pras casas decimais, então o usuário digita "2000000" e vê
+ * "20.000,00" — reconhecendo as casas decimais na hora, sem ter que pôr
+ * vírgula/ponto. Recebe o texto atual do input e devolve o texto já formatado.
+ */
+export function maskMoneyBRInput(raw: string): string {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  const cents = parseInt(digits, 10);
+  if (!isFinite(cents) || cents === 0) return "";
+  return formatMoneyBR(cents / 100);
+}

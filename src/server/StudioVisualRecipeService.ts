@@ -890,6 +890,30 @@ const SEED_RECIPES: Array<Parameters<typeof StudioVisualRecipeService.create>[0]
     supported_formats: ["story_9_16", "portrait_4_5", "feed_1_1"],
     vertical_hints: ["fashion", "beauty", "retail"],
   },
+  {
+    // Receita de MARCA (institucional), transversal a todas as verticais. Traduz
+    // a narrativa do ZapFlow: a empresa como um ORGANISMO INTELIGENTE, conectado
+    // e comandado por IA — NÃO uma "prestação de serviço de TI" nem um técnico
+    // executando tarefas. Não é product-hero: não preserva identidade de produto.
+    key: "BRAND_ORGANISM",
+    name: "Organismo Inteligente",
+    description: "Imagem institucional da empresa como um organismo vivo, conectado e comandado por IA — a camada de inteligência que une as áreas do negócio.",
+    intent: "brand_manifesto",
+    composition: {
+      concept: "a empresa retratada como um único organismo inteligente: as áreas (vendas, atendimento, estoque, financeiro, marketing, agenda) aparecem como órgãos/nós conectados por uma rede neural luminosa de dados, com um núcleo de IA central que percebe, decide e coordena tudo em tempo real",
+      camera: "wide_cinematic",
+      lighting: "cinematic_volumetric_glow",
+      palette: "azul-profundo com acentos ciano/turquesa e detalhes quentes de energia",
+      style: "3D isométrico sofisticado, corporativo premium, futurista sóbrio — sem clichê de robô, sem mascote",
+      motifs: ["rede neural conectando setores do negócio", "fluxo de dados vivo entre as áreas", "núcleo de IA pulsante ao centro", "sinapses de luz entre departamentos"],
+      background: "ambiente corporativo abstrato e profundo, com profundidade e brilho volumétrico",
+      avoid: ["técnico consertando computador", "pessoa executando tarefas de suporte", "ícones de help-desk/TI", "servidores e cabos como foco", "estética de antivírus/segurança"],
+    },
+    provider_hints: { preferred: ["gemini_imagen", "openai_gpt_image"] },
+    constraints: { preserve_product_identity: false, allow_text_on_image: false, max_people_in_scene: 0 },
+    supported_formats: ["landscape_16_9", "feed_1_1", "story_9_16", "portrait_4_5"],
+    vertical_hints: ["all"],
+  },
 ];
 
 const SEED_ALIASES: Array<[string, string]> = [
@@ -911,6 +935,13 @@ const SEED_ALIASES: Array<[string, string]> = [
   ["criativo de anúncio", "ADD_CREATIVE"],
   ["3d soft", "SOFT_3D"],
   ["lifestyle", "LIFESTYLE_SHORT"],
+  // marca institucional — narrativa "organismo inteligente"
+  ["/OrganismoInteligente", "BRAND_ORGANISM"],
+  ["/BrandOrganism", "BRAND_ORGANISM"],
+  ["organismo inteligente", "BRAND_ORGANISM"],
+  ["imagem institucional", "BRAND_ORGANISM"],
+  ["marca organismo", "BRAND_ORGANISM"],
+  ["manifesto de marca", "BRAND_ORGANISM"],
 ];
 
 export default StudioVisualRecipeService;

@@ -115,7 +115,8 @@ export const VERTICALS: Vertical[] = [
     key: "varejo", label: "Varejo / Comércio", icon: "🛍️",
     descricao: "Pet shop, eletrônicos, papelaria, utilidades — venda por unidade.",
     // ADR-092: varejo genérico sem cadências no preset (moda é vertical própria).
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor", "rie", "execucao"],
+    // Estúdio de Criação é transversal (todo negócio cria imagem de campanha) → no preset de todas as verticais.
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
@@ -128,20 +129,20 @@ export const VERTICALS: Vertical[] = [
   {
     key: "food", label: "Alimentação / Delivery", icon: "🍰",
     descricao: "Bolos, marmitas, pizzas, doces e salgados — inclusive venda por fatia.",
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "diretor", "rie", "execucao"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "campanhas", "integracoes", "estudio", "diretor", "rie", "execucao"],
     saleMode: "slice",
   },
   {
     key: "servicos", label: "Prestadores de Serviço", icon: "🛠️",
     descricao: "Serviços com hora marcada e orçamento (oficinas, técnicos, autônomos).",
     // ADR-092: reservas vira opt-in (nem todo prestador trabalha por período).
-    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
+    modules: ["agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "saude", label: "Saúde / Bem-estar", icon: "💆",
     descricao: "Clínicas, consultórios, estética e terapias — foco em agendamento.",
-    modules: ["agenda", "clinica", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
+    modules: ["agenda", "clinica", "pagamentos", "cadencias", "areas", "integracoes", "assinaturas", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
@@ -149,13 +150,13 @@ export const VERTICALS: Vertical[] = [
     descricao: "Escolas e cursos: secretaria virtual, aulas, turmas e mensalidades.",
     // ADR-144: "escola" é o corpo da vertical — conecta a escola à família (resumo
     // diário ao responsável no WhatsApp), como "clinica" é o corpo de "saude".
-    modules: ["escola", "assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "diretor", "rie", "execucao"],
+    modules: ["escola", "assinaturas", "agenda", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
     key: "hospitalidade", label: "Hotéis / Restaurantes", icon: "🏨",
     descricao: "Hospedagem e restaurantes/pensão: reservas, cardápio e atendimento.",
-    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "diretor", "rie", "execucao"],
+    modules: ["reservas", "catalogo", "vendas", "loja", "pagamentos", "agenda", "areas", "integracoes", "compras", "orcamentos", "eventos", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
@@ -185,7 +186,7 @@ export const VERTICALS: Vertical[] = [
     // A adaptação de terminologia (pet/tutor) e campos pet-específicos (espécie, raça,
     // carteira de vacina) são fatias seguintes — aqui é o preset que torna a vertical
     // selecionável no onboarding e liga os módulos certos.
-    modules: ["catalogo", "vendas", "loja", "pagamentos", "compras", "agenda", "clinica", "areas", "cadencias", "assinaturas", "campanhas", "integracoes", "diretor", "rie", "execucao"],
+    modules: ["catalogo", "vendas", "loja", "pagamentos", "compras", "agenda", "clinica", "areas", "cadencias", "assinaturas", "campanhas", "integracoes", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {
@@ -202,7 +203,7 @@ export const VERTICALS: Vertical[] = [
     // o módulo `clinica` (que traz prontuário/prescrição — não cabe no jurídico).
     key: "advocacia", label: "Advocacia / Jurídico", icon: "⚖️",
     descricao: "Escritório de advocacia — processos, prazos, audiências, clientes e honorários.",
-    modules: ["advocacia", "agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "diretor", "rie", "execucao"],
+    modules: ["advocacia", "agenda", "vendas", "pagamentos", "campanhas", "cadencias", "areas", "integracoes", "assinaturas", "estudio", "diretor", "rie", "execucao"],
     saleMode: "unit",
   },
   {

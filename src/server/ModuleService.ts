@@ -159,6 +159,39 @@ export class ModuleService {
     return { updated };
   }
 
+  /**
+   * Rollout operacional (idempotente + ADITIVO): garante que um módulo OPCIONAL
+   * fique habilitado para TODAS as orgs que têm lista explícita de módulos e
+   * ainda não o listam. Orgs com `enabled_modules` NULL já enxergam tudo
+   * (legado) — não precisam ser tocadas. NUNCA remove módulos; o teto de plano
+   * segue valendo em runtime (`isEnabled` cruza com `modulesForPlan`), então
+   * adicionar aqui não fura plano. Feito para o "torne X global" — ex.: o
+   * Estúdio de Criação. Rodar via SCRIPT (não no boot) para respeitar quem
+   * depois desligar o módulo na tela de Módulos.
+   */
+  static enableOptionalModuleForAllOrgs(moduleKey: string): { updated: number; scanned: number } {
+    if (!(OPTIONAL_MODULES as readonly string[]).includes(moduleKey)) {
+      throw new Error(`módulo opcional desconhecido: ${moduleKey}`);
+    }
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(
+        "SELECT organization_id, enabled_modules FROM organization_settings WHERE enabled_modules IS NOT NULL AND enabled_modules != ''"
+      ).all() as any[];
+    } catch (e) { return { updated: 0, scanned: 0 }; }
+    let updated = 0;
+    const upd = db.prepare("UPDATE organization_settings SET enabled_modules = ? WHERE organization_id = ?");
+    for (const r of rows) {
+      let arr: any;
+      try { arr = JSON.parse(r.enabled_modules); } catch { continue; }
+      if (!Array.isArray(arr) || arr.includes(moduleKey)) continue;
+      const next = this.sanitize([...arr, moduleKey]);
+      try { upd.run(JSON.stringify(next), r.organization_id); updated++; } catch (e) { /* noop */ }
+    }
+    if (updated) console.log(`[Modules] Rollout '${moduleKey}': ${updated}/${rows.length} organização(ões) atualizadas.`);
+    return { updated, scanned: rows.length };
+  }
+
   /** Sanitiza uma lista de módulos para apenas os opcionais conhecidos. */
   static sanitize(modules: any): string[] {
     if (!Array.isArray(modules)) return [];

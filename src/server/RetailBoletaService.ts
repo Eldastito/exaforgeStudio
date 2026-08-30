@@ -203,6 +203,43 @@ export class RetailBoletaService {
   }
 
   /**
+   * BOL-006 — Auditoria da regra "5 produtos por boleta". Regra da loja: cada
+   * boleta (talão impresso) tem no máximo 5 LINHAS, e cada linha é um produto
+   * DISTINTO (código de barras). Várias unidades do MESMO código ocupam UMA
+   * linha (ex.: 5 blusas G iguais = 1 linha), então a conta é por produto
+   * distinto, nunca por peças. Fonte da verdade = itens lançados no PDV
+   * (retail_pdv_sale_items): conta produtos distintos por boleta e sinaliza
+   * quem passou de 5 — o "virtual" tem que encaixar no talão real. Sem PDV
+   * sincronizado, devolve hasPdv=false (nada a conferir ainda).
+   */
+  static lineAudit(orgId: string, storeId: string, day: string, maxLinhas = 5): {
+    hasPdv: boolean; maxLinhas: number; totalBoletas: number;
+    overLimit: Array<{ boleta: string; produtos: number }>;
+    boletas: Array<{ boleta: string; produtos: number; itens: number }>;
+  } {
+    const limit = Math.max(1, Math.trunc(Number(maxLinhas) || 5));
+    const empty = { hasPdv: false, maxLinhas: limit, totalBoletas: 0, overLimit: [] as Array<{ boleta: string; produtos: number }>, boletas: [] as Array<{ boleta: string; produtos: number; itens: number }> };
+    const store = db.prepare(`SELECT code FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store?.code) return empty;
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(
+        `SELECT boleta, COUNT(DISTINCT produto) AS produtos, COUNT(*) AS itens
+           FROM retail_pdv_sale_items
+          WHERE organization_id = ? AND filial = ? AND sale_date = ?
+            AND boleta IS NOT NULL AND TRIM(boleta) <> ''
+          GROUP BY boleta`
+      ).all(orgId, String(store.code), day) as any[];
+    } catch { return empty; } // base sem PDV sync — nada a auditar
+    if (!rows.length) return empty;
+    const boletas = rows
+      .map((r) => ({ boleta: String(r.boleta), produtos: Number(r.produtos || 0), itens: Number(r.itens || 0) }))
+      .sort((a, b) => a.boleta.localeCompare(b.boleta, undefined, { numeric: true }));
+    const overLimit = boletas.filter((b) => b.produtos > limit).map((b) => ({ boleta: b.boleta, produtos: b.produtos }));
+    return { hasPdv: true, maxLinhas: limit, totalBoletas: boletas.length, overLimit, boletas };
+  }
+
+  /**
    * BOL-005 — histórico curto (leitura): os últimos N dias com boletas da loja,
    * pra o gestor confirmar num relance que a contagem NÃO foi apagada. Derivado
    * por query (RN-004). Retorna, por dia, aberto/inicial/primeira/última/ativas/

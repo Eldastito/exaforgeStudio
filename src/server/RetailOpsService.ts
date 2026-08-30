@@ -133,6 +133,26 @@ export class RetailClosingService {
   }
 
   /**
+   * Nomes dos vendedores CADASTRADOS na loja, pra a IA casar o nome manuscrito
+   * com o cadastro (ideia do lojista). Preferimos a lotação da loja; se a loja
+   * não tem vínculo, cai nos ativos da org (melhor candidatos que nenhum).
+   */
+  private static rosterNames(orgId: string, storeId: string): string[] {
+    let rows: any[] = [];
+    try {
+      rows = db.prepare(
+        `SELECT s.name FROM retail_seller_store_assignments a
+           JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+          WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1`
+      ).all(orgId, storeId) as any[];
+    } catch { rows = []; }
+    if (!rows.length) {
+      try { rows = db.prepare(`SELECT name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[]; } catch { rows = []; }
+    }
+    return rows.map((r) => String(r?.name || "").trim()).filter(Boolean);
+  }
+
+  /**
    * Fase C — lê a FOTO/documento da folha de fechamento com IA (OCR), preenche o
    * fechamento do dia da loja e calcula o desvio vs cota. NÃO aprova: baixa
    * confiança vira 'needs_review' para a conferência humana (a aprovação é
@@ -143,7 +163,8 @@ export class RetailClosingService {
   } = {}, actorId?: string): Promise<{ closing: any; extraction: any } | null> {
     if (!storeId) return null;
     const closing = this.getOrCreate(orgId, storeId, date);
-    const extractor = _closingExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractClosingFromImage(b, m));
+    const rosterNames = this.rosterNames(orgId, storeId);
+    const extractor = _closingExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractClosingFromImage(b, m, rosterNames));
     let parsed: any = {};
     try { parsed = JSON.parse((await extractor(base64, mimetype)) || "{}"); } catch { parsed = {}; }
 

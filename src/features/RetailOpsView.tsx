@@ -2542,6 +2542,12 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                 <button onClick={() => setDespesas(p => p.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
             ))}
+            {/* DESP-002: total em DESTAQUE no rodapé da caixa — pra o gestor
+                bater o olho e achar o total das despesas na hora (pedido do lojista). */}
+            <div className="mt-2 flex items-center justify-between rounded-md bg-orange-500/10 border border-orange-500/30 px-2.5 py-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wide text-orange-200">Total despesas</span>
+              <span className="text-lg font-bold text-orange-300">{brl(totalDespesas)}</span>
+            </div>
           </div>
           <div className="rounded-lg border border-zinc-800 p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Boletas, cadastros & malote</div>

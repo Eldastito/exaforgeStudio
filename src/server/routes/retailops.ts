@@ -1223,7 +1223,9 @@ router.post("/seller-sales/scan", requireRole("owner", "admin"), (req: AuthReque
       const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
       let imageUrl: string | null = null;
       try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); const name = `${randomUUID()}.jpg`; fs.writeFileSync(path.join(MEDIA_DIR, name), processed); imageUrl = `/media/${name}`; } catch { /* best-effort */ }
-      const out = await RetailSellerSalesService.extractFromImage(processed.toString("base64"), "image/jpeg");
+      const storeId = String((req as any).body?.storeId || req.query?.storeId || "");
+      const rosterNames = RetailSellerSalesService.rosterNamesForOcr(orgId, storeId);
+      const out = await RetailSellerSalesService.extractFromImage(processed.toString("base64"), "image/jpeg", rosterNames);
       res.json({ ...out, imageUrl });
     } catch (e: any) {
       console.error("[Retail Seller Sales Scan] erro", e);

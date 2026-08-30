@@ -3,6 +3,7 @@ import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Sc
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -11,7 +12,8 @@ import { useAuth } from '@/src/contexts/AuthContext';
 // ============================================================================
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// todayStr/sundayOf/addDays/isoLocal vêm de ./retailDateUtils (data LOCAL, não
+// UTC — corrige o off-by-one da escala e do fechamento à noite no Brasil).
 
 // PDR TOULON, Fatia 1D/4D — estados HONESTOS das telas analíticas. Nunca
 // mascarar 403/timeout/500/rede como "sem dados": cada um tem mensagem e ação
@@ -773,7 +775,7 @@ function StoreQuotaSummary({ quota, realized, individualQuotaTotal, compact }: {
 
 // ---- Resultado / lucro por loja (custos fixos + margem) ---------------------
 function StoreResultTab() {
-  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [period, setPeriod] = useState(() => todayStr().slice(0, 7));
   const { data, status, corr, loading, isStale, loadedAt, reload: load } =
     useAnalytics(() => `/api/retailops/stores-result?period=${period}`, [period]);
   const showData = status === 'ok' || isStale; // último snapshot enquanto o refresh falha
@@ -4129,9 +4131,7 @@ function ScheduleTab() {
   const [orgUsesAssignments, setOrgUsesAssignments] = useState(false);
   const [extra, setExtra] = useState<Record<string, string[]>>({}); // por loja: matrículas add "de outra loja"
   // Semana exibida na grade (domingo → sábado).
-  const sundayOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); return x.toISOString().slice(0, 10); };
   const [weekStart, setWeekStart] = useState(() => sundayOf(new Date()));
-  const addDays = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const DOW = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   // grade[date][sellerKey] = 'work' | 'off' | undefined
@@ -4424,7 +4424,7 @@ function CommissionTab() {
   const applyExShortcut = (kind: 'today' | 'week' | 'fortnight' | 'month') => {
     const now = new Date();
     const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
-    const iso = (dt: Date) => dt.toISOString().slice(0, 10);
+    const iso = (dt: Date) => isoLocal(dt);
     if (kind === 'today') { setExStart(iso(now)); setExEnd(iso(now)); }
     else if (kind === 'week') { const monday = new Date(now); monday.setDate(d - ((now.getDay() + 6) % 7)); setExStart(iso(monday)); setExEnd(iso(now)); }
     else if (kind === 'fortnight') { setExStart(iso(new Date(y, m, d <= 15 ? 1 : 16))); setExEnd(iso(now)); }

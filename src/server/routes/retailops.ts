@@ -26,6 +26,7 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
+import { RetailScheduleImportService } from "../RetailScheduleImportService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
 import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
@@ -1902,6 +1903,35 @@ router.put("/schedule", requireRole("owner", "admin"), (req: AuthRequest, res): 
   if (!Array.isArray(entries)) return res.status(400).json({ error: "entries deve ser uma lista" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   res.json({ entries: RetailCommissionRaceService.saveSchedule(orgId, String(storeId), String(start), String(end), entries, req.user?.userId) });
+});
+
+// Importa a ESCALA por FOTO: a IA lê a grade e devolve trabalha/folga por dia
+// pra CONFERÊNCIA — NÃO salva. O salvamento é o PUT /schedule, após conferir.
+router.post("/schedule/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  closingUpload.single("file")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    const storeId = String((req as any).body?.storeId || "");
+    const weekStart = String((req as any).body?.weekStart || "").slice(0, 10);
+    if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return res.status(400).json({ error: "weekStart (YYYY-MM-DD, domingo) obrigatório" });
+    if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    // 7 datas da semana (domingo→sábado) em UTC — evita off-by-one de fuso.
+    const base = new Date(`${weekStart}T00:00:00Z`);
+    const weekDates = Array.from({ length: 7 }, (_, i) => new Date(base.getTime() + i * 86400000).toISOString().slice(0, 10));
+    try {
+      const processed = await sharp(file.buffer).rotate().resize(2200, 2200, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      const out = await RetailScheduleImportService.extractFromImage(orgId, storeId, processed.toString("base64"), "image/jpeg", weekDates);
+      res.json({ ...out, weekStart, weekDates });
+    } catch (e: any) {
+      console.error("[Retail Schedule Scan] erro", e);
+      res.status(500).json({ error: "Falha ao ler a escala com a IA. Tente uma foto mais nítida ou preencha a escala manualmente." });
+    }
+  });
 });
 
 router.post("/schedule/copy-week", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

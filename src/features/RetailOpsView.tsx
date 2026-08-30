@@ -4,7 +4,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
-import { parseMoneyBR } from './retailMoney';
+import { parseMoneyBR, formatMoneyBR, maskMoneyBRInput } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 import { reconcileBandeiras, sumBandeiras } from './retailClosingForm';
 
@@ -4345,7 +4345,8 @@ function ScheduleTab() {
     const d = await apiFetch(`/api/retailops/seller-quotas?storeId=${storeId}&month=${month}`).then(r => r.json()).catch(() => null);
     setRaceWeeks(Array.isArray(d?.weeks) ? d.weeks : []);
     const g: Record<string, Record<string, string>> = {};
-    for (const q of d?.quotas || []) { g[q.week_start] = g[q.week_start] || {}; g[q.week_start][q.seller_key] = String(q.quota_amount); }
+    // Guarda já formatado como moeda BR ("20.000,00") — o campo é monetário.
+    for (const q of d?.quotas || []) { g[q.week_start] = g[q.week_start] || {}; g[q.week_start][q.seller_key] = formatMoneyBR(q.quota_amount); }
     setQuotaGrid(g);
   };
   useEffect(() => { loadQuotas(); /* eslint-disable-next-line */ }, [storeId, month]);
@@ -4409,7 +4410,7 @@ function ScheduleTab() {
         const row = quotaGrid[w.start] || {};
         const quotas = Object.entries(row)
           .filter(([, v]) => String(v).trim() !== '')
-          .map(([sk, v]) => ({ sellerKey: sk, sellerName: sellers.find(x => keyOf(x) === sk)?.name, amount: Number(v) || 0 }));
+          .map(([sk, v]) => ({ sellerKey: sk, sellerName: sellers.find(x => keyOf(x) === sk)?.name, amount: parseMoneyBR(v) }));
         if (!quotas.length) continue;
         const res = await apiFetch('/api/retailops/seller-quotas', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, weekStart: w.start, quotas }) });
         if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar as cotas.'); return; }
@@ -4521,7 +4522,7 @@ function ScheduleTab() {
           <input type="month" value={month} onChange={e => setMonth(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
           <button onClick={saveQuotas} disabled={savingQuotas} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{savingQuotas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Salvar cotas</button>
         </div>
-        <p className="mb-2 text-[11px] text-zinc-500">A cota que cada vendedor precisa bater em cada semana da corrida (a mensal é a soma). Em branco = usa a derivada da escala.</p>
+        <p className="mb-2 text-[11px] text-zinc-500">A cota (em R$) que cada vendedor precisa bater em cada semana da corrida (a mensal é a soma). O valor é monetário — digite os números que as casas decimais entram sozinhas (ex.: 2000000 → 20.000,00). Em branco = usa a derivada da escala.</p>
         {sellers.length > 0 && raceWeeks.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-xs">
@@ -4539,7 +4540,7 @@ function ScheduleTab() {
                       <td className="px-3 py-1.5 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
                       {raceWeeks.map((w: any) => (
                         <td key={w.start} className="px-2 py-1 text-center">
-                          <input type="number" step="50" placeholder="—" value={quotaGrid[w.start]?.[sk] ?? ''} onChange={e => setQuotaGrid(p => ({ ...p, [w.start]: { ...(p[w.start] || {}), [sk]: e.target.value } }))} className="w-24 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100 text-right" />
+                          <input inputMode="decimal" placeholder="—" value={quotaGrid[w.start]?.[sk] ?? ''} onChange={e => setQuotaGrid(p => ({ ...p, [w.start]: { ...(p[w.start] || {}), [sk]: maskMoneyBRInput(e.target.value) } }))} className="w-24 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100 text-right tabular-nums" />
                         </td>
                       ))}
                     </tr>

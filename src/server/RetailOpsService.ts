@@ -39,6 +39,60 @@ export class RetailQuotaService {
     ).all(orgId, date) as any[];
   }
 
+  /**
+   * QUOTA-002 — Sugestão de cota diária da loja a partir do histórico do PDV
+   * (média do MESMO dia-da-semana nas últimas 8 semanas; senão média de 28
+   * dias). TRAVA DA ESCALA: se a loja TEM escala nesse dia mas ninguém está
+   * 'work' (loja fechada / folga geral), NÃO sugere — cota 0. Sem escala lançada
+   * no dia, mantém o comportamento antigo (sugere pelo histórico). Ao aplicar,
+   * grava a cota da loja e atualiza o snapshot/desvio do fechamento do dia; numa
+   * loja fechada, ZERA a cota (corrige uma cota errada gravada antes).
+   */
+  static suggestForDate(orgId: string, date: string, opts: { apply?: boolean } = {}, actorId?: string): { date: string; applied: boolean; suggestions: any[] } {
+    const apply = !!opts.apply;
+    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const dow = (db.prepare(`SELECT strftime('%w', ?) w`).get(date) as any)?.w;
+    const suggestions: any[] = [];
+    const updateClosingSnapshot = (storeId: string, amount: number) => db.prepare(
+      `UPDATE retail_daily_closings SET quota_amount = ?,
+          variance_amount = CASE WHEN COALESCE(informed_total, 0) > 0 THEN informed_total - ? ELSE variance_amount END,
+          variance_percent = CASE WHEN COALESCE(informed_total, 0) > 0 AND ? > 0 THEN (informed_total - ?) * 100.0 / ? ELSE variance_percent END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE organization_id = ? AND store_id = ? AND closing_date = ?`
+    ).run(amount, amount, amount, amount, amount, orgId, storeId, date);
+
+    for (const s of stores) {
+      const sched = db.prepare(
+        `SELECT COUNT(*) total, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) working
+           FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ?`
+      ).get(orgId, s.id, date) as any;
+      const scheduled = Number(sched?.total || 0);
+      const working = Number(sched?.working || 0);
+      // Loja fechada no dia: TEM escala e ninguém trabalha → sem cota.
+      if (scheduled > 0 && working === 0) {
+        suggestions.push({ storeId: s.id, storeName: s.name, suggested: 0, samples: 0, basis: "loja fechada (todos de folga na escala)", skipped: true });
+        if (apply) { this.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: 0, source: "pdv_suggest" }, actorId); updateClosingSnapshot(s.id, 0); }
+        continue;
+      }
+      const sameDow = db.prepare(
+        `SELECT AVG(system_total) avg, COUNT(*) n FROM retail_daily_closings
+          WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0
+            AND closing_date >= date(?, '-56 days') AND closing_date < ? AND strftime('%w', closing_date) = ?`
+      ).get(orgId, s.id, date, date, dow) as any;
+      const overall = db.prepare(
+        `SELECT AVG(system_total) avg, COUNT(*) n FROM retail_daily_closings
+          WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0
+            AND closing_date >= date(?, '-28 days') AND closing_date < ?`
+      ).get(orgId, s.id, date, date) as any;
+      const pick = Number(sameDow?.n || 0) >= 2 ? sameDow : overall;
+      const suggested = Math.round(Number(pick?.avg || 0) * 100) / 100;
+      if (suggested <= 0) continue; // sem histórico do PDV para esta loja
+      suggestions.push({ storeId: s.id, storeName: s.name, suggested, samples: Number(pick?.n || 0), basis: Number(sameDow?.n || 0) >= 2 ? "mesmo dia da semana (8 sem.)" : "média 28 dias" });
+      if (apply) { this.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: suggested, source: "pdv_suggest" }, actorId); updateClosingSnapshot(s.id, suggested); }
+    }
+    return { date, applied: apply, suggestions };
+  }
+
   /** Importação em lote (CSV/planilha). Retorna quantas cotas foram gravadas. */
   static import(orgId: string, rows: Array<{ storeId: string; quotaDate: string; quotaAmount: number }>, actorId?: string): number {
     let n = 0;

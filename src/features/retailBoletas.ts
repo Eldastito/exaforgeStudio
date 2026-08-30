@@ -1,27 +1,31 @@
 /**
- * Regra de negócio da loja (Toulon): cada BOLETA (talão de venda manuscrito)
- * comporta no máximo 5 produtos. Se um vendedor vende mais que isso, abre-se
- * uma NOVA boleta para o MESMO vendedor. Ex.: 15 produtos = 3 boletas.
+ * Regra de negócio da loja (Toulon): cada BOLETA (talão de venda impresso) tem
+ * no máximo 5 LINHAS, e cada linha é um PRODUTO DISTINTO — um código de barras.
+ * Várias unidades do MESMO código ocupam UMA linha (ex.: 5 blusas G iguais =
+ * 1 linha), então a conta é por produto DISTINTO, nunca por peças. Passou de 5
+ * produtos distintos, abre-se nova boleta para o MESMO vendedor.
+ * Ex.: 15 produtos distintos = 3 boletas.
  *
- * O arredondamento é POR VENDEDOR (cada um enche a própria boleta), então a
- * soma não pode ser feita no total geral: 4 + 4 produtos = 1 + 1 = 2 boletas,
- * não ceil(8/5) = 2 por acaso; já 6 + 6 = 2 + 2 = 4, e não ceil(12/5) = 3.
+ * A fonte da verdade para conferir isso é o PDV (itens lançados por boleta) —
+ * ver RetailBoletaService.lineAudit. Estas funções são só a expressão pura da
+ * regra (arredondamento POR vendedor: 6 + 6 produtos = 2 + 2 = 4 boletas, e
+ * não ceil(12/5) = 3).
  */
 export const PRODUTOS_POR_BOLETA = 5;
 
-/** Boletas esperadas de UM vendedor pelo nº de produtos/peças vendidos. */
-export function boletasDeVendedor(pecas: unknown, porBoleta = PRODUTOS_POR_BOLETA): number {
-  const p = Math.max(0, Math.floor(Number(pecas) || 0));
+/** Boletas de UM vendedor pelo nº de PRODUTOS DISTINTOS (códigos de barras). */
+export function boletasDeVendedor(produtosDistintos: unknown, porBoleta = PRODUTOS_POR_BOLETA): number {
+  const p = Math.max(0, Math.floor(Number(produtosDistintos) || 0));
   const div = Math.max(1, Math.floor(Number(porBoleta) || PRODUTOS_POR_BOLETA));
   if (p <= 0) return 0;
   return Math.ceil(p / div);
 }
 
 /**
- * Total de boletas esperadas no dia, somando o arredondamento de CADA vendedor
- * (nunca o total de peças da loja de uma vez — ver nota acima).
+ * Total de boletas somando o arredondamento de CADA vendedor (nunca o total de
+ * produtos da loja de uma vez — ver nota acima).
  */
-export function boletasEsperadas(pecasPorVendedor: Array<unknown>, porBoleta = PRODUTOS_POR_BOLETA): number {
-  if (!Array.isArray(pecasPorVendedor)) return 0;
-  return pecasPorVendedor.reduce<number>((acc, v) => acc + boletasDeVendedor(v, porBoleta), 0);
+export function boletasEsperadas(produtosPorVendedor: Array<unknown>, porBoleta = PRODUTOS_POR_BOLETA): number {
+  if (!Array.isArray(produtosPorVendedor)) return 0;
+  return produtosPorVendedor.reduce<number>((acc, v) => acc + boletasDeVendedor(v, porBoleta), 0);
 }

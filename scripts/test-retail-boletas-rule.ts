@@ -16,7 +16,7 @@ async function main() {
 
   check("0.1 constante = 5", PRODUTOS_POR_BOLETA === 5);
 
-  // ===== 1. por vendedor (ceil de peças/5) =====
+  // ===== 1. por vendedor (ceil de produtos distintos/5) =====
   check("1.1 0 produtos → 0 boletas", boletasDeVendedor(0) === 0);
   check("1.2 1 produto → 1 boleta", boletasDeVendedor(1) === 1);
   check("1.3 5 produtos → 1 boleta", boletasDeVendedor(5) === 1);
@@ -32,9 +32,9 @@ async function main() {
   check("2.4 [15] → 3", boletasEsperadas([15]) === 3);
   check("2.5 [5,10,1] → 1+2+1 = 4", boletasEsperadas([5, 10, 1]) === 4);
 
-  // ===== 3. entradas sujas (peças vêm como string da UI) =====
+  // ===== 3. entradas sujas (produtos vêm como string da UI) =====
   check('3.1 ["6","4"] → 2+1 = 3', boletasEsperadas(["6", "4"]) === 3);
-  check('3.2 vendedor sem peças ("") não conta', boletasEsperadas(["", "5"]) === 1);
+  check('3.2 vendedor sem produtos ("") não conta', boletasEsperadas(["", "5"]) === 1);
   check("3.3 valores negativos/lixo → 0", boletasEsperadas([-3, "abc", null, undefined]) === 0);
   check("3.4 fração arredonda pra baixo antes (5.9 → 5 produtos → 1)", boletasDeVendedor(5.9) === 1);
 

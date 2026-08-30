@@ -5,7 +5,6 @@ import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 import { parseMoneyBR } from './retailMoney';
-import { boletasEsperadas, PRODUTOS_POR_BOLETA } from './retailBoletas';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2248,6 +2247,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [posDebQtd, setPosDebQtd] = useState(existing.pos?.debitoQtd ? String(existing.pos.debitoQtd) : '');
   const [escalados, setEscalados] = useState<string[]>([]);
   const [boletaClicks, setBoletaClicks] = useState<number | null>(null);
+  const [lineAudit, setLineAudit] = useState<{ hasPdv: boolean; maxLinhas: number; totalBoletas: number; overLimit: Array<{ boleta: string; produtos: number }> } | null>(null);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
@@ -2271,6 +2271,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         if (d.lastNumber) setBoletaFinal((prev: string) => prev || d.lastNumber);
       }
     }).catch(() => {});
+    // BOL-006: auditoria "5 produtos por boleta" pelos itens do PDV (produtos
+    // distintos por boleta). Só aparece quando o PDV do dia já sincronizou.
+    apiFetch(`/api/retailops/boletas/line-audit?storeId=${storeId}&day=${date}`).then(r => r.json()).then(d => {
+      setLineAudit(d && typeof d === 'object' && 'hasPdv' in d ? d : null);
+    }).catch(() => setLineAudit(null));
     // eslint-disable-next-line
   }, [storeId, date]);
 
@@ -2327,9 +2332,6 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const totalDespesas = useMemo(() => despesas.reduce((a, d) => a + n(d.valor), 0), [despesas]);
   const rankingTotal = useMemo(() => ranking.reduce((a, r) => a + n(r.valor), 0), [ranking]);
   const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
-  // Boletas esperadas pela regra da loja (5 produtos/boleta, arredondando por
-  // vendedor) — conferência contra o intervalo inicial→final informado.
-  const boletasEsperadasDia = useMemo(() => boletasEsperadas(ranking.map(r => r.pecas)), [ranking]);
   const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
   const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
   const quota = Number(closing.quota_amount || 0);
@@ -2552,16 +2554,14 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                 const ok = range === boletaClicks;
                 return <p className={`col-span-2 text-[11px] ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>{ok ? `Range de ${range} boleta(s) bate com os ${boletaClicks} clique(s) do dia.` : `Range de ${isNaN(range) ? '?' : range} boleta(s) × ${boletaClicks} clique(s) registrados — confira antes de salvar.`}</p>;
               })()}
-              {/* BOL-006: conferência pela regra da loja — 5 produtos/boleta,
-                  arredondando POR vendedor (peças do ranking). É estimativa. */}
-              {boletasEsperadasDia > 0 && (() => {
-                const range = parseInt(String(boletaFinal).replace(/\D/g, ''), 10) - parseInt(String(boletaInicial).replace(/\D/g, ''), 10) + 1;
-                const hasRange = Boolean(boletaInicial && boletaFinal && !isNaN(range));
-                const ok = hasRange && range === boletasEsperadasDia;
-                return <p className={`col-span-2 text-[11px] ${!hasRange ? 'text-zinc-500' : ok ? 'text-emerald-300' : 'text-amber-300'}`}>
-                  Estimativa: ~<strong>{boletasEsperadasDia}</strong> boleta(s) pela regra ({PRODUTOS_POR_BOLETA} produtos/boleta, pelas peças do ranking){hasRange ? ` · intervalo informado tem ${range} — ${ok ? 'bate.' : 'confira.'}` : '.'}
-                </p>;
-              })()}
+              {/* BOL-006: conferência da regra "5 produtos por boleta" pelos
+                  itens reais do PDV (produtos DISTINTOS por boleta — 5 blusas
+                  iguais = 1 linha). Só aparece quando o PDV do dia já entrou. */}
+              {lineAudit?.hasPdv && (
+                lineAudit.overLimit.length === 0
+                  ? <p className="col-span-2 text-[11px] text-emerald-300">{lineAudit.totalBoletas} boleta(s) do PDV — todas com até {lineAudit.maxLinhas} produtos. Regra OK.</p>
+                  : <p className="col-span-2 text-[11px] text-amber-300">Passou de {lineAudit.maxLinhas} produtos por boleta: {lineAudit.overLimit.map(b => `Nº ${b.boleta} (${b.produtos})`).join(', ')} — cada boleta só cabe {lineAudit.maxLinhas} linhas. Confira o lançamento.</p>
+              )}
               <label className="text-xs text-zinc-400">Cadastros
                 <input inputMode="numeric" value={cadastros} onChange={e => setCadastros(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
               </label>

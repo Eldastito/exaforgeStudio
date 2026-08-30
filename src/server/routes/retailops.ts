@@ -1498,6 +1498,18 @@ router.get("/boletas/day", (req: AuthRequest, res): any => {
   res.json({ ...report, businessDate: BusinessTimeService.businessDate(orgId), timezone: BusinessTimeService.timezoneFor(orgId), serverTimestamp: new Date().toISOString() });
 });
 
+// BOL-006: auditoria "5 produtos por boleta" a partir dos itens do PDV.
+router.get("/boletas/line-audit", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  const rawDay = String(req.query.day || "").slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : BusinessTimeService.businessDate(orgId);
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  res.json(RetailBoletaService.lineAudit(orgId, storeId, day));
+});
+
 // Abre o dia com o nº inicial do talão (gestão).
 router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

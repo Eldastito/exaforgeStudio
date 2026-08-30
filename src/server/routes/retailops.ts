@@ -2027,6 +2027,18 @@ router.get("/schedule/who-off", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
 });
 
+// Escala do dia agrupada por loja: quem trabalha (verde) + quem folga (vermelho).
+router.get("/schedule/day-roster", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date (YYYY-MM-DD) obrigatório" });
+  try {
+    res.json({ date, stores: RetailScheduleTemplateService.dayRoster(orgId, date, { storeId }) });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
 // Cota individual do vendedor por semana da corrida.
 router.get("/seller-quotas", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -73,9 +73,9 @@ async function main() {
 
   // ═══════════════ 3. Seed inicial ═══════════════
   const seedResult = VRE.seedInitialRecipes();
-  check("3.1 seedInitialRecipes cria 6 recipes", seedResult.created.length === 6);
-  check("3.2 6 recipes esperados presentes",
-    ["PRODUCT_EXPLOSION", "BILLBOARD_3D", "MAGAZINE_COVER", "ADD_CREATIVE", "SOFT_3D", "LIFESTYLE_SHORT"]
+  check("3.1 seedInitialRecipes cria 7 recipes", seedResult.created.length === 7);
+  check("3.2 7 recipes esperados presentes",
+    ["PRODUCT_EXPLOSION", "BILLBOARD_3D", "MAGAZINE_COVER", "ADD_CREATIVE", "SOFT_3D", "LIFESTYLE_SHORT", "BRAND_ORGANISM"]
       .every(k => seedResult.created.includes(k)));
 
   // Idempotência
@@ -84,7 +84,14 @@ async function main() {
   check("3.4 seed rodado 2x não duplica aliases", seedAgain.aliases_added === 0);
 
   const total = (db.prepare("SELECT COUNT(*) as n FROM studio_visual_recipes").get() as any).n;
-  check("3.5 total no db = 6", total === 6);
+  check("3.5 total no db = 7", total === 7);
+
+  // Receita de marca (narrativa "organismo inteligente") — transversal.
+  check("3.6 alias '/OrganismoInteligente' resolve p/ BRAND_ORGANISM", VRE.resolveAlias("/OrganismoInteligente") === "BRAND_ORGANISM");
+  check("3.7 alias natural 'organismo inteligente' resolve", VRE.resolveAlias("organismo inteligente") === "BRAND_ORGANISM");
+  const brand = VRE.get("BRAND_ORGANISM");
+  check("3.8 BRAND_ORGANISM é institucional (não preserva produto)", brand?.constraints?.preserve_product_identity === false);
+  check("3.9 BRAND_ORGANISM é transversal (vertical_hints inclui 'all')", Array.isArray(brand?.vertical_hints) && brand!.vertical_hints.includes("all"));
 
   // ═══════════════ 4. resolveAlias ═══════════════
   check("4.1 alias slash resolve", VRE.resolveAlias("/3Dbillboard") === "BILLBOARD_3D");
@@ -108,10 +115,10 @@ async function main() {
 
   // ═══════════════ 6. list() ═══════════════
   const listed = VRE.list();
-  check("6.1 list() retorna 6 recipes", listed.length === 6);
+  check("6.1 list() retorna 7 recipes", listed.length === 7);
   check("6.2 todos active", listed.every(r => r.active === true));
   check("6.3 ordem alfabética por key",
-    listed[0].key === "ADD_CREATIVE" && listed[5].key === "SOFT_3D");
+    listed[0].key === "ADD_CREATIVE" && listed[listed.length - 1].key === "SOFT_3D");
 
   // ═══════════════ 7. Versionamento ═══════════════
   const v2 = VRE.create({
@@ -130,9 +137,9 @@ async function main() {
   check("7.4 v1 marcada active=0", allVersions[0].version === 1 && allVersions[0].active === 0);
   check("7.5 v2 marcada active=1", allVersions[1].version === 2 && allVersions[1].active === 1);
 
-  // list() só retorna active (ainda 6 recipes — não somou nova key)
+  // list() só retorna active (ainda 7 recipes — não somou nova key)
   const listAfter = VRE.list();
-  check("7.6 list() ainda tem 6 (versão nova, não recipe nova)", listAfter.length === 6);
+  check("7.6 list() ainda tem 7 (versão nova, não recipe nova)", listAfter.length === 7);
 
   // ═══════════════ 8. buildPromptPlan ═══════════════
   const plan = VRE.buildPromptPlan({

@@ -5,6 +5,7 @@ import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
 import { parseMoneyBR } from './retailMoney';
+import { boletasEsperadas, PRODUTOS_POR_BOLETA } from './retailBoletas';
 
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
@@ -2326,6 +2327,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const totalDespesas = useMemo(() => despesas.reduce((a, d) => a + n(d.valor), 0), [despesas]);
   const rankingTotal = useMemo(() => ranking.reduce((a, r) => a + n(r.valor), 0), [ranking]);
   const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
+  // Boletas esperadas pela regra da loja (5 produtos/boleta, arredondando por
+  // vendedor) — conferência contra o intervalo inicial→final informado.
+  const boletasEsperadasDia = useMemo(() => boletasEsperadas(ranking.map(r => r.pecas)), [ranking]);
   const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
   const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
   const quota = Number(closing.quota_amount || 0);
@@ -2548,6 +2552,16 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                 const ok = range === boletaClicks;
                 return <p className={`col-span-2 text-[11px] ${ok ? 'text-emerald-300' : 'text-amber-300'}`}>{ok ? `Range de ${range} boleta(s) bate com os ${boletaClicks} clique(s) do dia.` : `Range de ${isNaN(range) ? '?' : range} boleta(s) × ${boletaClicks} clique(s) registrados — confira antes de salvar.`}</p>;
               })()}
+              {/* BOL-006: conferência pela regra da loja — 5 produtos/boleta,
+                  arredondando POR vendedor (peças do ranking). É estimativa. */}
+              {boletasEsperadasDia > 0 && (() => {
+                const range = parseInt(String(boletaFinal).replace(/\D/g, ''), 10) - parseInt(String(boletaInicial).replace(/\D/g, ''), 10) + 1;
+                const hasRange = Boolean(boletaInicial && boletaFinal && !isNaN(range));
+                const ok = hasRange && range === boletasEsperadasDia;
+                return <p className={`col-span-2 text-[11px] ${!hasRange ? 'text-zinc-500' : ok ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  Estimativa: ~<strong>{boletasEsperadasDia}</strong> boleta(s) pela regra ({PRODUTOS_POR_BOLETA} produtos/boleta, pelas peças do ranking){hasRange ? ` · intervalo informado tem ${range} — ${ok ? 'bate.' : 'confira.'}` : '.'}
+                </p>;
+              })()}
               <label className="text-xs text-zinc-400">Cadastros
                 <input inputMode="numeric" value={cadastros} onChange={e => setCadastros(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
               </label>
@@ -2567,6 +2581,12 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-950/60 px-3 py-2">
           <span className="text-sm text-zinc-400">Total do dia</span>
           <span className={`text-sm font-semibold ${quota > 0 && totalVendas >= quota ? 'text-emerald-300' : 'text-zinc-100'}`}>{brl(totalVendas)}</span>
+        </div>
+        {/* DESP-001: total de despesas como linha própria, ao lado dos outros
+            totais, pra o gestor comparar de bate-pronto (pedido do lojista). */}
+        <div className="mt-2 flex items-center justify-between rounded-lg bg-zinc-950/60 px-3 py-2">
+          <span className="text-sm text-zinc-400">Total de despesas do dia</span>
+          <span className="text-sm font-semibold text-orange-300">{brl(totalDespesas)}</span>
         </div>
         {/* QUOTA-001: resumo único da cota da loja (mesmo componente da corrida) */}
         {quota > 0 && <div className="mt-2"><StoreQuotaSummary quota={quota} realized={totalVendas} /></div>}

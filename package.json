@@ -87,6 +87,7 @@
     "test:retail-money-parse": "tsx scripts/test-retail-money-parse.ts",
     "test:retail-boletas-rule": "tsx scripts/test-retail-boletas-rule.ts",
     "test:retail-boleta-line-audit": "tsx scripts/test-retail-boleta-line-audit.ts",
+    "test:retail-ocr-roster-hint": "tsx scripts/test-retail-ocr-roster-hint.ts",
     "test:retail-name-match": "tsx scripts/test-retail-name-match.ts",
     "test:retail-seller-scoreboard": "tsx scripts/test-retail-seller-scoreboard.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",

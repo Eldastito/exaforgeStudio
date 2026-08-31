@@ -2082,6 +2082,16 @@ router.get("/dashboard/daily", (req: AuthRequest, res): any => {
   res.json(RetailDashboardService.daily(orgId, today(req)));
 });
 
+// Informe diário da rede: por loja + total da empresa (aberto por forma de
+// pagamento). date opcional (default = hoje).
+router.get("/dashboard/informe", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = req.query.date ? String(req.query.date) : today(req);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date (YYYY-MM-DD) inválido" });
+  res.json(RetailDashboardService.dailyInforme(orgId, date));
+});
+
 router.get("/dashboard/monthly", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

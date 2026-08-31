@@ -100,6 +100,7 @@
     "test:retail-ocr-roster-hint": "tsx scripts/test-retail-ocr-roster-hint.ts",
     "test:retail-name-match": "tsx scripts/test-retail-name-match.ts",
     "test:retail-seller-scoreboard": "tsx scripts/test-retail-seller-scoreboard.ts",
+    "test:retail-daily-informe": "tsx scripts/test-retail-daily-informe.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",
     "test:visual-generation-kernel": "tsx scripts/test-visual-generation-kernel.ts",
     "test:visual-kernel-edit-routing": "tsx scripts/test-visual-kernel-edit-routing.ts",

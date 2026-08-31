@@ -11290,6 +11290,63 @@ const initDb = () => {
   // sucesso pra evitar 2-3 tentativas por sync. Aditivo — perfil velho sem
   // essa coluna continua funcionando (fallback pra probe de formatos).
   try { db.exec(`ALTER TABLE alterdata_integration_profiles ADD COLUMN price_path_format TEXT`); } catch(e){}
+
+  // ADR-199 F0a — ZapFlow Grupo (multi-org / multi-marca). Fundação de IDENTIDADE
+  // + GRUPO, SEM ainda relaxar users.email UNIQUE e SEM tocar o login (F0c faz o
+  // rebuild; F0b migra os lookups por email). Tudo aditivo/opt-in, atrás da flag
+  // FEATURE_ORG_GROUPS na camada de aplicação. Isolamento §3/RN-GRP-01: estas
+  // tabelas NÃO carregam dado de negócio por-org — org_group_members só referencia
+  // organization_id como membership; nenhum service org-scoped as conhece.
+  //
+  // account_identities: a CREDENCIAL de login (email+senha+MFA) sobe pra cá, ACIMA
+  // de users, pra um mesmo humano ter linha de `users` em N orgs (§4.1/D1). É GLOBAL
+  // (sem organization_id), precedente já validado (professionals, vertical_intelligence).
+  // Nesta fatia a tabela é só populada por backfill; o login segue lendo `users` (F0b).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS account_identities (
+        id            TEXT PRIMARY KEY,
+        email         TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        mfa_secret    TEXT,
+        mfa_enabled   INTEGER DEFAULT 0,
+        mfa_backup_codes TEXT,
+        status        TEXT DEFAULT 'active',      -- active | disabled
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar account_identities', e); }
+
+  // users.identity_id — liga as linhas de `users` que são o MESMO humano em orgs
+  // diferentes (FK lógica nullable pra account_identities.id). Aditivo: linhas
+  // legadas ficam NULL até o backfill; email nulo NUNCA gera identidade (RN-GRP-04).
+  try { db.exec(`ALTER TABLE users ADD COLUMN identity_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_users_identity ON users (identity_id)`); } catch(e){}
+
+  // org_groups / org_group_members — a HOLDING e suas operações (§4.2/D2). Só
+  // metadado de agregação/UI; o grupo NÃO é tenant nem entra em service de negócio
+  // (RN-GRP-01/RN-GRP-05). owner_identity_id referencia account_identities.id.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_groups (
+        id                TEXT PRIMARY KEY,
+        name              TEXT NOT NULL,
+        owner_identity_id TEXT NOT NULL,
+        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS org_group_members (
+        id              TEXT PRIMARY KEY,
+        group_id        TEXT NOT NULL,
+        organization_id TEXT NOT NULL,
+        added_by        TEXT,
+        added_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(group_id, organization_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_group_members_org   ON org_group_members (organization_id);
+      CREATE INDEX IF NOT EXISTS idx_org_group_members_group ON org_group_members (group_id);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar org_groups/org_group_members', e); }
 };
 
 initDb();

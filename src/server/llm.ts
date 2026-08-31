@@ -562,6 +562,35 @@ Regras: se o NOME do vendedor aparece num turno (manhã/inter/tarde) daquele dia
 }
 
 /**
+ * Lê um COMPROVANTE DE DEPÓSITO bancário (Caixa, BB, Bradesco, lotérica etc.)
+ * pra pré-preencher o registro do malote: extrai o VALOR depositado e a DATA.
+ * O humano SEMPRE confere antes de salvar (não grava sozinho).
+ */
+export async function extractDepositFromImage(base64: string, mimetype = "image/jpeg"): Promise<string> {
+  const system = `Você é um assistente de leitura de COMPROVANTES DE DEPÓSITO bancário no Brasil (Caixa Econômica, Banco do Brasil, Bradesco, Itaú, lotérica etc.). Extraia o VALOR depositado e a DATA do depósito. Devolva SOMENTE um JSON:
+{"valor": <número em reais, ou null>, "data": <"YYYY-MM-DD" ou null>, "confidence": <inteiro de 0 a 100>}
+Regras rígidas: o VALOR é o campo "VALOR" / "Valor do depósito" / "Valor total" do comprovante (ex.: "VALOR : 1.179,75" → 1179.75). Use PONTO como separador decimal e NÃO use separador de milhar (1179.75, nunca 1.179,75). A DATA é a data do depósito impressa no comprovante (ex.: "26/AGO/2026" → "2026-08-26"; "26/08/2026" → "2026-08-26"). Mês por extenso: JAN=01, FEV=02, MAR=03, ABR=04, MAI=05, JUN=06, JUL=07, AGO=08, SET=09, OUT=10, NOV=11, DEZ=12. NUNCA invente: se não conseguir ler o valor ou a data, use null e reflita num confidence mais baixo. Responda SOMENTE o JSON, sem texto ao redor.`;
+  const res = await getClient().chat.completions.create({
+    model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
+    messages: [
+      { role: "system", content: system },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Leia este comprovante de depósito e devolva o JSON com o valor e a data do depósito." },
+          { type: "image_url", image_url: { url: `data:${mimetype};base64,${base64}`, detail: "high" } },
+        ],
+      },
+    ] as any,
+    temperature: 0.1,
+    max_tokens: 300,
+    response_format: { type: "json_object" },
+  });
+  recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
+  return res.choices[0]?.message?.content || "";
+}
+
+/**
  * Cadastro por foto direto no WhatsApp (canal do gestor/lojista, separado da
  * IA de atendimento ao cliente): classificação BARATA e rápida (sem extrair
  * nada ainda) — só decide se a foto é de UM produto avulso (embalagem/rótulo)

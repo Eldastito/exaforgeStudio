@@ -1768,6 +1768,9 @@ function MaloteTab() {
   const [depWho, setDepWho] = useState('');
   const [depFile, setDepFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState<string | null>(null);
+  const [scannedReceipt, setScannedReceipt] = useState<string | null>(null); // /media/... já salvo no scan
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1789,17 +1792,40 @@ function MaloteTab() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId, month]);
 
+  // Foto do comprovante → a IA lê valor + data pra pré-preencher (o humano
+  // confirma antes de registrar). A foto já fica salva no scan.
+  const onPickReceipt = async (f: File | null) => {
+    setDepFile(f); setScannedReceipt(null); setScanNote(null);
+    if (!f) return;
+    setScanning(true);
+    try {
+      const fd = new FormData(); fd.append('receipt', f);
+      const res = await apiFetch('/api/retailops/cash/deposit/scan', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setScanNote(d.error || 'Não consegui ler o comprovante — digite o valor.'); return; }
+      if (d.receiptUrl) setScannedReceipt(d.receiptUrl);
+      if (d.valor != null && Number(d.valor) > 0) setDepAmount(formatMoneyBR(d.valor));
+      if (d.data) setDepDate(d.data);
+      setScanNote(d.valor != null && Number(d.valor) > 0
+        ? `IA leu R$ ${formatMoneyBR(d.valor)}${d.data ? ` em ${d.data.slice(8)}/${d.data.slice(5, 7)}` : ''} (confiança ${d.confidence || 0}%). Confira antes de registrar.`
+        : 'Não consegui ler o valor no comprovante — digite o valor. A foto foi anexada.');
+    } catch { setScanNote('Falha ao enviar a imagem — digite o valor.'); }
+    finally { setScanning(false); }
+  };
+
   const registrar = async () => {
     const amount = parseMoneyBR(depAmount);
-    if (!(amount > 0)) { toast.error('Digite o valor depositado.'); return; }
+    if (!(amount > 0)) { toast.error('Digite (ou confira) o valor depositado.'); return; }
     setSaving(true);
     try {
       const fd = new FormData();
       fd.append('storeId', storeId); fd.append('date', depDate); fd.append('amount', String(amount));
       if (depWho.trim()) fd.append('depositor', depWho.trim());
-      if (depFile) fd.append('receipt', depFile);
+      // Se o scan já salvou a foto, reaproveita a URL (não re-envia o arquivo).
+      if (scannedReceipt) fd.append('receiptUrl', scannedReceipt);
+      else if (depFile) fd.append('receipt', depFile);
       const res = await apiFetch('/api/retailops/cash/deposit', { method: 'POST', body: fd });
-      if (res.ok) { toast.success('Depósito registrado.'); setDepAmount(''); setDepWho(''); setDepFile(null); if (fileRef.current) fileRef.current.value = ''; load(); }
+      if (res.ok) { toast.success('Depósito registrado.'); setDepAmount(''); setDepWho(''); setDepFile(null); setScannedReceipt(null); setScanNote(null); if (fileRef.current) fileRef.current.value = ''; load(); }
       else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao registrar o depósito.'); }
     } finally { setSaving(false); }
   };
@@ -1816,7 +1842,8 @@ function MaloteTab() {
     if (res.ok) { toast.success('Dinheiro do dia ajustado.'); load(); } else toast.error('Falha ao ajustar.');
   };
 
-  const visibleRows = (led?.rows || []).filter((r: any) => r.cash > 0 || (r.deposits && r.deposits.length > 0));
+  // Mostra TODOS os dias do mês (igual à folha do malote), com ou sem movimento.
+  const visibleRows = (led?.rows || []);
 
   return (
     <div className="space-y-3">
@@ -1862,13 +1889,14 @@ function MaloteTab() {
               <label className="text-[11px] text-zinc-400">Valor depositado<input inputMode="decimal" value={depAmount} onChange={e => setDepAmount(maskMoneyBRInput(e.target.value))} placeholder="0,00" className="block w-32 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100 text-right tabular-nums" /></label>
               <label className="text-[11px] text-zinc-400">Quem depositou<input value={depWho} onChange={e => setDepWho(e.target.value)} placeholder="Nome" className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
               <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
-                <Upload className="w-3.5 h-3.5" /> {depFile ? 'Comprovante anexado' : 'Foto do comprovante'}
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => setDepFile(e.target.files?.[0] || null)} />
+                {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {scanning ? 'Lendo comprovante…' : (depFile ? 'Comprovante anexado (IA lê o valor)' : 'Foto do comprovante (IA lê o valor)')}
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" disabled={scanning} onChange={e => { onPickReceipt(e.target.files?.[0] || null); }} />
               </label>
-              <button onClick={registrar} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+              <button onClick={registrar} disabled={saving || scanning} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Registrar
               </button>
             </div>
+            {scanNote && <p className="mt-2 flex items-start gap-1.5 text-[12px] text-amber-300/90"><Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {scanNote}</p>}
           </div>
 
           {/* Planilha do mês */}
@@ -1888,7 +1916,7 @@ function MaloteTab() {
                   <tr key={r.date} className="border-t border-zinc-800/70">
                     <td className="px-3 py-2 text-zinc-300 tabular-nums">{String(r.date).slice(8)}/{String(r.date).slice(5, 7)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      <span className={r.cashSource === 'ajuste' ? 'text-amber-300' : 'text-zinc-100'}>{brl(r.cash)}</span>
+                      <span className={r.cash > 0 ? (r.cashSource === 'ajuste' ? 'text-amber-300' : 'text-zinc-100') : 'text-zinc-600'}>{r.cash > 0 ? brl(r.cash) : '—'}</span>
                       <button onClick={() => ajustarDia(r.date, r.cash)} title="Ajustar o dinheiro deste dia" className="ml-1.5 text-[10px] text-zinc-600 hover:text-zinc-300">ajustar</button>
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.saldo > 0.01 ? 'text-amber-300' : 'text-zinc-500'}`}>{brl(r.saldo)}</td>

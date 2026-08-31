@@ -54,7 +54,7 @@ import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
-import { isAIConfigured } from "../llm.js";
+import { isAIConfigured, extractDepositFromImage } from "../llm.js";
 import { RetailPricingService } from "../RetailPricingService.js";
 
 const router = Router();
@@ -2129,6 +2129,9 @@ router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, r
         fs.writeFileSync(path.join(MEDIA_DIR, name), processed);
         receiptUrl = `/media/${name}`;
       } catch { /* comprovante é best-effort: registra o depósito mesmo sem a foto */ }
+    } else if (/^\/media\/[a-f0-9-]+\.jpg$/.test(String(body.receiptUrl || ""))) {
+      // Comprovante já salvo no scan (não re-envia o arquivo).
+      receiptUrl = String(body.receiptUrl);
     }
     try {
       const dep = RetailCashDepositService.registerDeposit(orgId, storeId, {
@@ -2137,6 +2140,33 @@ router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, r
       }, req.user?.userId);
       res.status(201).json(dep);
     } catch (e: any) { res.status(400).json({ error: e?.message || "falha ao registrar depósito" }); }
+  });
+});
+
+// OCR do comprovante: lê valor + data pra PRÉ-PREENCHER o registro (o humano
+// confirma). Salva a foto processada em /media e devolve a URL pra o registro
+// reaproveitar sem re-enviar o arquivo. NÃO grava depósito.
+router.post("/cash/deposit/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
+  closingUpload.single("receipt")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
+    try {
+      const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+      let receiptUrl: string | null = null;
+      try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); const name = `${randomUUID()}.jpg`; fs.writeFileSync(path.join(MEDIA_DIR, name), processed); receiptUrl = `/media/${name}`; } catch { /* best-effort */ }
+      let parsed: any = {};
+      try { parsed = JSON.parse((await extractDepositFromImage(processed.toString("base64"), "image/jpeg")) || "{}"); } catch { parsed = {}; }
+      const valor = Number(parsed?.valor);
+      const data = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.data)) ? String(parsed.data) : null;
+      res.json({ valor: Number.isFinite(valor) && valor > 0 ? Math.round(valor * 100) / 100 : null, data, confidence: Number(parsed?.confidence || 0), receiptUrl });
+    } catch (e: any) {
+      console.error("[Retail Cash Deposit Scan] erro", e);
+      res.status(500).json({ error: "Falha ao ler o comprovante. Anexe a foto e digite o valor manualmente." });
+    }
   });
 });
 

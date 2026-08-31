@@ -33,6 +33,7 @@ import falatuSoloWhatsappRoutes from "./src/server/routes/falatuSoloWhatsapp.js"
 import falatuIngestRoutes from "./src/server/routes/falatuIngest.js";
 import { manifestFileForHost } from "./src/server/hostManifest.js";
 import usersRoutes from "./src/server/routes/users.js";
+import orgGroupsRoutes from "./src/server/routes/orgGroups.js";
 import permissionsRoutes from "./src/server/routes/permissions.js";
 import auditRoutes from "./src/server/routes/audit.js";
 import ragRoutes from "./src/server/routes/rag.js";
@@ -696,6 +697,7 @@ async function startServer() {
   protectedApi.use("/entitlements", entitlementsRoutes);
   protectedApi.use("/notifications", notificationsRoutes);
   protectedApi.use("/users", usersRoutes);
+  protectedApi.use("/groups", orgGroupsRoutes); // ADR-199 F1 — ZapFlow Grupo (gated por FEATURE_ORG_GROUPS)
   protectedApi.use("/permissions", permissionsRoutes);
   protectedApi.use("/rag", ragRoutes);
   protectedApi.use("/managers", managersRoutes);

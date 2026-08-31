@@ -25,8 +25,9 @@ const ROOT = path.resolve(process.cwd(), "src/server");
 
 // Allowlist R1: só o AccountIdentityService faz o lookup global por email.
 const R1_ALLOW = new Set(["AccountIdentityService.ts"]);
-// Allowlist R2: a camada de holding/consolidação PODE conhecer grupo.
-const R2_ALLOW = new Set(["OrgGroupService.ts", "AccountIdentityService.ts", "GroupConsolidationService.ts"]);
+// Allowlist R2: a camada de holding/consolidação PODE conhecer grupo. NÃO inclui
+// nenhum service org-scoped de negócio — só a camada que É o grupo.
+const R2_ALLOW = new Set(["OrgGroupService.ts", "OrgGroupProvisioningService.ts", "AccountIdentityService.ts", "GroupConsolidationService.ts"]);
 
 const R1 = /FROM\s+users\s+WHERE\s+email\b/i;             // lookup global por email
 const R2 = /\b(group_id|org_group|org_groups|groupId)\b/; // conceito de grupo

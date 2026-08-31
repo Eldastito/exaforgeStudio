@@ -86,8 +86,19 @@ SELECT organization_id, email, COUNT(*) c FROM users
 Login e criação de conta devem funcionar normalmente (a resolução de credencial já
 passa pela identidade desde a F0b — ver `AccountIdentityService`).
 
-## Próximo (F0c-2)
+## Troca de operação (F0c-2)
 
-Com o schema relaxado, a F0c-2 entrega `POST /api/auth/switch-org` (reassina o JWT
-com outra org sob membership provado — `AccountIdentityService.orgsForIdentity`),
-também atrás de `FEATURE_ORG_GROUPS`.
+Com o schema relaxado, a troca de operação também vive atrás de `FEATURE_ORG_GROUPS`
+(sem a flag as rotas respondem 404 — feature invisível, single-org intacto):
+
+- `GET /api/auth/organizations` — operações que a sessão atual pode abrir (o front só
+  mostra o seletor quando há >1). Membership = ter linha de `users` ativa ligada à
+  identidade (RN-GRP-01), nunca o grupo/holding.
+- `POST /api/auth/switch-org { orgId }` — valida o membership (`resolveSwitch`) e
+  **reassina o JWT** com os claims da org alvo + reemite o cookie httpOnly coerente
+  (RN-GRP-07). Org sem membership → 403 + `SWITCH_ORG_DENIED` no audit; sucesso →
+  `SWITCH_ORG`. O `orgId` do cliente nunca é autoridade sem a checagem.
+
+Segurança: revogar o acesso a uma org = remover/bloquear a linha de `users` daquela org
+(+ bump de `security_version`); a org some de `GET /organizations` e o `switch-org` passa
+a recusá-la na hora.

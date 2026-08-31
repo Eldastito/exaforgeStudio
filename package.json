@@ -904,7 +904,8 @@
     "test:ceo-hardening": "tsx scripts/test-ceo-hardening.ts",
     "test:key-person-dependency": "tsx scripts/test-key-person-dependency.ts",
     "test:executive-proactive-briefing": "tsx scripts/test-executive-proactive-briefing.ts",
-    "test:users-email-rebuild": "tsx scripts/test-users-email-rebuild.ts"
+    "test:users-email-rebuild": "tsx scripts/test-users-email-rebuild.ts",
+    "test:switch-org": "tsx scripts/test-switch-org.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

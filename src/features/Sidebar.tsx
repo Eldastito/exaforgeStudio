@@ -1,12 +1,21 @@
 import React from 'react';
-import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel, GraduationCap, Layers } from 'lucide-react';
+import { MessageSquare, Users, Users2, BarChart3, Settings, LogOut, Bell, Webhook, Calendar, CalendarCheck, ShoppingBag, ShoppingCart, Megaphone, Link2, ShieldCheck, X, GitMerge, Store, LineChart, RefreshCw, PackageCheck, FileText, CalendarRange, BrainCircuit, Gauge, Wand2, ListChecks, Target, Video, Radar, ScrollText, Lightbulb, Stethoscope, HandCoins, Scale, Wallet, HeartPulse, Mic, Activity, Palette, Rocket, Gavel, GraduationCap, Layers, Building2 } from 'lucide-react';
 import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { apiFetch } from '@/src/lib/api';
 
 export function Sidebar() {
   const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, missionLayerEnabled, vertical } = useStore();
   const { user, logout } = useAuth();
+  // ADR-199 (UI): a entrada "Grupo" só aparece quando FEATURE_ORG_GROUPS está ligada —
+  // detectado por /api/groups responder (404 = feature off). 0-regressão pro single-org.
+  const [groupAvailable, setGroupAvailable] = React.useState(false);
+  React.useEffect(() => {
+    let alive = true;
+    apiFetch('/api/groups').then((r) => { if (alive) setGroupAvailable(r.ok); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
   // canAccessModule retorna sempre true — o menu fica idêntico ao de hoje.
@@ -87,6 +96,7 @@ export function Sidebar() {
              <NavItem icon={<Scale />} label="Consultora Jurídica" active={viewMode === 'juridico'} onClick={() => setViewMode('juridico')} />
              <NavItem icon={<ScrollText />} label="Manifesto da Marca" active={viewMode === 'manifesto'} onClick={() => setViewMode('manifesto')} />
              <NavItem icon={<Lightbulb />} label="Escuta Ativa" active={viewMode === 'escuta'} onClick={() => setViewMode('escuta')} />
+             {groupAvailable && <NavItem icon={<Building2 />} label="Grupo" active={viewMode === 'grupo'} onClick={() => setViewMode('grupo')} />}
              <NavItem icon={<Settings />} label="Configurações" active={viewMode === 'settings'} onClick={() => setViewMode('settings')} />
              {isMasterAdmin && (
                <NavItem icon={<ShieldCheck />} label="Admin Master" active={viewMode === 'admin'} onClick={() => setViewMode('admin')} />

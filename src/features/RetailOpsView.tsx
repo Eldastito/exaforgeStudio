@@ -714,10 +714,11 @@ function PatternSolutions({ patternId, refreshKey }: { patternId: string; refres
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'comissao' | 'metas' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'malote' | 'comissao' | 'metas' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
+  { key: 'malote', label: 'Malote / Depósitos', icon: Truck },
   { key: 'comissao', label: 'Comissão', icon: Calculator },
   { key: 'metas', label: 'Metas do vendedor', icon: Scale },
   { key: 'escala', label: 'Escala & cotas', icon: Users },
@@ -915,6 +916,7 @@ export function RetailOpsView() {
       </div>
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
+      {tab === 'malote' && <MaloteTab />}
       {tab === 'comissao' && <CommissionTab />}
       {tab === 'metas' && <SellerScoreboardTab />}
       {tab === 'escala' && <ScheduleTab />}
@@ -1747,6 +1749,165 @@ function BoletaPanel({ stores }: { stores: any[] }) {
             ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Malote / Depósitos (Fase I) — controle do dinheiro: cada loja acumula o
+// caixa do dia (vem do fechamento) e o gerente deposita no banco, registrando
+// valor/data/quem + a FOTO do comprovante. O dono confere entrou × depositado.
+function MaloteTab() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeId, setStoreId] = useState('');
+  const [month, setMonth] = useState(todayStr().slice(0, 7));
+  const [led, setLed] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [depDate, setDepDate] = useState(todayStr());
+  const [depAmount, setDepAmount] = useState('');
+  const [depWho, setDepWho] = useState('');
+  const [depFile, setDepFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
+      const ss = Array.isArray(d?.stores) ? d.stores : [];
+      setStores(ss);
+      if (ss.length && !storeId) setStoreId(ss[0].id);
+    }).catch(() => setStores([]));
+    // eslint-disable-next-line
+  }, []);
+
+  const load = async () => {
+    if (!storeId) { setLed(null); return; }
+    setLoading(true);
+    try {
+      const d = await apiFetch(`/api/retailops/cash/ledger?storeId=${storeId}&month=${month}`).then(r => r.json());
+      setLed(d && d.rows ? d : null);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [storeId, month]);
+
+  const registrar = async () => {
+    const amount = parseMoneyBR(depAmount);
+    if (!(amount > 0)) { toast.error('Digite o valor depositado.'); return; }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append('storeId', storeId); fd.append('date', depDate); fd.append('amount', String(amount));
+      if (depWho.trim()) fd.append('depositor', depWho.trim());
+      if (depFile) fd.append('receipt', depFile);
+      const res = await apiFetch('/api/retailops/cash/deposit', { method: 'POST', body: fd });
+      if (res.ok) { toast.success('Depósito registrado.'); setDepAmount(''); setDepWho(''); setDepFile(null); if (fileRef.current) fileRef.current.value = ''; load(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao registrar o depósito.'); }
+    } finally { setSaving(false); }
+  };
+  const excluir = async (id: string) => {
+    if (!window.confirm('Excluir este depósito?')) return;
+    const res = await apiFetch(`/api/retailops/cash/deposit/${id}`, { method: 'DELETE' });
+    if (res.ok) { toast.success('Depósito excluído.'); load(); } else toast.error('Falha ao excluir.');
+  };
+  const ajustarDia = async (date: string, atual: number) => {
+    const v = window.prompt(`Ajustar o dinheiro do dia ${date.slice(8)}/${date.slice(5, 7)} (em branco = volta pro fechamento):`, atual > 0 ? String(atual) : '');
+    if (v == null) return;
+    const amount = v.trim() === '' ? '' : parseMoneyBR(v);
+    const res = await apiFetch('/api/retailops/cash/day-override', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, date, amount }) });
+    if (res.ok) { toast.success('Dinheiro do dia ajustado.'); load(); } else toast.error('Falha ao ajustar.');
+  };
+
+  const visibleRows = (led?.rows || []).filter((r: any) => r.cash > 0 || (r.deposits && r.deposits.length > 0));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100">
+          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100" />
+        <span className="text-[11px] text-zinc-500">O dinheiro do dia vem do fechamento; o depósito e o comprovante você registra aqui.</span>
+      </div>
+
+      {!storeId ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Cadastre uma loja para controlar o malote.</div>
+      ) : loading ? (
+        <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+      ) : led && (
+        <>
+          {/* Conferência: entrou × depositado × em caixa */}
+          <div className="grid gap-2 sm:grid-cols-4">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Saldo anterior</div>
+              <div className="text-lg font-semibold text-zinc-300 tabular-nums">{brl(led.saldoInicial)}</div>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Entrou no mês</div>
+              <div className="text-lg font-semibold text-zinc-100 tabular-nums">{brl(led.totalCash)}</div>
+            </div>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Depositado</div>
+              <div className="text-lg font-semibold text-emerald-300 tabular-nums">{brl(led.totalDeposited)}</div>
+            </div>
+            <div className={`rounded-xl border px-3 py-2 ${led.saldoFinal > 0.01 ? 'border-amber-500/40 bg-amber-500/10' : 'border-zinc-800 bg-zinc-900/40'}`}>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Em caixa (a depositar)</div>
+              <div className={`text-lg font-semibold tabular-nums ${led.saldoFinal > 0.01 ? 'text-amber-300' : 'text-zinc-300'}`}>{brl(led.saldoFinal)}</div>
+            </div>
+          </div>
+
+          {/* Registrar depósito + comprovante */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Registrar depósito</div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-[11px] text-zinc-400">Data<input type="date" value={depDate} onChange={e => setDepDate(e.target.value)} className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
+              <label className="text-[11px] text-zinc-400">Valor depositado<input inputMode="decimal" value={depAmount} onChange={e => setDepAmount(maskMoneyBRInput(e.target.value))} placeholder="0,00" className="block w-32 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100 text-right tabular-nums" /></label>
+              <label className="text-[11px] text-zinc-400">Quem depositou<input value={depWho} onChange={e => setDepWho(e.target.value)} placeholder="Nome" className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
+              <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" /> {depFile ? 'Comprovante anexado' : 'Foto do comprovante'}
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => setDepFile(e.target.files?.[0] || null)} />
+              </label>
+              <button onClick={registrar} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Registrar
+              </button>
+            </div>
+          </div>
+
+          {/* Planilha do mês */}
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Dia</th>
+                  <th className="px-3 py-2 text-right font-medium">Dinheiro</th>
+                  <th className="px-3 py-2 text-right font-medium">Em caixa</th>
+                  <th className="px-3 py-2 text-left font-medium">Depósito</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-[12px] text-zinc-600">Nenhum dinheiro ou depósito lançado neste mês ainda.</td></tr>}
+                {visibleRows.map((r: any) => (
+                  <tr key={r.date} className="border-t border-zinc-800/70">
+                    <td className="px-3 py-2 text-zinc-300 tabular-nums">{String(r.date).slice(8)}/{String(r.date).slice(5, 7)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <span className={r.cashSource === 'ajuste' ? 'text-amber-300' : 'text-zinc-100'}>{brl(r.cash)}</span>
+                      <button onClick={() => ajustarDia(r.date, r.cash)} title="Ajustar o dinheiro deste dia" className="ml-1.5 text-[10px] text-zinc-600 hover:text-zinc-300">ajustar</button>
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums ${r.saldo > 0.01 ? 'text-amber-300' : 'text-zinc-500'}`}>{brl(r.saldo)}</td>
+                    <td className="px-3 py-2">
+                      {(r.deposits || []).map((d: any) => (
+                        <span key={d.id} className="inline-flex items-center gap-1.5 mr-2">
+                          <span className="text-emerald-300 font-medium tabular-nums">{brl(d.amount)}</span>
+                          {d.depositor && <span className="text-[11px] text-zinc-500">· {d.depositor}</span>}
+                          {d.receiptUrl && <a href={d.receiptUrl} target="_blank" rel="noreferrer" className="text-[11px] text-sky-300 hover:text-sky-200">comprovante</a>}
+                          <button onClick={() => excluir(d.id)} title="Excluir depósito" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

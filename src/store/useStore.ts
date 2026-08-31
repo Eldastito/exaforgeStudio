@@ -70,7 +70,7 @@ export type Ticket = {
   slaSegment?: string | null;
 };
 
-export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'beauty' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights' | 'falatu' | 'ai_usage' | 'production_readiness' | 'niche_intel' | 'radar_health' | 'missoes' | 'advocacia' | 'escola' | 'product_evolution';
+export type ViewMode = 'kanban' | 'channels' | 'dashboard' | 'agenda' | 'catalog' | 'vendas' | 'campanhas' | 'cadencias' | 'contacts' | 'integrations' | 'settings' | 'admin' | 'storefront' | 'areas' | 'reports' | 'reservas' | 'assinaturas' | 'compras' | 'orcamentos' | 'eventos' | 'diretor' | 'rie' | 'studio' | 'beauty' | 'tarefas' | 'prospect' | 'radar_b2b' | 'clinica' | 'vision' | 'radar' | 'radar_consultant' | 'manifesto' | 'escuta' | 'retailops' | 'retailfloor' | 'comigo' | 'juridico' | 'caixa' | 'saude' | 'insights' | 'falatu' | 'ai_usage' | 'production_readiness' | 'niche_intel' | 'radar_health' | 'missoes' | 'advocacia' | 'escola' | 'product_evolution' | 'grupo';
 
 export type EvolutionConfig = {
   baseUrl: string;

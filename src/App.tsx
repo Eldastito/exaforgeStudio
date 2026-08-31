@@ -30,6 +30,8 @@ import { VisionVmsView } from '@/src/features/VisionVmsView';
 import { RadarView } from '@/src/features/RadarView';
 import { RadarConsultantView } from '@/src/features/RadarConsultantView';
 import { FalaTuView } from '@/src/features/FalaTuView';
+import { OrgGroupView } from '@/src/features/orggroup/OrgGroupView';
+import { OrgSwitcher } from '@/src/features/orggroup/OrgSwitcher';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
 import { SalesView } from '@/src/features/SalesView';
@@ -497,8 +499,10 @@ export default function App() {
              {viewMode === 'radar_consultant' && 'Radar — Painel do Consultor'}
              {viewMode === 'falatu' && 'FalaTu'}
              {viewMode === 'comigo' && 'Comigo'}
+             {viewMode === 'grupo' && 'Grupo'}
            </h1>
            <div className="flex items-center gap-2 md:gap-4">
+              <OrgSwitcher />
               {connectivity !== 'online' && (
                 <div className="relative">
                   <button
@@ -597,6 +601,7 @@ export default function App() {
           {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'retailfloor' && <RetailFloorView />}
           {viewMode === 'comigo' && <ComigoView />}
+          {viewMode === 'grupo' && <OrgGroupView />}
           {viewMode === 'channels' && <ChannelsPanel />}
           {viewMode === 'areas' && <AreasView />}
           {viewMode === 'dashboard' && <DashboardPanel />}

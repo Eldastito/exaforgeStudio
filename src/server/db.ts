@@ -1843,6 +1843,39 @@ const initDb = () => {
         UNIQUE(organization_id, store_id, task_date, task_type)
       );
       CREATE INDEX IF NOT EXISTS idx_retail_tasks_due ON retail_store_daily_tasks (organization_id, status, task_date);
+
+      -- Malote / controle de DEPÓSITO do dinheiro (ADR-083 Fase I). Cada loja
+      -- acumula o dinheiro (caixa) do dia e o gerente deposita no banco
+      -- periodicamente, registrando valor + data + quem + a FOTO do comprovante.
+      -- O dono confere: entrou (dinheiro dos fechamentos) × depositado.
+      CREATE TABLE IF NOT EXISTS retail_cash_deposits (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        deposit_date DATE NOT NULL,              -- data do depósito no banco
+        amount REAL NOT NULL DEFAULT 0,          -- valor depositado
+        period_start DATE,                       -- semana/período coberto (opcional)
+        period_end DATE,
+        depositor TEXT,                          -- quem depositou (a "assinatura")
+        receipt_url TEXT,                        -- foto do comprovante (/media/...)
+        notes TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_retail_cash_dep ON retail_cash_deposits (organization_id, store_id, deposit_date);
+
+      -- Ajuste manual do dinheiro do dia (o gerente "pode ajustar"): quando há
+      -- linha aqui, ela sobrepõe o dinheiro derivado do fechamento no malote.
+      CREATE TABLE IF NOT EXISTS retail_cash_day_override (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        cash_date DATE NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        created_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, store_id, cash_date)
+      );
     `);
   } catch(e){ console.error('[DB] Falha ao criar tabelas Retail Ops Fase B', e); }
 

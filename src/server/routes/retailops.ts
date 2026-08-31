@@ -36,6 +36,7 @@ import { ManagerSolutionService } from "../ManagerSolutionService.js";
 import { ManagerSolutionRetrievalService } from "../ManagerSolutionRetrievalService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
+import { RetailCashDepositService } from "../RetailCashDepositService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
 import { RetailStockModeService } from "../RetailStockModeService.js";
@@ -2090,6 +2091,74 @@ router.get("/dashboard/informe", (req: AuthRequest, res): any => {
   const date = req.query.date ? String(req.query.date) : today(req);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date (YYYY-MM-DD) inválido" });
   res.json(RetailDashboardService.dailyInforme(orgId, date));
+});
+
+// --- Malote / depósitos de dinheiro (Fase I) ---
+// Planilha do mês por loja: dinheiro do dia (do fechamento), saldo em caixa e
+// os depósitos com comprovante + a conferência entrou × depositado.
+router.get("/cash/ledger", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "month (YYYY-MM) inválido" });
+  if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+  try { res.json(RetailCashDepositService.monthLedger(orgId, storeId, month)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+});
+
+// Registra um depósito (valor, data, quem) + comprovante opcional (multipart:
+// campos no body + arquivo 'receipt'). Só owner/gerente.
+router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  closingUpload.single("receipt")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const body = (req as any).body || {};
+    const storeId = String(body.storeId || "");
+    if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    let receiptUrl: string | null = null;
+    const file = (req as any).file;
+    if (file) {
+      try {
+        const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+        fs.mkdirSync(MEDIA_DIR, { recursive: true });
+        const name = `${randomUUID()}.jpg`;
+        fs.writeFileSync(path.join(MEDIA_DIR, name), processed);
+        receiptUrl = `/media/${name}`;
+      } catch { /* comprovante é best-effort: registra o depósito mesmo sem a foto */ }
+    }
+    try {
+      const dep = RetailCashDepositService.registerDeposit(orgId, storeId, {
+        date: String(body.date || ""), amount: Number(body.amount),
+        depositor: body.depositor, periodStart: body.periodStart, periodEnd: body.periodEnd, notes: body.notes, receiptUrl,
+      }, req.user?.userId);
+      res.status(201).json(dep);
+    } catch (e: any) { res.status(400).json({ error: e?.message || "falha ao registrar depósito" }); }
+  });
+});
+
+router.delete("/cash/deposit/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const ok = RetailCashDepositService.removeDeposit(orgId, String(req.params.id), req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "deposit_not_found" });
+  res.json({ ok: true });
+});
+
+// Ajuste manual do dinheiro de um dia (o "pode ajustar"). amount null/vazio limpa.
+router.put("/cash/day-override", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, date, amount } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return res.status(400).json({ error: "storeId e date (YYYY-MM-DD) obrigatórios" });
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  try {
+    RetailCashDepositService.setDayOverride(orgId, String(storeId), String(date), amount === "" || amount == null ? null : Number(amount), req.user?.userId);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
 });
 
 router.get("/dashboard/monthly", (req: AuthRequest, res): any => {

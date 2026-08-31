@@ -23,9 +23,36 @@ precisa **medir N operações**, não uma. Precisamos definir COMO cobrar.
 - **C) Híbrido:** plano-base por operação + add-on "Consolidação de Grupo" cobrado uma vez
   no grupo (destrava o dashboard F2 e o provisionamento self-service da F1).
 
-### Recomendação
-Começar no **A** (por operação) + add-on de grupo (C) para o dashboard consolidado. Isso
-mantém a receita ligada ao custo e transforma a F2 (consolidação) no diferencial pago.
+### Recomendação (DECIDIDA no desenho — números ficam com o comercial)
+**NÃO é um produto novo — é o modelo atual (assinatura por operação) ajustado + 1 add-on
+de grupo.** Grounding no código: os planos já são por-org (`organization_settings.plan_id`
++ `billing_status`; grade Autônomo R$247 · Start R$597 · Growth R$1.797 · Scale R$4.797 ·
+Enterprise R$8.000 em `plansGrade.ts`), e bundles já são "plano + add-ons com desconto".
+Reaproveita-se tudo isso. O grupo é camada de relacionamento/cobrança, não tenant novo.
+
+Três peças (encaixam no que existe):
+1. **Assinatura por operação (reuso 100%)** — cada CNPJ/loja mantém seu `plan_id`
+   conforme o tamanho dela. Alinha receita ao custo real (cada CNPJ = 1 instância WhatsApp
+   + 1 conexão ERP + 1 perfil fiscal — o custo escala por CNPJ, não por marca).
+2. **Faixa de desconto por VOLUME ("rede/franquia")** — preço por operação cai conforme a
+   contagem de CNPJs ativos no grupo. É AJUSTE de preço sobre o plano (mesma mecânica do
+   desconto de bundle), não um SKU novo. Estrutura sugerida (percentuais = decisão do
+   comercial): 1–2 ops preço cheio · 3–5 ops −X% · 6+ ops −Y%.
+3. **Add-on "Grupo/Consolidação" (uma vez por grupo)** — monetiza o valor específico do
+   grupo: login único + switch + provisionamento (F1) + dashboard consolidado (F2). Reusa
+   o `AddonService`.
+Opcional: **fatura consolidada** (somar as N assinaturas do grupo numa cobrança só) — é
+read-model, não produto novo.
+
+**Por que não um "tier de grupo" fechado (opção B):** engessa — cliente com 3 CNPJs pagaria
+igual ao com 12, ou vira dezenas de tiers. O modelo por-operação + volume + add-on escala
+sozinho com qualquer combinação de CNPJs/marcas.
+
+### O que dá pra construir JÁ (sem o gateway real)
+A **medição/prévia de fatura** do grupo: `GroupBillingService` (read-model determinístico)
+que conta operações ativas por grupo → aplica a faixa de volume → soma os `plan_id` de cada
+org (grade) + o add-on de grupo → devolve a prévia (por operação + total). Testável, sem
+ASAAS. A COBRANÇA real (emitir no gateway) espera o ASAAS deixar de ser mockado.
 
 ### Bloqueio técnico (não ignorar — PRD §11)
 O gateway **ASAAS está mockado** (não processa assinatura real — ver ADR-177). Enquanto
@@ -35,15 +62,23 @@ contratadas (evitar "1 login rodando N orgs sem cobrança"). A fatia de billing 
 (F3) permanece **bloqueada** até o gateway ser real.
 
 ### Ação
-- [ ] Comercial define o modelo (A/B/C) e o preço por operação + add-on de grupo.
-- [ ] Só então implementar a medição/cobrança (depende do ASAAS real).
+- [ ] Comercial define os NÚMEROS: % de desconto por faixa de volume + preço do add-on de grupo.
+- [x] Modelo desenhado: por-operação + volume + add-on (não é produto novo).
+- [ ] Construir `GroupBillingService` (prévia de fatura — determinístico, sem gateway).
+- [ ] Cobrança real: depende do ASAAS deixar de ser mockado.
 
 ---
 
-## 2. CNPJ por loja franqueada — cada loja Toulon é uma franquia (ARQUITETURA — a confirmar)
+## 2. CNPJ por loja franqueada — cada loja é uma org (ARQUITETURA — CONFIRMADO)
 
-**Fato novo levantado pelo cliente:** cada loja da **Toulon** é uma **loja franqueada com
-CNPJ próprio** (não é filial de um mesmo CNPJ). O mesmo vale, em tese, para redes maiores.
+**Confirmado pelo cliente (2026-08-31):** **cada loja é um CNPJ**, várias lojas por marca.
+Ex.: Toulon → loja Carioca (CNPJ 1) · Avenida Brasil (CNPJ 2) · Grande Rio (CNPJ 3) · …;
+Democrata → outra marca, outro(s) CNPJ(s). A hierarquia real é de **3 níveis**:
+
+> **Grupo (dono/identidade) → Marca (Toulon/Democrata) → Operação/Loja (1 CNPJ = 1 org)**
+
+O modelo do PRD tratava "marca = org". O correto é **operação (CNPJ) = org**; a marca é um
+AGRUPAMENTO de operações dentro do grupo.
 
 ### Por que isso importa
 A fronteira de tenant do ZapFlow (`organization_id`) é também a **fronteira fiscal** — cada

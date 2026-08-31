@@ -1752,6 +1752,98 @@ function BoletaPanel({ stores }: { stores: any[] }) {
   );
 }
 
+// Informe diário da rede (pedido do lojista — padrão do "Informe Diário"):
+// por loja (dinheiro/venda/cota/bateu-faltou/cota de amanhã) + TOTAL da empresa
+// aberto por forma de pagamento (dinheiro, PIX, cartão por bandeira) — o "já no
+// total, pra facilitar a conferência".
+function DailyInformeCard({ date }: { date: string }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    apiFetch(`/api/retailops/dashboard/informe?date=${date}`).then(r => r.json()).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [date]);
+  if (loading || !data) return null;
+  const t = data.total || {};
+  const bm = t.byMethod || {};
+  const dm = (d: string) => `${String(d).slice(8, 10)}/${String(d).slice(5, 7)}`;
+  const desvio = (v: number) => Number(v) >= 0
+    ? <span className="text-emerald-300 font-medium">Bateu {brl(v)}</span>
+    : <span className="text-red-300 font-medium">Faltou {brl(Math.abs(Number(v)))}</span>;
+  const bandeiras = (m: any) => Object.entries(m || {}).filter(([, v]) => Number(v) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
+  const credBand = bandeiras(bm.credito), debBand = bandeiras(bm.debito);
+  return (
+    <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+        <span className="font-medium text-zinc-200">📋 Informe diário · {dm(date)}</span>
+        <span className="text-[11px] text-zinc-500">rede — total da empresa</span>
+        <span className="ml-auto text-[11px] text-zinc-500">{open ? 'ocultar' : 'mostrar'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <table className="w-full text-[13px]">
+              <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
+                <tr>
+                  <th className="px-2.5 py-1.5 text-left font-medium">Loja</th>
+                  <th className="px-2.5 py-1.5 text-right font-medium">Dinheiro</th>
+                  <th className="px-2.5 py-1.5 text-right font-medium">Venda</th>
+                  <th className="px-2.5 py-1.5 text-right font-medium">Cota</th>
+                  <th className="px-2.5 py-1.5 text-right font-medium">Resultado</th>
+                  <th className="px-2.5 py-1.5 text-right font-medium">Cota {dm(data.nextDate)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.stores || []).map((s: any) => (
+                  <tr key={s.storeId} className="border-t border-zinc-800/70">
+                    <td className="px-2.5 py-1.5 text-zinc-200">{s.storeName}{!s.hasClosing && <span className="ml-1 text-[10px] text-zinc-600">(sem fechamento)</span>}</td>
+                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.dinheiro)}</td>
+                    <td className="px-2.5 py-1.5 text-right text-zinc-100 tabular-nums">{brl(s.venda)}</td>
+                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.cota)}</td>
+                    <td className="px-2.5 py-1.5 text-right tabular-nums">{desvio(s.desvio)}</td>
+                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.cotaNext > 0 ? brl(s.cotaNext) : '—'}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-zinc-700 bg-zinc-800/40 font-semibold">
+                  <td className="px-2.5 py-2 text-zinc-100">Empresa (total)</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-200 tabular-nums">{brl(t.dinheiro)}</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-50 tabular-nums">{brl(t.venda)}</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-300 tabular-nums">{brl(t.cota)}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">{desvio(t.desvio)}</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-300 tabular-nums">{t.cotaNext > 0 ? brl(t.cotaNext) : '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {/* Total ABERTO por forma de pagamento — a conferência do dono. */}
+          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">Total da empresa por forma de pagamento</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+              <span className="text-zinc-300">Dinheiro <strong className="text-zinc-100">{brl(bm.dinheiro)}</strong></span>
+              {Number(bm.pix) > 0 && <span className="text-zinc-300">PIX <strong className="text-zinc-100">{brl(bm.pix)}</strong></span>}
+              {Number(bm.voucher) > 0 && <span className="text-zinc-300">Voucher <strong className="text-zinc-100">{brl(bm.voucher)}</strong></span>}
+              {Number(bm.troca) > 0 && <span className="text-zinc-300">Troca <strong className="text-zinc-100">{brl(bm.troca)}</strong></span>}
+            </div>
+            {credBand.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
+                <span className="text-[11px] text-zinc-500">Crédito {brl(bm.totalCredito)} ·</span>
+                {credBand.map(([b, v]) => <span key={b} className="text-zinc-300">{b} <strong className="text-zinc-100">{brl(Number(v))}</strong></span>)}
+              </div>
+            )}
+            {debBand.length > 0 && (
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
+                <span className="text-[11px] text-zinc-500">Débito {brl(bm.totalDebito)} ·</span>
+                {debBand.map(([b, v]) => <span key={b} className="text-zinc-300">{b} <strong className="text-zinc-100">{brl(Number(v))}</strong></span>)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClosingsTab() {
   const [date, setDate] = useState(todayStr());
   const [stores, setStores] = useState<any[]>([]);
@@ -1850,6 +1942,7 @@ function ClosingsTab() {
       </div>
 
       <WhoIsOffCard className="mb-3" />
+      <DailyInformeCard date={date} />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 
       {stores.length === 0 ? (

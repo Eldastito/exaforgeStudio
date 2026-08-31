@@ -47,6 +47,60 @@ export class RetailDashboardService {
     };
   }
 
+  /**
+   * INFORME DIÁRIO DA REDE (pedido do lojista — padrão do "Informe Diário" do
+   * Brunno): por loja (dinheiro, venda, cota, bateu/faltou e a cota do DIA
+   * SEGUINTE) MAIS o TOTAL da empresa, com o total ainda ABERTO por forma de
+   * pagamento (dinheiro, PIX e cartão POR BANDEIRA) — pra facilitar a
+   * conferência. Só leitura, isolado por org. Lista TODAS as lojas ativas
+   * (loja sem fechamento aparece com venda 0).
+   */
+  static dailyInforme(orgId: string, date: string): any {
+    const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
+    const nextDate = new Date(Date.parse(date + "T12:00:00Z") + 86400000).toISOString().slice(0, 10);
+    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const closings = db.prepare(
+      `SELECT store_id, informed_total, quota_amount, details_json
+         FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'`
+    ).all(orgId, date) as any[];
+    const byStore = new Map(closings.map((c) => [c.store_id, c]));
+    const quotaToday = new Map((db.prepare(`SELECT store_id, quota_amount FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?`).all(orgId, date) as any[]).map((q) => [q.store_id, num(q.quota_amount)]));
+    const quotaNext = new Map((db.prepare(`SELECT store_id, quota_amount FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?`).all(orgId, nextDate) as any[]).map((q) => [q.store_id, num(q.quota_amount)]));
+
+    // Acumuladores da forma de pagamento (total da empresa).
+    const credito: Record<string, number> = {}, debito: Record<string, number> = {};
+    let tDinheiro = 0, tPix = 0, tVoucher = 0, tTroca = 0, tOutros = 0, tCredito = 0, tDebito = 0;
+
+    const rows = stores.map((s) => {
+      const c = byStore.get(s.id);
+      const venda = c ? num(c.informed_total) : 0;
+      // Cota do dia: snapshot do fechamento; senão a cota viva da loja.
+      const cota = c && num(c.quota_amount) > 0 ? num(c.quota_amount) : (quotaToday.get(s.id) || 0);
+      let dinheiro = 0;
+      if (c?.details_json) {
+        try {
+          const d = JSON.parse(c.details_json) || {};
+          dinheiro = num(d.dinheiro);
+          tDinheiro += num(d.dinheiro); tPix += num(d.pix); tVoucher += num(d.voucher); tTroca += num(d.troca); tOutros += num(d.outros);
+          for (const [k, v] of Object.entries(d.credito || {})) { credito[k] = r2((credito[k] || 0) + num(v)); tCredito += num(v); }
+          for (const [k, v] of Object.entries(d.debito || {})) { debito[k] = r2((debito[k] || 0) + num(v)); tDebito += num(v); }
+        } catch { /* fechamento sem detalhe: só o total (informed_total) entra */ }
+      }
+      return { storeId: s.id, storeName: s.name, dinheiro: r2(dinheiro), venda: r2(venda), cota: r2(cota), desvio: r2(venda - cota), cotaNext: r2(quotaNext.get(s.id) || 0), hasClosing: !!c };
+    });
+
+    const totalVenda = r2(rows.reduce((a, r) => a + r.venda, 0));
+    const totalCota = r2(rows.reduce((a, r) => a + r.cota, 0));
+    return {
+      date, nextDate, stores: rows,
+      total: {
+        dinheiro: r2(tDinheiro), venda: totalVenda, cota: totalCota, desvio: r2(totalVenda - totalCota),
+        cotaNext: r2(rows.reduce((a, r) => a + r.cotaNext, 0)),
+        byMethod: { dinheiro: r2(tDinheiro), pix: r2(tPix), voucher: r2(tVoucher), troca: r2(tTroca), outros: r2(tOutros), credito, debito, totalCredito: r2(tCredito), totalDebito: r2(tDebito) },
+      },
+    };
+  }
+
   /** Acumulado do MÊS ('YYYY-MM'). */
   static monthly(orgId: string, month: string): any {
     const start = `${month}-01`;

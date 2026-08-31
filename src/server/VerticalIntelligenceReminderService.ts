@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { MASTER_ADMIN_EMAIL } from "./config/secret.js";
+import { AccountIdentityService } from "./AccountIdentityService.js";
 
 /**
  * VerticalIntelligenceReminderService (ADR-156, DI-4.5) — agendamento SEMANAL
@@ -40,7 +41,7 @@ export class VerticalIntelligenceReminderService {
 
   /** Org do admin master (onde o lembrete é publicado). Null se não houver. */
   static masterOrgId(): string | null {
-    const row = db.prepare("SELECT organization_id FROM users WHERE email = ? LIMIT 1").get(MASTER_ADMIN_EMAIL) as any;
+    const row = AccountIdentityService.usersByEmail(MASTER_ADMIN_EMAIL)[0]; // RN-GRP-02
     return row?.organization_id || null;
   }
 

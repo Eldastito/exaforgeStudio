@@ -5,7 +5,6 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { JWT_SECRET, SESSION_JWT_TTL } from "../config/secret.js";
 import { DistributedLoginLimiter } from "../loginRateLimitRedis.js";
-import { bumpSecurityVersion } from "../middleware/auth.js";
 import { sessionCookieHeader, clearSessionCookieHeader, resolveRequestToken } from "../sessionCookie.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
@@ -14,6 +13,7 @@ import { PlanService } from "../PlanService.js";
 import { AddonService } from "../AddonService.js";
 import { PLAN_BUNDLES } from "../plansGrade.js";
 import { logAuthEvent } from "../auditLog.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 
 const router = Router();
 
@@ -78,8 +78,8 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
   }
 
   try {
-    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existingUser) {
+    // RN-GRP-02: dup-check via identidade (pronto pra F0c relaxar users.email UNIQUE).
+    if (AccountIdentityService.userExistsByEmail(email)) {
       return res.status(400).json({ error: "Email already in use" });
     }
 
@@ -199,8 +199,14 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
   }
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
-    if (!user || !user.password_hash) {
+    // RN-GRP-02: resolve a LINHA de users a assinar + a CREDENCIAL a validar. A
+    // credencial vem da identidade quando existe (a identidade é a fonte de verdade
+    // pós-F0b; users é espelho), senão da própria linha (fallback legado). Match exato
+    // por email — 0-regressão. Pré-F0c: no máx. 1 linha por email.
+    const rec = AccountIdentityService.resolveLogin(email);
+    const user = rec?.user;
+    const cred = rec?.credential;
+    if (!rec || !user || !cred?.password_hash) {
       // Don't reveal if user exists
       await registerFail();
       logAuthEvent(null, null, null, 'LOGIN_FAILED', { email });
@@ -212,7 +218,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
       return res.status(403).json({ error: "Account blocked." });
     }
 
-    const match = await bcrypt.compare(password, user.password_hash);
+    const match = await bcrypt.compare(password, cred.password_hash);
     if (!match) {
       await registerFail();
       logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
@@ -221,21 +227,22 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     // 2FA: se o usuário tem MFA ativo, exige o código (do app ou um backup code)
     // ANTES de emitir o token. Mantém o contador de tentativas para o 2º fator.
-    if (user.mfa_enabled) {
+    if (cred.mfa_enabled) {
       const provided = String(mfaToken || "").replace(/\s/g, "");
       if (!provided) {
         return res.status(401).json({ mfaRequired: true, error: "Código de verificação (2FA) necessário." });
       }
-      const secret = EncryptionService.decrypt(user.mfa_secret);
+      const secret = EncryptionService.decrypt(cred.mfa_secret);
       let ok = !!secret && TOTPService.verify(secret, provided);
-      // Tenta um código de backup (consumido ao usar).
-      if (!ok && user.mfa_backup_codes) {
+      // Tenta um código de backup (consumido ao usar). Consumo escreve na identidade
+      // (+ espelho em users) SEM bump de sv — é login, não troca de credencial.
+      if (!ok && cred.mfa_backup_codes) {
         try {
-          const codes: string[] = JSON.parse(EncryptionService.decrypt(user.mfa_backup_codes) || "[]");
+          const codes: string[] = JSON.parse(EncryptionService.decrypt(cred.mfa_backup_codes) || "[]");
           const idx = codes.indexOf(provided);
           if (idx >= 0) {
             codes.splice(idx, 1);
-            db.prepare("UPDATE users SET mfa_backup_codes = ? WHERE id = ?").run(EncryptionService.encrypt(JSON.stringify(codes)), user.id);
+            AccountIdentityService.setCredentialByUser(user.id, { mfaBackupCodes: EncryptionService.encrypt(JSON.stringify(codes)) }, { bumpSv: false });
             ok = true;
             logAuthEvent(user.organization_id, user.id, user.id, 'MFA_BACKUP_CODE_USED', { email });
           }
@@ -279,7 +286,7 @@ router.post("/forgot-password", async (req: Request, res: Response): Promise<any
   if (!email) return res.status(400).json({ error: "Missing email" });
 
   try {
-    const user = db.prepare('SELECT id, organization_id FROM users WHERE email = ?').get(email) as any;
+    const user = AccountIdentityService.usersByEmail(email)[0]; // RN-GRP-02
     if (user) {
       const token = uuidv4() + uuidv4(); // Simple token for demo
       const hashedToken = await bcrypt.hash(token, 10);
@@ -316,7 +323,7 @@ router.post("/reset-password", async (req: Request, res: Response): Promise<any>
   }
 
   try {
-    const user = db.prepare('SELECT id, organization_id FROM users WHERE email = ?').get(email) as any;
+    const user = AccountIdentityService.usersByEmail(email)[0]; // RN-GRP-02
     if (!user) return res.status(400).json({ error: "Invalid token or email" });
 
     // In a real implementation we would fetch pending events, unhash, or look up by a token ID.
@@ -337,8 +344,9 @@ router.post("/reset-password", async (req: Request, res: Response): Promise<any>
     }
 
     const hashed = await bcrypt.hash(newPassword, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashed, user.id);
-    bumpSecurityVersion(user.id); // SEC-F7: revoga tokens antigos após reset de senha
+    // RN-GRP-03: escreve a senha na identidade + espelho em users e revoga TODAS as
+    // sessões do humano (bump de sv em cada linha ligada), não só nesta org.
+    AccountIdentityService.setCredentialByUser(user.id, { passwordHash: hashed });
     db.prepare('UPDATE password_reset_events SET status = ? WHERE id = ?').run('completed', pendingEvent.id);
 
     logAuthEvent(user.organization_id, user.id, user.id, 'PASSWORD_RESET_COMPLETED', { email });

@@ -2,9 +2,10 @@ import { Router } from "express";
 import db from "../db.js";
 import bcrypt from "bcrypt";
 import QRCode from "qrcode";
-import { AuthRequest, bumpSecurityVersion } from "../middleware/auth.js";
+import { AuthRequest } from "../middleware/auth.js";
 import { TOTPService } from "../TOTPService.js";
 import { EncryptionService } from "../EncryptionService.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 
 const router = Router();
 
@@ -43,8 +44,14 @@ router.post("/enable", (req: AuthRequest, res): any => {
     return res.status(400).json({ error: "Código inválido. Confira o app autenticador." });
   }
   const backupCodes = TOTPService.generateBackupCodes();
-  db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_pending_secret = NULL, mfa_backup_codes = ? WHERE id = ?")
-    .run(EncryptionService.encrypt(secret), EncryptionService.encrypt(JSON.stringify(backupCodes)), userId);
+  // RN-GRP-02/03: a credencial MFA é escrita na identidade + espelho em users. Ativar
+  // NÃO revoga a sessão atual (bumpSv:false — 0-regressão; ativar 2FA não desloga).
+  AccountIdentityService.setCredentialByUser(userId, {
+    mfaEnabled: 1,
+    mfaSecret: EncryptionService.encrypt(secret),
+    mfaBackupCodes: EncryptionService.encrypt(JSON.stringify(backupCodes)),
+  }, { bumpSv: false });
+  db.prepare("UPDATE users SET mfa_pending_secret = NULL WHERE id = ?").run(userId);
   res.json({ success: true, backupCodes });
 });
 
@@ -57,8 +64,10 @@ router.post("/disable", async (req: AuthRequest, res): Promise<any> => {
   if (!u) return res.status(404).json({ error: "Usuário não encontrado" });
   const ok = u.password_hash && await bcrypt.compare(String(password || ""), u.password_hash);
   if (!ok) return res.status(400).json({ error: "Senha incorreta." });
-  db.prepare("UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_pending_secret = NULL, mfa_backup_codes = NULL WHERE id = ?").run(userId);
-  bumpSecurityVersion(userId); // SEC-F7: desativar MFA revoga tokens antigos
+  // RN-GRP-03: desativar MFA revoga TODAS as sessões do humano (bump de sv em cada
+  // linha ligada, default), não só nesta org. Espelha na identidade + users.
+  AccountIdentityService.setCredentialByUser(userId, { mfaEnabled: 0, mfaSecret: null, mfaBackupCodes: null });
+  db.prepare("UPDATE users SET mfa_pending_secret = NULL WHERE id = ?").run(userId);
   res.json({ success: true });
 });
 

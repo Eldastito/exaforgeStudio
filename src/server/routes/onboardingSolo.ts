@@ -6,6 +6,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
 import { FalaTuSoloWhatsAppService } from "../FalaTuSoloWhatsAppService.js";
 import { EntitlementService } from "../EntitlementService.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 
 // Inline pra não criar módulo separado: mesma política do POST /register.
 function passwordPolicyError(pw: string): string | null {
@@ -64,9 +65,8 @@ router.post("/", async (req: Request, res: Response): Promise<any> => {
     // Nunca vazamos existência de conta pra terceiros (o próprio usuário
     // recebe essa resposta autenticando pelo campo `email` que ele digitou —
     // não é enumeração cruzada).
-    const existingUser = db.prepare(
-      "SELECT id, organization_id FROM users WHERE email = ?",
-    ).get(email) as { id: string; organization_id: string } | undefined;
+    const existingUser = AccountIdentityService.usersByEmail(email)[0] as // RN-GRP-02
+      { id: string; organization_id: string } | undefined;
     if (existingUser) {
       let falatuInPlan = false;
       try {

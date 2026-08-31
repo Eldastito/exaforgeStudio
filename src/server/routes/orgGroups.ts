@@ -10,6 +10,7 @@ import { AccountIdentityService } from "../AccountIdentityService.js";
 import { OrgGroupService } from "../OrgGroupService.js";
 import { OrgGroupProvisioningService } from "../OrgGroupProvisioningService.js";
 import { GroupConsolidationService } from "../GroupConsolidationService.js";
+import { GroupBillingService } from "../GroupBillingService.js";
 
 const router = Router();
 
@@ -86,6 +87,22 @@ router.get("/:groupId/consolidated", requireRole("owner", "admin"), (req: AuthRe
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
   const onlyOrg = req.query.orgId ? String(req.query.orgId) : undefined;
   res.json(GroupConsolidationService.consolidateMonthly(groupId, month, { onlyOrg }));
+});
+
+/**
+ * PRÉVIA de fatura do grupo (read-model, NÃO cobra). Só o dono/admin do grupo. Dinheiro
+ * → role-gated. ?groupAddon= (valor do add-on de grupo; default 0 — não inventa).
+ */
+router.get("/:groupId/billing-preview", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const groupAddon = req.query.groupAddon != null ? Number(req.query.groupAddon) : 0;
+  res.json(GroupBillingService.preview(groupId, { groupAddon }));
 });
 
 export default router;

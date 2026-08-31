@@ -907,7 +907,8 @@
     "test:users-email-rebuild": "tsx scripts/test-users-email-rebuild.ts",
     "test:switch-org": "tsx scripts/test-switch-org.ts",
     "test:org-group-provision": "tsx scripts/test-org-group-provision.ts",
-    "test:group-consolidation": "tsx scripts/test-group-consolidation.ts"
+    "test:group-consolidation": "tsx scripts/test-group-consolidation.ts",
+    "test:group-billing": "tsx scripts/test-group-billing.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

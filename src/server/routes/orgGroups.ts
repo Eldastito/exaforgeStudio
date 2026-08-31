@@ -9,6 +9,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
 import { OrgGroupService } from "../OrgGroupService.js";
 import { OrgGroupProvisioningService } from "../OrgGroupProvisioningService.js";
+import { GroupConsolidationService } from "../GroupConsolidationService.js";
 
 const router = Router();
 
@@ -67,6 +68,24 @@ router.post("/provision", requireRole("owner", "admin"), (req: AuthRequest, res:
   } catch (e: any) {
     res.status(400).json({ error: e?.message || "provision_failed" });
   }
+});
+
+/**
+ * F2 — visão consolidada do grupo (fan-out, read-only). Só o dono/admin do grupo.
+ * ?month=YYYY-MM (default: mês corrente) · ?orgId= filtra por operação. Money — a rota
+ * é role-gated (owner/admin). Valida que o grupo é do dono da sessão (isolamento).
+ */
+router.get("/:groupId/consolidated", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" }); // não revela grupo de outro dono
+  }
+  const month = String(req.query.month || new Date().toISOString().slice(0, 7));
+  const onlyOrg = req.query.orgId ? String(req.query.orgId) : undefined;
+  res.json(GroupConsolidationService.consolidateMonthly(groupId, month, { onlyOrg }));
 });
 
 export default router;

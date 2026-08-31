@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { applyPlanGrade } from './plansGrade.js';
 import { applyFalatuPlans } from './falatuPlans.js';
+import { migrateUsersEmailConstraint } from './migrations/usersEmailConstraint.js';
 
 // DATA_DIR permite apontar o banco para um volume persistente (ex.: /data no
 // Coolify), evitando perda de dados a cada redeploy. Sem ela, usa o cwd.
@@ -11347,6 +11348,22 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_org_group_members_group ON org_group_members (group_id);
     `);
   } catch (e) { console.error('[DB] Falha ao criar org_groups/org_group_members', e); }
+
+  // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
+  // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
+  // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já
+  // org-scoped) e atômico (rollback deixa `users` intacta). Ver migrations/usersEmailConstraint.ts.
+  if (/^(1|true|yes|on)$/i.test(String(process.env.FEATURE_ORG_GROUPS || ""))) {
+    try {
+      const r = migrateUsersEmailConstraint(db);
+      if (!r.skipped) {
+        console.warn(`[DB][ADR-199] users email-constraint rebuild OK — linhas ${r.rowsBefore}→${r.rowsAfter}, colunas ${r.columns}, integridade ${r.integrityOk ? "ok" : "FALHA"}, fk ${r.fkOk ? "ok" : "FALHA"}, backup ${r.backupPath || "(n/a)"}`);
+      }
+    } catch (e) {
+      // A transação já fez rollback — `users` está intacta. Não derruba o boot; loga alto.
+      console.error('[DB][ADR-199] users email-constraint rebuild ABORTADO (users intacta):', e);
+    }
+  }
 };
 
 initDb();

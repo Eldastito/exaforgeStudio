@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { requirePermission, bumpSecurityVersion } from "../middleware/auth.js";
 import { PermissionService } from "../PermissionService.js";
 import { logAuthEvent } from "../auditLog.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 
 const router = Router();
 
@@ -45,9 +46,8 @@ router.post("/invite", requirePermission("usuarios", "write"), (req: Request, re
   }
 
   try {
-    // Check if already user or invited
-    const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existingUser) return res.status(400).json({ error: "User already exists" });
+    // Check if already user or invited (RN-GRP-02: dup-check via identidade).
+    if (AccountIdentityService.userExistsByEmail(email)) return res.status(400).json({ error: "User already exists" });
 
     // In this MVP, we just create the user straight away with a random password if we want, or create an invite.
     // The PRD says: "invite user, user clicks link, sets password". We'll just create the invite.

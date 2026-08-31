@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
 import { SecurityConfigurationService } from "../SecurityConfigurationService.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
 import { VerticalBlueprintService } from "../VerticalBlueprintService.js";
@@ -714,7 +715,9 @@ router.post("/users/:id/reset-password", async (req: AuthRequest, res): Promise<
       return res.status(400).json({ error: "cannot_reset_master_admin_here" });
     }
     const hash = await bcrypt.hash(password, 10);
-    db.prepare(`UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(hash, id);
+    // RN-GRP-03: escreve na identidade + espelho em users e revoga TODAS as sessões
+    // do humano (bump de sv em cada linha ligada). Reset de senha deve derrubar sessões.
+    AccountIdentityService.setCredentialByUser(id, { passwordHash: hash });
     try {
       logAuthEvent(null, req.user?.userId || null, id, "ADMIN_PASSWORD_RESET", {
         by_master: req.user?.email, target_email: user.email,

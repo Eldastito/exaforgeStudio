@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { AccountIdentityService } from "./AccountIdentityService.js";
 import { VerticalBlueprintService } from "./VerticalBlueprintService.js";
 import { AsaasService } from "./AsaasService.js";
 import { PlanService } from "./PlanService.js";
@@ -92,9 +93,8 @@ export class FalatuCheckoutService {
     const bp = VerticalBlueprintService.getLatestPublished(SOLO_BLUEPRINT_KEY);
     if (!bp || bp.mode !== "solo") throw new FalatuCheckoutError("blueprint_missing", 500, "Configuração do FalaTu indisponível.");
 
-    // ---- 1 email = 1 conta ----
-    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as any;
-    if (existing) throw new FalatuCheckoutError("email_in_use", 409, "Este e-mail já tem conta. Faça login.");
+    // ---- 1 email = 1 conta (RN-GRP-02: dup-check via identidade) ----
+    if (AccountIdentityService.userExistsByEmail(email)) throw new FalatuCheckoutError("email_in_use", 409, "Este e-mail já tem conta. Faça login.");
 
     // ---- cria a org (nasce trialing + plan_id) + dono ----
     const passwordHash = await bcrypt.hash(input.password, 10);

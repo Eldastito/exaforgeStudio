@@ -314,6 +314,8 @@
     "test:clinic-petcare": "tsx scripts/test-clinic-petcare.ts",
     "test:clinic-pet-history": "tsx scripts/test-clinic-pet-history.ts",
     "test:org-groups": "tsx scripts/test-org-groups.ts",
+    "test:org-group-auth": "tsx scripts/test-org-group-auth.ts",
+    "test:org-group-lint": "node scripts/check-org-group-isolation.mjs",
     "test:professional-network": "tsx scripts/test-professional-network.ts",
     "test:professional-schedule-config": "tsx scripts/test-professional-schedule-config.ts",
     "test:professional-availability": "tsx scripts/test-professional-availability.ts",

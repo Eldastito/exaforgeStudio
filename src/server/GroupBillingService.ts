@@ -119,4 +119,75 @@ export class GroupBillingService {
         + `Desconto de volume: ${volumeDiscountPct}% (${operationCount} operação(ões) ativa(s)).`,
     };
   }
+
+  /**
+   * FATURAMENTO SEPARADO (obs #1). Particiona a prévia por PAGADOR: cada CNPJ paga a
+   * própria fatura por default (payer_ref null → chave = a própria org); operações com o
+   * MESMO payer_ref caem numa fatura só (ex.: uma marca).
+   *
+   * DECISÃO DE DESCONTO (política): a faixa de volume é calculada pela ESCALA REAL do
+   * cliente (total de operações ativas no grupo) e aplicada à fatura de CADA CNPJ — separar
+   * o pagamento NÃO tira o desconto que o cliente ganhou por ter N lojas. Invariante: a
+   * soma das faturas separadas == a fatura consolidada (`preview().total`).
+   *
+   * ADD-ON de grupo: cobrado UMA vez por grupo (não por pagador). Vai no pagador PRINCIPAL
+   * (default: o 1º em ordem determinística; `opts.addonPayerRef` fixa outro).
+   */
+  static previewByPayer(
+    groupId: string,
+    opts: { groupAddon?: number; tiers?: VolumeTier[]; addonPayerRef?: string } = {}
+  ): {
+    groupId: string; operationCount: number; volumeDiscountPct: number; groupAddon: number;
+    payers: { payerRef: string; operations: BillingOperationRow[]; subtotal: number; addon: number; total: number }[];
+    grandTotal: number; currency: "BRL"; unpricedOperations: string[]; note: string;
+  } {
+    const tiers = opts.tiers || DEFAULT_VOLUME_TIERS;
+    const groupAddon = Number.isFinite(opts.groupAddon as number) ? Number(opts.groupAddon) : 0;
+
+    const members = OrgGroupService.membersOf(groupId);
+    const active = members.filter((m) => {
+      const s = db.prepare("SELECT status, billing_status FROM organization_settings WHERE organization_id = ?").get(m.organizationId) as any;
+      return s && s.status !== "blocked" && s.billing_status !== "cancelled";
+    });
+
+    // Desconto pela ESCALA DO GRUPO (não do subgrupo) — a fatura de cada CNPJ herda a faixa.
+    const operationCount = active.length;
+    const volumeDiscountPct = tierFor(operationCount, tiers);
+
+    // Agrupa por pagador: payer_ref quando setado, senão a própria org (paga sozinha).
+    const buckets = new Map<string, BillingOperationRow[]>();
+    const unpricedOperations: string[] = [];
+    for (const m of active) {
+      const key = m.payerRef || m.organizationId;
+      const s = db.prepare("SELECT business_name, plan_id FROM organization_settings WHERE organization_id = ?").get(m.organizationId) as any;
+      const planId: string | null = s?.plan_id || null;
+      const plan = planId ? PRICE_BY_PLAN[planId] : undefined;
+      const row: BillingOperationRow = plan
+        ? { organizationId: m.organizationId, businessName: s?.business_name ?? null, planId, planName: plan.name, basePrice: plan.price, netPrice: Math.round(plan.price * (1 - volumeDiscountPct / 100) * 100) / 100, unpriced: false }
+        : { organizationId: m.organizationId, businessName: s?.business_name ?? null, planId, planName: null, basePrice: null, netPrice: null, unpriced: true };
+      if (row.unpriced) unpricedOperations.push(m.organizationId);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(row);
+    }
+
+    const payerKeys = [...buckets.keys()].sort();
+    const addonKey = (opts.addonPayerRef && buckets.has(opts.addonPayerRef)) ? opts.addonPayerRef : payerKeys[0];
+
+    const payers = payerKeys.map((payerRef) => {
+      const operations = buckets.get(payerRef)!;
+      const subtotal = Math.round(operations.reduce((s, o) => s + (o.netPrice ?? 0), 0) * 100) / 100;
+      const addon = payerRef === addonKey ? groupAddon : 0;
+      return { payerRef, operations, subtotal, addon, total: Math.round((subtotal + addon) * 100) / 100 };
+    });
+
+    const grandTotal = Math.round(payers.reduce((s, p) => s + p.total, 0) * 100) / 100;
+
+    return {
+      groupId, operationCount, volumeDiscountPct, groupAddon, payers, grandTotal,
+      currency: "BRL", unpricedOperations,
+      note: "Prévia SEPARADA por pagador (read-model). Cada CNPJ paga a própria fatura; o "
+        + `desconto (${volumeDiscountPct}%) vem da escala do grupo (${operationCount} operações). `
+        + "Add-on de grupo cobrado uma vez. Soma das faturas == prévia consolidada.",
+    };
+  }
 }

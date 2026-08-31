@@ -88,6 +88,40 @@ async function main() {
   const pE = BILL.preview(gE.id);
   check("6.1 grupo vazio → total zero", pE.operationCount === 0 && pE.total === 0 && pE.operations.length === 0);
 
+  // --- FATURAMENTO SEPARADO (obs #1): cada CNPJ paga a própria; desconto pela escala do grupo ---
+  // Cliente: Toulon (3 CNPJs Growth) + Democrata (2 CNPJs Growth) = 5 operações → faixa 3–5 = 10%.
+  const gS = GRP.createGroup({ name: "GS", ownerIdentityId: identityId });
+  const tCar = mkOrgInGroup(db, GRP, gS.id, "Toulon Carioca", "growth");
+  const tAv = mkOrgInGroup(db, GRP, gS.id, "Toulon Av Brasil", "growth");
+  const tGr = mkOrgInGroup(db, GRP, gS.id, "Toulon Grande Rio", "growth");
+  const dA = mkOrgInGroup(db, GRP, gS.id, "Democrata A", "growth");
+  const dB = mkOrgInGroup(db, GRP, gS.id, "Democrata B", "growth");
+
+  // Default: cada CNPJ é seu próprio pagador (payer_ref null) → 5 faturas.
+  const split = BILL.previewByPayer(gS.id, { groupAddon: 200 });
+  check("7.1 desconto pela ESCALA do grupo (5 ops → 10%)", split.volumeDiscountPct === 10);
+  check("7.2 default: uma fatura por CNPJ (5 pagadores)", split.payers.length === 5);
+  // 1797*0.9 = 1617.3 por operação; cada fatura de 1 CNPJ = 1617.3 (+ add-on no principal)
+  const withAddon = split.payers.filter((p) => p.addon > 0);
+  check("7.3 add-on de grupo cobrado UMA vez só", withAddon.length === 1 && withAddon[0].addon === 200);
+  check("7.4 cada CNPJ paga o plano com o desconto do grupo (1617.3)", split.payers.every((p) => p.operations.length === 1 && p.operations[0].netPrice === 1617.3));
+  // RECONCILIAÇÃO: soma das faturas separadas == prévia consolidada.
+  const consolidated = BILL.preview(gS.id, { groupAddon: 200 });
+  check("7.5 soma das faturas separadas == consolidado", split.grandTotal === consolidated.total);
+  check("7.6 grandTotal = 5×1617.3 + 200 = 8286.5", split.grandTotal === 8286.5);
+
+  // Agrupar por MARCA: rotula os 3 CNPJs Toulon como um pagador e os 2 Democrata como outro.
+  for (const o of [tCar, tAv, tGr]) GRP.setPayerRef(gS.id, o, "toulon");
+  for (const o of [dA, dB]) GRP.setPayerRef(gS.id, o, "democrata");
+  const byBrand = BILL.previewByPayer(gS.id, { groupAddon: 200 });
+  check("8.1 agora 2 faturas (Toulon, Democrata)", byBrand.payers.length === 2);
+  const toulon = byBrand.payers.find((p) => p.payerRef === "toulon")!;
+  const democrata = byBrand.payers.find((p) => p.payerRef === "democrata")!;
+  check("8.2 Toulon: 3 CNPJs, subtotal 3×1617.3 = 4851.9", toulon.operations.length === 3 && toulon.subtotal === 4851.9);
+  check("8.3 Democrata: 2 CNPJs, subtotal 2×1617.3 = 3234.6", democrata.operations.length === 2 && democrata.subtotal === 3234.6);
+  check("8.4 desconto do grupo preservado (ainda 10%, escala do cliente)", byBrand.volumeDiscountPct === 10);
+  check("8.5 soma por marca == consolidado (add-on uma vez)", byBrand.grandTotal === consolidated.total);
+
   // Resultado.
   console.log("\n=== ADR-199 obs#1 — prévia de fatura do grupo (GroupBillingService) ===");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

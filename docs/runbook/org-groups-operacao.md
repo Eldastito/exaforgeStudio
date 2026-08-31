@@ -6,6 +6,37 @@ mesmo humano tenha linha de `users` em N orgs. Este runbook cobre **ensaio,
 promoção e rollback**. Código: `src/server/migrations/usersEmailConstraint.ts`;
 teste: `npm run test:users-email-rebuild`.
 
+## 0. Onde fica a "flag" (para quem nunca mexeu) — passo a passo
+
+A "flag" é uma **variável de ambiente** chamada `FEATURE_ORG_GROUPS`. Não é um botão
+dentro do app — é uma configuração do **servidor onde o ZappFlow roda (Coolify, na VPS
+Hostinger)**. Ver `docs/AMBIENTES.md`.
+
+**IMPORTANTE (honesto):** essa flag é **GLOBAL** — ela liga o recurso de grupo para a
+aplicação inteira daquele ambiente, não "só para a Toulon". Não existe um liga/desliga
+por conta. O "canary" na prática é: **ligar primeiro no STAGING** (ambiente de teste,
+cópia isolada), validar, e só então ligar na **PRODUÇÃO**. Quando ligar em produção, só
+a Toulon *usa* o grupo porque só a conta dela terá um grupo provisionado — as outras
+contas seguem exatamente iguais (0-regressão).
+
+### Como ligar (no Coolify)
+1. Entre no **Coolify** (o painel que faz o deploy na sua VPS).
+2. Abra a aplicação **de STAGING** primeiro (a que roda o branch `staging`, domínio
+   `staging.*`, banco `/data-staging/zappflow.db`).
+3. Vá em **Environment Variables** (Variáveis de Ambiente) da aplicação.
+4. Adicione uma variável: **Nome** `FEATURE_ORG_GROUPS` · **Valor** `1`.
+5. Salve e **Redeploy/Restart** a aplicação de staging.
+6. No primeiro boot com a flag ligada, o app roda o rebuild UMA vez (com snapshot
+   automático) e libera as rotas/tela de Grupo. Procure no **log** a linha:
+   `[DB][ADR-199] users email-constraint rebuild OK — linhas N→N, colunas C, integridade ok, fk ok, backup <path>`.
+7. Faça a validação da §4 abaixo. Só depois repita os passos 1–6 na aplicação de
+   **PRODUÇÃO** (branch `main`, domínio principal, banco `/data/`).
+
+### Como DESLIGAR (voltar atrás)
+Remova a variável `FEATURE_ORG_GROUPS` (ou mude o valor para `0`) e redeploy. As rotas/
+tela de Grupo somem na hora. (O schema já rebuildado NÃO precisa reverter — a constraint
+nova aceita tudo que a antiga aceitava; ver §3 Rollback se ainda assim quiser reverter.)
+
 ## Garantias de integridade (por que nenhum dado se perde)
 
 1. **Snapshot antes de tudo** — `VACUUM INTO` grava uma cópia física do banco +

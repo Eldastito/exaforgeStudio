@@ -11349,6 +11349,12 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar org_groups/org_group_members', e); }
 
+  // ADR-199 (obs #1) — payer_ref: rótulo de PAGADOR de uma operação no grupo, para
+  // FATURAMENTO SEPARADO. NULL (default) = a operação paga a própria fatura (por CNPJ,
+  // comportamento nativo do ASAAS por org). Setar o mesmo valor em N operações agrupa-as
+  // sob um pagador (ex.: uma marca). Aditivo; não muda nada de quem não usa.
+  try { db.exec(`ALTER TABLE org_group_members ADD COLUMN payer_ref TEXT`); } catch(e){}
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

@@ -102,7 +102,27 @@ router.get("/:groupId/billing-preview", requireRole("owner", "admin"), (req: Aut
     return res.status(404).json({ error: "Not found" });
   }
   const groupAddon = req.query.groupAddon != null ? Number(req.query.groupAddon) : 0;
+  // ?split=payer → faturamento SEPARADO (uma prévia por pagador; cada CNPJ paga a própria).
+  if (String(req.query.split || "") === "payer") {
+    return res.json(GroupBillingService.previewByPayer(groupId, { groupAddon }));
+  }
   res.json(GroupBillingService.preview(groupId, { groupAddon }));
+});
+
+/** Define o pagador (faturamento separado) de uma operação: body { orgId, payerRef|null }. */
+router.post("/:groupId/payer", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const orgId = String(req.body?.orgId || "");
+  if (!orgId) return res.status(400).json({ error: "orgId obrigatório" });
+  const ok = OrgGroupService.setPayerRef(groupId, orgId, req.body?.payerRef ?? null);
+  if (!ok) return res.status(404).json({ error: "operação não está no grupo" });
+  res.json({ ok: true });
 });
 
 export default router;

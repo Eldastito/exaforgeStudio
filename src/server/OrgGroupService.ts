@@ -31,6 +31,7 @@ export interface OrgGroupMember {
   organizationId: string;
   addedBy: string | null;
   addedAt: string;
+  payerRef: string | null;   // rótulo de pagador (faturamento separado); null = paga a própria fatura
 }
 
 function norm(s?: string | null): string {
@@ -42,7 +43,7 @@ export class OrgGroupService {
     return { id: r.id, name: r.name, ownerIdentityId: r.owner_identity_id, createdAt: r.created_at };
   }
   private static mapMember(r: any): OrgGroupMember {
-    return { id: r.id, groupId: r.group_id, organizationId: r.organization_id, addedBy: r.added_by ?? null, addedAt: r.added_at };
+    return { id: r.id, groupId: r.group_id, organizationId: r.organization_id, addedBy: r.added_by ?? null, addedAt: r.added_at, payerRef: r.payer_ref ?? null };
   }
 
   /** Cria um grupo. Exige nome e a identidade dona (não inventa — RN-GRP). */
@@ -89,6 +90,18 @@ export class OrgGroupService {
   /** Remove uma org do grupo (não apaga a org nem seus dados — só o vínculo de holding). */
   static removeMember(groupId: string, organizationId: string): boolean {
     const changes = db.prepare("DELETE FROM org_group_members WHERE group_id = ? AND organization_id = ?").run(norm(groupId), norm(organizationId)).changes as number;
+    return changes > 0;
+  }
+
+  /**
+   * Define o PAGADOR de uma operação no grupo (faturamento separado — obs #1). `payerRef`
+   * vazio/null volta ao default (a operação paga a própria fatura, por CNPJ). Setar o mesmo
+   * valor em N operações agrupa-as sob um pagador (ex.: marca). Só mexe no vínculo.
+   */
+  static setPayerRef(groupId: string, organizationId: string, payerRef: string | null): boolean {
+    const ref = payerRef == null ? null : (norm(payerRef) || null);
+    const changes = db.prepare("UPDATE org_group_members SET payer_ref = ? WHERE group_id = ? AND organization_id = ?")
+      .run(ref, norm(groupId), norm(organizationId)).changes as number;
     return changes > 0;
   }
 

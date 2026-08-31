@@ -14,8 +14,13 @@ import { AddonService } from "../AddonService.js";
 import { PLAN_BUNDLES } from "../plansGrade.js";
 import { logAuthEvent } from "../auditLog.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
+import { requireAuth, AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
+
+// ADR-199 F0c-2 — o switch de operação só existe com a flag ligada (canary). Sem ela,
+// as rotas respondem 404 (não revela a feature) e o app segue single-org (0-regressão).
+const orgGroupsEnabled = () => /^(1|true|yes|on)$/i.test(String(process.env.FEATURE_ORG_GROUPS || ""));
 
 // --- Proteção contra força-bruta no login (achado A10) ---
 // Limitador extraído e testável (loginRateLimit.ts). Por-e-mail (5/15min) é o
@@ -392,6 +397,58 @@ router.get("/me", (req, res) => {
 router.post("/logout", (_req: Request, res: Response): any => {
   res.append("Set-Cookie", clearSessionCookieHeader());
   res.json({ message: "Logged out" });
+});
+
+// ADR-199 F0c-2 — operações que a sessão atual pode abrir (o front mostra o seletor
+// SÓ quando há >1). Membership = ter linha de `users` ligada à identidade (RN-GRP-01),
+// nunca o grupo. Gated pela flag: sem ela → 404 (feature invisível, single-org intacto).
+router.get("/organizations", requireAuth, (req: AuthRequest, res: Response): any => {
+  if (!orgGroupsEnabled()) return res.status(404).json({ error: "Not found" });
+  const currentUserId = req.user?.userId;
+  const currentOrg = req.user?.organizationId;
+  if (!currentUserId) return res.status(401).json({ error: "Unauthorized" });
+  const identityId = AccountIdentityService.identityIdForUser(currentUserId);
+  const memberships = identityId ? AccountIdentityService.memberships(identityId) : [];
+  res.json({
+    organizations: memberships.map((m) => ({
+      organizationId: m.organizationId,
+      businessName: m.businessName,
+      role: m.role,
+      current: m.organizationId === currentOrg,
+    })),
+  });
+});
+
+// ADR-199 F0c-2 — troca de operação: reassina o JWT com a org alvo APÓS provar o
+// membership (RN §8). O orgId do cliente nunca é autoridade sem `resolveSwitch`. Reemite
+// o MESMO shape de claims do login e o cookie httpOnly coerente (RN-GRP-07). Passa pelo
+// requireAuth (herda o same-origin/CSRF do cookie). Registra no audit (SWITCH_ORG).
+router.post("/switch-org", requireAuth, (req: AuthRequest, res: Response): any => {
+  if (!orgGroupsEnabled()) return res.status(404).json({ error: "Not found" });
+  const currentUserId = req.user?.userId;
+  if (!currentUserId) return res.status(401).json({ error: "Unauthorized" });
+  const targetOrgId = String(req.body?.orgId || "");
+  if (!targetOrgId) return res.status(400).json({ error: "Missing orgId" });
+
+  let target: any;
+  try {
+    target = AccountIdentityService.resolveSwitch(currentUserId, targetOrgId);
+  } catch (e: any) {
+    // Sem membership provado → 403. Registra a tentativa (RN §7.7).
+    logAuthEvent(req.user?.organizationId || null, currentUserId, currentUserId, 'SWITCH_ORG_DENIED', { targetOrgId, reason: e?.message || "denied" });
+    return res.status(403).json({ error: "Forbidden: sem acesso a esta operação" });
+  }
+
+  const token = jwt.sign(
+    { userId: target.id, organizationId: target.organization_id, role: target.role, role_profile_id: target.role_profile_id || null, email: target.email, name: target.name, platform_role: target.platform_role || null, sv: target.security_version ?? 1 },
+    JWT_SECRET,
+    { expiresIn: SESSION_JWT_TTL as jwt.SignOptions["expiresIn"] }
+  );
+  logAuthEvent(target.organization_id, target.id, currentUserId, 'SWITCH_ORG', { fromOrg: req.user?.organizationId || null, toOrg: target.organization_id });
+
+  const org = db.prepare('SELECT onboarding_status FROM organization_settings WHERE organization_id = ?').get(target.organization_id) as any;
+  res.append("Set-Cookie", sessionCookieHeader(token));
+  res.json({ token, user: { id: target.id, email: target.email, name: target.name, organizationId: target.organization_id, role: target.role, onboarding_status: org?.onboarding_status } });
 });
 
 export default router;

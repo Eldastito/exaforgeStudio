@@ -94,6 +94,57 @@ export class AccountIdentityService {
     return AccountIdentityService.getByEmail(email) !== null;
   }
 
+  // ==========================================================================
+  // ADR-199 F0c-2 — troca de operação (switch-org). O membership de ACESSO é ter
+  // linha de `users` (ativa) ligada à identidade naquela org — NUNCA o grupo/holding
+  // (RN-GRP-01). Toda a resolução é por identity_id; o orgId vindo do cliente jamais é
+  // autoridade sem esta checagem (RN §8/RN-GRP-06).
+  // ==========================================================================
+
+  /** identity_id da linha de `users` (garante preguiçosamente). Null se email nulo/inexistente. */
+  static identityIdForUser(userId: string): string | null {
+    const u = db.prepare("SELECT identity_id FROM users WHERE id = ?").get(String(userId || "")) as any;
+    if (!u) return null;
+    return u.identity_id || AccountIdentityService.ensureForUser(userId);
+  }
+
+  /** As operações que a identidade pode abrir (id + org + role + nome do negócio). Só ativas. */
+  static memberships(identityId: string): { userId: string; organizationId: string; role: string; businessName: string | null }[] {
+    if (!identityId) return [];
+    const rows = db.prepare(
+      `SELECT u.id AS userId, u.organization_id AS organizationId, u.role AS role, s.business_name AS businessName
+         FROM users u
+         LEFT JOIN organization_settings s ON s.organization_id = u.organization_id
+        WHERE u.identity_id = ? AND (u.global_status IS NULL OR u.global_status NOT IN ('blocked','deleted'))
+        ORDER BY s.business_name ASC`
+    ).all(String(identityId)) as any[];
+    return rows.map((r) => ({ userId: r.userId, organizationId: r.organizationId, role: r.role, businessName: r.businessName ?? null }));
+  }
+
+  /** A linha de `users` (ativa) da identidade naquela org, ou null. Fonte da checagem de membership. */
+  static userRowForOrg(identityId: string, orgId: string): any | null {
+    if (!identityId || !orgId) return null;
+    return db.prepare(
+      `SELECT * FROM users
+        WHERE identity_id = ? AND organization_id = ?
+          AND (global_status IS NULL OR global_status NOT IN ('blocked','deleted'))
+        LIMIT 1`
+    ).get(String(identityId), String(orgId)) as any || null;
+  }
+
+  /**
+   * Resolve a troca de operação: a partir da sessão atual (currentUserId) valida o
+   * membership na org alvo e devolve a LINHA de `users` a assinar. Lança quando não há
+   * membership (o chamador responde 403 + audita). Nunca confia no orgId sem provar aqui.
+   */
+  static resolveSwitch(currentUserId: string, targetOrgId: string): any {
+    const identityId = AccountIdentityService.identityIdForUser(currentUserId);
+    if (!identityId) throw new Error("no_identity");
+    const row = AccountIdentityService.userRowForOrg(identityId, targetOrgId);
+    if (!row) throw new Error("no_membership");
+    return row;
+  }
+
   /**
    * Garante (idempotente) uma identidade pra linha de `users` e liga identity_id,
    * copiando a credencial atual (senha/MFA) da linha. Email nulo → null (RN-GRP-04).

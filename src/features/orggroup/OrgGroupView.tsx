@@ -64,6 +64,31 @@ function OpsTab({ groupId, onGroupCreated }: { groupId: string | null; onGroupCr
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [entering, setEntering] = useState<string | null>(null); // orgId em troca
+  const [plans, setPlans] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [changingPlan, setChangingPlan] = useState<string | null>(null); // orgId em troca de plano
+
+  useEffect(() => {
+    apiFetch('/api/plans')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPlans(Array.isArray(d) ? d.map((p: any) => ({ id: p.id, name: p.name, price: p.price ?? 0 })) : []))
+      .catch(() => {});
+  }, []);
+
+  // Ajusta o plano de uma operação (resolve "sem plano"/R$ 0 na Fatura). Group-scoped:
+  // o servidor valida que a operação é membro do grupo do dono. Recarrega a lista ao fim.
+  async function changePlan(orgId: string, planId: string) {
+    if (!groupId || !planId || changingPlan) return;
+    setChangingPlan(orgId); setMsg(null);
+    try {
+      const r = await apiFetch(`/api/groups/${groupId}/operation-plan`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId, planId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setMsg('Plano atualizado.'); await load(); }
+      else setMsg(d?.error || `Falha ao trocar plano (HTTP ${r.status}).`);
+    } catch { setMsg('Falha de rede ao trocar plano.'); }
+    setChangingPlan(null);
+  }
 
   // Entrar na operação: troca o JWT (switch-org) e recarrega já dentro dela. Independe do
   // seletor do header — funciona sobre a lista confiável do grupo. Erro fica visível.
@@ -147,7 +172,20 @@ function OpsTab({ groupId, onGroupCreated }: { groupId: string | null; onGroupCr
                   <div key={o.organizationId} className="flex items-center justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
                       <p className="text-sm text-zinc-100 truncate">{o.businessName || o.organizationId}</p>
-                      <p className="text-xs text-zinc-500">{o.planName || (o.unpriced ? 'sem plano' : o.planId || '—')}</p>
+                      {plans.length > 0 ? (
+                        <select
+                          value={o.planId || ''}
+                          disabled={changingPlan === o.organizationId}
+                          onChange={(e) => e.target.value && e.target.value !== o.planId && changePlan(o.organizationId, e.target.value)}
+                          className="mt-0.5 rounded bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                          title="Plano da operação"
+                        >
+                          {!o.planId && <option value="">sem plano</option>}
+                          {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      ) : (
+                        <p className="text-xs text-zinc-500">{o.planName || (o.unpriced ? 'sem plano' : o.planId || '—')}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       <span className="text-sm text-zinc-300">{brl(o.netPrice)}</span>

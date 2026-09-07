@@ -11,6 +11,7 @@ import { OrgGroupService } from "../OrgGroupService.js";
 import { OrgGroupProvisioningService } from "../OrgGroupProvisioningService.js";
 import { GroupConsolidationService } from "../GroupConsolidationService.js";
 import { GroupBillingService } from "../GroupBillingService.js";
+import { PlanService } from "../PlanService.js";
 
 const router = Router();
 
@@ -107,6 +108,33 @@ router.get("/:groupId/billing-preview", requireRole("owner", "admin"), (req: Aut
     return res.json(GroupBillingService.previewByPayer(groupId, { groupAddon }));
   }
   res.json(GroupBillingService.preview(groupId, { groupAddon }));
+});
+
+/**
+ * Ajusta o PLANO de uma operação do grupo (resolve o "sem plano" — Fatura fica R$ 0
+ * enquanto a operação está em plano de cortesia). Body: { orgId, planId }. Só o dono/admin
+ * do grupo; a operação PRECISA ser membro do grupo do dono (isolamento — não deixa mexer
+ * em org de fora). Reusa PlanService.selectPlan (mesmo caminho do /api/plans/select), sem
+ * duplicar regra de plano (§4/D6). NÃO cobra — só define o tier; a emissão real segue no
+ * gateway (mockado).
+ */
+router.post("/:groupId/operation-plan", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const orgId = String(req.body?.orgId || "");
+  const planId = String(req.body?.planId || "");
+  if (!orgId || !planId) return res.status(400).json({ error: "orgId e planId obrigatórios" });
+  // Isolamento: a operação tem que ser membro DESTE grupo (do dono da sessão).
+  const isMember = OrgGroupService.membersOf(groupId).some((m) => m.organizationId === orgId);
+  if (!isMember) return res.status(404).json({ error: "operação não está no grupo" });
+  const r = PlanService.selectPlan(orgId, planId);
+  if (!r.ok) return res.status(400).json({ error: r.reason || "Erro ao selecionar plano." });
+  res.json({ ok: true, planId });
 });
 
 /** Define o pagador (faturamento separado) de uma operação: body { orgId, payerRef|null }. */

@@ -445,7 +445,7 @@ export default function App() {
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top Navbar */}
-        <header className="flex h-16 items-center justify-between border-b border-zinc-800 bg-zinc-950/50 px-4 md:px-6 backdrop-blur-sm gap-2">
+        <header className="relative z-40 flex h-16 items-center justify-between border-b border-zinc-800 bg-zinc-950/50 px-4 md:px-6 backdrop-blur-sm gap-2">
            <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-2 -ml-1 text-zinc-300 hover:text-white" aria-label="Menu">
              <Menu className="w-5 h-5" />
            </button>

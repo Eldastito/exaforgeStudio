@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, weeksOfMonthLocal, daysBetween, addMonths } from './retailDateUtils';
+import { buildDailyInformeText } from './retailInformeText';
 import { parseMoneyBR, formatMoneyBR, maskMoneyBRInput } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retailClosingForm';
@@ -1995,6 +1996,18 @@ function DailyInformeCard({ date }: { date: string }) {
       </>
     );
   };
+  // Exportar/compartilhar o informe do dia (texto pronto pro WhatsApp — padrão Brunno).
+  const copyInforme = async () => {
+    const txt = buildDailyInformeText(data);
+    try { await navigator.clipboard.writeText(txt); toast.success('Informe copiado — cole no WhatsApp.'); }
+    catch { toast.error('Não consegui copiar aqui. Use o Compartilhar.'); }
+  };
+  const shareInforme = async () => {
+    const txt = buildDailyInformeText(data);
+    const nav: any = navigator;
+    if (nav.share) { try { await nav.share({ text: txt }); } catch { /* usuário cancelou */ } }
+    else copyInforme();
+  };
   return (
     <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
@@ -2004,6 +2017,14 @@ function DailyInformeCard({ date }: { date: string }) {
       </button>
       {open && (
         <div className="px-3 pb-3">
+          <div className="mb-2 flex items-center gap-2">
+            <button onClick={copyInforme} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800" title="Copiar o informe do dia (cole no WhatsApp)">
+              <Copy className="w-3.5 h-3.5" /> Copiar informe
+            </button>
+            <button onClick={shareInforme} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-2.5 py-1 text-xs text-emerald-300 hover:bg-emerald-500/10" title="Compartilhar (abre o WhatsApp no celular)">
+              <Share2 className="w-3.5 h-3.5" /> Compartilhar
+            </button>
+          </div>
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-[13px]">
               <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">

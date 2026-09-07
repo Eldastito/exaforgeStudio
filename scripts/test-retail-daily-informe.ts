@@ -31,6 +31,7 @@ async function main() {
   const { RetailStoreService } = await import("../src/server/RetailStoreService.js");
   const { RetailClosingService, RetailQuotaService } = await import("../src/server/RetailOpsService.js");
   const { RetailDashboardService } = await import("../src/server/RetailDashboardService.js");
+  const { buildDailyInformeText } = await import("../src/features/retailInformeText.js");
 
   const A = `org_A_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'X', 'active')`).run(randomUUID(), A);
@@ -100,6 +101,18 @@ async function main() {
   check("5.8 Carioca (sem fechamento) → byMethod zerado", !!cam && near(cam.dinheiro, 0) && near(cam.totalCredito, 0) && Object.keys(cam.credito || {}).length === 0, `${JSON.stringify(cam)}`);
   // A soma das lojas bate com o total (mesma quebra, agora visível dos dois lados).
   check("5.9 soma das lojas (crédito Master) = total (2000+1000=3000)", near((avm?.credito?.Master || 0) + (grm?.credito?.Master || 0), inf.total.byMethod.credito.Master), `${(avm?.credito?.Master || 0) + (grm?.credito?.Master || 0)}`);
+
+  // ===== 6. TEXTO compartilhável (WhatsApp — padrão Brunno) =====
+  const txt = buildDailyInformeText(inf);
+  const has = (s: string) => txt.includes(s);
+  check("6.1 texto tem cabeçalho 'Informe Diário' + data", has("Informe Diário") && has("29/08/26"), txt.slice(0, 40));
+  check("6.2 lista as 3 lojas", has("Av Brasil") && has("Carioca") && has("Grande Rio"));
+  check("6.3 fecha com 'Empresa Dia'", has("Empresa Dia"));
+  check("6.4 Av Brasil aparece ANTES de Empresa Dia", txt.indexOf("Av Brasil") < txt.indexOf("Empresa Dia") && txt.indexOf("Av Brasil") >= 0);
+  check("6.5 mostra Venda e Cota", has("Venda") && has("Cota"));
+  check("6.6 Av Brasil BATEU (a empresa FALTOU)", has("Bateu") && has("Faltou"));
+  check("6.7 cota do dia seguinte referenciada (30/08)", has("Cota 30/08"));
+  check("6.8 formas de pagamento 'num lugar só'", has("Formas de pagamento (empresa)") && has("Crédito") && has("Master") && has("Visa"));
 
   console.log("\n=== TEST: Informe Diário da rede ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

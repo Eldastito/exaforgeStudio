@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -1963,11 +1963,43 @@ function DailyInformeCard({ date }: { date: string }) {
     : <span className="text-red-300 font-medium">Faltou {brl(Math.abs(Number(v)))}</span>;
   const bandeiras = (m: any) => Object.entries(m || {}).filter(([, v]) => Number(v) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
   const credBand = bandeiras(bm.credito), debBand = bandeiras(bm.debito);
+  // Lojas com o detalhe de pagamento aberto (pedido do cliente: "individual e no total").
+  const [openStores, setOpenStores] = useState<Set<string>>(new Set());
+  const toggleStore = (id: string) => setOpenStores(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Tem algum detalhe de pagamento pra mostrar? (fechamento sem detalhe → nada a abrir)
+  const hasPay = (m: any) => !!m && (Number(m.dinheiro) > 0 || Number(m.pix) > 0 || Number(m.voucher) > 0 || Number(m.troca) > 0 || bandeiras(m.credito).length > 0 || bandeiras(m.debito).length > 0);
+  // Render reutilizável da quebra por forma de pagamento (usado por loja).
+  const payBreakdown = (m: any) => {
+    const cB = bandeiras(m?.credito), dB = bandeiras(m?.debito);
+    if (!hasPay(m)) return <div className="text-[11px] text-zinc-600">Sem detalhe de pagamento neste fechamento.</div>;
+    return (
+      <>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+          {Number(m.dinheiro) > 0 && <span className="text-zinc-300">Dinheiro <strong className="text-zinc-100">{brl(m.dinheiro)}</strong></span>}
+          {Number(m.pix) > 0 && <span className="text-zinc-300">PIX <strong className="text-zinc-100">{brl(m.pix)}</strong></span>}
+          {Number(m.voucher) > 0 && <span className="text-zinc-300">Voucher <strong className="text-zinc-100">{brl(m.voucher)}</strong></span>}
+          {Number(m.troca) > 0 && <span className="text-zinc-300">Troca <strong className="text-zinc-100">{brl(m.troca)}</strong></span>}
+        </div>
+        {cB.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
+            <span className="text-[11px] text-zinc-500">Crédito {brl(m.totalCredito)} ·</span>
+            {cB.map(([b, v]) => <span key={b} className="text-zinc-300">{b} <strong className="text-zinc-100">{brl(Number(v))}</strong></span>)}
+          </div>
+        )}
+        {dB.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
+            <span className="text-[11px] text-zinc-500">Débito {brl(m.totalDebito)} ·</span>
+            {dB.map(([b, v]) => <span key={b} className="text-zinc-300">{b} <strong className="text-zinc-100">{brl(Number(v))}</strong></span>)}
+          </div>
+        )}
+      </>
+    );
+  };
   return (
     <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
         <span className="font-medium text-zinc-200">📋 Informe diário · {dm(date)}</span>
-        <span className="text-[11px] text-zinc-500">rede — total da empresa</span>
+        <span className="text-[11px] text-zinc-500">rede — por loja e total</span>
         <span className="ml-auto text-[11px] text-zinc-500">{open ? 'ocultar' : 'mostrar'}</span>
       </button>
       {open && (
@@ -1985,16 +2017,39 @@ function DailyInformeCard({ date }: { date: string }) {
                 </tr>
               </thead>
               <tbody>
-                {(data.stores || []).map((s: any) => (
-                  <tr key={s.storeId} className="border-t border-zinc-800/70">
-                    <td className="px-2.5 py-1.5 text-zinc-200">{s.storeName}{!s.hasClosing && <span className="ml-1 text-[10px] text-zinc-600">(sem fechamento)</span>}</td>
-                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.dinheiro)}</td>
-                    <td className="px-2.5 py-1.5 text-right text-zinc-100 tabular-nums">{brl(s.venda)}</td>
-                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.cota)}</td>
-                    <td className="px-2.5 py-1.5 text-right tabular-nums">{desvio(s.desvio)}</td>
-                    <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.cotaNext > 0 ? brl(s.cotaNext) : '—'}</td>
-                  </tr>
-                ))}
+                {(data.stores || []).map((s: any) => {
+                  const canOpen = hasPay(s.byMethod);
+                  const isOpen = openStores.has(s.storeId);
+                  return (
+                    <Fragment key={s.storeId}>
+                      <tr className="border-t border-zinc-800/70">
+                        <td className="px-2.5 py-1.5 text-zinc-200">
+                          {canOpen ? (
+                            <button onClick={() => toggleStore(s.storeId)} className="inline-flex items-center gap-1 hover:text-white" title="Ver formas de pagamento desta loja">
+                              {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
+                              {s.storeName}
+                            </button>
+                          ) : (
+                            <span>{s.storeName}{!s.hasClosing && <span className="ml-1 text-[10px] text-zinc-600">(sem fechamento)</span>}</span>
+                          )}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.dinheiro)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-100 tabular-nums">{brl(s.venda)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.cota)}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">{desvio(s.desvio)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.cotaNext > 0 ? brl(s.cotaNext) : '—'}</td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="border-t border-zinc-800/40 bg-zinc-950/40">
+                          <td colSpan={6} className="px-3 py-2">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1">{s.storeName} · formas de pagamento</div>
+                            {payBreakdown(s.byMethod)}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
                 <tr className="border-t-2 border-zinc-700 bg-zinc-800/40 font-semibold">
                   <td className="px-2.5 py-2 text-zinc-100">Empresa (total)</td>
                   <td className="px-2.5 py-2 text-right text-zinc-200 tabular-nums">{brl(t.dinheiro)}</td>

@@ -88,6 +88,19 @@ async function main() {
   // ===== 4. dia seguinte calculado certo =====
   check("4.1 nextDate = 30/08", inf.nextDate === NEXT, inf.nextDate);
 
+  // ===== 5. forma de pagamento POR LOJA (não só no total) — pedido do cliente =====
+  const avm = av?.byMethod, grm = gr?.byMethod, cam = ca?.byMethod;
+  check("5.1 Av Brasil abre por loja: dinheiro 410,10", !!avm && near(avm.dinheiro, 410.10), `${avm?.dinheiro}`);
+  check("5.2 Av Brasil crédito Master POR LOJA = 2000 (não o total 3000)", !!avm && near(avm.credito?.Master, 2000), `${avm?.credito?.Master}`);
+  check("5.3 Av Brasil crédito Visa por loja = 3000", !!avm && near(avm.credito?.Visa, 3000), `${avm?.credito?.Visa}`);
+  check("5.4 Av Brasil débito Eletron por loja = 646", !!avm && near(avm.debito?.Eletron, 646), `${avm?.debito?.Eletron}`);
+  check("5.5 Av Brasil total crédito por loja = 5000", !!avm && near(avm.totalCredito, 5000), `${avm?.totalCredito}`);
+  check("5.6 Grande Rio crédito Master por loja = 1000 (separado da Av Brasil)", !!grm && near(grm.credito?.Master, 1000), `${grm?.credito?.Master}`);
+  check("5.7 Grande Rio débito Redshop por loja = 500", !!grm && near(grm.debito?.Redshop, 500), `${grm?.debito?.Redshop}`);
+  check("5.8 Carioca (sem fechamento) → byMethod zerado", !!cam && near(cam.dinheiro, 0) && near(cam.totalCredito, 0) && Object.keys(cam.credito || {}).length === 0, `${JSON.stringify(cam)}`);
+  // A soma das lojas bate com o total (mesma quebra, agora visível dos dois lados).
+  check("5.9 soma das lojas (crédito Master) = total (2000+1000=3000)", near((avm?.credito?.Master || 0) + (grm?.credito?.Master || 0), inf.total.byMethod.credito.Master), `${(avm?.credito?.Master || 0) + (grm?.credito?.Master || 0)}`);
+
   console.log("\n=== TEST: Informe Diário da rede ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

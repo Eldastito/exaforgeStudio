@@ -1303,6 +1303,23 @@ router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest,
   res.json(RetailQuotaService.suggestForDate(orgId, date, { apply }, req.user?.userId));
 });
 
+// COTA MENSAL → DIVIDIDA POR SEMANA/DIA respeitando FOLGAS (planilha do cliente).
+// { storeId, month, monthlyAmount, apply? } — sem apply só PREVÊ a divisão (o
+// gestor confere antes); apply=true grava a cota diária da loja de cada dia do
+// mês (aberto = fatia proporcional, folga = 0), de onde a cota por vendedor já
+// deriva. Erros de negócio (loja inexistente, mês todo em folga) → 400.
+router.post("/quotas/distribute-monthly", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, month, monthlyAmount, apply } = req.body || {};
+  if (!storeId || !month) return res.status(400).json({ error: "storeId e month (YYYY-MM) são obrigatórios" });
+  try {
+    res.json(await RetailQuotaService.distributeMonthly(orgId, String(storeId), String(month).slice(0, 7), Number(monthlyAmount), { apply: !!apply }, req.user?.userId));
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Falha ao distribuir a cota mensal." });
+  }
+});
+
 // GRADE FURADA / REPOSIÇÃO (dados do estoque por loja do ERP): loja que
 // TRABALHA o produto (tem outros tamanhos com saldo) mas está ZERADA numa
 // variação que outra loja tem sobrando (>= minDonor) → sugestão de

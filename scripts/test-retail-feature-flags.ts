@@ -68,13 +68,13 @@ async function main() {
 
   const cmvOn = RetailStoreCostService.monthlyCogsBreakdownAll(A, period).get(loja.id);
   check("ON: CMV via coluna = 60 (2×30)", !!cmvOn && near(cmvOn.cmvReal, 60), String(cmvOn?.cmvReal));
-  const priceOn = RetailPricingService.listProducts(A, { limit: 50 }).items.find((i: any) => i.productId === prod);
+  const priceOn = RetailPricingService.listProducts(A, { limit: 50, period }).items.find((i: any) => i.productId === prod);
   check("ON: precificar vê 2 unidades vendidas", !!priceOn && priceOn.unitsSoldMonth === 2, String(priceOn?.unitsSoldMonth));
 
   F.set(A, "resolved_products", false);
   const cmvOff = RetailStoreCostService.monthlyCogsBreakdownAll(A, period).get(loja.id);
   check("OFF (LIKE): CMV IDÊNTICO = 60 (equivalência)", !!cmvOff && near(cmvOff.cmvReal, 60), String(cmvOff?.cmvReal));
-  const priceOff = RetailPricingService.listProducts(A, { limit: 50 }).items.find((i: any) => i.productId === prod);
+  const priceOff = RetailPricingService.listProducts(A, { limit: 50, period }).items.find((i: any) => i.productId === prod);
   check("OFF (LIKE): precificar IDÊNTICO = 2 unidades", !!priceOff && priceOff.unitsSoldMonth === 2, String(priceOff?.unitsSoldMonth));
   F.set(A, "resolved_products", true);
 

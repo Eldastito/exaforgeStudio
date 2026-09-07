@@ -77,16 +77,26 @@ export class RetailDashboardService {
       // Cota do dia: snapshot do fechamento; senão a cota viva da loja.
       const cota = c && num(c.quota_amount) > 0 ? num(c.quota_amount) : (quotaToday.get(s.id) || 0);
       let dinheiro = 0;
+      // Forma de pagamento POR LOJA (pedido do cliente: "individual e no total").
+      // O dado já é capturado no fechamento detalhado; antes só o total abria por
+      // bandeira. Aqui expomos a mesma quebra em CADA loja.
+      let sPix = 0, sVoucher = 0, sTroca = 0, sOutros = 0, sTotCred = 0, sTotDeb = 0;
+      const sCredito: Record<string, number> = {}, sDebito: Record<string, number> = {};
       if (c?.details_json) {
         try {
           const d = JSON.parse(c.details_json) || {};
           dinheiro = num(d.dinheiro);
+          sPix = num(d.pix); sVoucher = num(d.voucher); sTroca = num(d.troca); sOutros = num(d.outros);
           tDinheiro += num(d.dinheiro); tPix += num(d.pix); tVoucher += num(d.voucher); tTroca += num(d.troca); tOutros += num(d.outros);
-          for (const [k, v] of Object.entries(d.credito || {})) { credito[k] = r2((credito[k] || 0) + num(v)); tCredito += num(v); }
-          for (const [k, v] of Object.entries(d.debito || {})) { debito[k] = r2((debito[k] || 0) + num(v)); tDebito += num(v); }
+          for (const [k, v] of Object.entries(d.credito || {})) { const val = num(v); sCredito[k] = r2((sCredito[k] || 0) + val); sTotCred += val; credito[k] = r2((credito[k] || 0) + val); tCredito += val; }
+          for (const [k, v] of Object.entries(d.debito || {})) { const val = num(v); sDebito[k] = r2((sDebito[k] || 0) + val); sTotDeb += val; debito[k] = r2((debito[k] || 0) + val); tDebito += val; }
         } catch { /* fechamento sem detalhe: só o total (informed_total) entra */ }
       }
-      return { storeId: s.id, storeName: s.name, dinheiro: r2(dinheiro), venda: r2(venda), cota: r2(cota), desvio: r2(venda - cota), cotaNext: r2(quotaNext.get(s.id) || 0), hasClosing: !!c };
+      return {
+        storeId: s.id, storeName: s.name, dinheiro: r2(dinheiro), venda: r2(venda), cota: r2(cota),
+        desvio: r2(venda - cota), cotaNext: r2(quotaNext.get(s.id) || 0), hasClosing: !!c,
+        byMethod: { dinheiro: r2(dinheiro), pix: r2(sPix), voucher: r2(sVoucher), troca: r2(sTroca), outros: r2(sOutros), credito: sCredito, debito: sDebito, totalCredito: r2(sTotCred), totalDebito: r2(sTotDeb) },
+      };
     });
 
     const totalVenda = r2(rows.reduce((a, r) => a + r.venda, 0));

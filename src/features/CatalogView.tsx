@@ -85,7 +85,10 @@ export function CatalogView() {
   // o navegador). Busca no servidor (nome/EAN/ref.) + "Carregar mais".
   const PAGE_SIZE = 60;
   const [search, setSearch] = useState('');
-  const [inStock, setInStock] = useState(false);
+  // Default: mostra só o que tem estoque (produtos zerados ficam ocultos; serviços e
+  // itens sem controle de estoque continuam aparecendo). Marcar "Mostrar todos" traz
+  // de volta os itens sem estoque.
+  const [inStock, setInStock] = useState(true);
   const [total, setTotal] = useState(0);
   const loadProducts = (q: string = search, offset = 0, onlyInStock: boolean = inStock) => {
     apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}${onlyInStock ? '&inStock=1' : ''}`)
@@ -419,8 +422,8 @@ export function CatalogView() {
           placeholder="Buscar por nome, EAN ou referência…"
           className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100"
         />
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer" title="Esconde produtos com controle de estoque zerado (serviços e itens sem controle continuam aparecendo)">
-          <input type="checkbox" checked={inStock} onChange={e => setInStock(e.target.checked)} /> Ocultar sem estoque
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer" title="Por padrão o catálogo mostra só itens com estoque (serviços e itens sem controle sempre aparecem). Marque para incluir também os produtos sem estoque.">
+          <input type="checkbox" checked={!inStock} onChange={e => setInStock(!e.target.checked)} /> Mostrar sem estoque
         </label>
         {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens{inStock ? ' com estoque' : ''}</span>}
       </div>

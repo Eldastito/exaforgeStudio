@@ -5010,6 +5010,15 @@ function ScheduleTab() {
         <MonthWeeksPanel />
       </div>
 
+      {/* Cota MENSAL da loja → dividida por semana/dia respeitando folgas
+          (planilha "MENSAL" do cliente). Grava a cota DIÁRIA da loja, de onde a
+          cota por vendedor já deriva. */}
+      {storeId && (
+        <div className="mt-4">
+          <MonthlyQuotaDistributePanel storeId={storeId} month={month} onApplied={loadQuotas} />
+        </div>
+      )}
+
       {/* Cotas semanais individuais (as semanas da CORRIDA do mês) */}
       <div className="mt-5">
         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -5046,6 +5055,70 @@ function ScheduleTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// COTA MENSAL da loja → dividida por SEMANA/DIA respeitando FOLGAS (planilha
+// "MENSAL" do cliente). Prevê a divisão (o gestor confere) e, ao aplicar, grava
+// a cota DIÁRIA da loja de cada dia do mês (aberto = fatia proporcional aos dias
+// que a loja opera na escala; folga geral = 0), de onde a cota por vendedor já
+// deriva. Requer a escala do mês preenchida acima pra respeitar as folgas.
+function MonthlyQuotaDistributePanel({ storeId, month, onApplied }: { storeId: string; month: string; onApplied?: () => void }) {
+  const [amount, setAmount] = useState('');
+  const [preview, setPreview] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  // Descarta a prévia quando loja/mês muda — nunca mostrar uma divisão de outro contexto.
+  useEffect(() => { setPreview(null); }, [storeId, month]);
+
+  const run = async (apply: boolean) => {
+    const val = parseMoneyBR(amount);
+    if (!(val > 0)) { toast.error('Digite a cota mensal da loja (ex.: 10000000 → 100.000,00).'); return; }
+    if (apply) setApplying(true); else setLoading(true);
+    try {
+      const res = await apiFetch('/api/retailops/quotas/distribute-monthly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month, monthlyAmount: val, apply }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao distribuir a cota mensal.'); return; }
+      setPreview(d);
+      if (apply) { toast.success('Cota mensal distribuída e aplicada como cota diária da loja.'); onApplied?.(); }
+    } finally { if (apply) setApplying(false); else setLoading(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-amber-400" /> Cota mensal da loja → dividir por semana</div>
+        <input inputMode="decimal" placeholder="cota do mês (ex.: 100.000,00)" value={amount} onChange={e => setAmount(maskMoneyBRInput(e.target.value))} className="w-44 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100 text-right tabular-nums" />
+        <button onClick={() => run(false)} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">{loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calculator className="w-3.5 h-3.5" />} Prever divisão</button>
+        {preview && <button onClick={() => run(true)} disabled={applying} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50">{applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Aplicar cota diária</button>}
+      </div>
+      <p className="mb-2 text-[11px] text-zinc-500">Divide o alvo do MÊS pelas semanas/dias em que a loja opera na escala — dia de folga geral (loja fechada) recebe 0 e a semana com mais folga fica com fatia menor. Preencha a escala acima primeiro. Só grava quando você clica em <strong>Aplicar</strong> (a cota por vendedor deriva dessa cota diária).</p>
+      {preview && (
+        <div className="overflow-x-auto rounded-lg border border-zinc-800">
+          <table className="w-full text-xs">
+            <thead className="bg-zinc-900/60 text-zinc-400"><tr>
+              <th className="px-3 py-2 text-left font-medium">Semana</th>
+              <th className="px-3 py-2 text-center font-medium">Dias abertos</th>
+              <th className="px-3 py-2 text-right font-medium">Cota da semana</th>
+            </tr></thead>
+            <tbody>
+              {preview.weeks.map((w: any) => (
+                <tr key={w.start} className="border-t border-zinc-800/70">
+                  <td className="px-3 py-1.5 text-zinc-200">{w.start.slice(8)}/{w.start.slice(5, 7)} → {w.end.slice(8)}/{w.end.slice(5, 7)}{!w.weekHasSchedule && <span className="ml-1.5 rounded bg-zinc-800 px-1 py-0.5 text-[9px] text-zinc-500" title="Sem escala lançada nesta semana — todos os dias contam como abertos">sem escala</span>}</td>
+                  <td className="px-3 py-1.5 text-center text-zinc-400 tabular-nums">{w.openDays}</td>
+                  <td className="px-3 py-1.5 text-right text-zinc-200 tabular-nums">{brl(w.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr className="border-t border-zinc-700 bg-zinc-900/40 text-zinc-300">
+              <td className="px-3 py-1.5 font-medium">Total</td>
+              <td className="px-3 py-1.5 text-center tabular-nums">{preview.totalOpenDays}</td>
+              <td className="px-3 py-1.5 text-right font-medium tabular-nums">{brl(preview.monthlyAmount)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

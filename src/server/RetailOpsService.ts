@@ -125,6 +125,114 @@ export class RetailQuotaService {
     try { logAuthEvent(orgId, actorId || "system", "quotas", "RETAIL_QUOTA_IMPORTED", { count: n }); } catch { /* noop */ }
     return n;
   }
+
+  /**
+   * COTA MENSAL → SEMANAS/DIAS respeitando FOLGAS (pedido da planilha do
+   * cliente — a aba MENSAL divide o alvo do mês pelas semanas e a SEMANAL
+   * mostra o dia-a-dia). Aqui o alvo MENSAL da loja é distribuído de cima pra
+   * baixo, PROPORCIONAL aos dias em que a loja OPERA na escala:
+   *
+   *   - "Dia aberto" = a escala tem ≥1 vendedor 'work' nesse dia. Dia em que
+   *     todos estão de folga (loja fechada) recebe 0 — é isto que "respeitar a
+   *     folga" significa: uma semana com mais folgas fica com uma fatia menor.
+   *   - Semana SEM nenhum lançamento de escala → todos os seus dias contam como
+   *     abertos (sem informação não zeramos a loja; o gestor vê e ajusta).
+   *   - Cada dia aberto recebe uma fatia IGUAL = alvoMensal ÷ totalDiasAbertos;
+   *     a semana soma as fatias dos seus dias. Isto trata na MESMA régua as
+   *     semanas quebradas (1ª/última parcial) E as folgas.
+   *   - O resíduo do arredondamento vai no ÚLTIMO dia aberto pra a soma dos dias
+   *     bater EXATAMENTE o alvo mensal (nunca inventa nem perde centavo).
+   *
+   * Só PREVÊ por padrão (RN: não inventa cota — o gestor confere e aplica). Com
+   * `apply`, grava a cota DIÁRIA da loja (`retail_store_quotas`) de cada dia do
+   * mês (aberto = fatia, fechado = 0) e atualiza o snapshot/desvio do
+   * fechamento — de onde a cota semanal POR VENDEDOR já deriva (cota diária ÷
+   * escalados). Semanas usam o MESMO corte da corrida/escala (`weeksOfMonthFor`,
+   * honra o override da org). Isolado por org. Só leitura quando `apply` é falso.
+   */
+  static async distributeMonthly(
+    orgId: string, storeId: string, month: string, monthlyAmount: number,
+    opts: { apply?: boolean } = {}, actorId?: string
+  ): Promise<any> {
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+    const amount = r2(monthlyAmount);
+    if (!(amount > 0)) throw new Error("Informe a cota mensal (valor maior que zero).");
+
+    const { RetailCommissionRaceService } = await import("./RetailCommissionRaceService.js");
+    const weeks = RetailCommissionRaceService.weeksOfMonthFor(orgId, month);
+    const { start: mStart, end: mEnd } = RetailCommissionRaceService.monthRange(month);
+
+    // Escala do mês → por dia: quantos 'work' (loja opera) e se há lançamento.
+    const rows = db.prepare(
+      `SELECT work_date, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) AS working, COUNT(*) AS total
+         FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date BETWEEN ? AND ?
+        GROUP BY work_date`
+    ).all(orgId, storeId, mStart, mEnd) as any[];
+    const byDate = new Map<string, { working: number; total: number }>(rows.map((x) => [String(x.work_date), { working: Number(x.working) || 0, total: Number(x.total) || 0 }]));
+
+    const daysOf = (a: string, b: string): string[] => {
+      const out: string[] = [];
+      for (let t = Date.parse(a + "T12:00:00Z"); t <= Date.parse(b + "T12:00:00Z"); t += 86400000) out.push(new Date(t).toISOString().slice(0, 10));
+      return out;
+    };
+
+    // 1ª passada — dias abertos por semana (fallback: semana sem escala = tudo aberto).
+    const weekPlan = weeks.map((w) => {
+      const dates = daysOf(w.start, w.end);
+      const weekHasSchedule = dates.some((d) => (byDate.get(d)?.total || 0) > 0);
+      const days = dates.map((d) => {
+        const info = byDate.get(d);
+        const open = weekHasSchedule ? !!(info && info.working > 0) : true;
+        return { date: d, open };
+      });
+      return { start: w.start, end: w.end, weekHasSchedule, days, openDays: days.filter((x) => x.open).length };
+    });
+    const totalOpenDays = weekPlan.reduce((a, w) => a + w.openDays, 0);
+    if (totalOpenDays <= 0) throw new Error("A escala do mês marca todos os dias como folga (loja fechada) — não há dia aberto pra distribuir a cota. Ajuste a escala.");
+
+    // 2ª passada — fatia igual por dia aberto; resíduo no último dia aberto.
+    const perDay = Math.floor((amount / totalOpenDays) * 100) / 100;
+    const dayAmount = new Map<string, number>();
+    const openDates: string[] = [];
+    for (const w of weekPlan) for (const d of w.days) if (d.open) { dayAmount.set(d.date, perDay); openDates.push(d.date); }
+    const residual = r2(amount - r2(perDay * openDates.length));
+    if (openDates.length) { const last = openDates[openDates.length - 1]; dayAmount.set(last, r2((dayAmount.get(last) || 0) + residual)); }
+
+    const weeksOut = weekPlan.map((w) => ({
+      start: w.start, end: w.end, openDays: w.openDays, weekHasSchedule: w.weekHasSchedule,
+      amount: r2(w.days.reduce((a, d) => a + (dayAmount.get(d.date) || 0), 0)),
+      days: w.days.map((d) => ({ date: d.date, open: d.open, amount: r2(dayAmount.get(d.date) || 0) })),
+    }));
+
+    if (opts.apply) {
+      const upsert = db.prepare(
+        `INSERT INTO retail_store_quotas (id, organization_id, store_id, quota_date, quota_amount, source, created_by)
+         VALUES (?, ?, ?, ?, ?, 'monthly_distribute', ?)
+         ON CONFLICT(organization_id, store_id, quota_date) DO UPDATE SET quota_amount = excluded.quota_amount, source = excluded.source`
+      );
+      const snap = db.prepare(
+        `UPDATE retail_daily_closings SET quota_amount = ?,
+            variance_amount = CASE WHEN COALESCE(informed_total, 0) > 0 THEN informed_total - ? ELSE variance_amount END,
+            variance_percent = CASE WHEN COALESCE(informed_total, 0) > 0 AND ? > 0 THEN (informed_total - ?) * 100.0 / ? ELSE variance_percent END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE organization_id = ? AND store_id = ? AND closing_date = ?`
+      );
+      const tx = db.transaction(() => {
+        for (const w of weeksOut) for (const d of w.days) {
+          const amt = r2(d.amount);
+          upsert.run(randomUUID(), orgId, storeId, d.date, amt, actorId || null);
+          snap.run(amt, amt, amt, amt, amt, orgId, storeId, d.date);
+        }
+      });
+      tx();
+      try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_QUOTA_MONTHLY_DISTRIBUTED", { month, monthlyAmount: amount, openDays: totalOpenDays }); } catch { /* noop */ }
+    }
+
+    return { storeId, storeName: store.name, month, monthlyAmount: amount, totalOpenDays, perDay, applied: !!opts.apply, weeks: weeksOut };
+  }
 }
 
 // ── Fechamentos ──────────────────────────────────────────────────────────────

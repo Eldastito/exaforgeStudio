@@ -2025,6 +2025,9 @@ function DailyInformeCard({ date }: { date: string }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(true);
+  // Lojas com o detalhe de pagamento aberto. DECLARADO AQUI (antes de qualquer
+  // early return) — hook nunca pode ficar depois de `return` (React #310).
+  const [openStores, setOpenStores] = useState<Set<string>>(new Set());
   useEffect(() => {
     setLoading(true);
     apiFetch(`/api/retailops/dashboard/informe?date=${date}`).then(r => r.json()).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -2038,8 +2041,6 @@ function DailyInformeCard({ date }: { date: string }) {
     : <span className="text-red-300 font-medium">Faltou {brl(Math.abs(Number(v)))}</span>;
   const bandeiras = (m: any) => Object.entries(m || {}).filter(([, v]) => Number(v) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
   const credBand = bandeiras(bm.credito), debBand = bandeiras(bm.debito);
-  // Lojas com o detalhe de pagamento aberto (pedido do cliente: "individual e no total").
-  const [openStores, setOpenStores] = useState<Set<string>>(new Set());
   const toggleStore = (id: string) => setOpenStores(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // Tem algum detalhe de pagamento pra mostrar? (fechamento sem detalhe → nada a abrir)
   const hasPay = (m: any) => !!m && (Number(m.dinheiro) > 0 || Number(m.pix) > 0 || Number(m.voucher) > 0 || Number(m.troca) > 0 || bandeiras(m.credito).length > 0 || bandeiras(m.debito).length > 0);

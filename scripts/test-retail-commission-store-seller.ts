@@ -89,9 +89,15 @@ async function main() {
   const totalGeral = round2(105 + 15 + 500 * 0.05);
   check("Extrato: total geral soma todo mundo", ex.totals.commission === totalGeral, JSON.stringify(ex.totals));
 
+  // O extrato ECOA o período pedido (a tela mostra "total da loja + período").
+  check("Extrato: period ecoa o intervalo pedido", ex.period?.start === P0 && ex.period?.end === P1, JSON.stringify(ex.period));
+
   // Filtro por loja: só Loja X (Marcos, 1 linha).
   const exX = RetailCommissionService.storeSellerExtract(A, P0, P1, { storeId: lojaX.id });
   check("Filtro por loja X: só Marcos aparece, comissão 105", exX.sellers.length === 1 && exX.sellers[0].commission === 105, JSON.stringify(exX.sellers));
+  // Com UMA loja filtrada, byStore tem exatamente essa loja (a tela rotula
+  // "Total da loja {nome}" a partir daqui).
+  check("Filtro por loja X: byStore tem só a Loja X (total da loja)", exX.byStore.length === 1 && exX.byStore[0].storeId === lojaX.id && exX.byStore[0].sales === 1500, JSON.stringify(exX.byStore));
 
   // Filtro por loja + vendedor: "o gerente seleciona a loja e o vendedor e roda".
   const key = exMarcosX!.sellerKey;

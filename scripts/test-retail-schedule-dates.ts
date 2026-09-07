@@ -16,7 +16,7 @@ const results: { name: string; ok: boolean; detail?: string }[] = [];
 function check(name: string, ok: boolean, detail = "") { results.push({ name, ok, detail }); if (!ok) failures++; }
 
 async function main() {
-  const { isoLocal, sundayOf, addDays, todayStr } = await import("../src/features/retailDateUtils.js");
+  const { isoLocal, sundayOf, addDays, todayStr, weeksOfMonthLocal, daysBetween, addMonths } = await import("../src/features/retailDateUtils.js");
 
   // Sábado, 29/08/2026, 22:17 LOCAL (Brasil). Em UTC isso é 30/08 01:17 — é aí
   // que o bug nascia. (mês 7 = agosto, 0-indexed.)
@@ -48,6 +48,34 @@ async function main() {
   // ===== 5. de manhã, local e UTC coincidem (sem regressão) =====
   const sábadoManhã = new Date(2026, 7, 29, 8, 0, 0);
   check("5.1 de manhã isoLocal = 29/08 (igual ao UTC)", isoLocal(sábadoManhã) === "2026-08-29");
+
+  // ===== 6. semanas FECHAM NO MÊS (a escala nunca atravessa a virada) =====
+  // Bug do lojista: domingo→domingo puxava a 1ª semana do mês seguinte. Agora a
+  // grade usa `weeksOfMonthLocal`, o MESMO corte de `raceWeeks`/servidor
+  // (RetailCommissionRaceService.weeksOfMonth): corte no domingo + fusão do
+  // início curto <4 dias. Agosto/2026 tem os dois casos (início curto 01 e fim
+  // curto 30-31).
+  const ago = weeksOfMonthLocal("2026-08");
+  check("6.1 agosto = 5 semanas (padrão do servidor)", ago.length === 5, String(ago.length));
+  check("6.2 1ª semana começa no dia 01 (não puxa julho)", ago[0].start === "2026-08-01", ago[0].start);
+  check("6.3 última semana termina no dia 31 (não vaza p/ setembro)", ago[ago.length - 1].end === "2026-08-31", ago[ago.length - 1].end);
+  check("6.4 início curto (01) foi FUNDIDO → 1ª semana 01→08", ago[0].start === "2026-08-01" && ago[0].end === "2026-08-08", `${ago[0].start}→${ago[0].end}`);
+  check("6.5 última semana é o resto curto 30→31", ago[4].start === "2026-08-30" && ago[4].end === "2026-08-31", `${ago[4].start}→${ago[4].end}`);
+  check("6.6 NENHUMA semana atravessa o mês", ago.every(w => w.start.slice(0, 7) === "2026-08" && w.end.slice(0, 7) === "2026-08"));
+
+  // Setembro/2026 começa numa terça — 1ª semana 01→05 (5 dias, NÃO funde).
+  const set = weeksOfMonthLocal("2026-09");
+  check("6.7 setembro começa no dia 01 (não herda 30/08)", set[0].start === "2026-09-01", set[0].start);
+  check("6.8 setembro termina no dia 30", set[set.length - 1].end === "2026-09-30", set[set.length - 1].end);
+
+  // daysBetween: enumera só os dias DENTRO da semana (parcial no fim do mês = 2 dias).
+  check("6.9 daysBetween da última semana de agosto = [30,31]", JSON.stringify(daysBetween("2026-08-30", "2026-08-31")) === JSON.stringify(["2026-08-30", "2026-08-31"]));
+  check("6.10 daysBetween de uma semana cheia = 7 dias", daysBetween("2026-08-09", "2026-08-15").length === 7);
+
+  // addMonths: navegação de mês, inclusive virada de ano.
+  check("6.11 addMonths(+1) 2026-08 → 2026-09", addMonths("2026-08", 1) === "2026-09");
+  check("6.12 addMonths(-1) 2026-01 → 2025-12", addMonths("2026-01", -1) === "2025-12");
+  check("6.13 addMonths(+1) 2026-12 → 2027-01", addMonths("2026-12", 1) === "2027-01");
 
   console.log("\n=== TEST: datas da Escala & Fechamento (fuso local) — TZ=America/Sao_Paulo ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

@@ -41,3 +41,48 @@ export function addDays(dateStr: string, n: number): string {
   x.setUTCDate(x.getUTCDate() + n);
   return x.toISOString().slice(0, 10);
 }
+
+/** Soma n meses a um mês YYYY-MM (n pode ser negativo). */
+export function addMonths(month: string, n: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, (m - 1) + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Dias YYYY-MM-DD de start..end INCLUSIVE (imune a fuso; cap de 40 p/ segurança). */
+export function daysBetween(start: string, end: string): string[] {
+  const out: string[] = [];
+  let cur = start;
+  for (let i = 0; i < 40 && cur <= end; i++) { out.push(cur); cur = addDays(cur, 1); }
+  return out;
+}
+
+/**
+ * Semanas de um MÊS (YYYY-MM) que FECHAM NO MÊS — espelho client-side de
+ * RetailCommissionRaceService.weeksOfMonth (servidor): corte no domingo +
+ * fusão do início curto (<4 dias) na semana seguinte. Garante que a semana da
+ * escala NUNCA atravessa a virada de mês (bug do lojista: domingo→domingo
+ * puxava a 1ª semana do mês seguinte). Usa UTC (igual ao servidor) — mesmo
+ * corte que o `raceWeeks` das cotas, então escala e cotas ficam alinhadas.
+ */
+export function weeksOfMonthLocal(month: string): Array<{ start: string; end: string }> {
+  const [y, m] = month.split("-").map(Number);
+  if (!y || !m) return [];
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const weeks: Array<{ start: string; end: string }> = [];
+  let cur: string[] = [];
+  for (let d = 1; d <= days; d++) {
+    const date = `${month}-${String(d).padStart(2, "0")}`;
+    if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0 && cur.length) {
+      weeks.push({ start: cur[0], end: cur[cur.length - 1] });
+      cur = [];
+    }
+    cur.push(date);
+  }
+  if (cur.length) weeks.push({ start: cur[0], end: cur[cur.length - 1] });
+  if (weeks.length > 1) {
+    const firstLen = (Date.parse(weeks[0].end) - Date.parse(weeks[0].start)) / 86400000 + 1;
+    if (firstLen < 4) { weeks[1] = { start: weeks[0].start, end: weeks[1].end }; weeks.shift(); }
+  }
+  return weeks;
+}

@@ -3,7 +3,7 @@ import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Sc
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
-import { isoLocal, todayStr, sundayOf, addDays } from './retailDateUtils';
+import { isoLocal, todayStr, weeksOfMonthLocal, daysBetween, addMonths } from './retailDateUtils';
 import { parseMoneyBR, formatMoneyBR, maskMoneyBRInput } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retailClosingForm';
@@ -15,8 +15,9 @@ import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retail
 // ============================================================================
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
-// todayStr/sundayOf/addDays/isoLocal vêm de ./retailDateUtils (data LOCAL, não
-// UTC — corrige o off-by-one da escala e do fechamento à noite no Brasil).
+// todayStr/isoLocal/weeksOfMonthLocal/daysBetween/addMonths vêm de ./retailDateUtils
+// (data LOCAL, não UTC — corrige o off-by-one da escala/fechamento à noite no Brasil;
+// semanas que FECHAM NO MÊS pra escala não atravessar a virada).
 
 // PDR TOULON, Fatia 1D/4D — estados HONESTOS das telas analíticas. Nunca
 // mascarar 403/timeout/500/rede como "sem dados": cada um tem mensagem e ação
@@ -4579,9 +4580,6 @@ function ScheduleTab() {
   const [roster, setRoster] = useState<any[]>([]);           // lotados na loja (Fatia 2A)
   const [orgUsesAssignments, setOrgUsesAssignments] = useState(false);
   const [extra, setExtra] = useState<Record<string, string[]>>({}); // por loja: matrículas add "de outra loja"
-  // Semana exibida na grade (domingo → sábado).
-  const [weekStart, setWeekStart] = useState(() => sundayOf(new Date()));
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const DOW = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   // grade[date][sellerKey] = 'work' | 'off' | undefined
   const [grid, setGrid] = useState<Record<string, Record<string, string>>>({});
@@ -4595,6 +4593,40 @@ function ScheduleTab() {
   const [raceWeeks, setRaceWeeks] = useState<any[]>([]);
   const [quotaGrid, setQuotaGrid] = useState<Record<string, Record<string, string>>>({}); // [weekStart][sellerKey] = valor
   const [savingQuotas, setSavingQuotas] = useState(false);
+
+  // Semana exibida na grade — FECHA NO MÊS (nunca atravessa a virada). Fonte: o
+  // corte oficial `raceWeeks` (honra o override retail_month_weeks); enquanto ele
+  // não chegou, o espelho client-side `weeksOfMonthLocal` renderiza na hora. Assim
+  // escala e cotas usam EXATAMENTE as mesmas semanas.
+  const weeks = useMemo(
+    () => (raceWeeks.length ? raceWeeks.map((w: any) => ({ start: String(w.start), end: String(w.end) })) : weeksOfMonthLocal(month)),
+    [raceWeeks, month]
+  );
+  const [weekIdx, setWeekIdx] = useState(0);
+  const clampedIdx = weeks.length ? Math.max(0, Math.min(weekIdx, weeks.length - 1)) : 0;
+  const selectedWeek = weeks[clampedIdx] || null;
+  const weekStart = selectedWeek?.start || todayStr();
+  const weekEnd = selectedWeek?.end || weekStart;
+  const days = useMemo(() => (selectedWeek ? daysBetween(selectedWeek.start, selectedWeek.end) : []), [selectedWeek?.start, selectedWeek?.end]);
+
+  // Ao abrir, seleciona a semana que contém HOJE (uma vez). A navegação de mês
+  // define o índice explicitamente (0 = 1ª semana; grande = última via clamp).
+  const didInitWeek = useRef(false);
+  useEffect(() => {
+    if (didInitWeek.current || !weeks.length) return;
+    const t = todayStr();
+    const i = weeks.findIndex((w) => t >= w.start && t <= w.end);
+    setWeekIdx(i >= 0 ? i : 0);
+    didInitWeek.current = true;
+  }, [weeks]);
+  const prevWeekWindow = () => {
+    if (clampedIdx > 0) { setWeekIdx(clampedIdx - 1); return; }
+    setMonth(m => addMonths(m, -1)); setWeekIdx(9999); // clamp → última semana do mês anterior
+  };
+  const nextWeekWindow = () => {
+    if (clampedIdx < weeks.length - 1) { setWeekIdx(clampedIdx + 1); return; }
+    setMonth(m => addMonths(m, 1)); setWeekIdx(0); // 1ª semana do mês seguinte
+  };
 
   useEffect(() => {
     (async () => {
@@ -4640,14 +4672,13 @@ function ScheduleTab() {
     if (!storeId) return;
     setLoading(true);
     try {
-      const end = addDays(weekStart, 6);
-      const d = await apiFetch(`/api/retailops/schedule?storeId=${storeId}&start=${weekStart}&end=${end}`).then(r => r.json()).catch(() => null);
+      const d = await apiFetch(`/api/retailops/schedule?storeId=${storeId}&start=${weekStart}&end=${weekEnd}`).then(r => r.json()).catch(() => null);
       const g: Record<string, Record<string, string>> = {};
       for (const e of d?.entries || []) { g[e.work_date] = g[e.work_date] || {}; g[e.work_date][e.seller_key] = e.status; }
       setGrid(g);
     } finally { setLoading(false); }
   };
-  useEffect(() => { loadWeek(); /* eslint-disable-next-line */ }, [storeId, weekStart]);
+  useEffect(() => { loadWeek(); /* eslint-disable-next-line */ }, [storeId, weekStart, weekEnd]);
 
   const loadQuotas = async () => {
     if (!storeId) return;
@@ -4680,13 +4711,17 @@ function ScheduleTab() {
         const s = sellers.find(x => keyOf(x) === sk);
         entries.push({ date, sellerKey: sk, sellerName: s?.name || sk.replace(/^(mat|nom|user):/, ''), status });
       }
-      const res = await apiFetch('/api/retailops/schedule', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, start: weekStart, end: addDays(weekStart, 6), entries }) });
+      const res = await apiFetch('/api/retailops/schedule', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, start: weekStart, end: weekEnd, entries }) });
       if (res.ok) toast.success('Escala da semana salva.');
       else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar a escala.'); }
     } finally { setSaving(false); }
   };
   const copyPrevious = async () => {
-    const res = await apiFetch('/api/retailops/schedule/copy-week', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, fromStart: addDays(weekStart, -7), toStart: weekStart }) });
+    // Semana anterior FECHADA NO MÊS: a de índice-1, ou a última do mês anterior.
+    const prevWeek = clampedIdx > 0 ? weeks[clampedIdx - 1] : weeksOfMonthLocal(addMonths(month, -1)).slice(-1)[0];
+    const fromStart = prevWeek?.start;
+    if (!fromStart) { toast.error('Sem semana anterior para copiar.'); return; }
+    const res = await apiFetch('/api/retailops/schedule/copy-week', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, fromStart, toStart: weekStart }) });
     if (res.ok) { toast.success('Escala copiada da semana anterior.'); loadWeek(); }
     else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao copiar.'); }
   };
@@ -4741,9 +4776,9 @@ function ScheduleTab() {
         <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
-        <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">← semana</button>
-        <span className="text-xs text-zinc-400">{days[0].slice(8)}/{days[0].slice(5, 7)} → {days[6].slice(8)}/{days[6].slice(5, 7)}</span>
-        <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">semana →</button>
+        <button onClick={prevWeekWindow} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">← semana</button>
+        <span className="text-xs text-zinc-400" title="A semana fecha no mês — nunca atravessa a virada.">{weekStart.slice(8)}/{weekStart.slice(5, 7)} → {weekEnd.slice(8)}/{weekEnd.slice(5, 7)}</span>
+        <button onClick={nextWeekWindow} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">semana →</button>
         <div className="ml-auto flex items-center gap-2">
           {/* SELL-006: escalar temporariamente alguém de outra loja */}
           <select value="" onChange={e => { addFromOther(e.target.value); e.currentTarget.value = ''; }} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300" title="Escalar um vendedor de outra loja nesta semana">
@@ -4770,7 +4805,7 @@ function ScheduleTab() {
             <thead className="bg-zinc-900/60 text-zinc-400">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Vendedor</th>
-                {days.map((d, i) => <th key={d} className="px-2 py-2 text-center font-medium">{DOW[i]}<br /><span className="text-[10px] text-zinc-600">{d.slice(8)}/{d.slice(5, 7)}</span></th>)}
+                {days.map((d) => <th key={d} className="px-2 py-2 text-center font-medium">{DOW[new Date(d + 'T12:00:00Z').getUTCDay()]}<br /><span className="text-[10px] text-zinc-600">{d.slice(8)}/{d.slice(5, 7)}</span></th>)}
               </tr>
             </thead>
             <tbody>

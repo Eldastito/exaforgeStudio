@@ -1760,6 +1760,8 @@ function BoletaPanel({ stores }: { stores: any[] }) {
 // caixa do dia (vem do fechamento) e o gerente deposita no banco, registrando
 // valor/data/quem + a FOTO do comprovante. O dono confere entrou × depositado.
 function MaloteTab() {
+  const { user } = useAuth();
+  const isOwnerAdmin = ['owner', 'admin'].includes((user as any)?.role || '');
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [month, setMonth] = useState(todayStr().slice(0, 7));
@@ -1774,6 +1776,11 @@ function MaloteTab() {
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [scannedReceipt, setScannedReceipt] = useState<string | null>(null); // /media/... já salvo no scan
   const fileRef = useRef<HTMLInputElement>(null);
+  // Fechamento semanal (trava): a semana em fecho + assinatura + comprovante.
+  const [closingWeek, setClosingWeek] = useState<{ start: string; end: string } | null>(null);
+  const [closeWho, setCloseWho] = useState('');
+  const [closeFile, setCloseFile] = useState<File | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/retailops/stores').then(r => r.json()).then(d => {
@@ -1841,7 +1848,30 @@ function MaloteTab() {
     if (v == null) return;
     const amount = v.trim() === '' ? '' : parseMoneyBR(v);
     const res = await apiFetch('/api/retailops/cash/day-override', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, date, amount }) });
-    if (res.ok) { toast.success('Dinheiro do dia ajustado.'); load(); } else toast.error('Falha ao ajustar.');
+    if (res.ok) { toast.success('Dinheiro do dia ajustado.'); load(); }
+    else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao ajustar.'); }
+  };
+  // Semanas do mês FECHADAS NO MÊS (mesmo corte da escala/cotas) + estado do fecho.
+  const weeks = weeksOfMonthLocal(month);
+  const closedByStart = new Map<string, any>((led?.weekClosings || []).map((w: any) => [w.weekStart, w]));
+  const confirmClose = async () => {
+    if (!closingWeek) return;
+    setClosingBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('storeId', storeId); fd.append('weekStart', closingWeek.start); fd.append('weekEnd', closingWeek.end);
+      if (closeWho.trim()) fd.append('depositor', closeWho.trim());
+      if (closeFile) fd.append('receipt', closeFile);
+      const res = await apiFetch('/api/retailops/cash/week/close', { method: 'POST', body: fd });
+      if (res.ok) { toast.success('Semana fechada.'); setClosingWeek(null); setCloseWho(''); setCloseFile(null); load(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao fechar a semana.'); }
+    } finally { setClosingBusy(false); }
+  };
+  const reabrirSemana = async (weekStart: string) => {
+    if (!window.confirm('Reabrir esta semana? Isso destrava os ajustes e depósitos daquele intervalo.')) return;
+    const res = await apiFetch('/api/retailops/cash/week/reopen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, weekStart }) });
+    if (res.ok) { toast.success('Semana reaberta.'); load(); }
+    else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao reabrir.'); }
   };
 
   // Mostra TODOS os dias do mês (igual à folha do malote), com ou sem movimento.
@@ -1901,6 +1931,47 @@ function MaloteTab() {
             {scanNote && <p className="mt-2 flex items-start gap-1.5 text-[12px] text-amber-300/90"><Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {scanNote}</p>}
           </div>
 
+          {/* Semanas do mês — fechar/travar. O gerente fecha e assina; o dono reabre. */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Semanas do mês (fechamento)</div>
+            <div className="space-y-1.5">
+              {weeks.map((w) => {
+                const c = closedByStart.get(w.start);
+                const label = `${w.start.slice(8)}/${w.start.slice(5, 7)} → ${w.end.slice(8)}/${w.end.slice(5, 7)}`;
+                return (
+                  <div key={w.start} className="flex flex-wrap items-center gap-2 text-[12px]">
+                    <span className="text-zinc-300 tabular-nums w-28">{label}</span>
+                    {c ? (
+                      <>
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 text-[11px]"><Check className="w-3 h-3" /> Fechada</span>
+                        {c.depositor && <span className="text-zinc-500">assinou {c.depositor}</span>}
+                        <span className="text-zinc-500 tabular-nums">dinheiro {brl(c.totalCash)} · depositado {brl(c.totalDeposited)}</span>
+                        {c.receiptUrl && <a href={c.receiptUrl} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">comprovante</a>}
+                        {isOwnerAdmin && <button onClick={() => reabrirSemana(w.start)} className="text-zinc-500 hover:text-amber-300">reabrir</button>}
+                      </>
+                    ) : (
+                      <button onClick={() => { setClosingWeek(w); setCloseWho(''); setCloseFile(null); }} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800"><Scale className="w-3 h-3" /> Fechar semana</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {closingWeek && (
+              <div className="mt-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-2.5">
+                <div className="text-[12px] text-zinc-200 mb-1.5">Fechar a semana <strong>{closingWeek.start.slice(8)}/{closingWeek.start.slice(5, 7)} → {closingWeek.end.slice(8)}/{closingWeek.end.slice(5, 7)}</strong> — depois disso os dias ficam travados (o dono reabre).</div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="text-[11px] text-zinc-400">Quem fechou (assinatura)<input value={closeWho} onChange={e => setCloseWho(e.target.value)} placeholder="Nome do gerente" className="block w-44 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
+                  <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> {closeFile ? 'Comprovante anexado' : 'Foto do comprovante (opcional)'}
+                    <input type="file" accept="image/*" className="hidden" onChange={e => setCloseFile(e.target.files?.[0] || null)} />
+                  </label>
+                  <button onClick={confirmClose} disabled={closingBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{closingBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Fechar</button>
+                  <button onClick={() => setClosingWeek(null)} className="text-[12px] text-zinc-500 hover:text-zinc-300">cancelar</button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Planilha do mês */}
           <div className="overflow-x-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
@@ -1915,11 +1986,14 @@ function MaloteTab() {
               <tbody>
                 {visibleRows.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-[12px] text-zinc-600">Nenhum dinheiro ou depósito lançado neste mês ainda.</td></tr>}
                 {visibleRows.map((r: any) => (
-                  <tr key={r.date} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-zinc-300 tabular-nums">{String(r.date).slice(8)}/{String(r.date).slice(5, 7)}</td>
+                  <tr key={r.date} className={`border-t border-zinc-800/70 ${r.locked ? 'bg-zinc-900/30' : ''}`}>
+                    <td className="px-3 py-2 text-zinc-300 tabular-nums">
+                      {String(r.date).slice(8)}/{String(r.date).slice(5, 7)}
+                      {r.locked && <span title="Semana fechada (travada)" className="ml-1 text-zinc-600">🔒</span>}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <span className={r.cash > 0 ? (r.cashSource === 'ajuste' ? 'text-amber-300' : 'text-zinc-100') : 'text-zinc-600'}>{r.cash > 0 ? brl(r.cash) : '—'}</span>
-                      <button onClick={() => ajustarDia(r.date, r.cash)} title="Ajustar o dinheiro deste dia" className="ml-1.5 text-[10px] text-zinc-600 hover:text-zinc-300">ajustar</button>
+                      {!r.locked && <button onClick={() => ajustarDia(r.date, r.cash)} title="Ajustar o dinheiro deste dia" className="ml-1.5 text-[10px] text-zinc-600 hover:text-zinc-300">ajustar</button>}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.saldo > 0.01 ? 'text-amber-300' : 'text-zinc-500'}`}>{brl(r.saldo)}</td>
                     <td className="px-3 py-2">
@@ -1928,7 +2002,7 @@ function MaloteTab() {
                           <span className="text-emerald-300 font-medium tabular-nums">{brl(d.amount)}</span>
                           {d.depositor && <span className="text-[11px] text-zinc-500">· {d.depositor}</span>}
                           {d.receiptUrl && <a href={d.receiptUrl} target="_blank" rel="noreferrer" className="text-[11px] text-sky-300 hover:text-sky-200">comprovante</a>}
-                          <button onClick={() => excluir(d.id)} title="Excluir depósito" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                          {!r.locked && <button onClick={() => excluir(d.id)} title="Excluir depósito" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </span>
                       ))}
                     </td>

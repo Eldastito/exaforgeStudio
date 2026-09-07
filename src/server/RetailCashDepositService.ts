@@ -99,6 +99,9 @@ export class RetailCashDepositService {
     for (const d of deposits) { const k = String(d.deposit_date); (depByDate.get(k) || depByDate.set(k, []).get(k)!).push(d); }
 
     const saldoInicial = this.saldoBefore(orgId, storeId, start);
+    // Semanas FECHADAS (travadas) que tocam o mês — pra marcar cada dia como locked.
+    const closed = this.weekClosings(orgId, storeId, month);
+    const isLocked = (date: string) => closed.some((w) => w.weekStart <= date && w.weekEnd >= date);
     let saldo = saldoInicial, totalCash = 0, totalDep = 0;
     const rows: any[] = [];
     for (let dd = 1; dd <= days; dd++) {
@@ -116,6 +119,7 @@ export class RetailCashDepositService {
         cash: cashAmt, cashSource: c?.source || null,
         deposits: deps.map((x) => ({ id: x.id, amount: r2(x.amount), depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
         saldo, // dinheiro em caixa (ainda não depositado) ao fim do dia
+        locked: isLocked(date), // dia dentro de uma semana FECHADA (congelado)
       });
     }
     return {
@@ -126,6 +130,7 @@ export class RetailCashDepositService {
       saldoFinal: r2(saldoInicial + totalCash - totalDep), // em caixa a depositar
       rows,
       deposits: deposits.map((x) => ({ id: x.id, date: String(x.deposit_date), amount: r2(x.amount), depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
+      weekClosings: closed, // semanas fechadas (travadas) que tocam o mês
     };
   }
 
@@ -137,6 +142,7 @@ export class RetailCashDepositService {
     if (!isDate(input.date)) throw new Error("date (YYYY-MM-DD) obrigatório");
     const amount = r2(input.amount);
     if (!(amount > 0)) throw new Error("valor do depósito deve ser maior que zero");
+    if (this.isWeekClosed(orgId, storeId, input.date)) throw new Error("week_closed"); // semana fechada — reabra pra lançar
     const id = randomUUID();
     db.prepare(
       `INSERT INTO retail_cash_deposits (id, organization_id, store_id, deposit_date, amount, period_start, period_end, depositor, receipt_url, notes, created_by)
@@ -159,7 +165,8 @@ export class RetailCashDepositService {
   }
 
   static removeDeposit(orgId: string, id: string, actorId?: string): boolean {
-    const dep = db.prepare(`SELECT store_id FROM retail_cash_deposits WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    const dep = db.prepare(`SELECT store_id, deposit_date FROM retail_cash_deposits WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (dep && this.isWeekClosed(orgId, dep.store_id, dep.deposit_date)) throw new Error("week_closed"); // semana fechada — reabra pra excluir
     const info = db.prepare(`DELETE FROM retail_cash_deposits WHERE organization_id = ? AND id = ?`).run(orgId, id);
     if (info.changes > 0) { try { logAuthEvent(orgId, actorId || "system", dep?.store_id || "cash", "RETAIL_CASH_DEPOSIT_REMOVED", { id }); } catch { /* noop */ } return true; }
     return false;
@@ -168,6 +175,7 @@ export class RetailCashDepositService {
   /** Ajuste manual do dinheiro de um dia (o "pode ajustar"). amount null = limpa. */
   static setDayOverride(orgId: string, storeId: string, date: string, amount: number | null, actorId?: string): void {
     if (!isDate(date)) throw new Error("date (YYYY-MM-DD) obrigatório");
+    if (this.isWeekClosed(orgId, storeId, date)) throw new Error("week_closed"); // semana fechada — reabra pra ajustar
     if (amount == null) {
       db.prepare(`DELETE FROM retail_cash_day_override WHERE organization_id = ? AND store_id = ? AND cash_date = ?`).run(orgId, storeId, date);
       return;
@@ -177,5 +185,73 @@ export class RetailCashDepositService {
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(organization_id, store_id, cash_date) DO UPDATE SET amount = excluded.amount, updated_at = CURRENT_TIMESTAMP`
     ).run(randomUUID(), orgId, storeId, date, r2(amount), actorId || null);
+  }
+
+  // ── Fechamento SEMANAL travado (pedido do cliente) ─────────────────────────
+
+  /** Um `date` (YYYY-MM-DD) cai dentro de alguma semana FECHADA desta loja? */
+  static isWeekClosed(orgId: string, storeId: string, date: string): boolean {
+    if (!isDate(date)) return false;
+    return !!db.prepare(
+      `SELECT 1 FROM retail_cash_week_closings
+        WHERE organization_id = ? AND store_id = ? AND week_start <= ? AND week_end >= ? LIMIT 1`
+    ).get(orgId, storeId, date, date);
+  }
+
+  /** Fechamentos que TOCAM o mês (a semana pode começar no mês anterior). */
+  static weekClosings(orgId: string, storeId: string, month: string): any[] {
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    const [y, m] = month.split("-").map(Number);
+    const mStart = `${month}-01`, mEnd = `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+    const rows = db.prepare(
+      `SELECT * FROM retail_cash_week_closings
+        WHERE organization_id = ? AND store_id = ? AND week_start <= ? AND week_end >= ?
+        ORDER BY week_start`
+    ).all(orgId, storeId, mEnd, mStart) as any[];
+    return rows.map((w) => ({
+      id: w.id, weekStart: w.week_start, weekEnd: w.week_end,
+      totalCash: r2(w.total_cash), totalDeposited: r2(w.total_deposited),
+      depositor: w.depositor || null, receiptUrl: w.receipt_url || null, notes: w.notes || null,
+      closedAt: w.closed_at || null,
+    }));
+  }
+
+  /**
+   * FECHA (trava) a semana [weekStart..weekEnd] da loja: snapshot do dinheiro e do
+   * depositado, quem assinou e o comprovante. Idempotência dura: UNIQUE(org,store,
+   * week_start) — refechar a MESMA semana falha (`week_already_closed`). Depois de
+   * fechada, os dias do intervalo ficam congelados (ver isWeekClosed nos mutadores).
+   */
+  static closeWeek(orgId: string, storeId: string, input: {
+    weekStart: string; weekEnd: string; depositor?: string | null; receiptUrl?: string | null; notes?: string | null;
+  }, actorId?: string): any {
+    if (!storeId) throw new Error("storeId obrigatório");
+    if (!isDate(input.weekStart) || !isDate(input.weekEnd)) throw new Error("weekStart/weekEnd (YYYY-MM-DD) obrigatórios");
+    if (input.weekEnd < input.weekStart) throw new Error("weekEnd deve ser >= weekStart");
+    if (db.prepare(`SELECT 1 FROM retail_cash_week_closings WHERE organization_id = ? AND store_id = ? AND week_start = ? LIMIT 1`).get(orgId, storeId, input.weekStart)) {
+      throw new Error("week_already_closed");
+    }
+    // Snapshot do dinheiro efetivo (fechamento + override) e do depositado no intervalo.
+    let totalCash = 0;
+    for (const { amount } of this.cashOn(orgId, storeId, input.weekStart, input.weekEnd).values()) totalCash = r2(totalCash + amount);
+    const totalDeposited = r2((db.prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS s FROM retail_cash_deposits
+        WHERE organization_id = ? AND store_id = ? AND deposit_date BETWEEN ? AND ?`
+    ).get(orgId, storeId, input.weekStart, input.weekEnd) as any)?.s);
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO retail_cash_week_closings (id, organization_id, store_id, week_start, week_end, total_cash, total_deposited, depositor, receipt_url, notes, closed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, storeId, input.weekStart, input.weekEnd, totalCash, totalDeposited,
+      (input.depositor || "").trim() || null, (input.receiptUrl || "").trim() || null, (input.notes || "").trim() || null, actorId || null);
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_WEEK_CLOSED", { weekStart: input.weekStart, weekEnd: input.weekEnd, totalCash, totalDeposited }); } catch { /* noop */ }
+    return db.prepare(`SELECT * FROM retail_cash_week_closings WHERE id = ?`).get(id);
+  }
+
+  /** REABRE (destrava) uma semana fechada — só o dono/admin (imposto na rota). */
+  static reopenWeek(orgId: string, storeId: string, weekStart: string, actorId?: string): boolean {
+    const info = db.prepare(`DELETE FROM retail_cash_week_closings WHERE organization_id = ? AND store_id = ? AND week_start = ?`).run(orgId, storeId, weekStart);
+    if (info.changes > 0) { try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_WEEK_REOPENED", { weekStart }); } catch { /* noop */ } return true; }
+    return false;
   }
 }

@@ -2094,6 +2094,16 @@ router.get("/dashboard/informe", (req: AuthRequest, res): any => {
 });
 
 // --- Malote / depósitos de dinheiro (Fase I) ---
+// Quem pode MEXER no malote de uma loja: dono/admin, OU o GERENTE lotado NAQUELA
+// loja (user_stores — reusa a trava de loja do ADR-173). Ausência de lotação NÃO
+// libera (diferente de canAccessStore) — o malote é ação de responsável.
+const canManageStore = (req: AuthRequest, orgId: string, storeId: string): boolean =>
+  ["owner", "admin"].includes(req.user?.role || "") || RetailStoreScopeService.isAssignedTo(orgId, req.user?.userId || "", storeId);
+const canManageAnyStore = (req: AuthRequest, orgId: string): boolean =>
+  ["owner", "admin"].includes(req.user?.role || "") || RetailStoreScopeService.hasAnyAssignment(orgId, req.user?.userId || "");
+// Erro de negócio "semana fechada" → 409 com mensagem amigável.
+const weekClosedMsg = "Semana fechada — reabra a semana (dono/admin) para lançar ou ajustar.";
+
 // Planilha do mês por loja: dinheiro do dia (do fechamento), saldo em caixa e
 // os depósitos com comprovante + a conferência entrou × depositado.
 router.get("/cash/ledger", (req: AuthRequest, res): any => {
@@ -2109,8 +2119,8 @@ router.get("/cash/ledger", (req: AuthRequest, res): any => {
 });
 
 // Registra um depósito (valor, data, quem) + comprovante opcional (multipart:
-// campos no body + arquivo 'receipt'). Só owner/gerente.
-router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+// campos no body + arquivo 'receipt'). Dono/admin OU o gerente lotado na loja.
+router.post("/cash/deposit", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   closingUpload.single("receipt")(req, res, async (err: any) => {
@@ -2119,6 +2129,7 @@ router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, r
     const storeId = String(body.storeId || "");
     if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
     if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    if (!canManageStore(req, orgId, storeId)) return res.status(403).json({ error: "Sem permissão para o malote desta loja." });
     let receiptUrl: string | null = null;
     const file = (req as any).file;
     if (file) {
@@ -2139,16 +2150,20 @@ router.post("/cash/deposit", requireRole("owner", "admin"), (req: AuthRequest, r
         depositor: body.depositor, periodStart: body.periodStart, periodEnd: body.periodEnd, notes: body.notes, receiptUrl,
       }, req.user?.userId);
       res.status(201).json(dep);
-    } catch (e: any) { res.status(400).json({ error: e?.message || "falha ao registrar depósito" }); }
+    } catch (e: any) {
+      if (e?.message === "week_closed") return res.status(409).json({ error: weekClosedMsg });
+      res.status(400).json({ error: e?.message || "falha ao registrar depósito" });
+    }
   });
 });
 
 // OCR do comprovante: lê valor + data pra PRÉ-PREENCHER o registro (o humano
 // confirma). Salva a foto processada em /media e devolve a URL pra o registro
 // reaproveitar sem re-enviar o arquivo. NÃO grava depósito.
-router.post("/cash/deposit/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/cash/deposit/scan", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!canManageAnyStore(req, orgId)) return res.status(403).json({ error: "Sem permissão para o malote." });
   if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
   closingUpload.single("receipt")(req, res, async (err: any) => {
     if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
@@ -2170,25 +2185,87 @@ router.post("/cash/deposit/scan", requireRole("owner", "admin"), (req: AuthReque
   });
 });
 
-router.delete("/cash/deposit/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/cash/deposit/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const ok = RetailCashDepositService.removeDeposit(orgId, String(req.params.id), req.user?.userId);
-  if (!ok) return res.status(404).json({ error: "deposit_not_found" });
-  res.json({ ok: true });
+  const dep = db.prepare(`SELECT store_id FROM retail_cash_deposits WHERE organization_id = ? AND id = ?`).get(orgId, String(req.params.id)) as any;
+  if (!dep) return res.status(404).json({ error: "deposit_not_found" });
+  if (!canManageStore(req, orgId, dep.store_id)) return res.status(403).json({ error: "Sem permissão para o malote desta loja." });
+  try {
+    const ok = RetailCashDepositService.removeDeposit(orgId, String(req.params.id), req.user?.userId);
+    if (!ok) return res.status(404).json({ error: "deposit_not_found" });
+    res.json({ ok: true });
+  } catch (e: any) {
+    if (e?.message === "week_closed") return res.status(409).json({ error: weekClosedMsg });
+    res.status(400).json({ error: e?.message || "falha" });
+  }
 });
 
 // Ajuste manual do dinheiro de um dia (o "pode ajustar"). amount null/vazio limpa.
-router.put("/cash/day-override", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/cash/day-override", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, date, amount } = req.body || {};
   if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return res.status(400).json({ error: "storeId e date (YYYY-MM-DD) obrigatórios" });
   if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
+  if (!canManageStore(req, orgId, String(storeId))) return res.status(403).json({ error: "Sem permissão para o malote desta loja." });
   try {
     RetailCashDepositService.setDayOverride(orgId, String(storeId), String(date), amount === "" || amount == null ? null : Number(amount), req.user?.userId);
     res.json({ ok: true });
-  } catch (e: any) { res.status(400).json({ error: e?.message || "falha" }); }
+  } catch (e: any) {
+    if (e?.message === "week_closed") return res.status(409).json({ error: weekClosedMsg });
+    res.status(400).json({ error: e?.message || "falha" });
+  }
+});
+
+// Fecha (trava) a SEMANA do malote da loja: snapshot + assinatura + comprovante.
+// Dono/admin OU o gerente lotado na loja. Multipart: campos no body + 'receipt'.
+router.post("/cash/week/close", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  closingUpload.single("receipt")(req, res, async (err: any) => {
+    if (err) return res.status(400).json({ error: err.message || "Falha no upload." });
+    const body = (req as any).body || {};
+    const storeId = String(body.storeId || "");
+    if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
+    if (!canManageStore(req, orgId, storeId)) return res.status(403).json({ error: "Sem permissão para o malote desta loja." });
+    let receiptUrl: string | null = null;
+    const file = (req as any).file;
+    if (file) {
+      try {
+        const processed = await sharp(file.buffer).rotate().resize(2000, 2000, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+        fs.mkdirSync(MEDIA_DIR, { recursive: true });
+        const name = `${randomUUID()}.jpg`;
+        fs.writeFileSync(path.join(MEDIA_DIR, name), processed);
+        receiptUrl = `/media/${name}`;
+      } catch { /* comprovante best-effort */ }
+    } else if (/^\/media\/[a-f0-9-]+\.jpg$/.test(String(body.receiptUrl || ""))) {
+      receiptUrl = String(body.receiptUrl);
+    }
+    try {
+      const wk = RetailCashDepositService.closeWeek(orgId, storeId, {
+        weekStart: String(body.weekStart || ""), weekEnd: String(body.weekEnd || ""),
+        depositor: body.depositor, notes: body.notes, receiptUrl,
+      }, req.user?.userId);
+      res.status(201).json(wk);
+    } catch (e: any) {
+      if (e?.message === "week_already_closed") return res.status(409).json({ error: "Esta semana já está fechada." });
+      res.status(400).json({ error: e?.message || "falha ao fechar a semana" });
+    }
+  });
+});
+
+// Reabre (destrava) uma semana fechada. Só dono/admin (o gerente fecha; reabrir
+// é decisão do dono — preserva a integridade da conferência).
+router.post("/cash/week/reopen", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { storeId, weekStart } = req.body || {};
+  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart))) return res.status(400).json({ error: "storeId e weekStart (YYYY-MM-DD) obrigatórios" });
+  const ok = RetailCashDepositService.reopenWeek(orgId, String(storeId), String(weekStart), req.user?.userId);
+  if (!ok) return res.status(404).json({ error: "week_not_closed" });
+  res.json({ ok: true });
 });
 
 router.get("/dashboard/monthly", (req: AuthRequest, res): any => {

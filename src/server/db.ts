@@ -11292,6 +11292,34 @@ const initDb = () => {
   // essa coluna continua funcionando (fallback pra probe de formatos).
   try { db.exec(`ALTER TABLE alterdata_integration_profiles ADD COLUMN price_path_format TEXT`); } catch(e){}
 
+  // Malote — FECHAMENTO SEMANAL travado (pedido do cliente: o gerente fecha a
+  // semana, assina e anexa o comprovante; a semana fechada CONGELA os ajustes e
+  // depósitos daquele intervalo — o dono confere sem risco de mexerem depois).
+  // Aditivo sobre retail_cash_deposits/override; snapshot dos totais no fecho.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_cash_week_closings (
+        id               TEXT PRIMARY KEY,
+        organization_id  TEXT NOT NULL,
+        store_id         TEXT NOT NULL,
+        week_start       TEXT NOT NULL,             -- YYYY-MM-DD (inclusive)
+        week_end         TEXT NOT NULL,             -- YYYY-MM-DD (inclusive)
+        total_cash       REAL NOT NULL DEFAULT 0,   -- snapshot do dinheiro da semana
+        total_deposited  REAL NOT NULL DEFAULT 0,   -- snapshot depositado no período
+        depositor        TEXT,                       -- quem fechou/assinou
+        receipt_url      TEXT,                       -- comprovante da semana (/media/...)
+        notes            TEXT,
+        closed_by        TEXT,                       -- userId que fechou (rastro)
+        closed_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_retail_cash_week
+        ON retail_cash_week_closings (organization_id, store_id, week_start);
+      CREATE INDEX IF NOT EXISTS idx_retail_cash_week_range
+        ON retail_cash_week_closings (organization_id, store_id, week_end);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar retail_cash_week_closings', e); }
+
   // ADR-199 F0a — ZapFlow Grupo (multi-org / multi-marca). Fundação de IDENTIDADE
   // + GRUPO, SEM ainda relaxar users.email UNIQUE e SEM tocar o login (F0c faz o
   // rebuild; F0b migra os lookups por email). Tudo aditivo/opt-in, atrás da flag

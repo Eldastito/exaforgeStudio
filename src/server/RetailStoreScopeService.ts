@@ -30,6 +30,23 @@ export class RetailStoreScopeService {
     return (db.prepare(`SELECT store_id FROM user_stores WHERE organization_id = ? AND user_id = ?`).all(orgId, userId) as any[]).map(r => r.store_id);
   }
 
+  /**
+   * O usuário está EXPLICITAMENTE lotado nesta loja? (ADR-180/ADR-083 F-J — o
+   * "gerente da loja"). Diferente de `canAccessStore`: aqui a ausência de
+   * atribuição NÃO libera — é a base de quem PODE fechar/depositar o malote da
+   * loja (owner/admin decidido à parte na rota). Isolado por org.
+   */
+  static isAssignedTo(orgId: string, userId: string, storeId: string): boolean {
+    if (!orgId || !userId || !storeId) return false;
+    return !!db.prepare(`SELECT 1 FROM user_stores WHERE organization_id = ? AND user_id = ? AND store_id = ? LIMIT 1`).get(orgId, userId, storeId);
+  }
+
+  /** Tem QUALQUER lotação de loja? (gerente de alguma loja — p/ ações sem loja fixa). */
+  static hasAnyAssignment(orgId: string, userId: string): boolean {
+    if (!orgId || !userId) return false;
+    return !!db.prepare(`SELECT 1 FROM user_stores WHERE organization_id = ? AND user_id = ? LIMIT 1`).get(orgId, userId);
+  }
+
   /** Resolve o escopo efetivo do usuário (papel + atribuições). */
   static allowed(orgId: string, userId: string, role?: string): StoreScope {
     if (role && BYPASS_ROLES.has(role)) return { unrestricted: true, storeIds: [], storeCodes: [] };

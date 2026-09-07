@@ -7,8 +7,9 @@
  * é role-gated na rota (owner/admin); 402/403 vira aviso, nunca inventa número.
  */
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, Receipt, LayoutGrid } from 'lucide-react';
+import { Building2, Plus, RefreshCw, Receipt, LayoutGrid, LogIn } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { useAuth } from '@/src/contexts/AuthContext';
 
 const brl = (n: number | null | undefined) =>
   n == null ? '—' : Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -56,11 +57,33 @@ export function OrgGroupView() {
 
 // ---------- Operações: lista + provisionar ----------
 function OpsTab({ groupId, onGroupCreated }: { groupId: string | null; onGroupCreated: (id: string) => void }) {
+  const { user, login } = useAuth();
   const [ops, setOps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [entering, setEntering] = useState<string | null>(null); // orgId em troca
+
+  // Entrar na operação: troca o JWT (switch-org) e recarrega já dentro dela. Independe do
+  // seletor do header — funciona sobre a lista confiável do grupo. Erro fica visível.
+  async function switchTo(orgId: string) {
+    if (entering) return;
+    setEntering(orgId); setMsg(null);
+    try {
+      const r = await apiFetch('/api/auth/switch-org', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d?.token && d?.user) {
+        login(d.token, { ...d.user, organizationId: d.user.organizationId });
+        window.location.reload();
+        return;
+      }
+      setMsg(d?.error || `Não foi possível entrar (HTTP ${r.status}).`);
+    } catch { setMsg('Falha de rede ao trocar de operação.'); }
+    setEntering(null);
+  }
 
   async function load() {
     setLoading(true);
@@ -118,15 +141,33 @@ function OpsTab({ groupId, onGroupCreated }: { groupId: string | null; onGroupCr
           : ops.length === 0 ? <p className="text-sm text-zinc-500">Nenhuma operação ainda. Adicione a primeira acima.</p>
           : (
             <div className="rounded-xl border border-zinc-800 overflow-hidden divide-y divide-zinc-800">
-              {ops.map((o) => (
-                <div key={o.organizationId} className="flex items-center justify-between px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-zinc-100 truncate">{o.businessName || o.organizationId}</p>
-                    <p className="text-xs text-zinc-500">{o.planName || (o.unpriced ? 'sem plano' : o.planId || '—')}</p>
+              {ops.map((o) => {
+                const isCurrent = o.organizationId === user?.organizationId;
+                return (
+                  <div key={o.organizationId} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-100 truncate">{o.businessName || o.organizationId}</p>
+                      <p className="text-xs text-zinc-500">{o.planName || (o.unpriced ? 'sem plano' : o.planId || '—')}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="text-sm text-zinc-300">{brl(o.netPrice)}</span>
+                      {isCurrent ? (
+                        <span className="text-[11px] px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Atual</span>
+                      ) : (
+                        <button
+                          onClick={() => switchTo(o.organizationId)}
+                          disabled={!!entering}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 px-2.5 py-1 text-xs font-medium text-zinc-100"
+                          title="Entrar nesta operação"
+                        >
+                          <LogIn className="w-3.5 h-3.5" />
+                          {entering === o.organizationId ? 'Entrando…' : 'Entrar'}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-sm text-zinc-300">{brl(o.netPrice)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
       </div>

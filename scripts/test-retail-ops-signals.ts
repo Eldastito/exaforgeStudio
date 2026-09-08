@@ -148,6 +148,42 @@ async function main() {
   const d1After = db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND source_entity_id=? AND signal_type='retail_store_no_closing'`).get(D, d1) as any;
   check("3c.8 d1 fechou → sinal 'não fechou' auto-resolvido", d1After?.status === "resolved", JSON.stringify(d1After));
 
+  // ===== 3d. Reconciliação loja virtual: item DESCONTINUADO com saldo =====
+  const { RetailOnlineReserveService: Reserve } = await import("../src/server/RetailOnlineReserveService.js");
+  const RSSE = (await import("../src/server/RetailStoreService.js")).RetailStoreService;
+  const mkProd = (org: string, name: string, active = 1) => { const id = randomUUID(); db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', ?, 100, ?, 1)`).run(id, org, name, active); return id; };
+  const mkVar = (org: string, prod: string, name: string, active = 1) => { const id = randomUUID(); db.prepare(`INSERT INTO product_variants (id, organization_id, product_service_id, name, active) VALUES (?, ?, ?, ?, ?)`).run(id, org, prod, name, active); return id; };
+  const mkStock = (org: string, store: string, prod: string, variant: string | null, qty: number) => db.prepare(`INSERT INTO retail_store_inventory (id, organization_id, store_id, product_service_id, variant_id, quantity_available, quantity_reserved) VALUES (?, ?, ?, ?, ?, ?, 0)`).run(randomUUID(), org, store, prod, variant, qty);
+
+  const E = `org_E_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'E', 'active')`).run(randomUUID(), E);
+  const eStore = RSSE.create(E, { name: "Loja Virtual", code: "1" }).id;
+  Reserve.setEnabled(E, true);
+  Reserve.setOnlineStoreId(E, eStore); // filial da loja virtual
+  const pAtivo = mkProd(E, "Camisa Nova"); const vAtivo = mkVar(E, pAtivo, "M / Azul", 1); mkStock(E, eStore, pAtivo, vAtivo, 5);            // ok (ativo)
+  const pVarDesc = mkProd(E, "Calça Antiga"); const vDesc = mkVar(E, pVarDesc, "42 / Preto", 0); mkStock(E, eStore, pVarDesc, vDesc, 3);      // flag (variante descontinuada)
+  const pDesc = mkProd(E, "Blusa Descontinuada", 0); mkStock(E, eStore, pDesc, null, 2);                                                       // flag (produto inativo)
+
+  RetailOpsSignalPublisher.run(E, { asOf: today, windowDays: 3650 });
+  const disc = db.prepare(`SELECT source_entity_id, severity, impact_amount, evidence_json FROM business_signals WHERE organization_id=? AND signal_type='retail_discontinued_online_stock' AND status='open'`).all(E) as any[];
+  check("3d.1 loja virtual: descontinuado com saldo → sinal (risco, 2 itens)", disc.length === 1 && disc[0].source_entity_id === eStore && disc[0].severity === "risk" && Number(disc[0].impact_amount) === 2, JSON.stringify(disc));
+  check("3d.2 produto ATIVO com saldo NÃO conta", disc[0] && !/Camisa Nova/.test(JSON.parse(disc[0].evidence_json).sample || ""));
+  check("3d.3 summary humano", disc[0] && /descontinuad/.test(JSON.parse(disc[0].evidence_json).summary || ""));
+
+  // Gate: loja virtual DESLIGADA → item antigo com saldo é venda física normal, não alerta.
+  const F = `org_F_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'F', 'active')`).run(randomUUID(), F);
+  const fStore = RSSE.create(F, { name: "Loja Física", code: "1" }).id;
+  const pf = mkProd(F, "Item Antigo", 0); mkStock(F, fStore, pf, null, 4);
+  RetailOpsSignalPublisher.run(F, { asOf: today, windowDays: 3650 });
+  check("3d.4 loja virtual DESLIGADA → não alerta descontinuado", !db.prepare(`SELECT 1 FROM business_signals WHERE organization_id=? AND signal_type='retail_discontinued_online_stock'`).get(F));
+
+  // Auto-resolve: reativa a variante e o produto → some o fantasma.
+  db.prepare(`UPDATE product_variants SET active = 1 WHERE id = ?`).run(vDesc);
+  db.prepare(`UPDATE products_services SET active = 1 WHERE id = ?`).run(pDesc);
+  RetailOpsSignalPublisher.run(E, { asOf: today, windowDays: 3650 });
+  check("3d.5 reativados → sinal de descontinuado auto-resolvido", (db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND signal_type='retail_discontinued_online_stock'`).get(E) as any)?.status === "resolved");
+
   // ===== 4. Isolamento =====
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

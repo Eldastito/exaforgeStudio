@@ -290,6 +290,11 @@ export function FalaTuView() {
   const [askQuestion, setAskQuestion] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [askThread, setAskThread] = useState<{ q: string; answer: string; grounded: boolean; restricted: boolean }[]>([]);
+  // F8 — voz na aba "Perguntar": gravador DEDICADO (o compartilhado é cabeado
+  // pra captura). O dono fala; o áudio vai pro /ask, que transcreve e responde.
+  const [askRecording, setAskRecording] = useState(false);
+  const askRecRef = useRef<MediaRecorder | null>(null);
+  const askChunksRef = useRef<Blob[]>([]);
   const [text, setText] = useState('');
   const [processing, setProcessing] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -768,6 +773,42 @@ export function FalaTuView() {
     }
   }, [askQuestion, askBusy, loadPending]);
 
+  // F8 — grava a pergunta por VOZ e manda pro /ask (que transcreve + responde).
+  const startAskRecording = async () => {
+    if (askBusy || askRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      askChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) askChunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(askChunksRef.current, { type: mime });
+        if (!blob.size) return;
+        if (blob.size > MAX_UPLOAD_BYTES) { toast.error('Áudio muito longo. Fale a pergunta de forma mais curta.'); return; }
+        setAskBusy(true);
+        try {
+          const data = await blobToBase64(blob);
+          const r = await api('/ask', { method: 'POST', body: JSON.stringify({ audio: { mimeType: mime, data } }) });
+          setAskThread((prev) => [{ q: r?.question || '🎤 (áudio)', answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
+          if (r?.data?.pendingId) loadPending();
+        } catch (e: any) {
+          setAskThread((prev) => [{ q: '🎤 (áudio)', answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
+        } finally { setAskBusy(false); }
+      };
+      rec.start();
+      askRecRef.current = rec;
+      setAskRecording(true);
+    } catch { toast.error('Não foi possível acessar o microfone.'); }
+  };
+  const stopAskRecording = () => {
+    if (!askRecRef.current) return;
+    askRecRef.current.stop();
+    askRecRef.current = null;
+    setAskRecording(false);
+  };
+
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
     { id: 'ask', label: 'Perguntar', icon: <MessageCircle className="h-4 w-4" /> },
@@ -873,14 +914,23 @@ export function FalaTuView() {
             <p className="text-sm text-ft-text-muted">Converse com o seu negócio — <strong className="text-ft-text">pergunte</strong> e eu respondo com o dado real (<em>"quanto vendi em dinheiro hoje?"</em>, <em>"quem está de folga amanhã?"</em>), ou peça pra <strong className="text-ft-text">gravar</strong> algo (<em>"anota ligar pro contador amanhã"</em>) — você confirma antes de salvar.</p>
             <div className="flex gap-2">
               <input value={askQuestion} onChange={(e) => setAskQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendAsk()}
-                placeholder='Ex.: "quanto a loja fez em dinheiro no dia 31 de agosto?"'
-                className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
-              <button onClick={sendAsk} disabled={askBusy || !askQuestion.trim()}
+                disabled={askRecording}
+                placeholder={askRecording ? 'Ouvindo… fale sua pergunta' : 'Ex.: "quanto a loja fez em dinheiro no dia 31 de agosto?"'}
+                className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text disabled:opacity-60" />
+              {/* F8 — falar em vez de digitar: toque no microfone, fale, toque de novo pra enviar. */}
+              <button onClick={askRecording ? stopAskRecording : startAskRecording} disabled={askBusy && !askRecording}
+                title="Falar a pergunta"
+                className={askRecording
+                  ? 'inline-flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 px-3 py-2 text-sm font-semibold text-white animate-pulse'
+                  : 'inline-flex items-center gap-2 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-3 py-2 text-sm text-ft-text disabled:opacity-50'}>
+                {askRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </button>
+              <button onClick={sendAsk} disabled={askBusy || askRecording || !askQuestion.trim()}
                 className="inline-flex items-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                {askBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {askBusy && !askRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-xs text-ft-text-faint">Valores de faturamento e vendas são visíveis só para dono, sócios, administradores e gerentes.</p>
+            <p className="text-xs text-ft-text-faint">Toque no <Mic className="inline h-3 w-3" /> pra falar a pergunta, ou digite. Valores de faturamento e vendas são visíveis só para dono, sócios, administradores e gerentes.</p>
           </div>
           <div className="space-y-3">
             {askThread.length === 0 && !askBusy && (

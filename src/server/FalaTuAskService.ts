@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -131,6 +131,14 @@ const RECORD_LABEL: Record<string, string> = { TASK: "tarefa", EVENT: "compromis
 // Vai pro pipeline GOVERNADO (proposta→aprovação→execução), não pra captura.
 const EXPENSE_KW_RE = /\b(despesa|despesas|gasto|gastei|gastar|conta a pagar|contas a pagar|boleto|paguei|fornecedor)\b/i;
 const AMOUNT_CUE_RE = /r\$|\breais\b|\bconto\b|\d{2,}/i;
+// F6 (venda) — registro de VENDA como ENTRADA de caixa. Cue com VERBO/imperativo
+// de venda (vendi/faturei/"registra a venda") — NUNCA o substantivo "faturamento"
+// solto, que é PERGUNTA (sales_on_day). Assim "quanto foi o faturamento?" segue
+// pergunta e "registra a venda de R$500" vira registro.
+const SALE_RECORD_RE = /\bvendi\b|\bvendeu\b|\bfaturei\b|(?:registra(?:r)?|lan[çc]a(?:r)?|anota(?:r)?|grava(?:r)?)\s+(?:a\s+|uma\s+)?venda\b/i;
+// Pergunta nunca é registro: "quanto vendi..." é consulta (cash/sales), não venda
+// a gravar. Palavra interrogativa ou "?" → bloqueia os kinds de gravação.
+const QUESTION_RE = /\b(quanto|quantos|quanta|quantas|qual|quais|quando|quem|onde|por\s?que|porqu[eê]|como)\b|\?/i;
 
 export class FalaTuAskService {
   /**
@@ -141,15 +149,23 @@ export class FalaTuAskService {
   static classify(text: string, today: string): FalaTuAskClassification {
     const t = String(text || "");
     const date = extractDate(t, today);
+    // Pergunta nunca vira registro (ex.: "quanto vendi em dinheiro no dia X" é
+    // consulta, não venda a gravar). Só as gravações são bloqueadas por isto.
+    const isQuestion = QUESTION_RE.test(t);
     // Despesa primeiro: "lança a despesa de R$200 com fornecedor Y" é registro
     // financeiro GOVERNADO (dinheiro que sai), não captura de nota. needsMoney
     // porque expõe/escreve dinheiro (§73).
-    if (EXPENSE_KW_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
+    if (!isQuestion && EXPENSE_KW_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
       return { kind: "record_expense", date: null, needsMoney: true };
+    }
+    // Venda ANTES da gravação genérica ("registra a venda" contém "registra") e
+    // ANTES da pergunta de faturamento (cue é verbo de venda, não "faturamento").
+    if (!isQuestion && SALE_RECORD_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
+      return { kind: "record_sale", date: null, needsMoney: true };
     }
     // Gravação: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
     // pergunta — senão "anota vender mais" viraria consulta de vendas.
-    if (RECORD_RE.test(t)) {
+    if (!isQuestion && RECORD_RE.test(t)) {
       return { kind: "record", date: null, needsMoney: false };
     }
     // Folga/escala tem prioridade quando o texto é claramente sobre isso.
@@ -320,6 +336,23 @@ export class FalaTuAskService {
       return {
         kind: "record_expense", date: null, grounded: true, moneyRestricted: false,
         answer: `📝 Preparei o lançamento da despesa de ${brl(r.amount || 0)}${sup}, vencendo ${fmtDate(r.dueDate || "")}. Aprove em *Aprovações* pra gravar — não lanço sozinho.`,
+        data: { actionId: r.actionId, awaitingApproval: true },
+      };
+    }
+
+    // Registro de VENDA → mesmo pipeline governado (entrada de caixa). Role-gated.
+    if (cls.kind === "record_sale") {
+      if (!this.canSeeMoney(orgId, user)) {
+        return { kind: "record_sale", date: null, grounded: true, moneyRestricted: true, answer: "Registrar vendas é restrito ao dono, sócios, administradores e gerentes." };
+      }
+      const { FalatuRecordService } = await import("./FalatuRecordService.js");
+      const r = FalatuRecordService.recordSale(orgId, user, t, { now: opts.now });
+      if (!r.proposed) {
+        return { kind: "record_sale", date: null, grounded: true, moneyRestricted: false, answer: "Entendi que é uma venda, mas não peguei o valor. Diga o valor — ex.: *registra a venda de R$500*." };
+      }
+      return {
+        kind: "record_sale", date: null, grounded: true, moneyRestricted: false,
+        answer: `📝 Preparei o registro da venda de ${brl(r.amount || 0)} (entrada de caixa em ${fmtDate(r.eventDate || "")}). Aprove em *Aprovações* pra gravar — não lanço sozinho.`,
         data: { actionId: r.actionId, awaitingApproval: true },
       };
     }

@@ -66,6 +66,12 @@ export interface ParsedSale {
   eventDate: string; // YYYY-MM-DD
 }
 
+export interface ParsedContact {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
 export class FalatuRecordService {
   /** Parser determinístico da despesa ditada. `today` = data comercial da org. */
   static parseExpense(text: string, today: string): ParsedExpense {
@@ -162,6 +168,55 @@ export class FalatuRecordService {
     if (parsed.amount == null) return { proposed: false };
     const action = this.proposeSale(orgId, parsed, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
     return { proposed: true, amount: parsed.amount, eventDate: parsed.eventDate, actionId: action?.id };
+  }
+
+  // ── F7: CLIENTE (contato) ────────────────────────────────────────────────────
+  /** Parser determinístico do cliente ditado. Nome é obrigatório; tel/email best-effort. */
+  static parseContact(text: string): ParsedContact {
+    const t = String(text || "").trim();
+    const m = t.match(/(?:cliente|contato)\s+(?:chamad[oa]\s+|de\s+nome\s+)?(.+)$/i);
+    const rest = m ? m[1] : "";
+    const email = (rest.match(/[^\s@]+@[^\s@]+\.[^\s@]+/) || [])[0] || null;
+    const phoneRaw = (rest.match(/\+?\d[\d\s().-]{7,}\d/) || [])[0] || null;
+    const phone = phoneRaw ? phoneRaw.replace(/[^\d+]/g, "") : null;
+    let name: string | null = rest
+      .replace(/\b(telefone|fone|tel|whatsapp|whats|zap|celular|n[uú]mero|email|e-?mail)\b.*$/i, "")
+      .replace(/\+?\d[\d\s().-]{6,}\d/g, "")
+      .replace(/[^\s@]+@[^\s@]+/g, "")
+      .replace(/[,;:.\s]+$/, "")
+      .trim();
+    name = name ? name.slice(0, 80) : null;
+    return { name, phone, email };
+  }
+
+  /**
+   * Propõe o CADASTRO de cliente como comando governado. Domínio 'crm' (não é
+   * financeiro → não é default-deny; nasce awaiting_approval pela política
+   * 'single' de fallback). Semeia a policy de execução (não amplia autonomia).
+   */
+  static proposeContact(orgId: string, parsed: ParsedContact, opts: { createdBy?: string; correlationId?: string | null } = {}): any {
+    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = 'crm' AND action_type = 'falatu_record_contact'`).get(orgId) as any;
+    if (!pol) {
+      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, 'crm', 'falatu_record_contact', 'execute', 'approved_execution', 1)`)
+        .run(randomUUID(), orgId);
+    }
+    return DecisionActionService.propose(orgId, {
+      domain: "crm",
+      actionType: "falatu_record_contact",
+      title: `Cadastrar cliente${parsed.name ? ` — ${parsed.name}` : ""}`,
+      description: [parsed.name, parsed.phone, parsed.email].filter(Boolean).join(" · ").slice(0, 160),
+      commandType: "falatu_record_contact",
+      commandPayload: { name: parsed.name, phone: parsed.phone, email: parsed.email },
+      correlationId: opts.correlationId ?? null,
+      createdBy: opts.createdBy || "falatu",
+    });
+  }
+
+  static recordContact(orgId: string, user: any, text: string, opts: { correlationId?: string | null } = {}): { proposed: boolean; name?: string | null; phone?: string | null; email?: string | null; actionId?: string } {
+    const parsed = this.parseContact(text);
+    if (!parsed.name) return { proposed: false };
+    const action = this.proposeContact(orgId, parsed, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
+    return { proposed: true, name: parsed.name, phone: parsed.phone, email: parsed.email, actionId: action?.id };
   }
 }
 

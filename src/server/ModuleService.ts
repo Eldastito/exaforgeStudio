@@ -122,6 +122,15 @@ export class ModuleService {
 
   static isEnabled(orgId: string, moduleKey: string): boolean {
     if (this.CORE.includes(moduleKey)) return true;
+    // ADR-151: o flag `falatu_enabled` habilita o módulo Fala Tu por si só (o opt-in
+    // do Admin Master), independente do teto do plano — mesmo princípio dos add-ons
+    // operacionais opt-in (PLAN_FREE_ADDONS). O flag É a contratação do Fala Tu.
+    if (moduleKey === "falatu") {
+      try {
+        const o = db.prepare("SELECT falatu_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+        if (Number(o?.falatu_enabled) === 1) return true;
+      } catch { /* noop */ }
+    }
     const em = this.enabledModules(orgId);
     if (em == null) return false;
     if (!em.includes(moduleKey)) return false;

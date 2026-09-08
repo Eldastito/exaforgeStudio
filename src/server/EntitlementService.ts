@@ -210,7 +210,7 @@ export class EntitlementService {
    *  ADR-153 F1.4: `ctx` opcional pra overview pre-resolver o blueprint uma vez. */
   static check(orgId: string, user: any, resource: string, action: EntitlementAction, ctx?: EntitlementContext): EntitlementDecision {
     const org = db.prepare(
-      `SELECT vertical, plan_id, billing_status FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`,
+      `SELECT vertical, plan_id, billing_status, falatu_enabled FROM organization_settings WHERE organization_id = ? AND deleted_at IS NULL`,
     ).get(orgId) as any || {};
     const vertical: string | null = org.vertical || null;
     const planId: string | null = org.plan_id || null;
@@ -287,8 +287,14 @@ export class EntitlementService {
 
     // 3) Detecta se o plano/add-on cobre o resource + se dono ligou.
     const planMods = PlanService.modulesForPlan(orgId); // null = sem teto
-    const covered = planMods == null || planMods.includes(resource);
-    const enabled = ModuleService.isEnabled(orgId, resource); // já intersecciona plano+addon+enabled_modules
+    let covered = planMods == null || planMods.includes(resource);
+    let enabled = ModuleService.isEnabled(orgId, resource); // já intersecciona plano+addon+enabled_modules
+    // ADR-151: `falatu_enabled` é o opt-in de 1ª classe do Fala Tu. Quando o Admin
+    // Master "libera o Fala Tu pra empresa", o módulo `falatu` fica COBERTO e LIGADO
+    // independente do teto do plano — o flag É a contratação. RBAC continua valendo
+    // (dono/gerente enxergam; vendedor/caixa não). Fecha o gap em que ligar o flag
+    // não bastava porque o plano (ex.: Cortesia) não listava `falatu`.
+    if (resource === "falatu" && Number(org.falatu_enabled) === 1) { covered = true; enabled = true; }
 
     // 4) `hidden` = blueprint marca como incoerente E plano não cobre.
     //    (Se plano cobre, mesmo em blueprint "esconde", devolve available — se

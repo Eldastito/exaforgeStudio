@@ -206,8 +206,13 @@ router.get("/entities", (req: AuthRequest, res): any => {
   res.json(FalaTuService.entities(req.organizationId!, actorId(req)));
 });
 
-router.get("/briefing", (req: AuthRequest, res): any => {
-  res.json(FalaTuService.briefing(req.organizationId!, actorId(req)));
+router.get("/briefing", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const base = FalaTuService.briefing(req.organizationId!, actorId(req));
+    // F9 — resumo da Central de Saúde no Fala Tu (só p/ visão completa, §73).
+    const healthDigest = await FalaTuService.healthDigestFor(req.organizationId!, req.user);
+    res.json({ ...base, healthDigest });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Briefing proativo (Fatia 5): sinais no business_signals (ADR-136) ──

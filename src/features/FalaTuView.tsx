@@ -1035,6 +1035,15 @@ export function FalaTuView() {
 
       {tab === 'briefing' && briefing && (
         <div className="space-y-4">
+          {/* F9 — resumo da Central de Saúde entregue TAMBÉM pelo Fala Tu (o mesmo
+              do digest de WhatsApp). Só aparece p/ visão completa (§73): o backend
+              devolve healthDigest=null pra quem não é dono/admin/gestor. */}
+          {briefing.healthDigest?.text && (
+            <div className="rounded-xl border border-ft-border bg-ft-surface p-4">
+              <p className="text-sm font-semibold text-ft-text mb-1">☀️ Resumo de gestão de hoje</p>
+              <p className="text-sm text-ft-text-muted whitespace-pre-wrap">{String(briefing.healthDigest.text).replace(/\*/g, '')}</p>
+            </div>
+          )}
           {/* Fatia 5 — o sweep diário publicou o briefing como sinal (ADR-136):
               o mesmo resumo aparece no painel de sinais da operação. */}
           {signals.length > 0 && (

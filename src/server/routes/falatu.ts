@@ -4,6 +4,10 @@ import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
+// Registra o handler de comando do registro governado (despesa, F5) no boot —
+// pro executor achar o handler mesmo se ninguém rodou o /ask ainda (ex.: aprovar
+// e executar uma despesa pendente após restart). Side-effect import.
+import "../FalatuRecordCommandHandler.js";
 import { FalaTuBridgeReconService } from "../FalaTuBridgeReconService.js";
 import { FalaTuCaptureTokenService } from "../FalaTuCaptureTokenService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";

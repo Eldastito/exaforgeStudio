@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -126,6 +126,11 @@ const OFF_RE = /\b(folga|folgando|folgar|de folga|escala|quem (est[aá]|vai esta
 // gravação que já existe; nunca escrita direta (RN-151).
 const RECORD_RE = /^(?:grava|gravar|anota|anotar|registra|registrar|guarda|guardar|salva|salvar|cadastra|cadastrar|lan[çc]a|lan[çc]ar)\b[:,]?\s*/i;
 const RECORD_LABEL: Record<string, string> = { TASK: "tarefa", EVENT: "compromisso", LIST: "lista", NOTE: "nota", UNKNOWN: "nota" };
+// F5 (gravar despesa) — registro de DESPESA de negócio: palavra de despesa +
+// pista de valor (R$, "reais", ou número de 2+ dígitos — evita casar "dia 5").
+// Vai pro pipeline GOVERNADO (proposta→aprovação→execução), não pra captura.
+const EXPENSE_KW_RE = /\b(despesa|despesas|gasto|gastei|gastar|conta a pagar|contas a pagar|boleto|paguei|fornecedor)\b/i;
+const AMOUNT_CUE_RE = /r\$|\breais\b|\bconto\b|\d{2,}/i;
 
 export class FalaTuAskService {
   /**
@@ -136,7 +141,13 @@ export class FalaTuAskService {
   static classify(text: string, today: string): FalaTuAskClassification {
     const t = String(text || "");
     const date = extractDate(t, today);
-    // Gravação primeiro: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
+    // Despesa primeiro: "lança a despesa de R$200 com fornecedor Y" é registro
+    // financeiro GOVERNADO (dinheiro que sai), não captura de nota. needsMoney
+    // porque expõe/escreve dinheiro (§73).
+    if (EXPENSE_KW_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
+      return { kind: "record_expense", date: null, needsMoney: true };
+    }
+    // Gravação: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
     // pergunta — senão "anota vender mais" viraria consulta de vendas.
     if (RECORD_RE.test(t)) {
       return { kind: "record", date: null, needsMoney: false };
@@ -293,6 +304,26 @@ export class FalaTuAskService {
     const t = String(text || "").trim();
     const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
     const cls = this.classify(t, today);
+
+    // Registro de DESPESA → pipeline GOVERNADO (proposta→aprovação→execução).
+    // Dinheiro é role-gated (§73): só dono/sócio/admin/gerente propõem.
+    if (cls.kind === "record_expense") {
+      if (!this.canSeeMoney(orgId, user)) {
+        return { kind: "record_expense", date: null, grounded: true, moneyRestricted: true, answer: "Lançar despesas é restrito ao dono, sócios, administradores e gerentes." };
+      }
+      const { FalatuRecordService } = await import("./FalatuRecordService.js");
+      const r = FalatuRecordService.recordExpense(orgId, user, t, { now: opts.now });
+      if (!r.proposed) {
+        return { kind: "record_expense", date: null, grounded: true, moneyRestricted: false, answer: "Entendi que é uma despesa, mas não peguei o valor. Diga o valor — ex.: *lança a despesa de R$200 com a padaria*." };
+      }
+      const sup = r.supplierName ? ` (${r.supplierName})` : "";
+      return {
+        kind: "record_expense", date: null, grounded: true, moneyRestricted: false,
+        answer: `📝 Preparei o lançamento da despesa de ${brl(r.amount || 0)}${sup}, vencendo ${fmtDate(r.dueDate || "")}. Aprove em *Aprovações* pra gravar — não lanço sozinho.`,
+        data: { actionId: r.actionId, awaitingApproval: true },
+      };
+    }
+
     if (cls.kind !== "record") return this.answer(orgId, user, t, { now: opts.now });
 
     const userId = user?.userId || user?.id;

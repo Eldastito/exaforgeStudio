@@ -12,6 +12,11 @@ interface Report {
   coreCards: any[];
   verticalCards: any[];
   topProducts: { name: string; qty: number; total: number }[];
+  flows?: {
+    fisica: { revenue: number; sales: number | null; pecas: number | null; ticket: number | null; source: 'pdv' | 'fechamento' | 'none' };
+    virtual: { revenue: number; orders: number; paid: number; ticket: number | null };
+    total: { revenue: number };
+  };
   options: { categories: string[]; sellers: { id: string; name: string }[]; channels: string[] };
 }
 
@@ -128,6 +133,32 @@ export function ReportsPanel() {
               </div>
             ))}
           </div>
+
+          {/* Os DOIS fluxos: loja física (PDV/rede) × loja virtual (pedidos). */}
+          {data.flows && (data.flows.fisica.revenue > 0 || data.flows.virtual.revenue > 0) && (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-4">
+                <div className="text-zinc-300 text-sm font-medium flex items-center gap-2">🏬 Loja física <span className="text-[10px] text-zinc-500">{data.flows.fisica.source === 'pdv' ? 'PDV/rede' : data.flows.fisica.source === 'fechamento' ? 'fechamento diário' : ''}</span></div>
+                <p className="mt-1 text-xl font-bold text-emerald-400">{brl(data.flows.fisica.revenue)}</p>
+                <p className="mt-1 text-[12px] text-zinc-500">
+                  {data.flows.fisica.source === 'pdv'
+                    ? <>{int(data.flows.fisica.sales || 0)} venda(s){data.flows.fisica.ticket != null && <> · ticket {brl(data.flows.fisica.ticket)}</>}{data.flows.fisica.pecas != null && <> · {int(data.flows.fisica.pecas)} peça(s)</>}</>
+                    : data.flows.fisica.source === 'fechamento'
+                      ? 'faturamento pelos fechamentos diários (sem detalhe por venda)'
+                      : 'sem vendas no período'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.04] p-4">
+                <div className="text-zinc-300 text-sm font-medium flex items-center gap-2">🛒 Loja virtual <span className="text-[10px] text-zinc-500">pedidos online/app</span></div>
+                <p className="mt-1 text-xl font-bold text-emerald-400">{brl(data.flows.virtual.revenue)}</p>
+                <p className="mt-1 text-[12px] text-zinc-500">
+                  {data.flows.virtual.orders > 0
+                    ? <>{int(data.flows.virtual.orders)} pedido(s){data.flows.virtual.ticket != null && <> · ticket {brl(data.flows.virtual.ticket)}</>}</>
+                    : 'sem pedidos online no período'}
+                </p>
+              </div>
+            </div>
+          )}
 
           {data.topProducts.length > 0 && (
             <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">

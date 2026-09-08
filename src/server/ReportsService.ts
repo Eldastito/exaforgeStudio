@@ -6,6 +6,30 @@ import db from "./db.js";
  * para o Google Sheets. Compara os últimos 30 dias com o total geral.
  */
 export class ReportsService {
+  /**
+   * Faturamento da LOJA FÍSICA (PDV) num intervalo [startDate, endDate]. Prefere
+   * as VENDAS do PDV (Alterdata, per-venda → faturamento + nº de vendas +
+   * ticket); sem elas, cai nos FECHAMENTOS diários do WhatsApp
+   * (`retail_daily_closings.informed_total` — total do dia, sem contagem). NUNCA
+   * soma as duas fontes (evita dobrar). Só leitura, isolado por org. É o fluxo
+   * que faltava no Relatório — a rede física fatura aqui, não em `orders`.
+   */
+  static retailPhysicalFlow(orgId: string, startDate: string, endDate = "9999-12-31"): { revenue: number; sales: number | null; pecas: number | null; ticket: number | null; source: "pdv" | "fechamento" | "none" } {
+    const r2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
+    try {
+      const pdv = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(valor),0) AS rev, COALESCE(SUM(pecas),0) AS pcs FROM retail_pdv_sales WHERE organization_id = ? AND sale_date >= ? AND sale_date <= ? AND (status IS NULL OR status = 'N')`).get(orgId, startDate, endDate) as any;
+      if (Number(pdv?.n) > 0) {
+        const sales = Number(pdv.n); const revenue = r2(pdv.rev);
+        return { revenue, sales, pecas: Number(pdv.pcs) || 0, ticket: sales > 0 ? r2(revenue / sales) : null, source: "pdv" };
+      }
+    } catch { /* retail_pdv_sales pode não existir em base antiga */ }
+    try {
+      const clo = db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS rev FROM retail_daily_closings WHERE organization_id = ? AND closing_date >= ? AND closing_date <= ? AND status != 'rejected'`).get(orgId, startDate, endDate) as any;
+      if (Number(clo?.rev) > 0) return { revenue: r2(clo.rev), sales: null, pecas: null, ticket: null, source: "fechamento" };
+    } catch { /* noop */ }
+    return { revenue: 0, sales: null, pecas: null, ticket: null, source: "none" };
+  }
+
   static salesSummary(orgId: string): {
     orders: { d30: number; all: number };
     revenue: { d30: number; all: number };
@@ -92,14 +116,38 @@ export class ReportsService {
     // ---- cards core ----
     const agg = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS sum FROM orders o WHERE ${baseWhere}`).get(...params) as any;
     const paid = db.prepare(`SELECT COUNT(*) AS n FROM orders o WHERE ${baseWhere} AND o.status = 'pago'`).get(...params) as any;
-    const orders = Number(agg.n) || 0;
+    const r2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
+    const orders = Number(agg.n) || 0;          // fluxo VIRTUAL (pedidos do app/loja online)
     const revenue = Number(agg.sum) || 0;
+    const virtualPaid = Number(paid.n) || 0;
+
+    // Fluxo FÍSICO (PDV/rede) no mesmo período — datas em YYYY-MM-DD.
+    let phStart: string; let phEnd = "9999-12-31";
+    if (period === "month") phStart = (db.prepare("SELECT date('now','start of month') d").get() as any).d;
+    else if (period === "prev_month") { phStart = (db.prepare("SELECT date('now','start of month','-1 month') d").get() as any).d; phEnd = (db.prepare("SELECT date('now','start of month','-1 day') d").get() as any).d; }
+    else phStart = (db.prepare("SELECT date('now', ?) d").get(periodMap[period]) as any).d;
+    // A loja física só entra na visão GERAL (ou canal 'pdv'); filtrar por um
+    // canal virtual (loja/whatsapp), vendedor ou categoria NÃO traz o físico.
+    const includeFisica = !filters.seller && !filters.category && (!filters.channel || filters.channel === "pdv");
+    const fisica = includeFisica ? ReportsService.retailPhysicalFlow(orgId, phStart, phEnd) : { revenue: 0, sales: null as number | null, pecas: null as number | null, ticket: null as number | null, source: "none" as const };
+
+    // Cards CORE = os DOIS fluxos somados (o Relatório enxergava só o virtual).
+    const totalRevenue = r2(revenue + fisica.revenue);
+    const totalTxns = orders + (fisica.sales || 0);
+    const knownTxns = orders + (fisica.source === "pdv" ? (fisica.sales || 0) : 0);   // ticket só sobre venda com contagem
+    const knownRevenue = revenue + (fisica.source === "pdv" ? fisica.revenue : 0);
     const coreCards = [
-      { key: "revenue", label: "Faturamento", value: revenue, format: "brl" },
-      { key: "orders", label: "Pedidos (não cancelados)", value: orders, format: "int" },
-      { key: "ticket", label: "Ticket médio", value: orders > 0 ? revenue / orders : 0, format: "brl" },
-      { key: "paid", label: "Pedidos pagos", value: Number(paid.n) || 0, format: "int" },
+      { key: "revenue", label: "Faturamento", value: totalRevenue, format: "brl" },
+      { key: "orders", label: "Vendas (não canceladas)", value: totalTxns, format: "int" },
+      { key: "ticket", label: "Ticket médio", value: knownTxns > 0 ? r2(knownRevenue / knownTxns) : 0, format: "brl" },
+      { key: "paid", label: "Vendas pagas/realizadas", value: virtualPaid + (fisica.sales || 0), format: "int" },
     ];
+    // Os DOIS fluxos separados — "entender loja física × loja virtual".
+    const flows = {
+      fisica: { revenue: fisica.revenue, sales: fisica.sales, pecas: fisica.pecas, ticket: fisica.ticket, source: fisica.source },
+      virtual: { revenue: r2(revenue), orders, paid: virtualPaid, ticket: orders > 0 ? r2(revenue / orders) : null },
+      total: { revenue: totalRevenue },
+    };
 
     // ---- itens vendidos no período (base dos cards por vertical) ----
     const soldItems = db.prepare(
@@ -158,7 +206,7 @@ export class ReportsService {
 
     return {
       vertical, period, filters: { category: filters.category || null, channel: filters.channel || null, seller: filters.seller || null },
-      coreCards, verticalCards, topProducts,
+      coreCards, verticalCards, topProducts, flows,
       options: { categories, sellers, channels: ["loja", "whatsapp", "pdv"] },
     };
   }

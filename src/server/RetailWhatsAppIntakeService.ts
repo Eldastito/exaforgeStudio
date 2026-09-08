@@ -74,22 +74,32 @@ export class RetailWhatsAppIntakeService {
       return { reply: this.confirmationText(store, res.closing, res.extraction, true) };
     }
 
-    // 2) VALOR total em texto → registra manualmente.
-    const amount = payload.text != null ? parseBrlAmount(payload.text) : null;
+    // 2) VALOR total do dia em texto/ÁUDIO → registra. Primeiro o número "puro"
+    // (parseBrlAmount, formato BR); se falhar mas houver INTENÇÃO de fechamento
+    // (ÁUDIO transcrito, ex.: "fechamos com doze mil e quinhentos"), tenta o
+    // parser de valor FALADO por extenso. O gate de intenção evita sequestrar
+    // conversa normal ("me manda 2 blusas"). O áudio já chega transcrito em
+    // payload.text (transcrição roda no webhook, ADR-102).
+    const strict = payload.text != null ? parseBrlAmount(payload.text) : null;
+    const spoken = (strict == null && payload.text && hasClosingIntent(payload.text)) ? parseSpokenBrlAmount(payload.text) : null;
+    const amount = strict != null && strict > 0 ? strict : (spoken != null && spoken > 0 ? spoken : null);
     if (amount != null && amount > 0) {
       const closing = RetailClosingService.getOrCreate(orgId, store.id, date);
+      const source = strict != null ? "whatsapp_text" : "whatsapp_voice";
       const updated = RetailClosingService.setInformed(orgId, closing.id, {
-        informedTotal: amount, source: "whatsapp_text",
+        informedTotal: amount, source,
         submittedByContactId: payload.contactId || null, submittedByIdentifier: payload.senderId,
       });
       this.markTaskSubmitted(orgId, store.id, date, "fechamento", payload.contactId || null);
-      try { logAuthEvent(orgId, "system", store.id, "RETAIL_CLOSING_WHATSAPP_TEXT", { date, amount }); } catch { /* noop */ }
+      try { logAuthEvent(orgId, "system", store.id, "RETAIL_CLOSING_WHATSAPP_TEXT", { date, amount, source }); } catch { /* noop */ }
       return { reply: this.confirmationText(store, updated, { informedTotal: amount }, false) };
     }
 
-    // 3) Sem foto nem valor: só orienta SE houver pendência de fechamento aberta hoje.
-    if (this.hasOpenTask(orgId, store.id, date, "fechamento")) {
-      return { reply: `Oi! Para registrar o fechamento da loja *${store.name}* de hoje, é só me enviar a *foto da folha* de fechamento ou o *valor total* do dia (ex.: R$ 4.850,00). 🙏` };
+    // 3) Sem valor legível: orienta quando há pendência de fechamento aberta hoje
+    // OU a pessoa claramente FALOU de fechamento sem um número que dê pra ler
+    // (ex.: áudio embolado). Fallback honesto — pede texto/foto, não inventa.
+    if (this.hasOpenTask(orgId, store.id, date, "fechamento") || (payload.text != null && hasClosingIntent(payload.text))) {
+      return { reply: `Oi! Para registrar o fechamento da loja *${store.name}* de hoje, é só me enviar a *foto da folha* de fechamento ou o *valor total* do dia (ex.: R$ 4.850,00 — pode falar por áudio também). 🙏` };
     }
 
     // Não é caso de fechamento → segue o fluxo normal de atendimento.
@@ -183,6 +193,73 @@ export function parseBrlAmount(text: string): number | null {
   }
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
+}
+
+// ── Valor FALADO (áudio transcrito) ──────────────────────────────────────────
+function stripAccents(s: string): string { return s.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+
+const SPOKEN_UNITS: Record<string, number> = {
+  zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9,
+  dez: 10, onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14, quinze: 15, dezesseis: 16, dezassete: 17, dezessete: 17, dezoito: 18, dezenove: 19,
+  vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, sessenta: 60, setenta: 70, oitenta: 80, noventa: 90,
+};
+const SPOKEN_HUNDREDS: Record<string, number> = {
+  cem: 100, cento: 100, duzentos: 200, duzentas: 200, trezentos: 300, trezentas: 300, quatrocentos: 400, quatrocentas: 400,
+  quinhentos: 500, quinhentas: 500, seiscentos: 600, seiscentas: 600, setecentos: 700, setecentas: 700,
+  oitocentos: 800, oitocentas: 800, novecentos: 900, novecentas: 900,
+};
+const SPOKEN_SCALES: Record<string, number> = { mil: 1000, milhao: 1000000, milhoes: 1000000 };
+
+/** Um token puramente numérico ("12500", "12.500,00", "12,5") → número BR. */
+function numericToken(tok: string): number | null {
+  let s = tok;
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else {
+    const dots = (s.match(/\./g) || []).length;
+    if (dots > 1) s = s.replace(/\./g, "");
+    else if (dots === 1) { const [a, b] = s.split("."); if (b && b.length === 3) s = a + b; } // 12.500 = milhar
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Parser de valor FALADO em pt-BR (áudio transcrito): número por extenso
+ * ("doze mil e quinhentos"), com "mil"/"milhão", "meio" (0,5) e dígitos
+ * embutidos numa frase ("o fechamento foi 12500 reais"). Devolve o valor ou
+ * null. Guarda anti-falso-positivo: só aceita quando o valor veio de um DÍGITO,
+ * de uma ESCALA (mil/milhão), de CENTENA, ou é ≥ 20 — assim "um/dois/..." solto
+ * numa frase ("fechamos um dia bom") NÃO vira R$ 1. Deve ser chamado só quando
+ * há intenção de fechamento (hasClosingIntent) — não sequestra conversa normal.
+ */
+export function parseSpokenBrlAmount(text: string): number | null {
+  const norm = stripAccents(String(text || "").toLowerCase());
+  const tokens = norm.replace(/[^\w,.\s]/g, " ").split(/\s+/).filter(Boolean);
+  let total = 0, current = 0, sawNumber = false, usedStrong = false;
+  const flush = (mult: number) => { total += (current === 0 ? 1 : current) * mult; current = 0; };
+  for (const tok of tokens) {
+    if (tok === "meio") { current += 0.5; sawNumber = true; continue; }
+    if (/^\d[\d.,]*$/.test(tok)) { const v = numericToken(tok); if (v != null) { current += v; sawNumber = true; usedStrong = true; } continue; }
+    if (tok in SPOKEN_SCALES) { flush(SPOKEN_SCALES[tok]); sawNumber = true; usedStrong = true; continue; }
+    if (tok in SPOKEN_HUNDREDS) { current += SPOKEN_HUNDREDS[tok]; sawNumber = true; usedStrong = true; continue; }
+    if (tok in SPOKEN_UNITS) { current += SPOKEN_UNITS[tok]; sawNumber = true; continue; }
+    // conectivo / palavra desconhecida ("e", "de", "reais", "fechamos") → ignora
+  }
+  total += current;
+  if (!sawNumber || total <= 0) return null;
+  if (!usedStrong && total < 20) return null; // só unidades/teens soltos → provável falso positivo
+  return Math.round(total * 100) / 100;
+}
+
+/** Há INTENÇÃO clara de fechamento no texto? (gate do parser falado.) */
+export function hasClosingIntent(text: string): boolean {
+  const t = stripAccents(String(text || "").toLowerCase());
+  if (/\bfechament/.test(t)) return true;
+  if (/\bfech(amos|ei|ou|ando|aram)\b/.test(t)) return true;
+  if (/\bcaixa\b/.test(t) && /\b(dia|hoje|fech|total|vend)/.test(t)) return true;
+  if (/\btotal\s+(do\s+dia|de\s+hoje|vendid)/.test(t)) return true;
+  if (/\bvend(a|as|emos|i|eu)\b/.test(t) && /\b(dia|hoje)\b/.test(t)) return true;
+  return false;
 }
 
 /**

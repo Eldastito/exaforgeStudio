@@ -3,6 +3,7 @@ import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
+import { FalaTuAskService } from "../FalaTuAskService.js";
 import { FalaTuBridgeReconService } from "../FalaTuBridgeReconService.js";
 import { FalaTuCaptureTokenService } from "../FalaTuCaptureTokenService.js";
 import { FalaTuPurchaseService } from "../FalaTuPurchaseService.js";
@@ -73,6 +74,18 @@ router.post("/capture", async (req: AuthRequest, res): Promise<any> => {
   if (audio && image) return res.status(400).json({ error: "Envie áudio OU imagem, não ambos." });
   try {
     res.json(await FalaTuService.capture(req.organizationId!, actorId(req), { text, audio, image, source, commandId }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// "Conversar com o negócio" — o dono PERGUNTA e recebe a resposta (não vira
+// item de inbox). Roteia p/ query direta (exata, admite lacuna) ou, se aberta,
+// pros agentes de IA. Dinheiro é role-gated DENTRO do service (§73). Valida só
+// forma aqui; invariante fica no service.
+router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
+  const { question } = req.body || {};
+  if (typeof question !== "string" || !question.trim()) return res.status(400).json({ error: "question deve ser string não vazia." });
+  try {
+    res.json(await FalaTuAskService.answer(req.organizationId!, req.user, question));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

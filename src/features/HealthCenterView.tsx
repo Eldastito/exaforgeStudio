@@ -207,11 +207,29 @@ export function HealthCenterView() {
           </div>
         )}
 
-        {/* Estoque parado sem giro (ADR-132 Fatia 4) */}
+        {/* Estoque parado sem giro (ADR-132 Fatia 4) — com o detalhamento das peças */}
         {d?.estoque?.slowMoverCapital > 0 && (
-          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px] flex items-center justify-between gap-2">
-            <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} item${d.estoque.slowMoverCount > 1 ? 's' : ''})` : ''}</span>
-            <span className="font-semibold text-amber-300">{brl(d.estoque.slowMoverCapital)}{d.estoque.totalCapital > d.estoque.slowMoverCapital ? <span className="text-[11px] text-zinc-500"> de {brl(d.estoque.totalCapital)}</span> : null}</span>
+          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} item${d.estoque.slowMoverCount > 1 ? 's' : ''})` : ''}</span>
+              <span className="font-semibold text-amber-300">{brl(d.estoque.slowMoverCapital)}{d.estoque.totalCapital > d.estoque.slowMoverCapital ? <span className="text-[11px] text-zinc-500"> de {brl(d.estoque.totalCapital)}</span> : null}</span>
+            </div>
+            {Array.isArray(d.estoque.slowMovers) && d.estoque.slowMovers.length > 0 && (
+              <ul className="mt-2 space-y-1 border-t border-zinc-800/70 pt-2">
+                {d.estoque.slowMovers.map((s: any, i: number) => (
+                  <li key={s.variantId || s.productId || i} className="flex items-center justify-between gap-2 text-[12px]">
+                    <span className="min-w-0 truncate text-zinc-300">
+                      {s.label}
+                      {s.quantity > 0 && <span className="text-zinc-500"> · {s.quantity} un</span>}
+                    </span>
+                    <span className="shrink-0 text-amber-300/90">{brl(s.capital)}</span>
+                  </li>
+                ))}
+                {d.estoque.slowMoversTruncated && (
+                  <li className="pt-0.5 text-[11px] text-zinc-500">…e mais itens — veja o relatório de estoque.</li>
+                )}
+              </ul>
+            )}
           </div>
         )}
 

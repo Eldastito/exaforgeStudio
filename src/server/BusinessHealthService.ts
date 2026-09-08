@@ -107,12 +107,35 @@ export class BusinessHealthService {
     try { return QuoteService.conversionStats(orgId); } catch { return null; }
   }
 
-  /** Capital de estoque + sem giro (guardado) — só os agregados, sem a lista. */
-  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number } | null {
+  /**
+   * Capital de estoque + sem giro (guardado). Além dos agregados, carrega a
+   * LISTA dos itens sem giro (rótulo pronto: produto + variante/tamanho/cor) —
+   * o gestor precisa saber QUAIS peças não giram, não só "N itens" (ADR-132
+   * Fatia 4, detalhamento). Lista limitada (top por capital) pra não inflar o
+   * payload da tela.
+   */
+  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number; slowMovers: any[]; slowMoversTruncated: boolean } | null {
     try {
       const sc = RetailImpactService.stockCapital(orgId) as any;
       if (!sc || Number(sc.itemsInStock) <= 0) return null;
-      return { totalCapital: Number(sc.totalCapital) || 0, slowMoverCapital: Number(sc.slowMoverCapital) || 0, slowMoverCount: Number(sc.slowMoverCount) || 0 };
+      const TOP = 12; // a tela mostra os que mais travam capital; o resto continua no relatório de estoque
+      const all = Array.isArray(sc.slowMovers) ? sc.slowMovers : [];
+      const slowMovers = all.slice(0, TOP).map((s: any) => ({
+        productId: s.productId,
+        variantId: s.variantId ?? null,
+        label: s.label || s.name || "Item",
+        variantLabel: s.variantLabel ?? null,
+        quantity: Number(s.quantity) || 0,
+        capital: Number(s.capital) || 0,
+        lastSaleAt: s.lastSaleAt ?? null,
+      }));
+      return {
+        totalCapital: Number(sc.totalCapital) || 0,
+        slowMoverCapital: Number(sc.slowMoverCapital) || 0,
+        slowMoverCount: Number(sc.slowMoverCount) || 0,
+        slowMovers,
+        slowMoversTruncated: !!sc.slowMoversTruncated || all.length > TOP,
+      };
     } catch { return null; }
   }
 

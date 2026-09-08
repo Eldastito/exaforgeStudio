@@ -474,6 +474,13 @@ router.delete("/backups/:id", (req: AuthRequest, res): any => {
 // ===== Integração Alterdata/ModaUp (ADR-105) — config por organização =====
 // Fundação: guarda credenciais CIFRADAS + rede/filial + flag. A sincronização
 // real (Fase 1) entra quando a Alterdata fornecer token + homologação.
+// Diagnóstico "a grade (tamanho/cor) está chegando da Alterdata?" — resposta em
+// linguagem de negócio pro dono saber, num olhar, se a loja virtual tem fonte.
+router.get("/alterdata/catalog-grade", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(AlterdataConnectorService.catalogGradeStatus(req.organizationId));
+});
+
 router.get("/alterdata/status", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId) });

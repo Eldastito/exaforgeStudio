@@ -744,6 +744,12 @@ function AlterdataConnectorPanel() {
   const [syncing, setSyncing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
+  // Diagnóstico "a grade (tamanho/cor) está chegando da Alterdata?" — resposta
+  // em português claro pro dono, em vez de ler "890 variantes" no resumo técnico.
+  const [grade, setGrade] = useState<any>(null);
+  useEffect(() => {
+    apiFetch('/api/integrations/alterdata/catalog-grade').then(r => r.ok ? r.json() : null).then(setGrade).catch(() => {});
+  }, [lastSync]);
   // Monta a mensagem do resumo (com o motivo dos "pulados" e os totais do
   // catálogo — sem isso um "0 saldos" não explica a causa).
   const applySummary = (s: any) => {
@@ -955,6 +961,24 @@ function AlterdataConnectorPanel() {
       <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-[12px] text-sky-200/90">
         O token é emitido pelo <strong>Guardian da ModaUp</strong>: o <strong>Client ID é o e-mail</strong> e o <strong>Client Secret é a senha</strong> de um usuário de <strong>retaguarda com acesso total</strong>. Salve as credenciais (guardadas cifradas) e clique em <strong>Testar conexão</strong> para validar.
       </div>
+
+      {/* Resposta clara "a grade está chegando?" — o que a loja virtual precisa
+          como fonte única (tamanho/cor por SKU). Derivado do catálogo importado. */}
+      {grade && (
+        <div className={`mt-3 rounded-lg border p-3 text-[13px] ${grade.gradeFlowing ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200' : 'border-amber-500/30 bg-amber-500/5 text-amber-200'}`}>
+          {grade.gradeFlowing ? (
+            <>
+              <span className="font-semibold">✅ Grade (tamanho/cor) chegando da Alterdata.</span>
+              <span className="text-zinc-400"> {grade.variantsWithGrade} variantes com grade · {grade.productsFromAlterdata} produtos do ERP · {grade.storeStockRows} saldos por loja. A loja virtual tem fonte única — sem digitação dupla.</span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">⚠️ Ainda sem grade (tamanho/cor) da Alterdata.</span>
+              <span className="text-zinc-400"> {grade.connected ? 'A conexão está ativa, mas o catálogo ainda não trouxe variantes com tamanho/cor — clique em “Sincronizar agora” ou verifique com a Alterdata se o módulo de catálogo (Referência/CódigoDeBarras) está liberado.' : 'A Alterdata ainda não está conectada (sem token). A grade e o estoque da loja virtual dependem dessa conexão.'}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* RF-10/11: Prontidão do go-live. Cada blocker mostra responsável + ação. */}
       {readiness && (

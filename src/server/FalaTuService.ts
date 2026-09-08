@@ -736,4 +736,19 @@ export class FalaTuService {
       lists: FalaTuService.lists(orgId, userId),
     };
   }
+
+  /**
+   * F9 — resumo da CENTRAL DE SAÚDE (o mesmo do digest de WhatsApp) entregue
+   * TAMBÉM pelo Fala Tu. Reusa `BusinessTutorService.morningBrief` (não
+   * recomputa). Contém DINHEIRO → role-gated: só p/ quem tem visão completa do
+   * negócio (dono/admin/gestor, §73); os demais recebem `null` (não vaza).
+   * Import dinâmico p/ não acoplar o motor de caixa no load do Fala Tu.
+   */
+  static async healthDigestFor(orgId: string, user: any): Promise<{ text: string; status: string; priorityCount: number } | null> {
+    const { ContextProjectionService } = await import("./ContextProjectionService.js");
+    if (!ContextProjectionService.hasFullBusinessVisibility(orgId, user)) return null;
+    const { BusinessTutorService } = await import("./BusinessTutorService.js");
+    const b = BusinessTutorService.morningBrief(orgId);
+    return { text: b.text, status: b.status, priorityCount: b.priorityCount };
+  }
 }

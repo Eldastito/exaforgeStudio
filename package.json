@@ -718,6 +718,7 @@
     "test:falatu-record-expense": "tsx scripts/test-falatu-record-expense.ts",
     "test:falatu-record-sale": "tsx scripts/test-falatu-record-sale.ts",
     "test:falatu-record-contact": "tsx scripts/test-falatu-record-contact.ts",
+    "test:falatu-health-digest": "tsx scripts/test-falatu-health-digest.ts",
     "test:healthy-reserve": "tsx scripts/test-healthy-reserve.ts",
     "test:owner-draws": "tsx scripts/test-owner-draws.ts",
     "test:ai-governance": "tsx scripts/test-ai-governance.ts",

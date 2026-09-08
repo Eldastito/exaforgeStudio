@@ -35,7 +35,7 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { RetailStoreService } = await import("../src/server/RetailStoreService.js");
   const { RetailQuotaService, RetailClosingService, RetailTaskService, __setClosingExtractorForTests } = await import("../src/server/RetailOpsService.js");
-  const { RetailWhatsAppIntakeService, parseBrlAmount } = await import("../src/server/RetailWhatsAppIntakeService.js");
+  const { RetailWhatsAppIntakeService, parseBrlAmount, parseSpokenBrlAmount, hasClosingIntent } = await import("../src/server/RetailWhatsAppIntakeService.js");
 
   const DATE = "2026-07-15";
   const A = `org_A_${randomUUID().slice(0, 6)}`;
@@ -97,6 +97,44 @@ async function main() {
   RetailTaskService.generateDay(A, DATE4); // agora existe pendência de fechamento
   const r5 = await RetailWhatsAppIntakeService.handleInbound(A, store, { senderId: "5531988887777", text: "bom dia!", contactId: "c1", date: DATE4 });
   check("Texto irrelevante COM pendência → orienta", !!r5?.reply && /foto da folha|valor total/i.test(r5!.reply));
+
+  // ---- 5b. Valor FALADO (áudio transcrito) por extenso ----
+  check("spoken: 'doze mil e quinhentos' = 12500", parseSpokenBrlAmount("doze mil e quinhentos") === 12500);
+  check("spoken: 'oito mil' = 8000", parseSpokenBrlAmount("oito mil") === 8000);
+  check("spoken: 'mil e duzentos' = 1200", parseSpokenBrlAmount("mil e duzentos") === 1200);
+  check("spoken: 'doze mil quinhentos e cinquenta' = 12550", parseSpokenBrlAmount("doze mil quinhentos e cinquenta") === 12550);
+  check("spoken: 'doze e meio mil' = 12500", parseSpokenBrlAmount("doze e meio mil") === 12500);
+  check("spoken: '12,5 mil' = 12500", parseSpokenBrlAmount("12,5 mil") === 12500);
+  check("spoken: 'o fechamento foi 12500 reais' = 12500", parseSpokenBrlAmount("o fechamento foi 12500 reais") === 12500);
+  check("spoken: 'cem reais' = 100", parseSpokenBrlAmount("cem reais") === 100);
+  check("spoken: 'um dia bom' = null (unidade solta não vira R$1)", parseSpokenBrlAmount("um dia bom") === null);
+  check("spoken: 'dois' = null (unidade solta)", parseSpokenBrlAmount("dois") === null);
+  check("spoken: 'oitenta' = 80 (dezena isolada aceita)", parseSpokenBrlAmount("oitenta") === 80);
+
+  check("intent: 'fechamos com doze mil' → tem intenção", hasClosingIntent("fechamos com doze mil") === true);
+  check("intent: 'fechamento do dia' → tem intenção", hasClosingIntent("fechamento do dia") === true);
+  check("intent: 'me manda duas blusas 38' → SEM intenção", hasClosingIntent("me manda duas blusas 38") === false);
+
+  // Fluxo: áudio transcrito com intenção + extenso → registra (source whatsapp_voice).
+  const DATE5 = "2026-07-20";
+  RetailQuotaService.set(A, { storeId: store.id, quotaDate: DATE5, quotaAmount: 10000 });
+  const rv = await RetailWhatsAppIntakeService.handleInbound(A, store, { senderId: "5531988887777", text: "fechamos hoje com doze mil e quinhentos", contactId: "c1", date: DATE5 });
+  const cv = RetailClosingService.listByDate(A, DATE5).find((c: any) => c.store_id === store.id);
+  check("áudio→extenso: registra 12500", Number(cv?.informed_total) === 12500, String(cv?.informed_total));
+  check("áudio→extenso: source whatsapp_voice", cv?.source === "whatsapp_voice", cv?.source);
+  check("áudio→extenso: confirma que bateu a meta", !!rv?.reply && /bateu/i.test(rv!.reply));
+
+  // Anti-sequestro: mensagem SEM intenção com números por extenso → NÃO registra
+  // (segue fluxo normal), mesmo sem pendência no dia.
+  const DATE6 = "2026-07-21";
+  const rns = await RetailWhatsAppIntakeService.handleInbound(A, store, { senderId: "5531988887777", text: "me manda duas blusas tamanho 38", contactId: "c1", date: DATE6 });
+  check("sem intenção: não registra e segue fluxo (null)", rns === null && RetailClosingService.listByDate(A, DATE6).length === 0);
+
+  // Fallback honesto: intenção de fechamento mas sem número legível → orienta (não inventa).
+  const DATE7 = "2026-07-22";
+  const rfb = await RetailWhatsAppIntakeService.handleInbound(A, store, { senderId: "5531988887777", text: "fechamos agora, foi corrido demais", contactId: "c1", date: DATE7 });
+  check("fallback: intenção sem valor → orienta (texto/foto)", !!rfb?.reply && /valor total|foto da folha/i.test(rfb!.reply));
+  check("fallback: não registrou nada", RetailClosingService.listByDate(A, DATE7).length === 0);
 
   // ---- 6. Isolamento multi-tenant ----
   const B = `org_B_${randomUUID().slice(0, 6)}`;

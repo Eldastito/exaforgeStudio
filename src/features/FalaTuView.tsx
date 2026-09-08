@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, type PointerEvent as ReactPointerEvent } from 'react';
-import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall, MessageCircle } from 'lucide-react';
+import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall, MessageCircle, Share2 } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
@@ -23,6 +23,21 @@ async function api(path: string, opts: RequestInit = {}) {
 const INTENT_LABEL: Record<string, string> = {
   TASK: 'Tarefa', EVENT: 'Compromisso', LIST: 'Lista', NOTE: 'Nota', UNKNOWN: 'Não identificado',
 };
+
+// F13 — chave do histórico de perguntas no localStorage, namespaced por
+// (org, usuário) do perfil salvo (`zappflow_user`), pra não misturar consultas
+// de contas diferentes no mesmo navegador.
+function askThreadStorageKey(): string {
+  try {
+    const raw = localStorage.getItem('zappflow_user');
+    const u = raw ? JSON.parse(raw) : {};
+    const org = u?.organizationId || u?.organization_id || u?.orgId || 'org';
+    const uid = u?.id || u?.userId || 'user';
+    return `falatu_ask_thread_${org}_${uid}`;
+  } catch { return 'falatu_ask_thread'; }
+}
+const mkAskId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const todayKey = () => new Date().toISOString().slice(0, 10);
 
 type InboxItem = {
   id: string; status: string; intent: string; summary: string | null; transcription: string | null;
@@ -289,7 +304,12 @@ export function FalaTuView() {
   // na tela (POST /api/falatu/ask). Thread mais recente no topo.
   const [askQuestion, setAskQuestion] = useState('');
   const [askBusy, setAskBusy] = useState(false);
-  const [askThread, setAskThread] = useState<{ q: string; answer: string; grounded: boolean; restricted: boolean }[]>([]);
+  const [askThread, setAskThread] = useState<{ id: string; q: string; answer: string; grounded: boolean; restricted: boolean }[]>([]);
+  // F13 — persistência TEMPORÁRIA (só neste aparelho, não vai pro servidor) +
+  // limpeza automática no dia seguinte. Chave namespaced por org+usuário pra não
+  // vazar consulta entre contas no mesmo navegador. hydrated evita o 1º efeito
+  // de save apagar o storage antes de restaurar.
+  const askHydratedRef = useRef(false);
   // F8 — voz na aba "Perguntar": gravador DEDICADO (o compartilhado é cabeado
   // pra captura). O dono fala; o áudio vai pro /ask, que transcreve e responde.
   const [askRecording, setAskRecording] = useState(false);
@@ -761,17 +781,57 @@ export function FalaTuView() {
     setAskBusy(true);
     try {
       const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
-      setAskThread((prev) => [{ q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
+      setAskThread((prev) => [{ id: mkAskId(), q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
       setAskQuestion('');
       // F4 — se foi um pedido de GRAVAR, virou item pendente: recarrega o Inbox
       // pra o card de confirmação já aparecer na aba.
       if (r?.data?.pendingId) loadPending();
     } catch (e: any) {
-      setAskThread((prev) => [{ q, answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
+      setAskThread((prev) => [{ id: mkAskId(), q, answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
     } finally {
       setAskBusy(false);
     }
   }, [askQuestion, askBusy, loadPending]);
+
+  // F13 — restaura o histórico do dia ao montar; do dia anterior → limpa.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(askThreadStorageKey());
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.day === todayKey() && Array.isArray(saved.items)) {
+          setAskThread(saved.items.map((it: any) => ({ id: it.id || mkAskId(), q: it.q || '', answer: it.answer || '', grounded: !!it.grounded, restricted: !!it.restricted })));
+        } else {
+          localStorage.removeItem(askThreadStorageKey()); // limpeza do dia anterior
+        }
+      }
+    } catch { /* storage indisponível → segue sem histórico */ }
+    askHydratedRef.current = true;
+  }, []);
+
+  // F13 — persiste o histórico (só neste aparelho) a cada mudança, com a data
+  // pra limpeza no dia seguinte. Só depois da hidratação (senão apagaria).
+  useEffect(() => {
+    if (!askHydratedRef.current) return;
+    try {
+      if (askThread.length) localStorage.setItem(askThreadStorageKey(), JSON.stringify({ day: todayKey(), items: askThread }));
+      else localStorage.removeItem(askThreadStorageKey());
+    } catch { /* noop */ }
+  }, [askThread]);
+
+  // F13 — compartilhar a resposta (WhatsApp/e-mail/apps via share nativo; copia se não houver).
+  const shareAnswer = async (t: { q: string; answer: string }) => {
+    const text = `${t.q}\n\n${t.answer}`;
+    const nav = navigator as any;
+    if (typeof nav.share === 'function') {
+      try { await nav.share({ text }); return; }
+      catch (e: any) { if (e?.name === 'AbortError') return; /* falhou → cai pro copiar */ }
+    }
+    try { await navigator.clipboard.writeText(text); toast.success('Resposta copiada — cole no WhatsApp, e-mail ou onde quiser.'); }
+    catch { toast.error('Não consegui compartilhar. Copie manualmente.'); }
+  };
+  const deleteAnswer = (id: string) => setAskThread((prev) => prev.filter((t) => t.id !== id));
+  const clearAskThread = () => setAskThread([]);
 
   // F8 — grava a pergunta por VOZ e manda pro /ask (que transcreve + responde).
   const startAskRecording = async () => {
@@ -791,10 +851,10 @@ export function FalaTuView() {
         try {
           const data = await blobToBase64(blob);
           const r = await api('/ask', { method: 'POST', body: JSON.stringify({ audio: { mimeType: mime, data } }) });
-          setAskThread((prev) => [{ q: r?.question || '🎤 (áudio)', answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
+          setAskThread((prev) => [{ id: mkAskId(), q: r?.question || '🎤 (áudio)', answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
           if (r?.data?.pendingId) loadPending();
         } catch (e: any) {
-          setAskThread((prev) => [{ q: '🎤 (áudio)', answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
+          setAskThread((prev) => [{ id: mkAskId(), q: '🎤 (áudio)', answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
         } finally { setAskBusy(false); }
       };
       rec.start();
@@ -936,13 +996,32 @@ export function FalaTuView() {
             {askThread.length === 0 && !askBusy && (
               <p className="text-center text-sm text-ft-text-muted pt-6">Faça uma pergunta sobre o seu negócio — a resposta aparece aqui.</p>
             )}
-            {askThread.map((t, i) => (
-              <div key={i} className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-1.5">
+            {/* F13 — as respostas ficam neste aparelho e somem no dia seguinte; dá pra limpar já. */}
+            {askThread.length > 0 && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] text-ft-text-faint">As respostas ficam só neste aparelho e são apagadas no dia seguinte.</span>
+                <button onClick={clearAskThread} className="inline-flex items-center gap-1 text-xs text-ft-text-muted hover:text-ft-text">
+                  <Trash2 className="h-3.5 w-3.5" /> Limpar tudo
+                </button>
+              </div>
+            )}
+            {askThread.map((t) => (
+              <div key={t.id} className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-1.5">
                 <p className="text-sm font-medium text-ft-text">{t.q}</p>
                 <p className={`text-sm whitespace-pre-wrap ${t.restricted ? 'text-ft-on-amber' : 'text-ft-text-muted'}`}>{t.answer}</p>
                 {!t.grounded && !t.restricted && (
                   <p className="text-[11px] text-ft-text-faint">Resposta da IA a partir do panorama do negócio.</p>
                 )}
+                <div className="flex items-center gap-2 pt-1.5">
+                  <button onClick={() => shareAnswer(t)} title="Compartilhar (WhatsApp, e-mail, apps…)"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-1.5 text-xs text-ft-text">
+                    <Share2 className="h-3.5 w-3.5" /> Compartilhar
+                  </button>
+                  <button onClick={() => deleteAnswer(t.id)} title="Excluir esta resposta"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-ft-border hover:bg-ft-surface-2 px-2.5 py-1.5 text-xs text-ft-text-muted hover:text-ft-text">
+                    <Trash2 className="h-3.5 w-3.5" /> Excluir
+                  </button>
+                </div>
               </div>
             ))}
           </div>

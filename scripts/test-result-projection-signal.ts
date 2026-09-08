@@ -78,6 +78,40 @@ async function main() {
   // 9. Isolamento.
   check("9.1 isolado (A tem, C/D não)", !!sig(A) && !sig(C) && !sig(D));
 
+  // ── 10. REDE FÍSICA (sem `orders` online) entra no passe pela receita do PDV ──
+  // Antes o pass() só olhava `orders` — uma rede física (TOULON) nunca disparava.
+  const E = mkOrg();
+  const dP = "2026-06";
+  // Receita física de PDV que projeta prejuízo: 200 no dia 10 (run-rate p/ dia 15) < fixo 300.
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B1', ?, 200, 3, 'N')`).run(randomUUID(), E, `${dP}-10`);
+  mkPayable(E, 20, "none", dP); mkPayable(E, 500, "monthly", dP); // fixo alto → projeta prejuízo
+  const r10 = RP.publishResultProjectionSignal(E, { period: dP, asOf: `${dP}-15` });
+  check("10.1 rede física projeta prejuízo → publica (DRE já lê a física)", r10.published === true && !!sig(E));
+  check("10.2 confirma que E não tem NENHUM pedido online", (db.prepare(`SELECT COUNT(*) n FROM orders WHERE organization_id=?`).get(E) as any).n === 0);
+
+  // ── 11. Fallback do passe: org só com FECHAMENTO diário (sem PDV) também é auditada ──
+  const F = mkOrg();
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total) VALUES (?, ?, ?, ?, 'received', 250)`).run(randomUUID(), F, randomUUID(), `${dP}-10`);
+  mkPayable(F, 20, "none", dP); mkPayable(F, 600, "monthly", dP); // fixo alto → projeta prejuízo
+  // pass() usa o mês corrente; então testamos a audiência direto pela receita registrada e o publish com asOf explícito.
+  const r11 = RP.publishResultProjectionSignal(F, { period: dP, asOf: `${dP}-15` });
+  check("11.1 org só com fechamento diário → publica (receita física do fechamento)", r11.published === true && !!sig(F));
+
+  // ── 12. pass() (mês CORRENTE) audita uma rede física-only ──────────────────
+  // Prova a expansão da audiência: sem `orders`, só PDV no mês corrente. A
+  // publicação depende de ≥5 dias decorridos (RN-RP-2), então guarda pelo dia.
+  const nowYm = new Date().toISOString().slice(0, 7);
+  const nowDay = Number(new Date().toISOString().slice(8, 10));
+  const G = mkOrg();
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B1', ?, 100, 1, 'N')`).run(randomUUID(), G, `${nowYm}-01`);
+  mkPayable(G, 5000, "monthly", nowYm); // fixo enorme → projeta prejuízo em qualquer ritmo
+  RP.pass();
+  if (nowDay >= 5) {
+    check("12.1 pass() audita rede física-only e sinaliza (mês corrente)", !!sig(G));
+  } else {
+    check("12.1 pass() rodou sem quebrar (poucos dias no mês → sem sinal ainda)", true);
+  }
+
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} result-projection-signal: ${passed}/${results.length} checks`);

@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { OwnerDrawService } from "./OwnerDrawService.js";
+import { ReportsService } from "./ReportsService.js";
 
 /**
  * DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa em linguagem
@@ -37,6 +38,40 @@ export class ManagerialDreService {
     } catch { return { revenue: 0, cost: 0 }; }
   }
 
+  /**
+   * Receita e CMV da LOJA FÍSICA (PDV/rede) no mês — o fluxo que faltava no DRE
+   * (antes só somava `order_items`, por isso zerava numa rede física). Receita
+   * vem de `ReportsService.retailPhysicalFlow` (vendas do PDV ou fechamentos).
+   * CMV é BEST-EFFORT: só das vendas do PDV com item (`retail_pdv_sale_items`)
+   * cujo produto tem custo médio conhecido (`inventory_items.avg_cost`). O que
+   * não tem custo entra como receita SEM custo → `costCoverage` mede a fração
+   * coberta, pra a margem NUNCA fingir lucro cheio (a nota avisa quando parcial).
+   */
+  private static retailRevCost(orgId: string, period: string): { revenue: number; cost: number; source: "pdv" | "fechamento" | "none"; costCoverage: number | null } {
+    const { from, to } = monthBounds(period);
+    const flow = ReportsService.retailPhysicalFlow(orgId, from, to);
+    if (!(flow.revenue > 0)) return { revenue: 0, cost: 0, source: flow.source, costCoverage: null };
+    let cost = 0, coveredRevenue = 0;
+    if (flow.source === "pdv") {
+      try {
+        const rows = db.prepare(`
+          SELECT i.quantidade AS qty, i.valor AS val,
+                 (SELECT inv.avg_cost FROM inventory_items inv
+                    WHERE inv.organization_id = i.organization_id AND inv.product_service_id = i.product_service_id
+                      AND COALESCE(inv.avg_cost,0) > 0 LIMIT 1) AS unit_cost
+            FROM retail_pdv_sale_items i
+           WHERE i.organization_id = ? AND i.sale_date >= ? AND i.sale_date <= ? AND i.product_service_id IS NOT NULL
+        `).all(orgId, from, to) as any[];
+        for (const r of rows) {
+          const uc = Number(r.unit_cost) || 0;
+          if (uc > 0) { cost += uc * (Number(r.qty) || 0); coveredRevenue += Number(r.val) || 0; }
+        }
+      } catch { /* retail_pdv_sale_items pode não existir em base antiga */ }
+    }
+    const costCoverage = flow.revenue > 0 ? round2(coveredRevenue / flow.revenue) : null; // 0..1
+    return { revenue: round2(flow.revenue), cost: round2(cost), source: flow.source, costCoverage };
+  }
+
   private static lossDriver(orgId: string, period: string, driver: string): number {
     try { return round2((db.prepare("SELECT COALESCE(SUM(amount),0) s FROM loss_events WHERE organization_id = ? AND driver = ? AND period = ?").get(orgId, driver, period) as any).s); } catch { return 0; }
   }
@@ -62,12 +97,16 @@ export class ManagerialDreService {
     const { from, to } = monthBounds(period);
     const core = this.coreRevCost(orgId, period);
     const comigo = ComigoHealthService.rangeResult(orgId, from, to);
+    const retail = this.retailRevCost(orgId, period);   // loja física (PDV/rede)
 
-    const receitaBruta = round2(core.revenue + comigo.revenue);
+    const receitaBruta = round2(core.revenue + comigo.revenue + retail.revenue);
     const descontos = this.lossDriver(orgId, period, "desconto");
     const devolucoes = this.lossDriver(orgId, period, "devolucao");
     const receitaLiquida = round2(receitaBruta - descontos - devolucoes);
-    const cmv = round2(core.cost + comigo.cost);
+    const cmv = round2(core.cost + comigo.cost + retail.cost);
+    // Custo do varejo é parcial? (receita física entrou, mas nem todo custo é
+    // conhecido) → a margem pode estar superestimada; a nota avisa (não finge).
+    const retailCostPartial = retail.revenue > 0 && (retail.source !== "pdv" || (retail.costCoverage != null && retail.costCoverage < 0.999));
     const margemBruta = round2(receitaLiquida - cmv);
     const margemPct = receitaLiquida > 0 ? round2((margemBruta / receitaLiquida) * 100) : null;
     const desp = this.despesasSplit(orgId, period);
@@ -85,7 +124,9 @@ export class ManagerialDreService {
       breakdown: {
         core: { revenue: core.revenue, cost: core.cost },
         comigo: { revenue: round2(comigo.revenue), cost: round2(comigo.cost) },
+        retail: { revenue: retail.revenue, cost: retail.cost, source: retail.source, costCoverage: retail.costCoverage },
       },
+      retailCostPartial,
     };
   }
 
@@ -110,7 +151,9 @@ export class ManagerialDreService {
       notas: {
         retiradas: "Retiradas dos sócios (pró-labore, distribuição, despesas pessoais) — cadastre no Empresa × Proprietário.",
         despesas: "Despesas por competência do vencimento — fixas = recorrentes, variáveis = avulsas. A visão de caixa fica no Motor de Caixa.",
+        ...(cur.retailCostPartial ? { varejo: "Inclui a receita da loja física (PDV). O CMV do varejo ainda é parcial (custo por produto incompleto) — a margem bruta pode estar superestimada até o custo vir completo da Alterdata." } : {}),
       },
+      retailCostPartial: cur.retailCostPartial,
       disclaimer: DISCLAIMER,
     };
   }

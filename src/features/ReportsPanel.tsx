@@ -301,9 +301,12 @@ function DreSection() {
         <Row label="Retiradas dos sócios" value={l.retiradas} op="(-)" muted />
         <Row label={l.sobra >= 0 ? 'Sobra (reinveste)' : 'Consumo (tira do caixa)'} value={l.sobra} strong deltaKey="sobra" />
       </div>
-      {(d.breakdown?.comigo?.revenue > 0 || d.breakdown?.core?.revenue > 0) && (
-        <p className="mt-2 text-[11px] text-zinc-500">Receita: loja/serviço {brl(d.breakdown.core.revenue)} · Balcão (Comigo) {brl(d.breakdown.comigo.revenue)}.</p>
+      {(d.breakdown?.comigo?.revenue > 0 || d.breakdown?.core?.revenue > 0 || d.breakdown?.retail?.revenue > 0) && (
+        <p className="mt-2 text-[11px] text-zinc-500">Receita: loja online/serviço {brl(d.breakdown.core.revenue)}
+          {d.breakdown?.retail?.revenue > 0 && <> · 🏬 Loja física {brl(d.breakdown.retail.revenue)}</>}
+          {d.breakdown?.comigo?.revenue > 0 && <> · Balcão (Comigo) {brl(d.breakdown.comigo.revenue)}</>}.</p>
       )}
+      {d.notas?.varejo && <p className="mt-1 text-[11px] text-amber-400/80">⚠️ {d.notas.varejo}</p>}
       <p className="mt-1 text-[11px] text-zinc-500">{d.notas?.despesas}</p>
       <p className="mt-2 text-[11px] text-amber-200/70 border-t border-zinc-800 pt-2">{d.disclaimer}</p>
     </div>

@@ -102,6 +102,40 @@ async function main() {
   check("org vazia: receita 0 e margem % null", de.linhas.receitaBruta === 0 && de.linhas.margemPct === null);
   check("org vazia: resultado 0 (isolamento)", de.linhas.resultadoOperacional === 0 && de.linhas.sobra === 0);
 
+  // ===== 7. LOJA FÍSICA (PDV) entra no DRE (antes zerava numa rede física) =====
+  const rorg = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, vertical) VALUES (?, ?, 'R', 'active', 'varejo')`).run(randomUUID(), rorg);
+  const prod = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active) VALUES (?, ?, 'product', 'Calça', 100, 1)`).run(prod, rorg);
+  db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, ?, 10, 30)`).run(randomUUID(), rorg, prod);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B1', ?, 200, 2, 'N')`).run(randomUUID(), rorg, today);
+  db.prepare(`INSERT INTO retail_pdv_sale_items (id, organization_id, filial, boleta, sale_date, item_seq, produto, quantidade, valor, product_service_id) VALUES (?, ?, '1', 'B1', ?, 1, 'REF', 2, 200, ?)`).run(randomUUID(), rorg, today, prod);
+  const rr: any = D.monthly(rorg, period);
+  check("7.1 DRE inclui receita da loja física (200)", near(rr.linhas.receitaBruta, 200));
+  check("7.2 breakdown retail (200/60, source pdv)", near(rr.breakdown.retail.revenue, 200) && near(rr.breakdown.retail.cost, 60) && rr.breakdown.retail.source === "pdv");
+  check("7.3 CMV inclui custo do varejo (2 × 30 = 60)", near(rr.linhas.cmv, 60));
+  check("7.4 margem bruta = 200 - 60 = 140", near(rr.linhas.margemBruta, 140));
+  check("7.5 custo 100% coberto → sem nota de varejo parcial", !rr.notas.varejo && rr.retailCostPartial === false);
+
+  // 7b. item SEM custo conhecido → cobertura parcial → receita entra, nota avisa.
+  const rorg2 = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, vertical) VALUES (?, ?, 'R2', 'active', 'varejo')`).run(randomUUID(), rorg2);
+  const prodNoCost = randomUUID();
+  db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active) VALUES (?, ?, 'product', 'Blusa', 50, 1)`).run(prodNoCost, rorg2);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B9', ?, 150, 1, 'N')`).run(randomUUID(), rorg2, today);
+  db.prepare(`INSERT INTO retail_pdv_sale_items (id, organization_id, filial, boleta, sale_date, item_seq, produto, quantidade, valor, product_service_id) VALUES (?, ?, '1', 'B9', ?, 1, 'REF2', 1, 150, ?)`).run(randomUUID(), rorg2, today, prodNoCost);
+  const rr2: any = D.monthly(rorg2, period);
+  check("7.6 receita física entra mesmo sem custo (150)", near(rr2.linhas.receitaBruta, 150));
+  check("7.7 sem custo → CMV varejo 0, retailCostPartial + nota", near(rr2.breakdown.retail.cost, 0) && rr2.retailCostPartial === true && /parcial/i.test(rr2.notas.varejo || ""));
+
+  // 7c. fechamento-only (sem PDV) → receita in, custo 0, parcial.
+  const rorg3 = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, vertical) VALUES (?, ?, 'R3', 'active', 'varejo')`).run(randomUUID(), rorg3);
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total) VALUES (?, ?, ?, ?, 'received', 800)`).run(randomUUID(), rorg3, randomUUID(), today);
+  const rr3: any = D.monthly(rorg3, period);
+  check("7.8 fechamento-only: receita 800 (source fechamento), custo 0, parcial", near(rr3.linhas.receitaBruta, 800) && rr3.breakdown.retail.source === "fechamento" && rr3.retailCostPartial === true);
+  check("7.9 isolamento: org do core (1500) não recebeu varejo", near(l.receitaBruta, 1500) && (dre.breakdown.retail?.revenue || 0) === 0);
+
   // --- Relatório ---
   console.log("\n=== TEST: DRE Gerencial Simplificada (ADR-128 Fatia 1) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}`);

@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -139,6 +139,8 @@ const SALE_RECORD_RE = /\bvendi\b|\bvendeu\b|\bfaturei\b|(?:registra(?:r)?|lan[�
 // Pergunta nunca é registro: "quanto vendi..." é consulta (cash/sales), não venda
 // a gravar. Palavra interrogativa ou "?" → bloqueia os kinds de gravação.
 const QUESTION_RE = /\b(quanto|quantos|quanta|quantas|qual|quais|quando|quem|onde|por\s?que|porqu[eê]|como)\b|\?/i;
+// F7 (cliente) — cadastro de CLIENTE/CONTATO por comando (verbo + cliente/contato).
+const CONTACT_RE = /(?:cadastra(?:r)?|adiciona(?:r)?|registra(?:r)?|salva(?:r)?|cria(?:r)?)\s+(?:o\s+|a\s+|um\s+|uma\s+|meu\s+|minha\s+|novo\s+|nova\s+)?(?:cliente|contato)\b/i;
 
 export class FalaTuAskService {
   /**
@@ -162,6 +164,11 @@ export class FalaTuAskService {
     // ANTES da pergunta de faturamento (cue é verbo de venda, não "faturamento").
     if (!isQuestion && SALE_RECORD_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
       return { kind: "record_sale", date: null, needsMoney: true };
+    }
+    // Cliente ANTES da gravação genérica ("registra o cliente" contém "registra").
+    // Não é dinheiro → needsMoney false (mas a rota já exige write no módulo).
+    if (!isQuestion && CONTACT_RE.test(t)) {
+      return { kind: "record_contact", date: null, needsMoney: false };
     }
     // Gravação: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
     // pergunta — senão "anota vender mais" viraria consulta de vendas.
@@ -353,6 +360,21 @@ export class FalaTuAskService {
       return {
         kind: "record_sale", date: null, grounded: true, moneyRestricted: false,
         answer: `📝 Preparei o registro da venda de ${brl(r.amount || 0)} (entrada de caixa em ${fmtDate(r.eventDate || "")}). Aprove em *Aprovações* pra gravar — não lanço sozinho.`,
+        data: { actionId: r.actionId, awaitingApproval: true },
+      };
+    }
+
+    // Cadastro de CLIENTE → pipeline governado (não é dinheiro; sem role-gate de §73).
+    if (cls.kind === "record_contact") {
+      const { FalatuRecordService } = await import("./FalatuRecordService.js");
+      const r = FalatuRecordService.recordContact(orgId, user, t);
+      if (!r.proposed) {
+        return { kind: "record_contact", date: null, grounded: true, moneyRestricted: false, answer: "Entendi que é um cliente, mas não peguei o nome. Diga o nome — ex.: *cadastra o cliente João, telefone 11 99999-0000*." };
+      }
+      const extra = [r.phone ? `tel ${r.phone}` : null, r.email || null].filter(Boolean).join(", ");
+      return {
+        kind: "record_contact", date: null, grounded: true, moneyRestricted: false,
+        answer: `📝 Preparei o cadastro do cliente *${r.name}*${extra ? ` (${extra})` : ""}. Aprove em *Aprovações* pra salvar — não cadastro sozinho.`,
         data: { actionId: r.actionId, awaitingApproval: true },
       };
     }

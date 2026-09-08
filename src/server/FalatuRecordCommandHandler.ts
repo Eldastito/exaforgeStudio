@@ -12,6 +12,8 @@
  * 2º `execute` bem-sucedido (`action_already_executed`) — o mesmo lançamento
  * nunca entra 2× no `payables`.
  */
+import { randomUUID } from "crypto";
+import db from "./db.js";
 import { CommandExecutorService, type CommandHandler } from "./CommandExecutorService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 
@@ -93,8 +95,50 @@ export const FalatuRecordSaleCommandHandler: CommandHandler = {
   },
 };
 
+// F7 — CLIENTE (contato). Contatos são presos a um channel_id — não existe
+// criador "sem canal" no repo; espelhamos BalcaoService.ensureFiadoContact:
+// canal SINTÉTICO 'falatu' (uma vez por org) + dedupe por identifier
+// (telefone/email/nome). Idempotência DURÁVEL: dedupe + guard do executor →
+// o mesmo cliente nunca duplica.
+export const FalatuRecordContactCommandHandler: CommandHandler = {
+  key: "FalatuRecordContactCommandHandler",
+  commandTypes: ["falatu_record_contact"],
+
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    const extra = [p.phone, p.email].filter(Boolean).join(" · ");
+    return {
+      summary: `Cliente a cadastrar: ${p.name || "?"}${extra ? ` (${extra})` : ""}`,
+      artifact: { kind: "contact_draft", name: p.name ?? null, phone: p.phone ?? null, email: p.email ?? null },
+    };
+  },
+
+  execute(orgId, action) {
+    const p = payloadOf(action);
+    const name = String(p.name || "").trim();
+    if (!name) throw new Error("Não consegui identificar o nome do cliente.");
+    // Canal sintético 'falatu' (uma vez por org), espelhando o 'balcao'.
+    let ch = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND provider = 'falatu'`).get(orgId) as any;
+    if (!ch) {
+      const chId = randomUUID();
+      db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'falatu', 'Fala Tu', 'falatu', 'connected')`).run(chId, orgId);
+      ch = { id: chId };
+    }
+    const identifier = String(p.phone || p.email || name).trim();
+    const existing = db.prepare(`SELECT id FROM contacts WHERE organization_id = ? AND channel_id = ? AND identifier = ?`).get(orgId, ch.id, identifier) as any;
+    if (existing) {
+      return { summary: `Cliente já cadastrado: ${name}`, artifact: { kind: "contact", contactId: existing.id, deduped: true }, effect: "contact_deduped", externalRef: existing.id };
+    }
+    const contactId = randomUUID();
+    db.prepare(`INSERT INTO contacts (id, organization_id, channel_id, name, identifier, email) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(contactId, orgId, ch.id, name, identifier, p.email || null);
+    return { summary: `Cliente cadastrado: ${name}`, artifact: { kind: "contact", contactId }, effect: "contact_created", externalRef: contactId };
+  },
+};
+
 // Registra no MESMO registry do executor (mesmo padrão de SocialPublishCommandHandler).
 CommandExecutorService.registerHandler(FalatuRecordExpenseCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordSaleCommandHandler);
+CommandExecutorService.registerHandler(FalatuRecordContactCommandHandler);
 
 export default FalatuRecordExpenseCommandHandler;

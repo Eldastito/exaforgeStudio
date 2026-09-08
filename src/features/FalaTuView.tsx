@@ -758,12 +758,15 @@ export function FalaTuView() {
       const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
       setAskThread((prev) => [{ q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
       setAskQuestion('');
+      // F4 — se foi um pedido de GRAVAR, virou item pendente: recarrega o Inbox
+      // pra o card de confirmação já aparecer na aba.
+      if (r?.data?.pendingId) loadPending();
     } catch (e: any) {
       setAskThread((prev) => [{ q, answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
     } finally {
       setAskBusy(false);
     }
-  }, [askQuestion, askBusy]);
+  }, [askQuestion, askBusy, loadPending]);
 
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
@@ -867,7 +870,7 @@ export function FalaTuView() {
       {tab === 'ask' && (
         <>
           <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
-            <p className="text-sm text-ft-text-muted">Converse com o seu negócio — pergunte e eu respondo com o <strong className="text-ft-text">dado real</strong>. Ex.: <em>"quanto vendi em dinheiro hoje?"</em>, <em>"quem está de folga amanhã?"</em>.</p>
+            <p className="text-sm text-ft-text-muted">Converse com o seu negócio — <strong className="text-ft-text">pergunte</strong> e eu respondo com o dado real (<em>"quanto vendi em dinheiro hoje?"</em>, <em>"quem está de folga amanhã?"</em>), ou peça pra <strong className="text-ft-text">gravar</strong> algo (<em>"anota ligar pro contador amanhã"</em>) — você confirma antes de salvar.</p>
             <div className="flex gap-2">
               <input value={askQuestion} onChange={(e) => setAskQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendAsk()}
                 placeholder='Ex.: "quanto a loja fez em dinheiro no dia 31 de agosto?"'

@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -120,6 +120,12 @@ const CASH_RE = /\b(dinheiro|em esp[eé]cie)\b/i;
 const SALES_CUE_RE = /\b(vend|faturou|faturamento|fatur[oó]|receita|fez|entrou|receb|quanto|total|caixa)\b/i;
 const SALES_RE = /\b(vend|faturou|faturamento|fatur[oó]|receita|total de venda)\b/i;
 const OFF_RE = /\b(folga|folgando|folgar|de folga|escala|quem (est[aá]|vai estar|vai) (de folga|folgando))\b/i;
+// F4 (gravar) — verbos de GRAVAÇÃO no INÍCIO da fala. O dono pede pra guardar
+// algo ("anota ligar pro contador amanhã", "grava: comprar embalagens"). Isso
+// NÃO responde — vira captura PENDENTE (Fala→Faz→Confere), reusando a porta de
+// gravação que já existe; nunca escrita direta (RN-151).
+const RECORD_RE = /^(?:grava|gravar|anota|anotar|registra|registrar|guarda|guardar|salva|salvar|cadastra|cadastrar|lan[çc]a|lan[çc]ar)\b[:,]?\s*/i;
+const RECORD_LABEL: Record<string, string> = { TASK: "tarefa", EVENT: "compromisso", LIST: "lista", NOTE: "nota", UNKNOWN: "nota" };
 
 export class FalaTuAskService {
   /**
@@ -130,6 +136,11 @@ export class FalaTuAskService {
   static classify(text: string, today: string): FalaTuAskClassification {
     const t = String(text || "");
     const date = extractDate(t, today);
+    // Gravação primeiro: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
+    // pergunta — senão "anota vender mais" viraria consulta de vendas.
+    if (RECORD_RE.test(t)) {
+      return { kind: "record", date: null, needsMoney: false };
+    }
     // Folga/escala tem prioridade quando o texto é claramente sobre isso.
     if (OFF_RE.test(t)) {
       return { kind: "who_is_off", date, needsMoney: false };
@@ -268,6 +279,40 @@ export class FalaTuAskService {
         return { kind: "open_question", answer: text, date: cls.date, grounded: false, moneyRestricted: false };
       }
     }
+  }
+
+  /**
+   * Superfície CONVERSACIONAL: o dono ou PERGUNTA (→ answer, F1) ou pede pra
+   * GRAVAR (→ captura PENDENTE via FalaTuService.capture, Fala→Faz→Confere).
+   * Gravar NUNCA escreve direto: cria só o item pendente que o humano confirma
+   * (RN-151). Reusa a porta de gravação existente — sem novo caminho de escrita.
+   * `opts.source` marca o canal (whatsapp/falatu_web) pro item ser confirmável
+   * no fluxo do canal certo.
+   */
+  static async converse(orgId: string, user: any, text: string, opts: { now?: Date; source?: string } = {}): Promise<FalaTuAskResult> {
+    const t = String(text || "").trim();
+    const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
+    const cls = this.classify(t, today);
+    if (cls.kind !== "record") return this.answer(orgId, user, t, { now: opts.now });
+
+    const userId = user?.userId || user?.id;
+    const content = t.replace(RECORD_RE, "").trim();
+    if (!content) {
+      return { kind: "record", answer: "O que é pra gravar? Ex.: *anota ligar pro contador amanhã* — pode ser áudio também.", date: null, grounded: true, moneyRestricted: false };
+    }
+    const { FalaTuService } = await import("./FalaTuService.js");
+    const item: any = await FalaTuService.capture(orgId, userId, { text: content, source: opts.source || "falatu_web" });
+    // Protocolo (regra de código no capture) não vira item pendente — devolve o
+    // desfecho como está, sem fingir que "anotou".
+    if (item?.protocol) {
+      return { kind: "record", answer: `Protocolo: ${item.protocol.name || item.protocol.kind}.`, date: null, grounded: true, moneyRestricted: false, data: { protocol: item.protocol } };
+    }
+    const label = RECORD_LABEL[String(item?.intent || "NOTE")] || "nota";
+    return {
+      kind: "record", date: null, grounded: true, moneyRestricted: false,
+      answer: `📝 Anotei como *${label}*: ${item?.summary || content}. Confirme pra gravar (na aba *Inbox*).`,
+      data: { pendingId: item?.id || null, intent: item?.intent || null },
+    };
   }
 }
 

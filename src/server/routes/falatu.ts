@@ -77,15 +77,15 @@ router.post("/capture", async (req: AuthRequest, res): Promise<any> => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-// "Conversar com o negócio" — o dono PERGUNTA e recebe a resposta (não vira
-// item de inbox). Roteia p/ query direta (exata, admite lacuna) ou, se aberta,
-// pros agentes de IA. Dinheiro é role-gated DENTRO do service (§73). Valida só
-// forma aqui; invariante fica no service.
+// "Conversar com o negócio" — o dono PERGUNTA (resposta direta) OU pede pra
+// GRAVAR (vira captura pendente Fala→Faz→Confere, nunca escrita direta). O
+// roteamento (pergunta × gravação × query direta × agentes de IA) e o
+// role-gate de dinheiro (§73) vivem no service. Valida só forma aqui.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   const { question } = req.body || {};
   if (typeof question !== "string" || !question.trim()) return res.status(400).json({ error: "question deve ser string não vazia." });
   try {
-    res.json(await FalaTuAskService.answer(req.organizationId!, req.user, question));
+    res.json(await FalaTuAskService.converse(req.organizationId!, req.user, question));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

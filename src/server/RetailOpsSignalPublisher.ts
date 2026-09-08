@@ -26,6 +26,10 @@ import { haversineKm } from "./geo.js";
  *    estoque do ERP desatualizado (ação: lançar as baixas).
  *  - `retail_seller_below_quota`: vendedor abaixo da meta das regras de comissão
  *    (ação: acompanhar).
+ *  - `retail_store_no_closing`: loja que NÃO fechou o caixa do último dia (ação:
+ *    cobrar o fechamento). Só para lojas que participam da rotina.
+ *  - `retail_store_below_quota`: loja que fechou ABAIXO da cota no último dia
+ *    (ação: entender o desvio). Leva o gap em R$.
  */
 
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
@@ -213,6 +217,52 @@ export class RetailOpsSignalPublisher {
           impactAmount: round2(top.sales), impactUnit: "BRL", sourceEntityType: "user", sourceEntityId: top.sellerUserId,
           evidence: { seller: top.sellerName, pct: round2(pct * 100), totalSales: totalSellerSales, windowDays },
           dedupeKey: `retail_ops:seller_concentration`,
+        });
+      }
+    }
+
+    // ── Fechamento diário → Central de Saúde (pedido TOULON) ──────────────────
+    // O fechamento por WhatsApp já registra e responde o desvio; aqui o dado
+    // vira VISÍVEL na Central de Saúde/Pareto: loja que NÃO fechou o caixa e loja
+    // que fechou ABAIXO da cota — no último dia FECHADO (asOf-1; hoje ainda pode
+    // estar em aberto, evita cobrar cedo demais). Publica em `business_signals`
+    // (conv. nº 12 — sem tabela de alerta paralela). Auto-resolve quando o
+    // fechamento chega / volta acima da cota (dedupe por loja+dia).
+    const closeDay = daysBefore(asOf, 1);
+    const dm = (d: string) => `${d.slice(8)}/${d.slice(5, 7)}`;
+    const activeStores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    for (const st of activeStores) {
+      // Loja fechada nesse dia (tem escala e ninguém 'work') → não se espera
+      // fechamento; sem escala lançada → assume aberta (mesma regra do CLOSE-002).
+      const sched = db.prepare(`SELECT COUNT(*) total, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) working FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ?`).get(orgId, st.id, closeDay) as any;
+      if (Number(sched?.total || 0) > 0 && Number(sched?.working || 0) === 0) continue; // folga geral
+      const closing = db.prepare(`SELECT status, informed_total, quota_amount FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(orgId, st.id, closeDay) as any;
+      const informed = !!closing && ["received", "approved"].includes(String(closing.status)) && Number(closing.informed_total) > 0;
+      if (!informed) {
+        // Só cobra quem PARTICIPA da rotina de fechamento (fechou algum dia no
+        // último mês OU tem cota lançada no dia) — não alerta loja que nunca usa.
+        const participates = !!db.prepare(`SELECT 1 FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date >= ? AND status IN ('received','approved') AND COALESCE(informed_total,0) > 0 LIMIT 1`).get(orgId, st.id, daysBefore(closeDay, windowDays))
+          || !!db.prepare(`SELECT 1 FROM retail_store_quotas WHERE organization_id = ? AND store_id = ? AND quota_date = ? AND COALESCE(quota_amount,0) > 0 LIMIT 1`).get(orgId, st.id, closeDay);
+        if (participates) {
+          pub({
+            domain: "retail_ops", signalType: "retail_store_no_closing", severity: "risk",
+            impactAmount: null, impactUnit: null, sourceEntityType: "retail_store", sourceEntityId: st.id,
+            evidence: { summary: `${st.name} não fechou o caixa de ${dm(closeDay)}`, store: st.name, date: closeDay },
+            dedupeKey: `retail_ops:no_closing:${st.id}:${closeDay}`,
+          });
+        }
+        continue;
+      }
+      // Fechou ABAIXO da cota (cota > 0 e informado < cota) → alerta com o gap R$.
+      const quota = Number(closing.quota_amount) || 0;
+      const total = Number(closing.informed_total) || 0;
+      if (quota > 0 && total < quota) {
+        const gapPct = round2((1 - total / quota) * 10000) / 100;
+        pub({
+          domain: "retail_ops", signalType: "retail_store_below_quota", severity: "attention",
+          impactAmount: round2(quota - total), impactUnit: "BRL", sourceEntityType: "retail_store", sourceEntityId: st.id,
+          evidence: { summary: `${st.name} fechou ${gapPct}% abaixo da cota em ${dm(closeDay)}`, store: st.name, date: closeDay, quota: round2(quota), informed: round2(total), gapPct },
+          dedupeKey: `retail_ops:below_quota:${st.id}:${closeDay}`,
         });
       }
     }

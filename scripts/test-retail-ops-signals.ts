@@ -104,6 +104,50 @@ async function main() {
   const below = db.prepare(`SELECT evidence_json FROM business_signals WHERE organization_id=? AND signal_type='retail_seller_below_quota' AND status='open'`).get(C) as any;
   check("vendedor abaixo da meta: Ana 500 < 1000 → sinal", below && JSON.parse(below.evidence_json).gap === 500, JSON.stringify(below));
 
+  // ===== 3c. Fechamento diário → Central de Saúde (não fechou / abaixo da cota) =====
+  const { RetailClosingService, RetailQuotaService } = await import("../src/server/RetailOpsService.js");
+  const D = `org_D_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'D', 'active')`).run(randomUUID(), D);
+  const RSS = (await import("../src/server/RetailStoreService.js")).RetailStoreService;
+  const d1 = RSS.create(D, { name: "Nao Fechou", code: "1" }).id;      // participa mas não fechou
+  const d2 = RSS.create(D, { name: "Abaixo", code: "2" }).id;          // fechou abaixo da cota
+  const d3 = RSS.create(D, { name: "Bateu", code: "3" }).id;           // fechou acima da cota (sem sinal)
+  const d4 = RSS.create(D, { name: "Nao Participa", code: "4" }).id;   // nunca fecha (sem sinal)
+  const d5 = RSS.create(D, { name: "Folga", code: "5" }).id;           // folga geral no dia (sem sinal)
+  const ydayD = new Date(`${today}T00:00:00Z`); ydayD.setUTCDate(ydayD.getUTCDate() - 1);
+  const yday = ydayD.toISOString().slice(0, 10); // closeDay = asOf-1
+
+  // d1: cota lançada no dia (participa) mas SEM fechamento → deve alertar "não fechou".
+  RetailQuotaService.set(D, { storeId: d1, quotaDate: yday, quotaAmount: 1000 });
+  // d2: fechou 800 com cota 1000 → abaixo (gap 200, 20%).
+  RetailClosingService.submitDetailed(D, d2, yday, { dinheiro: 800 });
+  RetailQuotaService.setForDate(D, d2, yday, 1000);
+  // d3: fechou 1200 com cota 1000 → bateu (nenhum sinal).
+  RetailClosingService.submitDetailed(D, d3, yday, { dinheiro: 1200 });
+  RetailQuotaService.setForDate(D, d3, yday, 1000);
+  // d4: nada (sem cota, sem fechamento, sem histórico) → não participa, não alerta.
+  // d5: folga geral no dia (escala com todos 'off') + cota → deve ser IGNORADA.
+  db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status, created_by) VALUES (?, ?, ?, ?, 'mat:1', 'Ana', 'off', NULL)`).run(randomUUID(), D, d5, yday);
+  RetailQuotaService.set(D, { storeId: d5, quotaDate: yday, quotaAmount: 1000 });
+
+  const rd = RetailOpsSignalPublisher.run(D, { asOf: today, windowDays: 3650 });
+  const noClosing = db.prepare(`SELECT source_entity_id, severity, impact_amount, evidence_json FROM business_signals WHERE organization_id=? AND signal_type='retail_store_no_closing' AND status='open'`).all(D) as any[];
+  check("3c.1 loja que não fechou → retail_store_no_closing (risco, sem R$)", noClosing.length === 1 && noClosing[0].source_entity_id === d1 && noClosing[0].severity === "risk" && noClosing[0].impact_amount === null, JSON.stringify(noClosing));
+  check("3c.2 summary humano no evidence", noClosing[0] && /não fechou o caixa/.test(JSON.parse(noClosing[0].evidence_json).summary), noClosing[0]?.evidence_json);
+  const belowQ = db.prepare(`SELECT source_entity_id, severity, impact_amount, evidence_json FROM business_signals WHERE organization_id=? AND signal_type='retail_store_below_quota' AND status='open'`).all(D) as any[];
+  check("3c.3 loja abaixo da cota → retail_store_below_quota (atenção, gap 200)", belowQ.length === 1 && belowQ[0].source_entity_id === d2 && belowQ[0].severity === "attention" && Number(belowQ[0].impact_amount) === 200, JSON.stringify(belowQ));
+  check("3c.4 gap% = 20 no evidence", belowQ[0] && Number(JSON.parse(belowQ[0].evidence_json).gapPct) === 20, belowQ[0]?.evidence_json);
+  check("3c.5 loja que bateu a cota (d3) NÃO gera sinal", !db.prepare(`SELECT 1 FROM business_signals WHERE organization_id=? AND source_entity_id=? AND signal_type IN ('retail_store_no_closing','retail_store_below_quota')`).get(D, d3));
+  check("3c.6 loja que não participa (d4) NÃO gera sinal", !db.prepare(`SELECT 1 FROM business_signals WHERE organization_id=? AND source_entity_id=? AND signal_type='retail_store_no_closing'`).get(D, d4));
+  check("3c.7 loja em folga geral (d5) NÃO gera sinal", !db.prepare(`SELECT 1 FROM business_signals WHERE organization_id=? AND source_entity_id=? AND signal_type='retail_store_no_closing'`).get(D, d5), JSON.stringify(rd));
+
+  // Auto-resolve: d1 fecha o caixa (tardio) → próximo run resolve o "não fechou".
+  RetailClosingService.submitDetailed(D, d1, yday, { dinheiro: 1500 });
+  RetailQuotaService.setForDate(D, d1, yday, 1000);
+  RetailOpsSignalPublisher.run(D, { asOf: today, windowDays: 3650 });
+  const d1After = db.prepare(`SELECT status FROM business_signals WHERE organization_id=? AND source_entity_id=? AND signal_type='retail_store_no_closing'`).get(D, d1) as any;
+  check("3c.8 d1 fechou → sinal 'não fechou' auto-resolvido", d1After?.status === "resolved", JSON.stringify(d1After));
+
   // ===== 4. Isolamento =====
   const B = `org_B_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

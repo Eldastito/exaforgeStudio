@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge, PiggyBank } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge, PiggyBank, Landmark } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -186,6 +186,7 @@ export function ReportsPanel() {
         </>
       )}
 
+      <ConnectedFinancialsCard />
       <DreSection />
       <ResultProjectionCard />
       <HealthyReserveSection />
@@ -259,6 +260,61 @@ function OwnerSection() {
           <ul className="mt-1.5 space-y-0.5">{d.premissas?.map((p: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {p}</li>)}</ul>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Leitura do CFO — DRE + Balanço + Fluxo de Caixa conectados (ADR-200) ─────
+function ConnectedFinancialsCard() {
+  const [c, setC] = useState<any | null>(null);
+  useEffect(() => { apiFetch('/api/dre/connected').then((r) => r.json()).then((x: any) => { if (x?.ponte) setC(x); }).catch(() => {}); }, []);
+  if (!c) return null;
+  const p = c.ponte;
+  const alerta = p.lucroSemCaixa;
+  const Pill = ({ label, value, hint, tone }: { label: string; value: number; hint: string; tone: 'sky' | 'emerald' | 'amber' }) => {
+    const cls = tone === 'emerald' ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-200'
+      : tone === 'amber' ? 'border-amber-500/30 bg-amber-500/5 text-amber-200'
+      : 'border-sky-500/30 bg-sky-500/5 text-sky-200';
+    return (
+      <div className={`rounded-lg border p-3 ${cls}`}>
+        <div className="text-[11px] uppercase tracking-wide opacity-80">{label}</div>
+        <div className="text-xl font-semibold tabular-nums">{brl(value)}</div>
+        <div className="text-[11px] opacity-70 mt-0.5">{hint}</div>
+      </div>
+    );
+  };
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+        <h3 className="text-zinc-100 font-semibold flex items-center gap-2"><Landmark className="w-5 h-5 text-indigo-300" /> Leitura do CFO <span className="text-xs font-normal text-zinc-500">· lucro × caixa × preso · {c.period}</span></h3>
+        {alerta && <span className="text-xs rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 px-2.5 py-1">lucrou, mas o caixa não veio</span>}
+      </div>
+
+      <div className="grid sm:grid-cols-3 gap-3 mt-2">
+        <Pill label="Lucro (competência)" value={p.lucro} hint="o que o DRE diz que você ganhou" tone="sky" />
+        <Pill label="Caixa que entrou" value={p.caixaGerado} hint="variação real no banco" tone={p.caixaGerado >= 0 ? 'emerald' : 'amber'} />
+        <Pill label="Preso (giro)" value={p.preso} hint="estoque + a receber" tone="amber" />
+      </div>
+
+      <div className={`mt-3 rounded-lg border p-3 text-[13px] flex items-start gap-2 ${alerta ? 'border-amber-500/30 bg-amber-500/5 text-amber-200' : 'border-zinc-800 bg-zinc-950/40 text-zinc-300'}`}>
+        {alerta && <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
+        <div>{c.narrativa}</div>
+      </div>
+
+      {(p.decomposicao?.deltaReceber > 0 || (p.decomposicao?.deltaEstoque || 0) > 0 || p.decomposicao?.deltaPagar !== 0) && (
+        <p className="mt-2 text-[11px] text-zinc-500">
+          Ponte lucro→caixa: {p.decomposicao.deltaReceber ? `a receber ${p.decomposicao.deltaReceber > 0 ? '+' : ''}${brl(p.decomposicao.deltaReceber)}` : ''}
+          {p.decomposicao.deltaEstoque != null ? ` · estoque ${p.decomposicao.deltaEstoque > 0 ? '+' : ''}${brl(p.decomposicao.deltaEstoque)}` : ' · estoque —'}
+          {` · a pagar ${p.decomposicao.deltaPagar > 0 ? '+' : ''}${brl(p.decomposicao.deltaPagar)}`}
+          {p.decomposicao.aConciliar ? ` · a conciliar ${brl(p.decomposicao.aConciliar)}` : ''}.
+        </p>
+      )}
+      {c.caveats?.length > 0 && (
+        <ul className="mt-2 space-y-0.5 border-t border-zinc-800 pt-2">
+          {c.caveats.slice(0, 3).map((x: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {x}</li>)}
+        </ul>
+      )}
+      <p className="mt-2 text-[11px] text-amber-200/70">{c.disclaimer}</p>
     </div>
   );
 }

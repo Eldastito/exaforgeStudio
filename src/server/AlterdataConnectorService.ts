@@ -149,6 +149,24 @@ export class AlterdataConnectorService {
   }
 
   /**
+   * Diagnóstico em LINGUAGEM DE NEGÓCIO: "a GRADE (tamanho/cor) está chegando
+   * da Alterdata?" — hoje isso só dá pra inferir do resumo técnico da última
+   * sync ("890 variantes"). Aqui responde direto, derivado por query (RN-004):
+   * grade = variantes importadas do catálogo (external_ref preenchido, com
+   * tamanho ou cor). Também diz se há estoque por loja da Alterdata. Read-only,
+   * isolado por org. É o que a loja virtual precisa como fonte única.
+   */
+  static catalogGradeStatus(orgId: string): { connected: boolean; gradeFlowing: boolean; variantsWithGrade: number; productsFromAlterdata: number; storeStockRows: number } {
+    const pub = this.publicSettings(orgId);
+    const connected = !!pub.enabled && !!pub.hasToken;
+    const count = (sql: string): number => { try { return Number((db.prepare(sql).get(orgId) as any)?.c || 0); } catch { return 0; } };
+    const variantsWithGrade = count(`SELECT COUNT(*) c FROM product_variants WHERE organization_id = ? AND external_ref IS NOT NULL AND TRIM(external_ref) <> '' AND (size IS NOT NULL OR color IS NOT NULL)`);
+    const productsFromAlterdata = count(`SELECT COUNT(*) c FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND TRIM(external_ref) <> ''`);
+    const storeStockRows = count(`SELECT COUNT(*) c FROM retail_store_inventory WHERE organization_id = ?`);
+    return { connected, gradeFlowing: variantsWithGrade > 0, variantsWithGrade, productsFromAlterdata, storeStockRows };
+  }
+
+  /**
    * Credencial decifrada do env corrente. Prefere profile (isolado por env);
    * cai no legado se profile ainda não tem — mantém zero-regressão.
    */

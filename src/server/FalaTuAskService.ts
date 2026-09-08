@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -144,6 +144,8 @@ const CONTACT_RE = /(?:cadastra(?:r)?|adiciona(?:r)?|registra(?:r)?|salva(?:r)?|
 // F11 (compromisso) — verbo de AGENDAR + (substantivo de compromisso OU "com").
 const APPOINTMENT_VERB_RE = /\b(?:agenda(?:r)?|agende|marca(?:r)?|marque)\b/i;
 const APPOINTMENT_NOUN_RE = /\b(reuni[aã]o|compromisso|consulta|atendimento|visita|call|encontro|hor[aá]rio)\b/i;
+// F12 (recebível/fiado) — registro de conta A RECEBER (dinheiro futuro).
+const RECEIVABLE_KW_RE = /\b(receb[íi]ve(l|is)|fiado|a\s*receber|conta[s]?\s*a\s*receber)\b/i;
 
 export class FalaTuAskService {
   /**
@@ -167,6 +169,10 @@ export class FalaTuAskService {
     // ANTES da pergunta de faturamento (cue é verbo de venda, não "faturamento").
     if (!isQuestion && SALE_RECORD_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
       return { kind: "record_sale", date: null, needsMoney: true };
+    }
+    // Recebível/fiado (conta a receber) — dinheiro futuro. Role-gated (§73).
+    if (!isQuestion && RECEIVABLE_KW_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
+      return { kind: "record_receivable", date: null, needsMoney: true };
     }
     // Cliente ANTES da gravação genérica ("registra o cliente" contém "registra").
     // Não é dinheiro → needsMoney false (mas a rota já exige write no módulo).
@@ -382,6 +388,24 @@ export class FalaTuAskService {
       return {
         kind: "record_contact", date: null, grounded: true, moneyRestricted: false,
         answer: `📝 Preparei o cadastro do cliente *${r.name}*${extra ? ` (${extra})` : ""}. Aprove em *Aprovações* pra salvar — não cadastro sozinho.`,
+        data: { actionId: r.actionId, awaitingApproval: true },
+      };
+    }
+
+    // Recebível/fiado → pipeline governado (conta a receber). Role-gated (§73).
+    if (cls.kind === "record_receivable") {
+      if (!this.canSeeMoney(orgId, user)) {
+        return { kind: "record_receivable", date: null, grounded: true, moneyRestricted: true, answer: "Lançar recebíveis é restrito ao dono, sócios, administradores e gerentes." };
+      }
+      const { FalatuRecordService } = await import("./FalatuRecordService.js");
+      const r = FalatuRecordService.recordReceivable(orgId, user, t, { now: opts.now });
+      if (!r.proposed) {
+        return { kind: "record_receivable", date: null, grounded: true, moneyRestricted: false, answer: "Entendi que é um recebível, mas não peguei o valor. Diga o valor — ex.: *lança um recebível de R$500 do cliente João, vence 10/09*." };
+      }
+      const cli = r.clientName ? ` (${r.clientName})` : "";
+      return {
+        kind: "record_receivable", date: null, grounded: true, moneyRestricted: false,
+        answer: `📝 Preparei o recebível de ${brl(r.amount || 0)}${cli}, vencendo ${fmtDate(r.dueDate || "")}. Aprove em *Aprovações* pra lançar — não lanço sozinho.`,
         data: { actionId: r.actionId, awaitingApproval: true },
       };
     }

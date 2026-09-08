@@ -5,6 +5,7 @@ import { ResultProjectionService } from "../ResultProjectionService.js";
 import { HealthyReserveService } from "../HealthyReserveService.js";
 import { ManagerialBalanceSheetService } from "../ManagerialBalanceSheetService.js";
 import { ManagerialCashFlowService } from "../ManagerialCashFlowService.js";
+import { ConnectedFinancialsService } from "../ConnectedFinancialsService.js";
 
 // DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa. Rota core
 // (não é módulo opcional): disponível em todas as verticais.
@@ -66,6 +67,15 @@ router.get("/cashflow", requireRole("owner", "admin"), (req: AuthRequest, res): 
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = /^\d{4}-\d{2}$/.test(String(req.query?.period || "")) ? String(req.query.period) : undefined;
   res.json(ManagerialCashFlowService.indirect(orgId, period));
+});
+
+// GET /api/dre/connected?period=YYYY-MM — ADR-200 F3: a "leitura do CFO" — DRE + Balanço + Fluxo
+// de Caixa conectados + a ponte "lucro ≠ caixa". Dinheiro de gestão (§73) → owner/admin.
+router.get("/connected", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const period = /^\d{4}-\d{2}$/.test(String(req.query?.period || "")) ? String(req.query.period) : undefined;
+  res.json(ConnectedFinancialsService.assemble(orgId, period));
 });
 
 export default router;

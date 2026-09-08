@@ -962,6 +962,12 @@ export class Scheduler {
       import("./HealthyReserveService.js").then((m) => m.HealthyReserveService.pass())
         .catch((e) => console.error('[Scheduler] sinal de reserva saudável falhou', e));
     } catch (e) { console.error('[Scheduler] pass de reserva saudável falhou', e); }
+    // Inteligência Financeira Conectada (ADR-200 F3): nudge "lucrou mas o caixa não veio" (lucro sem
+    // caixa) quando material. Só orgs com receita no mês (online ou física). Advisory. Best-effort.
+    try {
+      import("./ConnectedFinancialsService.js").then((m) => m.ConnectedFinancialsService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de finanças conectadas falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de finanças conectadas falhou', e); }
     // Checkpoint de missões (ADR-189 F6): mission/at_risk quando a missão sai da trajetória. Só orgs
     // com o Mission Layer ligado + missões em andamento com métrica/alvo/prazo. Advisory. Best-effort.
     try {

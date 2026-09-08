@@ -78,4 +78,13 @@ router.get("/connected", requireRole("owner", "admin"), (req: AuthRequest, res):
   res.json(ConnectedFinancialsService.assemble(orgId, period));
 });
 
+// GET /api/dre/connected/narrative?period=YYYY-MM — ADR-200 F5 (D6): a "leitura do CFO" em texto,
+// reescrita pela IA GROUNDED nos números (fallback determinístico sem IA). §73 → owner/admin.
+router.get("/connected/narrative", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const period = /^\d{4}-\d{2}$/.test(String(req.query?.period || "")) ? String(req.query.period) : undefined;
+  res.json(await ConnectedFinancialsService.narrateAsync(orgId, period));
+});
+
 export default router;

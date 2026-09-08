@@ -710,6 +710,7 @@
     "test:managerial-balance": "tsx scripts/test-managerial-balance.ts",
     "test:managerial-cashflow": "tsx scripts/test-managerial-cashflow.ts",
     "test:connected-financials": "tsx scripts/test-connected-financials.ts",
+    "test:connected-financials-hardening": "tsx scripts/test-connected-financials-hardening.ts",
     "test:healthy-reserve": "tsx scripts/test-healthy-reserve.ts",
     "test:owner-draws": "tsx scripts/test-owner-draws.ts",
     "test:ai-governance": "tsx scripts/test-ai-governance.ts",

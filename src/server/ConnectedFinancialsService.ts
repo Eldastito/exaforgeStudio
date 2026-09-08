@@ -139,6 +139,36 @@ export class ConnectedFinancialsService {
   }
 
   /**
+   * ADR-200 F5 (D6) — narrativa GROUNDED opcional. Transforma os NÚMEROS DERIVADOS na "leitura do
+   * CFO" em português mais natural, SEMPRE ancorada nos números (RN-FIN-8 — nunca inventa número).
+   * Sem IA configurada (ou em qualquer erro), devolve a narrativa DETERMINÍSTICA (0-regressão).
+   * Best-effort; o número que a IA recebe é o mesmo do `assemble` — ela só reescreve o texto.
+   */
+  static async narrateAsync(orgId: string, period?: string): Promise<{ narrativa: string; source: "llm" | "deterministic"; ponte: ConnectedFinancials["ponte"] }> {
+    const c = this.assemble(orgId, period);
+    const fallback = { narrativa: c.narrativa, source: "deterministic" as const, ponte: c.ponte };
+    try {
+      const { isAIConfigured, chat } = await import("./llm.js");
+      if (!isAIConfigured()) return fallback;
+      const brlN = (n: number | null) => (n == null ? "—" : brl(n));
+      const facts = [
+        `lucro (competência): ${brlN(c.ponte.lucro)}`,
+        `caixa que entrou: ${brlN(c.ponte.caixaGerado)}`,
+        `preso em estoque+recebíveis: ${brlN(c.ponte.preso)}`,
+        `gap lucro−caixa: ${brlN(c.ponte.gap)}`,
+        `Δ a receber: ${brlN(c.ponte.decomposicao.deltaReceber)}`,
+        `Δ estoque: ${brlN(c.ponte.decomposicao.deltaEstoque)}`,
+        `Δ a pagar: ${brlN(c.ponte.decomposicao.deltaPagar)}`,
+      ].join(" · ");
+      const system = "Você é um CFO explicando finanças a um dono de PME em português claro e direto. Use SOMENTE os números fornecidos — NUNCA invente valores, percentuais ou conclusões não suportadas. 2 a 4 frases. Se o lucro não virou caixa, explique por quê (o que ficou preso). Não use jargão contábil.";
+      const prompt = `Com base APENAS nestes números do mês ${c.period}, escreva a leitura do CFO:\n${facts}\n\nNão repita todos os números crus; conte a HISTÓRIA (lucrou mas o dinheiro ficou preso onde?).`;
+      const out = (await chat(prompt, { system, temperature: 0.3 })).trim();
+      if (!out) return fallback;
+      return { narrativa: out, source: "llm", ponte: c.ponte };
+    } catch { return fallback; }
+  }
+
+  /**
    * Passe do Scheduler: orgs com receita no mês corrente — os DOIS fluxos (online + loja física),
    * espelhando `ResultProjectionService.pass`. Cada fonte no seu try/catch.
    */

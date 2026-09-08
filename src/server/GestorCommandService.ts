@@ -94,7 +94,7 @@ export class GestorCommandService {
    * `handled=false` quando a org não habilitou a interface (o webhook segue o
    * fluxo normal). Número desconhecido é recusado com aviso.
    */
-  static handle(orgId: string, fromNumber: string, text: string): GestorResult {
+  static async handle(orgId: string, fromNumber: string, text: string): Promise<GestorResult> {
     if (!this.isEnabled(orgId)) return { handled: false, reply: "", intent: "menu", user: null };
     const user = this.resolveUser(orgId, fromNumber);
     if (!user) {
@@ -138,10 +138,26 @@ export class GestorCommandService {
         }
         try {
           const r = DecisionActionService.approve(orgId, id, user.id, { reason: "aprovado via WhatsApp" });
-          const reply = r.status === "approved"
-            ? `✅ *Aprovada:* ${action.title}`
-            : `👍 Registrei sua aprovação de *${action.title}*. Ainda falta outra aprovação (política de 2 pessoas).`;
-          return { handled: true, reply, intent, user: { id: user.id, name: user.name } };
+          if (r.status !== "approved") {
+            return { handled: true, reply: `👍 Registrei sua aprovação de *${action.title}*. Ainda falta outra aprovação (política de 2 pessoas).`, intent, user: { id: user.id, name: user.name } };
+          }
+          // F10 — aprovada por completo: se a ação carrega um COMANDO governado
+          // (falatu_record_* de despesa/venda/cliente, social_publish, …),
+          // EXECUTA o efeito AGORA. Senão, aprovar pelo WhatsApp não gravaria
+          // nada — a ação ficaria 'approved' sem efeito. Idempotência e guardas
+          // ficam no executor; falha de execução não desfaz a aprovação.
+          let tail = "";
+          if (action.command_type) {
+            try {
+              const { CommandExecutorService } = await import("./CommandExecutorService.js");
+              const ex = await CommandExecutorService.execute(orgId, id);
+              const summary = ex?.result?.summary;
+              tail = summary ? `\n${summary}.` : "";
+            } catch (e: any) {
+              tail = `\n⚠️ Aprovei, mas não consegui executar agora: ${e.message} Tente pelo painel (Aprovações).`;
+            }
+          }
+          return { handled: true, reply: `✅ *Aprovada:* ${action.title}${tail}`, intent, user: { id: user.id, name: user.name } };
         } catch (e: any) { return { handled: true, reply: `Não consegui aprovar: ${e.message}`, intent, user: { id: user.id, name: user.name } }; }
       }
       // rejeitar

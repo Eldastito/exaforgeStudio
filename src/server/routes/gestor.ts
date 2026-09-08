@@ -25,13 +25,13 @@ router.put("/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any 
 
 // POST /api/gestor/preview { phone, text } — simula a resposta a um comando do
 // gestor (autenticação do número + RBAC), sem enviar nada. Só gestores.
-router.post("/preview", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/preview", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const phone = String(req.body?.phone || "").trim();
   const text = String(req.body?.text || "");
   if (!phone) return res.status(400).json({ error: "Informe o número (phone)." });
-  res.json(GestorCommandService.handle(orgId, phone, text));
+  res.json(await GestorCommandService.handle(orgId, phone, text));
 });
 
 // GET /api/gestor/briefing-prefs — preferências de briefing do usuário atual.

@@ -5155,6 +5155,10 @@ function CommissionTab() {
   const [exEnd, setExEnd] = useState(todayStr());
   const [extract, setExtract] = useState<any | null>(null);
   const [loadingExtract, setLoadingExtract] = useState(false);
+  // Depois do 1º "Gerar extrato", trocar a LOJA regenera sozinho (o print do
+  // cliente mostrava "Av. brasil" mas a tabela era de todas as lojas — resultado
+  // velho porque a troca não refazia a busca).
+  const didGenExtract = useRef(false);
   const applyExShortcut = (kind: 'today' | 'week' | 'fortnight' | 'month') => {
     const now = new Date();
     const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
@@ -5172,9 +5176,16 @@ function CommissionTab() {
       if (opts?.keepSeller && exSellerKey) params.set('sellerKey', exSellerKey);
       else setExSellerKey('');
       const d = await apiFetch(`/api/retailops/commission/store-report?${params}`).then(r => r.json()).catch(() => null);
-      if (d && !d.error) setExtract(d); else toast.error(d?.error || 'Falha ao gerar o extrato.');
+      if (d && !d.error) { setExtract(d); didGenExtract.current = true; } else toast.error(d?.error || 'Falha ao gerar o extrato.');
     } finally { setLoadingExtract(false); }
   };
+  // Regenera ao trocar a loja (só depois da 1ª geração manual — não dispara no
+  // carregamento da aba). Zera o vendedor porque a lista muda por loja.
+  useEffect(() => {
+    if (!didGenExtract.current) return;
+    generateExtract();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exStoreId]);
   // Dá NOME à matrícula do ERP (mapeamento retail_sellers) — com regra "por
   // vendedor" ativa, a apuração oficial passa a usar esse nome. Abre o formulário
   // (SellerNameModal) em vez de window.prompt.
@@ -5475,8 +5486,11 @@ function CommissionTab() {
 
         {extract && (
           <div className="mt-3 space-y-3">
-            <div className="text-sm text-zinc-300">Total do filtro: <span className="font-semibold text-emerald-300">{brl(extract.totals?.commission)}</span>
+            {/* Rótulo do total: com UMA loja filtrada vira "Total da loja X"; o
+                período é ecoado sempre (o cliente pede "total da loja + período"). */}
+            <div className="text-sm text-zinc-300">{exStoreId && extract.byStore?.[0] ? `Total da loja ${extract.byStore[0].storeName}` : 'Total do filtro'}: <span className="font-semibold text-emerald-300">{brl(extract.totals?.commission)}</span>
               <span className="text-zinc-500"> · vendas {brl(extract.totals?.sales)} · {Number(extract.totals?.pecas || 0)} peças · {extract.totals?.sellerCount || 0} vendedor(es)</span>
+              {extract.period?.start && extract.period?.end && <span className="text-zinc-500"> · período {extract.period.start.slice(8)}/{extract.period.start.slice(5, 7)} → {extract.period.end.slice(8)}/{extract.period.end.slice(5, 7)}</span>}
             </div>
 
             {!exStoreId && extract.byStore?.length > 0 && (

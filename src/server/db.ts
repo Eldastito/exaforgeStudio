@@ -11383,6 +11383,20 @@ const initDb = () => {
   // sob um pagador (ex.: uma marca). Aditivo; não muda nada de quem não usa.
   try { db.exec(`ALTER TABLE org_group_members ADD COLUMN payer_ref TEXT`); } catch(e){}
 
+  // ADR-201 — Reserva Saudável (método das 4 contas / Profit First). Lente
+  // PRESCRITIVA sobre os números que a DRE já calcula: quanto do faturamento (ou
+  // da margem bruta, no varejo) DEVERIA ir pra Lucro / Pró-labore / Impostos /
+  // Operação, e onde a operação está fora. Alvos configuráveis (default 10/50/18/
+  // 22); base do rateio por vertical (varejo → margem bruta, senão faturamento)
+  // ou forçada. O sinal proativo é OPT-IN (flag) pra não estrear um tipo de sinal
+  // em todo mundo; VER o plano não exige flag (é só leitura da DRE). Aditivo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN healthy_reserve_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_target_profit REAL`); } catch(e){}     // % (null → 10)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_target_prolabore REAL`); } catch(e){}  // % teto (null → 50)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_target_taxes REAL`); } catch(e){}      // % (null → 18)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_target_ops REAL`); } catch(e){}        // % teto (null → 22)
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_base_mode TEXT`); } catch(e){}         // 'revenue'|'gross_margin'|null(auto)
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

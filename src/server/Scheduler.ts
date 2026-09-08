@@ -955,6 +955,13 @@ export class Scheduler {
       import("./ResultProjectionService.js").then((m) => m.ResultProjectionService.pass())
         .catch((e) => console.error('[Scheduler] sinal de projeção de resultado falhou', e));
     } catch (e) { console.error('[Scheduler] pass de projeção de resultado falhou', e); }
+    // Reserva Saudável (ADR-201): nudge quando a alocação das 4 contas está fora do saudável.
+    // OPT-IN (flag healthy_reserve_enabled) + orgs com receita no mês (online ou física). Advisory,
+    // nunca move dinheiro. Best-effort.
+    try {
+      import("./HealthyReserveService.js").then((m) => m.HealthyReserveService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de reserva saudável falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de reserva saudável falhou', e); }
     // Checkpoint de missões (ADR-189 F6): mission/at_risk quando a missão sai da trajetória. Só orgs
     // com o Mission Layer ligado + missões em andamento com métrica/alvo/prazo. Advisory. Best-effort.
     try {

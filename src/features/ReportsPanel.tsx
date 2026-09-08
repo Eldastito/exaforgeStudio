@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge } from 'lucide-react';
+import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge, PiggyBank } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
@@ -188,6 +188,7 @@ export function ReportsPanel() {
 
       <DreSection />
       <ResultProjectionCard />
+      <HealthyReserveSection />
       <OwnerSection />
       <LossMarginSection />
     </div>
@@ -258,6 +259,78 @@ function OwnerSection() {
           <ul className="mt-1.5 space-y-0.5">{d.premissas?.map((p: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {p}</li>)}</ul>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Reserva Saudável — método das 4 contas (ADR-201) ─────────────────────────
+const RESERVE_STATUS: Record<string, { cls: string; label: string }> = {
+  ok: { cls: 'text-emerald-300 border-emerald-500/30 bg-emerald-500/5', label: 'dentro' },
+  atencao: { cls: 'text-amber-300 border-amber-500/30 bg-amber-500/5', label: 'atenção' },
+  excesso: { cls: 'text-red-300 border-red-500/30 bg-red-500/5', label: 'acima do teto' },
+  baixo: { cls: 'text-red-300 border-red-500/30 bg-red-500/5', label: 'abaixo da meta' },
+  reserva: { cls: 'text-sky-300 border-sky-500/30 bg-sky-500/5', label: 'reserva' },
+  no_data: { cls: 'text-zinc-400 border-zinc-700 bg-zinc-800/40', label: '—' },
+};
+function HealthyReserveSection() {
+  const [d, setD] = useState<any | null>(null);
+  const load = useCallback(() => { apiFetch('/api/dre/healthy-reserve').then((r) => r.json()).then((x: any) => { if (x?.plan) setD(x); }).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!d) return null;
+  const { plan, config } = d;
+
+  const toggleAlert = async () => {
+    try {
+      const r = await apiFetch('/api/dre/healthy-reserve/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !config.enabled }) });
+      if (r.ok) { toast.success(config.enabled ? 'Aviso proativo desligado.' : 'Aviso proativo ligado.'); load(); } else toast.error('Não consegui salvar.');
+    } catch { toast.error('Falha ao salvar.'); }
+  };
+
+  const overall = RESERVE_STATUS[plan.overallStatus] || RESERVE_STATUS.no_data;
+  return (
+    <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+        <h3 className="text-zinc-100 font-semibold flex items-center gap-2"><PiggyBank className="w-5 h-5 text-pink-300" /> Reserva saudável <span className="text-xs font-normal text-zinc-500">· método das 4 contas · {plan.period}</span></h3>
+        {plan.available && <span className={`text-xs rounded-full border px-2.5 py-1 ${overall.cls}`}>{overall.label}</span>}
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-3">Rateio sobre a {plan.baseLabel}{plan.base != null && <> · base {brl(plan.base)}</>}.</p>
+
+      {!plan.available ? (
+        <p className="text-[13px] text-zinc-400">{plan.caveats?.[0] || 'Sem base pra ratear ainda.'}</p>
+      ) : (
+        <>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {plan.accounts.map((a: any) => {
+              const st = RESERVE_STATUS[a.status] || RESERVE_STATUS.no_data;
+              return (
+                <div key={a.key} className={`rounded-lg border p-3 ${st.cls}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-medium">{a.label}</span>
+                    <span className="text-[10px] uppercase tracking-wide opacity-80">{a.targetPct}%</span>
+                  </div>
+                  <div className="mt-1 flex items-baseline justify-between">
+                    <span className="text-lg font-semibold tabular-nums">{brl(a.targetAmount)}</span>
+                    <span className="text-[11px] opacity-80">
+                      {a.actualAmount == null ? 'não medido' : <>realizado {brl(a.actualAmount)}{a.actualPct != null && <> ({a.actualPct}%)</>}</>}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] opacity-80">{a.note}</p>
+                </div>
+              );
+            })}
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-[12px] text-zinc-400 cursor-pointer">
+            <input type="checkbox" checked={!!config.enabled} onChange={toggleAlert} className="accent-pink-500" />
+            Avisar quando a alocação sair do saudável (Central de Saúde)
+          </label>
+        </>
+      )}
+      {plan.caveats?.length > 0 && (
+        <ul className="mt-2 space-y-0.5 border-t border-zinc-800 pt-2">
+          {plan.caveats.map((c: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {c}</li>)}
+        </ul>
+      )}
+      <p className="mt-2 text-[11px] text-amber-200/70">{plan.disclaimer}</p>
     </div>
   );
 }

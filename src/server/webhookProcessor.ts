@@ -202,7 +202,7 @@ export async function processIncomingMessage(
     // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.
     // Greeting/menu/tarefas caem no Coordenador (fluxo atual, sem duplicar).
     try {
-      const g = GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
+      const g = await GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
       if (GestorCommandService.shouldRoute(g)) {
         // Pergunta livre de negócio ("quanto o Marcos vendeu esse mês?"): o
         // Controller (síncrono/determinístico) só reconheceu que é uma pergunta

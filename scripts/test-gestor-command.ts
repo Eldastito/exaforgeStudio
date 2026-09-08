@@ -38,7 +38,7 @@ async function main() {
   P.seedSystemProfiles(orgA);
 
   // ===== 1. Opt-in: desligado → não trata =====
-  check("desligado: handled=false (webhook segue normal)", G.handle(orgA, "11999990001", "saldo").handled === false);
+  check("desligado: handled=false (webhook segue normal)", (await G.handle(orgA, "11999990001", "saldo")).handled === false);
   db.prepare("UPDATE organization_settings SET wa_gestor_enabled = 1 WHERE organization_id = ?").run(orgA);
   check("isEnabled reflete o flag", G.isEnabled(orgA) === true);
 
@@ -54,59 +54,59 @@ async function main() {
   check("parse 'asdf' = desconhecido", G.parse("asdf").intent === "desconhecido");
 
   // ===== 3. Número desconhecido é recusado =====
-  const unk = G.handle(orgA, "11888880000", "saldo");
+  const unk = await G.handle(orgA, "11888880000", "saldo");
   check("número desconhecido: recusado, sem usuário", unk.handled === true && unk.user === null && /não reconhe/i.test(unk.reply));
 
   // ===== 4. Owner (perfil) consulta finanças — autenticação por DDI/9º dígito =====
   mkUser(orgA, "11999990001", "owner", "owner");
-  const saldo = G.handle(orgA, "5511999990001", "saldo"); // com DDI 55 → casa pelo phoneMatch
+  const saldo = await G.handle(orgA, "5511999990001", "saldo"); // com DDI 55 → casa pelo phoneMatch
   check("owner: 'saldo' autentica por DDI e responde caixa", saldo.handled === true && !saldo.denied && saldo.intent === "saldo" && /Caixa atual/.test(saldo.reply));
   check("comando do gestor é auditado (WA_GESTOR_COMMAND)", sigCount(orgA, "WA_GESTOR_COMMAND") >= 1);
 
   // ===== 5. RBAC: vendedor NÃO vê finanças (aceite do PRD) =====
   mkUser(orgA, "11999990002", "agent", "vendedor");
-  const deny = G.handle(orgA, "11999990002", "saldo");
+  const deny = await G.handle(orgA, "11999990002", "saldo");
   check("vendedor: consulta financeira NEGADA", deny.handled === true && deny.denied === true && /permiss/i.test(deny.reply));
   check("negação financeira é auditada (WA_FINANCE_DENIED)", sigCount(orgA, "WA_FINANCE_DENIED") >= 1);
-  check("vendedor: prioridades também negadas", G.handle(orgA, "11999990002", "prioridades").denied === true);
+  check("vendedor: prioridades também negadas", (await G.handle(orgA, "11999990002", "prioridades")).denied === true);
 
   // ===== 6. Fallback legado (sem perfil): papel decide =====
   const orgB = mkOrg();
   db.prepare("UPDATE organization_settings SET wa_gestor_enabled = 1 WHERE organization_id = ?").run(orgB);
   mkUser(orgB, "11777770001", "owner");            // sem perfil → fallback owner = full
   mkUser(orgB, "11777770002", "agent");            // sem perfil → fallback atendente = none
-  check("legado owner vê saldo", G.handle(orgB, "11777770001", "saldo").denied !== true);
-  check("legado agent NÃO vê saldo", G.handle(orgB, "11777770002", "saldo").denied === true);
+  check("legado owner vê saldo", (await G.handle(orgB, "11777770001", "saldo")).denied !== true);
+  check("legado agent NÃO vê saldo", (await G.handle(orgB, "11777770002", "saldo")).denied === true);
 
   // ===== 7. Delegar/adiar/explicar ainda são DIFERIDAS =====
-  const acao = G.handle(orgA, "11999990001", "delegar 2 para Ana");
+  const acao = await G.handle(orgA, "11999990001", "delegar 2 para Ana");
   check("delegar ainda diferido: aponta o Plano de Ação", acao.intent === "acao_diferida" && /Plano de Ação/i.test(acao.reply));
 
   // ===== 8. Menu / desconhecido =====
-  check("owner: 'oi' devolve o menu do Controller", /Controller IA/.test(G.handle(orgA, "11999990001", "oi").reply));
-  check("owner: 'prioridades' responde (sem sinais → aviso)", G.handle(orgA, "11999990001", "prioridades").intent === "prioridades");
+  check("owner: 'oi' devolve o menu do Controller", /Controller IA/.test((await G.handle(orgA, "11999990001", "oi")).reply));
+  check("owner: 'prioridades' responde (sem sinais → aviso)", (await G.handle(orgA, "11999990001", "prioridades")).intent === "prioridades");
 
   // ===== 9. Roteamento no webhook (shouldRoute) — Fatia 2 =====
-  check("roteia 'saldo' de gestor conhecido p/ o Controller", G.shouldRoute(G.handle(orgA, "11999990001", "saldo")) === true);
-  check("roteia 'aprovar 1' (ação diferida)", G.shouldRoute(G.handle(orgA, "11999990001", "aprovar 1")) === true);
-  check("NÃO roteia 'oi' (menu → Coordenador/tarefas)", G.shouldRoute(G.handle(orgA, "11999990001", "oi")) === false);
-  check("NÃO roteia número desconhecido (sem user)", G.shouldRoute(G.handle(orgA, "11888880000", "saldo")) === false);
-  check("roteia denial de vendedor (Controller responde a negação)", G.shouldRoute(G.handle(orgA, "11999990002", "saldo")) === true);
+  check("roteia 'saldo' de gestor conhecido p/ o Controller", G.shouldRoute(await G.handle(orgA, "11999990001", "saldo")) === true);
+  check("roteia 'aprovar 1' (ação diferida)", G.shouldRoute(await G.handle(orgA, "11999990001", "aprovar 1")) === true);
+  check("NÃO roteia 'oi' (menu → Coordenador/tarefas)", G.shouldRoute(await G.handle(orgA, "11999990001", "oi")) === false);
+  check("NÃO roteia número desconhecido (sem user)", G.shouldRoute(await G.handle(orgA, "11888880000", "saldo")) === false);
+  check("roteia denial de vendedor (Controller responde a negação)", G.shouldRoute(await G.handle(orgA, "11999990002", "saldo")) === true);
   // 'prioridades' não sequestra pergunta de tarefas do colaborador.
   check("'o que tenho pra fazer hoje' NÃO vira prioridades", G.parse("o que tenho pra fazer hoje").intent === "desconhecido");
-  check("desligado: shouldRoute=false (webhook segue p/ Coordenador)", G.shouldRoute(G.handle(mkOrg(), "11999990001", "saldo")) === false);
+  check("desligado: shouldRoute=false (webhook segue p/ Coordenador)", G.shouldRoute(await G.handle(mkOrg(), "11999990001", "saldo")) === false);
 
   // ===== 9b. Pergunta livre de NEGÓCIO (dono) → Diretor Executivo IA =====
   // `parse()` puro continua "desconhecido" (não muda) — é `handle()` quem, só
   // para GESTOR (owner/admin), reclassifica pra `pergunta_negocio` e roteia pro
   // Diretor IA (que o WEBHOOK chama, com LLM; `reply` sai vazio de propósito).
   check("parse('qualquer coisa') continua 'desconhecido' (puro, sem RBAC)", G.parse("qualquer coisa").intent === "desconhecido");
-  const perguntaOwner = G.handle(orgA, "11999990001", "quanto o Marcos vendeu esse mês?");
+  const perguntaOwner = await G.handle(orgA, "11999990001", "quanto o Marcos vendeu esse mês?");
   check("owner: pergunta livre vira intent 'pergunta_negocio'", perguntaOwner.intent === "pergunta_negocio" && perguntaOwner.reply === "");
   check("owner: pergunta livre É roteada (webhook chama o Diretor IA)", G.shouldRoute(perguntaOwner) === true);
   // Colaborador comum (vendedor) NÃO ganha acesso ao Diretor — comportamento
   // antigo preservado: cai no Coordenador (tarefas), como sempre.
-  const perguntaVendedor = G.handle(orgA, "11999990002", "quanto o Marcos vendeu esse mês?");
+  const perguntaVendedor = await G.handle(orgA, "11999990002", "quanto o Marcos vendeu esse mês?");
   check("vendedor: pergunta livre continua 'desconhecido'", perguntaVendedor.intent === "desconhecido" && /Não entendi/.test(perguntaVendedor.reply));
   check("vendedor: pergunta livre NÃO é roteada (→ Coordenador)", G.shouldRoute(perguntaVendedor) === false);
 
@@ -115,24 +115,24 @@ async function main() {
   // owner (admin role) na orgA já existe (11999990001, role 'owner').
   const c1 = D.propose(orgA, { domain: "finance", actionType: "collection", title: "Cobrar R$ 4.200", expectedImpact: 4200 });
   const c2 = D.propose(orgA, { domain: "finance", actionType: "collection", title: "Cobrar R$ 800", expectedImpact: 800 });
-  const listReply = G.handle(orgA, "11999990001", "aprovações");
+  const listReply = await G.handle(orgA, "11999990001", "aprovações");
   check("aprovações: lista numerada as pendências", listReply.intent === "aprovacoes" && /1\..*4\.200/.test(listReply.reply) && /2\./.test(listReply.reply));
   check("roteia 'aprovações' no webhook", G.shouldRoute(listReply) === true);
-  const okApprove = G.handle(orgA, "11999990001", "aprovar 1");
+  const okApprove = await G.handle(orgA, "11999990001", "aprovar 1");
   check("aprovar 1: single aprova a ação", okApprove.intent === "aprovar" && /Aprovada/.test(okApprove.reply) && D.get(orgA, c1.id).status === "approved");
-  check("aprovar de novo: já resolvida → aviso, nada muda", /não está mais disponível/i.test(G.handle(orgA, "11999990001", "aprovar 1").reply));
-  const okReject = G.handle(orgA, "11999990001", "dispensar 2");
+  check("aprovar de novo: já resolvida → aviso, nada muda", /não está mais disponível/i.test((await G.handle(orgA, "11999990001", "aprovar 1")).reply));
+  const okReject = await G.handle(orgA, "11999990001", "dispensar 2");
   check("dispensar 2: rejeita a ação", /Dispensada/.test(okReject.reply) && D.get(orgA, c2.id).status === "rejected");
-  check("índice inválido → aviso sem efeito", /Não achei/i.test(G.handle(orgA, "11999990001", "aprovar 9").reply));
+  check("índice inválido → aviso sem efeito", /Não achei/i.test((await G.handle(orgA, "11999990001", "aprovar 9")).reply));
 
   // Vendedor (agent) NÃO opera aprovações.
-  check("vendedor não vê aprovações", G.handle(orgA, "11999990002", "aprovações").denied === true);
-  check("vendedor não aprova", G.handle(orgA, "11999990002", "aprovar 1").denied === true);
+  check("vendedor não vê aprovações", (await G.handle(orgA, "11999990002", "aprovações")).denied === true);
+  check("vendedor não aprova", (await G.handle(orgA, "11999990002", "aprovar 1")).denied === true);
 
   // two_step: 1ª aprovação do owner ainda aguarda 2º aprovador distinto.
   const sup = D.propose(orgA, { domain: "procurement", actionType: "choose_supplier", title: "Fornecedor X", expectedImpact: 30000 });
-  G.handle(orgA, "11999990001", "aprovações");
-  const twoStep = G.handle(orgA, "11999990001", `aprovar ${D.list(orgA, { status: "awaiting_approval" }).findIndex((a: any) => a.id === sup.id) + 1}`);
+  await G.handle(orgA, "11999990001", "aprovações");
+  const twoStep = await G.handle(orgA, "11999990001", `aprovar ${D.list(orgA, { status: "awaiting_approval" }).findIndex((a: any) => a.id === sup.id) + 1}`);
   check("two_step: 1ª aprovação registra mas ainda aguarda", /falta outra aprova/i.test(twoStep.reply) && D.get(orgA, sup.id).status === "awaiting_approval");
 
   // approval_role: change_price exige owner; admin não aprova.
@@ -140,14 +140,14 @@ async function main() {
   db.prepare("UPDATE organization_settings SET wa_gestor_enabled = 1 WHERE organization_id = ?").run(orgR);
   mkUser(orgR, "11666660001", "admin");
   const cp = D.propose(orgR, { domain: "sales", actionType: "change_price", title: "Mudar preço" });
-  G.handle(orgR, "11666660001", "aprovações");
-  check("admin NÃO aprova change_price (exige owner)", G.handle(orgR, "11666660001", "aprovar 1").denied === true && D.get(orgR, cp.id).status === "awaiting_approval");
+  await G.handle(orgR, "11666660001", "aprovações");
+  check("admin NÃO aprova change_price (exige owner)", (await G.handle(orgR, "11666660001", "aprovar 1")).denied === true && D.get(orgR, cp.id).status === "awaiting_approval");
 
   // Roteamento inclui os novos intents.
-  check("roteia 'aprovar 1' e 'dispensar 2'", G.shouldRoute(G.handle(orgA, "11999990001", "aprovar 1")) === true && G.shouldRoute(G.handle(orgA, "11999990001", "dispensar 1")) === true);
+  check("roteia 'aprovar 1' e 'dispensar 2'", G.shouldRoute(await G.handle(orgA, "11999990001", "aprovar 1")) === true && G.shouldRoute(await G.handle(orgA, "11999990001", "dispensar 1")) === true);
 
   // ===== 11. Isolamento por organização =====
-  check("isolamento: número de A não é reconhecido em B", G.handle(orgB, "11999990001", "saldo").user === null);
+  check("isolamento: número de A não é reconhecido em B", (await G.handle(orgB, "11999990001", "saldo")).user === null);
 
   console.log("\n=== TEST: GestorCommandService (Epic 3 — fatia 1) ===\n");
   for (const rr of results) console.log(`${rr.ok ? "✅" : "❌"} ${rr.name}`);

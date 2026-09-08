@@ -72,6 +72,28 @@ export interface ParsedContact {
   email: string | null;
 }
 
+export interface ParsedAppointment {
+  contactName: string | null;
+  date: string | null; // YYYY-MM-DD
+  time: string | null; // HH:MM
+  title: string;
+}
+
+function pad2n(n: number): string { return String(n).padStart(2, "0"); }
+
+// Horário na fala. Aceita "10h", "10h30", "10:30", "às 14", "14 horas". Sem
+// marcador de hora explícito → null (não confunde "dia 5" com 5h).
+function parseTime(text: string): string | null {
+  const t = String(text || "");
+  let m = t.match(/\b(\d{1,2})[:h](\d{2})\b/);
+  if (m && +m[1] <= 23 && +m[2] <= 59) return `${pad2n(+m[1])}:${m[2]}`;
+  m = t.match(/\b(\d{1,2})\s*h(?:oras?)?\b/i);
+  if (m && +m[1] <= 23) return `${pad2n(+m[1])}:00`;
+  m = t.match(/\b[àa]s\s+(\d{1,2})\b/i);
+  if (m && +m[1] <= 23) return `${pad2n(+m[1])}:00`;
+  return null;
+}
+
 export class FalatuRecordService {
   /** Parser determinístico da despesa ditada. `today` = data comercial da org. */
   static parseExpense(text: string, today: string): ParsedExpense {
@@ -217,6 +239,76 @@ export class FalatuRecordService {
     if (!parsed.name) return { proposed: false };
     const action = this.proposeContact(orgId, parsed, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
     return { proposed: true, name: parsed.name, phone: parsed.phone, email: parsed.email, actionId: action?.id };
+  }
+
+  // ── F11: COMPROMISSO com cliente ──────────────────────────────────────────
+  /** Parser determinístico do compromisso ditado. Nada é inventado. */
+  static parseAppointment(text: string, today: string): ParsedAppointment {
+    const t = String(text || "").trim();
+    const date = extractDate(t, today);
+    const time = parseTime(t);
+    const nm = t.match(/\b(reuni[aã]o|compromisso|consulta|atendimento|visita|call|encontro)\b/i);
+    const title = nm ? nm[1][0].toUpperCase() + nm[1].slice(1).toLowerCase() : "Compromisso";
+    // Nome do cliente depois de "com" (best-effort), cortando data/hora/dia-da-semana.
+    let contactName: string | null = null;
+    const cm = t.match(/\bcom\s+(?:o\s+|a\s+)?(.+)$/i);
+    if (cm) {
+      contactName = cm[1]
+        .replace(/\b(depois de amanh[aã]|amanh[aã]|hoje|ontem|anteontem|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\b.*$/i, "")
+        .replace(/\bdia\s+\d.*$/i, "")
+        .replace(/\b[àa]s?\s+\d.*$/i, "")
+        .replace(/\b\d{1,2}[:h/].*$/i, "")
+        .replace(/\b\d{1,2}\s*h.*$/i, "")
+        .replace(/[,;].*$/, "")
+        .replace(/[\s.]+$/, "")
+        .trim().slice(0, 60);
+      if (!contactName) contactName = null;
+    }
+    return { contactName, date, time, title };
+  }
+
+  /** Resolve o cliente por NOME entre os contatos da org. 1 match → id; 0 → not_found; 2+ → ambiguous. */
+  static resolveContactByName(orgId: string, name: string): { status: "ok" | "not_found" | "ambiguous"; contactId?: string } {
+    const rows = db.prepare(`SELECT id FROM contacts WHERE organization_id = ? AND name LIKE ? COLLATE NOCASE`).all(orgId, `%${String(name || "").trim()}%`) as any[];
+    if (rows.length === 0) return { status: "not_found" };
+    if (rows.length > 1) return { status: "ambiguous" };
+    return { status: "ok", contactId: rows[0].id };
+  }
+
+  /**
+   * Propõe o COMPROMISSO como comando governado (domínio 'agenda', não financeiro
+   * → não default-deny; nasce awaiting_approval). O contato JÁ resolvido entra no
+   * payload; o handler só cria o appointment na aprovação.
+   */
+  static proposeAppointment(orgId: string, payload: { contactId: string; contactName: string; scheduledStart: string; title: string }, opts: { createdBy?: string; correlationId?: string | null } = {}): any {
+    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = 'agenda' AND action_type = 'falatu_record_appointment'`).get(orgId) as any;
+    if (!pol) {
+      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, 'agenda', 'falatu_record_appointment', 'execute', 'approved_execution', 1)`)
+        .run(randomUUID(), orgId);
+    }
+    return DecisionActionService.propose(orgId, {
+      domain: "agenda",
+      actionType: "falatu_record_appointment",
+      title: `Agendar ${payload.title} com ${payload.contactName}`,
+      description: `${payload.title} · ${payload.contactName} · ${payload.scheduledStart}`.slice(0, 160),
+      commandType: "falatu_record_appointment",
+      commandPayload: payload,
+      correlationId: opts.correlationId ?? null,
+      createdBy: opts.createdBy || "falatu",
+    });
+  }
+
+  static recordAppointment(orgId: string, user: any, text: string, opts: { now?: Date; correlationId?: string | null } = {}): { proposed: boolean; reason?: "no_contact_name" | "no_datetime" | "contact_not_found" | "contact_ambiguous"; contactName?: string | null; date?: string | null; time?: string | null; title?: string; actionId?: string } {
+    const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
+    const p = this.parseAppointment(text, today);
+    if (!p.contactName) return { proposed: false, reason: "no_contact_name" };
+    if (!p.date || !p.time) return { proposed: false, reason: "no_datetime", contactName: p.contactName };
+    const resolved = this.resolveContactByName(orgId, p.contactName);
+    if (resolved.status === "not_found") return { proposed: false, reason: "contact_not_found", contactName: p.contactName };
+    if (resolved.status === "ambiguous") return { proposed: false, reason: "contact_ambiguous", contactName: p.contactName };
+    const scheduledStart = `${p.date}T${p.time}:00`;
+    const action = this.proposeAppointment(orgId, { contactId: resolved.contactId!, contactName: p.contactName, scheduledStart, title: p.title }, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
+    return { proposed: true, contactName: p.contactName, date: p.date, time: p.time, title: p.title, actionId: action?.id };
   }
 }
 

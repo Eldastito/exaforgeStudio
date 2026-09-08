@@ -136,9 +136,44 @@ export const FalatuRecordContactCommandHandler: CommandHandler = {
   },
 };
 
+// F11 — COMPROMISSO com cliente. O efeito é criar o appointment na agenda
+// (AppointmentService.create) — o contato JÁ foi resolvido no propose (payload
+// carrega contactId + scheduledStart). Idempotência durável pelo guard do
+// executor (o mesmo action nunca cria 2 appointments).
+export const FalatuRecordAppointmentCommandHandler: CommandHandler = {
+  key: "FalatuRecordAppointmentCommandHandler",
+  commandTypes: ["falatu_record_appointment"],
+
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    return {
+      summary: `Compromisso a agendar: ${p.title || "Compromisso"} com ${p.contactName || "?"} (${p.scheduledStart || "?"})`,
+      artifact: { kind: "appointment_draft", contactId: p.contactId ?? null, contactName: p.contactName ?? null, scheduledStart: p.scheduledStart ?? null, title: p.title ?? null },
+    };
+  },
+
+  async execute(orgId, action) {
+    const p = payloadOf(action);
+    const { AppointmentService } = await import("./AppointmentService.js");
+    let appt: any;
+    try {
+      appt = AppointmentService.create(orgId, { contactId: String(p.contactId || ""), title: String(p.title || "Compromisso"), scheduledStart: String(p.scheduledStart || "") }, action.created_by || "falatu");
+    } catch (e: any) {
+      throw new Error(`Não consegui agendar o compromisso: ${e.message}`);
+    }
+    return {
+      summary: `Compromisso agendado: ${p.title || "Compromisso"} com ${p.contactName || ""}`,
+      artifact: { kind: "appointment", appointmentId: appt?.id, contactName: p.contactName ?? null },
+      effect: "appointment_created",
+      externalRef: appt?.id ?? null,
+    };
+  },
+};
+
 // Registra no MESMO registry do executor (mesmo padrão de SocialPublishCommandHandler).
 CommandExecutorService.registerHandler(FalatuRecordExpenseCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordSaleCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordContactCommandHandler);
+CommandExecutorService.registerHandler(FalatuRecordAppointmentCommandHandler);
 
 export default FalatuRecordExpenseCommandHandler;

@@ -4,6 +4,7 @@ import { ManagerialDreService } from "../ManagerialDreService.js";
 import { ResultProjectionService } from "../ResultProjectionService.js";
 import { HealthyReserveService } from "../HealthyReserveService.js";
 import { ManagerialBalanceSheetService } from "../ManagerialBalanceSheetService.js";
+import { ManagerialCashFlowService } from "../ManagerialCashFlowService.js";
 
 // DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa. Rota core
 // (não é módulo opcional): disponível em todas as verticais.
@@ -56,6 +57,15 @@ router.get("/balance", requireRole("owner", "admin"), (req: AuthRequest, res): a
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.asOf || "")) ? String(req.query.asOf) : undefined;
   res.json(ManagerialBalanceSheetService.snapshot(orgId, asOf));
+});
+
+// GET /api/dre/cashflow?period=YYYY-MM — ADR-200 F2: Fluxo de Caixa pelo método indireto
+// (DRE→caixa via variações de capital de giro, reconciliado com o Motor de Caixa). §73 → owner/admin.
+router.get("/cashflow", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const period = /^\d{4}-\d{2}$/.test(String(req.query?.period || "")) ? String(req.query.period) : undefined;
+  res.json(ManagerialCashFlowService.indirect(orgId, period));
 });
 
 export default router;

@@ -86,10 +86,27 @@ router.post("/capture", async (req: AuthRequest, res): Promise<any> => {
 // roteamento (pergunta × gravação × query direta × agentes de IA) e o
 // role-gate de dinheiro (§73) vivem no service. Valida só forma aqui.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
-  const { question } = req.body || {};
-  if (typeof question !== "string" || !question.trim()) return res.status(400).json({ error: "question deve ser string não vazia." });
+  const { question, audio } = req.body || {};
+  let q = typeof question === "string" ? question.trim() : "";
+  // F8 — VOZ: o dono FALA a pergunta em vez de digitar. Transcreve o áudio
+  // (mesmo Whisper da captura, ADR-102) e usa a transcrição como pergunta.
+  if (audio !== undefined) {
+    if (typeof audio?.mimeType !== "string" || typeof audio?.data !== "string") return res.status(400).json({ error: "audio deve ter mimeType e data (base64)." });
+    if (audio.data.length > MAX_MEDIA_B64) return res.status(400).json({ error: "áudio muito grande." });
+    try {
+      const llm = await import("../llm.js");
+      if (!llm.isAIConfigured()) return res.status(400).json({ error: "Transcrição de áudio indisponível (IA não configurada)." });
+      const mime = String(audio.mimeType);
+      const ext = mime.includes("webm") ? "webm" : (mime.includes("mp3") || mime.includes("mpeg")) ? "mp3" : "ogg";
+      q = (await llm.transcribeAudio(Buffer.from(audio.data, "base64"), `falatu-ask.${ext}`, mime)).trim();
+    } catch (e: any) { return res.status(400).json({ error: `Não consegui transcrever o áudio: ${e.message}` }); }
+  }
+  if (!q) return res.status(400).json({ error: "Envie a pergunta (texto ou áudio)." });
   try {
-    res.json(await FalaTuAskService.converse(req.organizationId!, req.user, question));
+    const result = await FalaTuAskService.converse(req.organizationId!, req.user, q);
+    // Devolve a `question` (transcrita, quando veio de áudio) pra UI mostrar o
+    // que foi entendido.
+    res.json({ ...result, question: q });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

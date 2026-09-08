@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, type PointerEvent as ReactPointerEvent } from 'react';
-import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall } from 'lucide-react';
+import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall, MessageCircle } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
@@ -284,7 +284,12 @@ const PurchaseCheckCard: FC<{ check: any; onResolved: () => void }> = ({ check, 
 };
 
 export function FalaTuView() {
-  const [tab, setTab] = useState<'inbox' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing' | 'plugues' | 'protocols'>('inbox');
+  const [tab, setTab] = useState<'inbox' | 'ask' | 'tasks' | 'events' | 'lists' | 'memory' | 'briefing' | 'plugues' | 'protocols'>('inbox');
+  // F3 (conversar com o negócio) — a aba "Perguntar": pergunta → resposta AQUI
+  // na tela (POST /api/falatu/ask). Thread mais recente no topo.
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askBusy, setAskBusy] = useState(false);
+  const [askThread, setAskThread] = useState<{ q: string; answer: string; grounded: boolean; restricted: boolean }[]>([]);
   const [text, setText] = useState('');
   const [processing, setProcessing] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -745,8 +750,24 @@ export function FalaTuView() {
     toast.success('Número verificado! Protocolo pronto pra usar. ✅');
   });
 
+  const sendAsk = useCallback(async () => {
+    const q = askQuestion.trim();
+    if (!q || askBusy) return;
+    setAskBusy(true);
+    try {
+      const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
+      setAskThread((prev) => [{ q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
+      setAskQuestion('');
+    } catch (e: any) {
+      setAskThread((prev) => [{ q, answer: e?.message || 'Não consegui responder agora.', grounded: true, restricted: false }, ...prev]);
+    } finally {
+      setAskBusy(false);
+    }
+  }, [askQuestion, askBusy]);
+
   const TABS = [
     { id: 'inbox', label: 'Inbox', icon: <Inbox className="h-4 w-4" /> },
+    { id: 'ask', label: 'Perguntar', icon: <MessageCircle className="h-4 w-4" /> },
     { id: 'tasks', label: 'Tarefas', icon: <ListTodo className="h-4 w-4" /> },
     { id: 'events', label: 'Agenda', icon: <CalendarDays className="h-4 w-4" /> },
     { id: 'lists', label: 'Listas', icon: <Check className="h-4 w-4" /> },
@@ -839,6 +860,38 @@ export function FalaTuView() {
 
           <div className="space-y-3">
             {pending.map((item) => <ConfirmCard key={item.id} item={item} onResolved={loadPending} />)}
+          </div>
+        </>
+      )}
+
+      {tab === 'ask' && (
+        <>
+          <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
+            <p className="text-sm text-ft-text-muted">Converse com o seu negócio — pergunte e eu respondo com o <strong className="text-ft-text">dado real</strong>. Ex.: <em>"quanto vendi em dinheiro hoje?"</em>, <em>"quem está de folga amanhã?"</em>.</p>
+            <div className="flex gap-2">
+              <input value={askQuestion} onChange={(e) => setAskQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendAsk()}
+                placeholder='Ex.: "quanto a loja fez em dinheiro no dia 31 de agosto?"'
+                className="flex-1 rounded-lg bg-ft-bg border border-ft-border px-3 py-2 text-sm text-ft-text" />
+              <button onClick={sendAsk} disabled={askBusy || !askQuestion.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-violet-600 hover:bg-violet-500 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {askBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-ft-text-faint">Valores de faturamento e vendas são visíveis só para dono, sócios, administradores e gerentes.</p>
+          </div>
+          <div className="space-y-3">
+            {askThread.length === 0 && !askBusy && (
+              <p className="text-center text-sm text-ft-text-muted pt-6">Faça uma pergunta sobre o seu negócio — a resposta aparece aqui.</p>
+            )}
+            {askThread.map((t, i) => (
+              <div key={i} className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-1.5">
+                <p className="text-sm font-medium text-ft-text">{t.q}</p>
+                <p className={`text-sm whitespace-pre-wrap ${t.restricted ? 'text-ft-on-amber' : 'text-ft-text-muted'}`}>{t.answer}</p>
+                {!t.grounded && !t.restricted && (
+                  <p className="text-[11px] text-ft-text-faint">Resposta da IA a partir do panorama do negócio.</p>
+                )}
+              </div>
+            ))}
           </div>
         </>
       )}

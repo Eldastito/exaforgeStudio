@@ -296,17 +296,28 @@ export function AdminMasterView() {
                       </select>
                   </td>
                   <td className="px-6 py-4">
-                      {/* Rollout opt-in do FalaTu (ADR-151 F2): flag por org. */}
+                      {/* Rollout opt-in do FalaTu (ADR-151 F2): flag por org. SWITCH explícito —
+                          a pílula-status antiga ("Desligado") não parecia clicável e o operador
+                          não achava o botão. Agora: trilho+botão deslizante, rótulo de AÇÃO
+                          ("Ligar" quando off) + tooltip. */}
                       <button
                         onClick={() => handleToggleFalaTu(org.organization_id, !Number(org.falatu_enabled))}
                         disabled={loadingId === org.organization_id}
-                        className={`px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
+                        role="switch"
+                        aria-checked={!!Number(org.falatu_enabled)}
+                        title={Number(org.falatu_enabled)
+                          ? 'Fala Tu liberado para esta empresa — clique para desligar'
+                          : 'Clique para liberar o Fala Tu para esta empresa'}
+                        className={`inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
                           Number(org.falatu_enabled)
-                            ? 'bg-violet-500/10 text-violet-300 border-violet-500/30 hover:bg-violet-500/20'
-                            : 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20 hover:text-zinc-300'
+                            ? 'bg-violet-500/15 text-violet-200 border-violet-500/40 hover:bg-violet-500/25'
+                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:border-violet-500/50 hover:text-violet-200'
                         }`}
                       >
-                        {Number(org.falatu_enabled) ? 'Ligado' : 'Desligado'}
+                        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${Number(org.falatu_enabled) ? 'bg-violet-500' : 'bg-zinc-500'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.falatu_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
+                        </span>
+                        {Number(org.falatu_enabled) ? 'Ligado' : 'Ligar'}
                       </button>
                   </td>
                   <td className="px-6 py-4">

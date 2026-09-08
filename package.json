@@ -713,6 +713,7 @@
     "test:connected-financials-hardening": "tsx scripts/test-connected-financials-hardening.ts",
     "test:falatu-entitlement": "tsx scripts/test-falatu-entitlement.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
+    "test:falatu-ask-whatsapp": "tsx scripts/test-falatu-ask-whatsapp.ts",
     "test:healthy-reserve": "tsx scripts/test-healthy-reserve.ts",
     "test:owner-draws": "tsx scripts/test-owner-draws.ts",
     "test:ai-governance": "tsx scripts/test-ai-governance.ts",

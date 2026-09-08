@@ -180,21 +180,41 @@ export class ResultProjectionService {
     return { published, resolved };
   }
 
-  /** Passe do Scheduler: só orgs com RECEITA no mês corrente (senão a projeção é `no_revenue`). */
+  /**
+   * Passe do Scheduler: orgs com RECEITA no mês corrente (senão a projeção é `no_revenue`).
+   * A receita tem DOIS fluxos (o DRE já soma os dois desde a Frente 1) — então a audiência
+   * do passe também precisa dos dois, senão uma REDE FÍSICA (sem `orders` online, como a
+   * TOULON) nunca dispararia o alerta "mês abaixo do equilíbrio":
+   *   - virtual: `orders` pagos/em preparo/entregues/concluídos;
+   *   - física:  `retail_pdv_sales` (venda a venda) OU `retail_daily_closings` (fechamento).
+   * Cada fonte no seu try/catch (base antiga pode não ter a tabela).
+   */
   static pass(): void {
     const period = new Date().toISOString().slice(0, 7);
-    let orgs: any[] = [];
+    const orgs = new Set<string>();
     try {
-      orgs = db.prepare(`
+      for (const o of db.prepare(`
         SELECT DISTINCT o.organization_id AS organization_id
         FROM orders o
         WHERE strftime('%Y-%m', o.created_at) = ?
           AND o.status IN ('pago','em_preparo','entregue','concluido')
-      `).all(period) as any[];
-    } catch { return; }
-    for (const o of orgs) {
-      try { this.publishResultProjectionSignal(o.organization_id); }
-      catch (e) { console.error("[ResultProjection] pass falhou", o.organization_id, e); }
+      `).all(period) as any[]) if (o?.organization_id) orgs.add(o.organization_id);
+    } catch { /* orders pode não existir em base antiga */ }
+    try {
+      for (const o of db.prepare(`
+        SELECT DISTINCT organization_id FROM retail_pdv_sales
+        WHERE substr(sale_date,1,7) = ? AND (status IS NULL OR status = 'N')
+      `).all(period) as any[]) if (o?.organization_id) orgs.add(o.organization_id);
+    } catch { /* retail_pdv_sales pode não existir */ }
+    try {
+      for (const o of db.prepare(`
+        SELECT DISTINCT organization_id FROM retail_daily_closings
+        WHERE substr(closing_date,1,7) = ? AND COALESCE(informed_total,0) > 0 AND status != 'rejected'
+      `).all(period) as any[]) if (o?.organization_id) orgs.add(o.organization_id);
+    } catch { /* retail_daily_closings pode não existir */ }
+    for (const orgId of orgs) {
+      try { this.publishResultProjectionSignal(orgId); }
+      catch (e) { console.error("[ResultProjection] pass falhou", orgId, e); }
     }
   }
 }

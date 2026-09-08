@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { FalaTuService, FalaTuIntent, FalaTuMention, parseFalaTuMemory } from "./FalaTuService.js";
+import { FalaTuAskService } from "./FalaTuAskService.js";
 import { GestorCommandService } from "./GestorCommandService.js";
 import { PermissionService } from "./PermissionService.js";
 
@@ -42,6 +43,11 @@ import { PermissionService } from "./PermissionService.js";
 // "í" — "anota aí X" falharia no branch com acento e sobraria "aí X" no
 // conteúdo. Strip em 2 passos: gatilho, depois muleta "aí"/"ai" opcional.
 const CAPTURE_RE = /^(?:anota|anotar|falatu)\b[:,]?\s*/i;
+// F2 (conversar com o negócio) — gatilho EXPLÍCITO de PERGUNTA. Dedicado
+// (não reusa "falatu", que é captura) pra não sequestrar mensagem de outro
+// fluxo no canal interno disputado. Ex.: "pergunta quanto vendi em dinheiro
+// hoje" / "pergunte quem está de folga amanhã".
+const ASK_RE = /^(?:pergunta|pergunte|pergunt[ae]r)\b[:,]?\s*/i;
 const CAPTURE_FILLER_RE = /^a[ií](?:\s+|$)[:,]?\s*/i;
 const CONFIRM_RE = /^(?:confere|confirma|confirmar)\s*$/i;
 const DISCARD_RE = /^(?:descarta|descartar|ignora|ignorar)\s*$/i;
@@ -93,17 +99,39 @@ export class FalaTuWhatsAppService {
     if (!raw || !FalaTuService.orgEnabled(orgId)) return { handled: false, reply: "" };
 
     const isCapture = CAPTURE_RE.test(raw);
+    const isAsk = ASK_RE.test(raw);
     const isConfirm = CONFIRM_RE.test(raw);
     const isDiscard = DISCARD_RE.test(raw);
     const resolveMatch = raw.match(RESOLVE_RE);
-    if (!isCapture && !isConfirm && !isDiscard && !resolveMatch) return { handled: false, reply: "" };
+    if (!isCapture && !isAsk && !isConfirm && !isDiscard && !resolveMatch) return { handled: false, reply: "" };
 
     const user = GestorCommandService.resolveUser(orgId, fromNumber);
     if (!user) {
       // confere/descarta/é-N de número desconhecido não é nosso: deixa o fluxo
-      // normal responder (só o gatilho explícito ganha o aviso de cadastro).
-      if (!isCapture) return { handled: false, reply: "" };
+      // normal responder (só os gatilhos explícitos — anota/pergunta — ganham o
+      // aviso de cadastro).
+      if (!isCapture && !isAsk) return { handled: false, reply: "" };
       return { handled: true, reply: "Olá! Não reconheço este número. 🙋 Peça ao administrador para cadastrar seu WhatsApp em *Configurações → Usuários*." };
+    }
+
+    // ── Pergunta (F2): o dono pergunta e recebe a resposta AQUI, sem virar item
+    // de inbox. Leitura → exige nível 'read' no módulo falatu; dinheiro é
+    // role-gated DENTRO do FalaTuAskService (§73), então colaborador pergunta
+    // folga mas faturamento vem barrado com aviso honesto. ──
+    if (isAsk) {
+      if (!PermissionService.can(orgId, user, "falatu", "read")) {
+        return { handled: true, reply: "Você não tem acesso ao FalaTu nesta conta. Fale com o gestor pra liberar seu perfil." };
+      }
+      const question = raw.replace(ASK_RE, "").trim();
+      if (!question) {
+        return { handled: true, reply: "Manda a pergunta junto. 😉 Ex.: *pergunta quanto vendi em dinheiro hoje* ou *pergunta quem está de folga amanhã* — pode ser áudio também." };
+      }
+      try {
+        const r = await FalaTuAskService.answer(orgId, user, question);
+        return { handled: true, reply: r.answer };
+      } catch (e: any) {
+        return { handled: true, reply: `Não consegui responder agora: ${e.message}` };
+      }
     }
 
     // confere/descarta/é-N só são nossos quando EXISTE pendência de WhatsApp —

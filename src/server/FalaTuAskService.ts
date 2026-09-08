@@ -35,7 +35,7 @@ import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -141,6 +141,9 @@ const SALE_RECORD_RE = /\bvendi\b|\bvendeu\b|\bfaturei\b|(?:registra(?:r)?|lan[�
 const QUESTION_RE = /\b(quanto|quantos|quanta|quantas|qual|quais|quando|quem|onde|por\s?que|porqu[eê]|como)\b|\?/i;
 // F7 (cliente) — cadastro de CLIENTE/CONTATO por comando (verbo + cliente/contato).
 const CONTACT_RE = /(?:cadastra(?:r)?|adiciona(?:r)?|registra(?:r)?|salva(?:r)?|cria(?:r)?)\s+(?:o\s+|a\s+|um\s+|uma\s+|meu\s+|minha\s+|novo\s+|nova\s+)?(?:cliente|contato)\b/i;
+// F11 (compromisso) — verbo de AGENDAR + (substantivo de compromisso OU "com").
+const APPOINTMENT_VERB_RE = /\b(?:agenda(?:r)?|agende|marca(?:r)?|marque)\b/i;
+const APPOINTMENT_NOUN_RE = /\b(reuni[aã]o|compromisso|consulta|atendimento|visita|call|encontro|hor[aá]rio)\b/i;
 
 export class FalaTuAskService {
   /**
@@ -169,6 +172,10 @@ export class FalaTuAskService {
     // Não é dinheiro → needsMoney false (mas a rota já exige write no módulo).
     if (!isQuestion && CONTACT_RE.test(t)) {
       return { kind: "record_contact", date: null, needsMoney: false };
+    }
+    // Compromisso: "agenda/marca reunião com <cliente> <data> <hora>".
+    if (!isQuestion && APPOINTMENT_VERB_RE.test(t) && (APPOINTMENT_NOUN_RE.test(t) || /\bcom\b/i.test(t))) {
+      return { kind: "record_appointment", date: null, needsMoney: false };
     }
     // Gravação: um verbo de gravar no início é PEDIDO PRA GUARDAR, não
     // pergunta — senão "anota vender mais" viraria consulta de vendas.
@@ -375,6 +382,24 @@ export class FalaTuAskService {
       return {
         kind: "record_contact", date: null, grounded: true, moneyRestricted: false,
         answer: `📝 Preparei o cadastro do cliente *${r.name}*${extra ? ` (${extra})` : ""}. Aprove em *Aprovações* pra salvar — não cadastro sozinho.`,
+        data: { actionId: r.actionId, awaitingApproval: true },
+      };
+    }
+
+    // Compromisso com cliente → pipeline governado (cria appointment na aprovação).
+    if (cls.kind === "record_appointment") {
+      const { FalatuRecordService } = await import("./FalatuRecordService.js");
+      const r = FalatuRecordService.recordAppointment(orgId, user, t, { now: opts.now });
+      if (!r.proposed) {
+        const msg = r.reason === "no_contact_name" ? "Com quem é o compromisso? Ex.: *marca reunião com João amanhã às 10h*."
+          : r.reason === "no_datetime" ? `Faltou a data ou a hora do compromisso com *${r.contactName}*. Ex.: *amanhã às 10h*.`
+          : r.reason === "contact_not_found" ? `Não achei o cliente *${r.contactName}* no seu cadastro. Cadastre primeiro (ex.: *cadastra o cliente ${r.contactName}*) e agende depois.`
+          : `Achei mais de um cliente com *${r.contactName}*. Seja mais específico com o nome completo.`;
+        return { kind: "record_appointment", date: null, grounded: true, moneyRestricted: false, answer: msg };
+      }
+      return {
+        kind: "record_appointment", date: null, grounded: true, moneyRestricted: false,
+        answer: `📝 Preparei o agendamento: *${r.title}* com *${r.contactName}* em ${fmtDate(r.date || "")} às ${r.time}. Aprove em *Aprovações* pra confirmar — não agendo sozinho.`,
         data: { actionId: r.actionId, awaitingApproval: true },
       };
     }

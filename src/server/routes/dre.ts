@@ -3,6 +3,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ManagerialDreService } from "../ManagerialDreService.js";
 import { ResultProjectionService } from "../ResultProjectionService.js";
 import { HealthyReserveService } from "../HealthyReserveService.js";
+import { ManagerialBalanceSheetService } from "../ManagerialBalanceSheetService.js";
 
 // DRE Gerencial Simplificada (ADR-128) — venda × lucro × caixa. Rota core
 // (não é módulo opcional): disponível em todas as verticais.
@@ -46,6 +47,15 @@ router.put("/healthy-reserve/config", requireRole("owner", "admin"), (req: AuthR
   for (const k of ["profit", "prolabore", "taxes", "ops"]) if (b[k] != null) patch[k] = Number(b[k]);
   if (b.baseMode !== undefined) patch.baseMode = b.baseMode;
   res.json(HealthyReserveService.setConfig(orgId, patch));
+});
+
+// GET /api/dre/balance?asOf=YYYY-MM-DD — ADR-200 F1: Balanço Patrimonial gerencial derivado
+// (Ativo = Passivo + PL, com "a conciliar" e coverage). Dinheiro de gestão (§73) → owner/admin.
+router.get("/balance", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query?.asOf || "")) ? String(req.query.asOf) : undefined;
+  res.json(ManagerialBalanceSheetService.snapshot(orgId, asOf));
 });
 
 export default router;

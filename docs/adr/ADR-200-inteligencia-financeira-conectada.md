@@ -98,7 +98,7 @@ Uma camada LLM opcional transforma os números derivados na "leitura do CFO" em 
 ## 5. Plano de fatias (fatia-por-PR)
 
 - **F0 — Auditoria + este ADR** (doc-only). Mapa dos sub-razões e da régua de período; matriz componente→fonte. ✅ (este documento)
-- **F1 — `ManagerialBalanceSheetService.snapshot`** (D1): Ativo/Passivo/PL derivados numa data, com "a conciliar" e coverage. Rota `GET /api/dre/balance`. `test:managerial-balance`.
+- **F1 — `ManagerialBalanceSheetService.snapshot`** (D1): Ativo/Passivo/PL derivados numa data, com "a conciliar" e coverage. Rota `GET /api/dre/balance`. `test:managerial-balance`. ✅ **em produção** — caixa RECONSTRUÍDO na data (saldo atual − eventos posteriores), a receber/a pagar ABERTOS na data, estoque a custo (retail×`avg_cost` com fallback armazém + coverage parcial honesto), PL = capital do sócio + "resultado acumulado / a conciliar" (residual explícito, identidade sempre fecha), `preso` = a receber + estoque (o capital de giro travado do CFO). 21 checks.
 - **F2 — `ManagerialCashFlowService.indirect`** (D2): DRE→caixa pelo método indireto, reconciliado com `cash_events`. Rota `GET /api/dre/cashflow`. `test:managerial-cashflow`.
 - **F3 — `ConnectedFinancialsService.assemble`** (D3): os três + a ponte "lucro ≠ caixa"; sinal `financials/lucro_sem_caixa` no `business_signals` quando material. Rota `GET /api/dre/connected`. `test:connected-financials`.
 - **F4 — UI** no menu Relatórios (ou um card "Leitura do CFO"): três demonstrativos + a narrativa da conexão; disclaimer sempre; dinheiro role-gated (§73). Sem tela concorrente ao Motor de Caixa.

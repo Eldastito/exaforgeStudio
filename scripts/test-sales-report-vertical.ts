@@ -76,6 +76,36 @@ async function main() {
   check("6.1 categorias disponíveis", r.options.categories.includes("Camisas") && r.options.categories.includes("Calças"));
   check("6.2 vendedor aparece na lista", r.options.sellers.some((s: any) => s.id === sellerId && s.name === "Vendedor João"));
 
+  // ===== 7. LOJA FÍSICA (PDV) entra no total + fluxos separados =====
+  const todayStr = new Date().toISOString().slice(0, 10);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B1', ?, 200, 3, 'N')`).run(randomUUID(), orgId, todayStr);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B2', ?, 100, 1, 'N')`).run(randomUUID(), orgId, todayStr);
+  const rf = ReportsService.salesReport(orgId, { period: "30" }) as any;
+  check("7.1 faturamento total = virtual 480 + física 300 = 780", card(rf, "revenue") === 780);
+  check("7.2 flows.fisica: 300, 2 vendas, source pdv", rf.flows.fisica.revenue === 300 && rf.flows.fisica.sales === 2 && rf.flows.fisica.source === "pdv");
+  check("7.3 flows.virtual: 480, 3 pedidos", rf.flows.virtual.revenue === 480 && rf.flows.virtual.orders === 3);
+  check("7.4 vendas totais = 3 pedidos + 2 vendas físicas = 5", card(rf, "orders") === 5);
+  check("7.5 ticket total = 156 (780/5)", Math.round(card(rf, "ticket")) === 156);
+
+  // Filtrar por canal VIRTUAL (loja) NÃO traz a física; canal 'pdv' traz.
+  const lojaF = ReportsService.salesReport(orgId, { period: "30", channel: "loja" }) as any;
+  check("7.6 canal loja: física NÃO entra", card(lojaF, "revenue") === 300 && lojaF.flows.fisica.revenue === 0);
+  const pdvF = ReportsService.salesReport(orgId, { period: "30", channel: "pdv" }) as any;
+  check("7.7 canal pdv: física entra (300) + virtual pdv (100) = 400", card(pdvF, "revenue") === 400 && pdvF.flows.fisica.revenue === 300 && pdvF.flows.virtual.revenue === 100);
+  // Filtro por vendedor também não traz física.
+  const sellerF = ReportsService.salesReport(orgId, { period: "30", seller: sellerId }) as any;
+  check("7.8 filtro por vendedor: física NÃO entra", sellerF.flows.fisica.revenue === 0);
+
+  // ===== 8. Fallback: sem PDV, usa o FECHAMENTO diário =====
+  const org2 = randomUUID();
+  db.prepare(`INSERT INTO organization_settings (organization_id, business_name, status, vertical) VALUES (?, 'Loja2', 'active', 'varejo')`).run(org2);
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total) VALUES (?, ?, ?, ?, 'received', 500)`).run(randomUUID(), org2, randomUUID(), todayStr);
+  const r2rep = ReportsService.salesReport(org2, { period: "30" }) as any;
+  check("8.1 sem PDV: física vem do fechamento (500, source fechamento)", r2rep.flows.fisica.revenue === 500 && r2rep.flows.fisica.source === "fechamento");
+  check("8.2 física do fechamento sem contagem por venda (sales null)", r2rep.flows.fisica.sales === null);
+  check("8.3 faturamento total = 500 (sem virtual)", card(r2rep, "revenue") === 500);
+  check("8.4 isolamento: org2 não vê o PDV da org1", r2rep.flows.fisica.revenue === 500 && r2rep.flows.virtual.revenue === 0);
+
   console.log("\n=== test:sales-report-vertical ===");
   for (const x of results) console.log(`${x.ok ? "✅" : "❌"} ${x.name}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

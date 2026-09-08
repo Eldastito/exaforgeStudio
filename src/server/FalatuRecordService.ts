@@ -79,6 +79,15 @@ export interface ParsedAppointment {
   title: string;
 }
 
+export interface ParsedReceivable {
+  amount: number | null;
+  clientName: string | null;
+  description: string;
+  dueDate: string; // YYYY-MM-DD
+}
+
+const RECEIVABLE_LEAD_RE = /^(?:grava|gravar|anota|anotar|registra|registrar|lan[çc]a|lan[çc]ar)\b[:,]?\s*/i;
+
 function pad2n(n: number): string { return String(n).padStart(2, "0"); }
 
 // Horário na fala. Aceita "10h", "10h30", "10:30", "às 14", "14 horas". Sem
@@ -309,6 +318,67 @@ export class FalatuRecordService {
     const scheduledStart = `${p.date}T${p.time}:00`;
     const action = this.proposeAppointment(orgId, { contactId: resolved.contactId!, contactName: p.contactName, scheduledStart, title: p.title }, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
     return { proposed: true, contactName: p.contactName, date: p.date, time: p.time, title: p.title, actionId: action?.id };
+  }
+
+  // ── F12: RECEBÍVEL / FIADO (conta a receber) ──────────────────────────────
+  /** Parser determinístico do recebível ditado. Cliente é opcional (best-effort). */
+  static parseReceivable(text: string, today: string): ParsedReceivable {
+    const t = String(text || "").trim();
+    const amount = parseAmountBRL(t);
+    const dueDate = extractDate(t, today) || today;
+    // Cliente depois de "cliente"/"do"/"da"/"de" — best-effort, cortando data/valor.
+    let clientName: string | null = null;
+    const cm = t.match(/\b(?:do|da|de)\s+cliente\s+([A-Za-zÀ-ú][A-Za-zÀ-ú0-9.'\- ]{1,38})/i)
+      || t.match(/\bcliente\s+([A-Za-zÀ-ú][A-Za-zÀ-ú0-9.'\- ]{1,38})/i)
+      || t.match(/\bdo\s+([A-ZÀ-Ú][A-Za-zÀ-ú.'\-]{1,38}(?:\s+[A-ZÀ-Ú][A-Za-zÀ-ú.'\-]{1,38})?)/);
+    if (cm) {
+      clientName = cm[1]
+        .replace(/\b(vencimento|vence|venc\.|no dia|at[ée]|em)\b.*$/i, "")
+        .replace(/\bdia\s+\d.*$/i, "")
+        .replace(/\+?\d[\d.,/]*.*$/, "")
+        .replace(/\br\$.*$/i, "")
+        .replace(/[,;.].*$/, "")
+        .replace(/[\s]+$/, "")
+        .trim().slice(0, 60);
+      if (clientName.length < 2) clientName = null;
+    }
+    const description = (t.replace(RECEIVABLE_LEAD_RE, "").trim().slice(0, 160)) || `Recebível${clientName ? ` — ${clientName}` : ""}`;
+    return { amount, clientName, description, dueDate };
+  }
+
+  /**
+   * Propõe o RECEBÍVEL como comando governado (domínio finance; dinheiro que
+   * ENTRA no futuro → expectedImpact positivo). Semeia a policy de execução e
+   * nasce awaiting_approval. Cliente resolvido (se achado) entra como contactId.
+   */
+  static proposeReceivable(orgId: string, payload: { amount: number; description: string; dueDate: string; clientName: string | null; contactId: string | null }, opts: { createdBy?: string; correlationId?: string | null } = {}): any {
+    const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = 'finance' AND action_type = 'falatu_record_receivable'`).get(orgId) as any;
+    if (!pol) {
+      db.prepare(`INSERT INTO agent_policies (id, organization_id, domain, action_type, autonomy_level, execution_mode, active) VALUES (?, ?, 'finance', 'falatu_record_receivable', 'execute', 'approved_execution', 1)`)
+        .run(randomUUID(), orgId);
+    }
+    return DecisionActionService.propose(orgId, {
+      domain: "finance",
+      actionType: "falatu_record_receivable",
+      title: `Lançar recebível${payload.clientName ? ` — ${payload.clientName}` : ""}`,
+      description: payload.description,
+      expectedImpact: Math.abs(payload.amount),
+      impactUnit: "BRL",
+      basis: "estimate", // recebível é dinheiro ESPERADO, não fato
+      commandType: "falatu_record_receivable",
+      commandPayload: payload,
+      correlationId: opts.correlationId ?? null,
+      createdBy: opts.createdBy || "falatu",
+    });
+  }
+
+  static recordReceivable(orgId: string, user: any, text: string, opts: { now?: Date; correlationId?: string | null } = {}): { proposed: boolean; amount?: number | null; clientName?: string | null; dueDate?: string; actionId?: string } {
+    const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
+    const p = this.parseReceivable(text, today);
+    if (p.amount == null) return { proposed: false };
+    const contactId = p.clientName ? (this.resolveContactByName(orgId, p.clientName).contactId || null) : null;
+    const action = this.proposeReceivable(orgId, { amount: p.amount, description: p.description, dueDate: p.dueDate, clientName: p.clientName, contactId }, { createdBy: user?.userId || user?.id, correlationId: opts.correlationId ?? null });
+    return { proposed: true, amount: p.amount, clientName: p.clientName, dueDate: p.dueDate, actionId: action?.id };
   }
 }
 

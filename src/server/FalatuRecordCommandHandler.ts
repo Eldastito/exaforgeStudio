@@ -170,10 +170,45 @@ export const FalatuRecordAppointmentCommandHandler: CommandHandler = {
   },
 };
 
+// F12 — RECEBÍVEL / FIADO (conta a receber). O efeito é
+// FinancialLedgerService.addReceivable (dinheiro que ENTRA no futuro; status
+// 'open'). Idempotência durável pelo guard do executor.
+export const FalatuRecordReceivableCommandHandler: CommandHandler = {
+  key: "FalatuRecordReceivableCommandHandler",
+  commandTypes: ["falatu_record_receivable"],
+
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    return {
+      summary: `Recebível a lançar: ${brl(Number(p.amount) || 0)}${p.clientName ? ` — ${p.clientName}` : ""} (vence ${p.dueDate || "?"})`,
+      artifact: { kind: "receivable_draft", amount: Number(p.amount) || 0, clientName: p.clientName ?? null, dueDate: p.dueDate ?? null, contactId: p.contactId ?? null },
+    };
+  },
+
+  execute(orgId, action) {
+    const p = payloadOf(action);
+    const r = FinancialLedgerService.addReceivable(orgId, {
+      description: String(p.description || "Recebível (Fala Tu)"),
+      amount: Number(p.amount) || 0,
+      dueDate: String(p.dueDate || ""),
+      contactId: p.contactId || undefined,
+      createdBy: action.created_by || "falatu",
+    });
+    if (!r.ok) throw new Error(`Não consegui lançar o recebível (${r.error}).`);
+    return {
+      summary: `Recebível lançado: ${brl(Number(p.amount) || 0)}${p.clientName ? ` — ${p.clientName}` : ""}`,
+      artifact: { kind: "receivable", receivableId: (r as any).id ?? null, amount: Number(p.amount) || 0 },
+      effect: "receivable_created",
+      externalRef: (r as any).id ?? action.id,
+    };
+  },
+};
+
 // Registra no MESMO registry do executor (mesmo padrão de SocialPublishCommandHandler).
 CommandExecutorService.registerHandler(FalatuRecordExpenseCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordSaleCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordContactCommandHandler);
 CommandExecutorService.registerHandler(FalatuRecordAppointmentCommandHandler);
+CommandExecutorService.registerHandler(FalatuRecordReceivableCommandHandler);
 
 export default FalatuRecordExpenseCommandHandler;

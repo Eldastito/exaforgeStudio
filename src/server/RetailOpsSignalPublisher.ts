@@ -30,6 +30,9 @@ import { haversineKm } from "./geo.js";
  *    cobrar o fechamento). Só para lojas que participam da rotina.
  *  - `retail_store_below_quota`: loja que fechou ABAIXO da cota no último dia
  *    (ação: entender o desvio). Leva o gap em R$.
+ *  - `retail_discontinued_online_stock`: item DESCONTINUADO no catálogo Alterdata
+ *    mas ainda com saldo na filial da loja virtual (ação: limpar antes de vender
+ *    fantasma). Só com a loja virtual ligada. Reconciliação read-only.
  */
 
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
@@ -266,6 +269,41 @@ export class RetailOpsSignalPublisher {
         });
       }
     }
+
+    // ── Loja virtual: produto DESCONTINUADO com saldo (anti-fantasma) ─────────
+    // Reconciliação NF/estoque × catálogo Alterdata (pedido TOULON). A fonte
+    // ÚNICA de estoque+grade da loja virtual é o Saldo/catálogo da Alterdata —
+    // este detector NÃO escreve estoque, só CONFERE: um item que o catálogo
+    // Alterdata marcou DESCONTINUADO (product_variants.active=0 / products_
+    // services.active=0) mas que ainda tem saldo na FILIAL da loja virtual
+    // apareceria pra venda online sem existir mais (a rede não repete
+    // referência/modelo). Só age com a loja virtual LIGADA (é quando o fantasma
+    // importa); sem ela, saldo de item antigo na loja física é venda normal.
+    try {
+      const onlineStoreId = RetailOnlineReserveService.isEnabled(orgId) ? RetailOnlineReserveService.getOnlineStoreId(orgId) : null;
+      if (onlineStoreId) {
+        const rows = db.prepare(
+          `SELECT p.name AS product, COALESCE(v.name, '') AS variant, rsi.quantity_available AS qty
+             FROM retail_store_inventory rsi
+             JOIN products_services p ON p.id = rsi.product_service_id AND p.organization_id = rsi.organization_id
+             LEFT JOIN product_variants v ON v.id = rsi.variant_id AND v.organization_id = rsi.organization_id
+            WHERE rsi.organization_id = ? AND rsi.store_id = ? AND rsi.quantity_available > 0
+              AND ((rsi.variant_id IS NOT NULL AND v.active = 0) OR p.active = 0)
+            ORDER BY rsi.quantity_available DESC`
+        ).all(orgId, onlineStoreId) as any[];
+        if (rows.length > 0) {
+          const storeName = (db.prepare(`SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?`).get(onlineStoreId, orgId) as any)?.name || "loja virtual";
+          const units = rows.reduce((a, r) => a + Number(r.qty || 0), 0);
+          const sample = rows.slice(0, 3).map((r) => [r.product, r.variant].filter(Boolean).join(" ")).join(", ");
+          pub({
+            domain: "retail_ops", signalType: "retail_discontinued_online_stock", severity: "risk",
+            impactAmount: rows.length, impactUnit: "items", sourceEntityType: "retail_store", sourceEntityId: onlineStoreId,
+            evidence: { summary: `${rows.length} item(ns) descontinuado(s) ainda com saldo na loja virtual (${storeName}) — sumiu do catálogo mas apareceria pra venda`, store: storeName, items: rows.length, units, sample },
+            dedupeKey: `retail_ops:discontinued_online_stock:${onlineStoreId}`,
+          });
+        }
+      }
+    } catch { /* colunas online_store_* / retail_store_inventory podem não existir em schema antigo */ }
 
     // Auto-resolve: sinais deste publicador que não valem mais (voltaram ao normal).
     let resolved = 0;

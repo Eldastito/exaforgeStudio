@@ -56,7 +56,45 @@ export const FalatuRecordExpenseCommandHandler: CommandHandler = {
   },
 };
 
+// F6 — VENDA (entrada de caixa). Mesmo choke-point governado; o efeito é
+// `recordEvent direction:'in'` (dinheiro que ENTROU — VENDA≠LUCRO≠CAIXA, só o
+// que entrou de fato forma o caixa). Idempotência DURÁVEL via `sourceId=action.id`
+// (o mesmo lançamento nunca entra 2× no `cash_events`) + o guard do executor.
+export const FalatuRecordSaleCommandHandler: CommandHandler = {
+  key: "FalatuRecordSaleCommandHandler",
+  commandTypes: ["falatu_record_sale"],
+
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    return {
+      summary: `Venda a registrar: ${brl(Number(p.amount) || 0)} (entrada de caixa em ${p.eventDate || "?"})`,
+      artifact: { kind: "cash_in_draft", amount: Number(p.amount) || 0, eventDate: p.eventDate ?? null, note: p.note ?? null },
+    };
+  },
+
+  execute(orgId, action) {
+    const p = payloadOf(action);
+    const r = FinancialLedgerService.recordEvent(orgId, {
+      direction: "in",
+      amount: Number(p.amount) || 0,
+      eventDate: p.eventDate || undefined,
+      sourceType: "falatu_sale",
+      sourceId: action.id, // idempotência durável (INSERT OR IGNORE por source)
+      note: String(p.note || "Venda (Fala Tu)"),
+      createdBy: action.created_by || "falatu",
+    });
+    if (!r.ok) throw new Error(`Não consegui registrar a venda (${r.error}).`);
+    return {
+      summary: `Venda registrada: ${brl(Number(p.amount) || 0)} (entrada de caixa)`,
+      artifact: { kind: "cash_in", amount: Number(p.amount) || 0, deduped: !!(r as any).deduped },
+      effect: "cash_in_recorded",
+      externalRef: (r as any).id ?? action.id,
+    };
+  },
+};
+
 // Registra no MESMO registry do executor (mesmo padrão de SocialPublishCommandHandler).
 CommandExecutorService.registerHandler(FalatuRecordExpenseCommandHandler);
+CommandExecutorService.registerHandler(FalatuRecordSaleCommandHandler);
 
 export default FalatuRecordExpenseCommandHandler;

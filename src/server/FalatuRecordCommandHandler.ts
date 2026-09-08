@@ -1,0 +1,62 @@
+/**
+ * FalatuRecordCommandHandler — executa o registro de DESPESA ditado pelo dono no
+ * Fala Tu, PELO choke-point governado (D4): a fala não escreve direto; vira um
+ * COMANDO que atravessa `DecisionAction → ApprovalPolicy → CommandExecutor`.
+ * Registrado no MESMO registry do executor (§184 — sem runtime paralelo),
+ * espelhando `SocialPublishCommandHandler`.
+ *
+ * O efeito é DINHEIRO (conta a pagar) → a ação nasce `awaiting_approval`
+ * (política 'single' por não estar na matriz de DEFAULTS + finance é
+ * financeiro/destrutivo, RN-159-1). Só após a aprovação humana o `execute` roda
+ * `FinancialLedgerService.addPayable`. Idempotência durável: o executor já barra
+ * 2º `execute` bem-sucedido (`action_already_executed`) — o mesmo lançamento
+ * nunca entra 2× no `payables`.
+ */
+import { CommandExecutorService, type CommandHandler } from "./CommandExecutorService.js";
+import { FinancialLedgerService } from "./FinancialLedgerService.js";
+
+function payloadOf(action: any): any { try { return action.command_payload_json ? JSON.parse(action.command_payload_json) : {}; } catch { return {}; } }
+
+function brl(n: number): string {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  const [int, dec] = v.toFixed(2).split(".");
+  return `R$ ${int.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${dec}`;
+}
+
+export const FalatuRecordExpenseCommandHandler: CommandHandler = {
+  key: "FalatuRecordExpenseCommandHandler",
+  commandTypes: ["falatu_record_expense"],
+
+  prepare(_orgId, action) {
+    const p = payloadOf(action);
+    return {
+      summary: `Despesa a lançar: ${brl(Number(p.amount) || 0)}${p.supplierName ? ` — ${p.supplierName}` : ""} (vence ${p.dueDate || "?"})`,
+      artifact: { kind: "payable_draft", amount: Number(p.amount) || 0, supplierName: p.supplierName ?? null, dueDate: p.dueDate ?? null, description: p.description ?? null },
+    };
+  },
+
+  execute(orgId, action) {
+    const p = payloadOf(action);
+    const r = FinancialLedgerService.addPayable(orgId, {
+      description: String(p.description || "Despesa (Fala Tu)"),
+      amount: Number(p.amount) || 0,
+      dueDate: String(p.dueDate || ""),
+      supplierName: p.supplierName ?? undefined,
+      category: p.category ?? undefined,
+      createdBy: action.created_by || "falatu",
+    });
+    // Falha HONESTA (execução auditada como `failed`, retryável) — nunca finge.
+    if (!r.ok) throw new Error(`Não consegui lançar a despesa (${r.error}).`);
+    return {
+      summary: `Despesa lançada: ${brl(Number(p.amount) || 0)}${p.supplierName ? ` — ${p.supplierName}` : ""}`,
+      artifact: { kind: "payable", payableId: r.id, amount: Number(p.amount) || 0 },
+      effect: "payable_created",
+      externalRef: r.id,
+    };
+  },
+};
+
+// Registra no MESMO registry do executor (mesmo padrão de SocialPublishCommandHandler).
+CommandExecutorService.registerHandler(FalatuRecordExpenseCommandHandler);
+
+export default FalatuRecordExpenseCommandHandler;

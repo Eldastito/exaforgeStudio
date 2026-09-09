@@ -11438,6 +11438,40 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar channel_feature_bindings', e); }
 
+  // PRD WhatsApp Unificado — RF-04 §10 (F3.2): PROVA DE POSSE do telefone.
+  // Vincula um telefone ao usuário AUTENTICADO por código de verificação (molde
+  // PIN Fase 28: sha256 + timingSafeEqual + TTL + cap de tentativas). Guarda
+  // normalização, verificação, organização e status. `status`: pending→verified
+  // →revoked (nunca DELETE — trilha, convenção nº 9). Verificar um número novo
+  // revoga o vínculo anterior do usuário e qualquer vínculo verificado do MESMO
+  // número a OUTRO usuário (um dono verificado por número). Aditiva/opt-in:
+  // ninguém escreve `users.phone` aqui — o resolvedor de identidade prefere o
+  // vínculo verificado na fatia de modo misto (F3.3).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_phone_bindings (
+        id                TEXT PRIMARY KEY,
+        organization_id   TEXT NOT NULL,
+        user_id           TEXT NOT NULL,
+        phone             TEXT NOT NULL,
+        phone_normalized  TEXT NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'pending',
+        confidence        TEXT,
+        verify_code_hash  TEXT,
+        verify_expires_at DATETIME,
+        verify_attempts   INTEGER NOT NULL DEFAULT 0,
+        verified_at       DATETIME,
+        revoked_at        DATETIME,
+        created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_upb_lookup
+        ON user_phone_bindings (organization_id, phone_normalized, status);
+      CREATE INDEX IF NOT EXISTS idx_upb_user
+        ON user_phone_bindings (organization_id, user_id, status);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar user_phone_bindings', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

@@ -13,7 +13,7 @@
 | F0 | F0.1–F0.4 | **EM ANDAMENTO** | `docs/whatsapp-unificado/ANALISE-F0-auditoria-baseline.md` | Contrato Evolution real (Swagger) + fixtures + execução da suíte |
 | F1 | F1.1–F1.4 | **IMPLEMENTADO** (escopo enxuto) | F1.1 (`evolution-credential` 6/6) · F1.2a (`meta-webhook-dedup` 10/10) · F1.2b (`whatsapp-jid` 16/16) · F1.2c (`evolution-channel-status` 10/10) · F1.3 (`evolution-reset` 14/14) · F1.4 (`evolution-connect-subscribe` 5/5) | **G1 atendido** no escopo enxuto; difere pra F1.2d a máquina de estados RF-02 + webhook assinado (A10) |
 | F2 | F2.1–F2.4 | **IMPLEMENTADO** (escopo enxuto) | F2.1 + F2.2 + F2.3 (`channel-binding-migration` 18/18) + F2.4 (`channel-binding-gate` 11/11) | **G2 atendido** no escopo enxuto; ativação por-produtor do gate difere pra Fase 6 |
-| F3 | F3.1–F3.4 | NÃO INICIADO | — | G3 |
+| F3 | F3.1–F3.4 | **EM ANDAMENTO** | F3.0 auditoria (`docs/whatsapp-unificado/ANALISE-F3-identidade-modo-misto.md`) | G3 (CA-04/05/06) — próximo: F3.1a projeção por usuário no Diretor |
 | F4 | F4.1–F4.4 | NÃO INICIADO | — | G4 |
 | F5 | F5.1–F5.4 | NÃO INICIADO | — | G5 |
 | F6 | F6.1–F6.4 | NÃO INICIADO | — | G6 |
@@ -40,6 +40,7 @@
 - [x] **F2.4** — Fluxo móvel e bloqueio de pendências ao desligar validados. — **IMPLEMENTADO (gate no SINK, opt-in)**: `OutboundFeatureDisabledError` + `ChannelBindingService.assertOutboundAllowed(orgId, feature?, {unitId?})` — só LANÇA quando a finalidade tem binding com saída DESLIGADA (`feature_disabled`); passa em `no_binding`/finalidade ligada/sem-feature (0-regressão). Wired como gate OPCIONAL no sink de saída `MessageProviderService.sendMessage`/`sendDocument` (quando o chamador informa `opts.feature`): desligar a finalidade BLOQUEIA o envio ANTES de tocar o provedor (fetch=0), sem afetar as outras finalidades do mesmo canal (CA-03). A ativação POR PRODUTOR (passar `feature` em cada ponto de envio) fica pra Fase 6 — hoje nasce testado e 0-regressão porque nenhum produtor passa `feature` ainda. `test:channel-binding-gate` 11/11; regressões `channel-binding` 21/21, `channel-binding-migration` 18/18, `evolution-credential` 6/6, `security-tenant` 7/7, `delivery-receipts` 10/10; tsc verde. **Fecha o G2 no escopo enxuto.**
 
 ### Fase 3 — Identidade e conversa interna unificadas
+- [ ] **F3.0** — Auditoria de identidade/autorização/modo misto (RF-04/05/06). — **IMPLEMENTADO (doc-only)**: `docs/whatsapp-unificado/ANALISE-F3-identidade-modo-misto.md`. 8 perguntas respondidas com `arquivo:linha`. Achado nº1 (bloqueador G3): Diretor `ExecutiveAdvisorService.ask(orgId,question)` sem projeção por usuário + gate de dinheiro contornado em pergunta aberta (INV-11/X5, CA-04). Recorte F3.0→F3.1a→F3.1b→F3.2→F3.3→F3.4 proposto.
 - [ ] **F3.1** — Identidade e permissão unificadas, incluindo perguntas abertas. — NÃO INICIADO
 - [ ] **F3.2** — Entrada comum web/WhatsApp com aliases preservados. — NÃO INICIADO
 - [ ] **F3.3** — Modo misto sem vazamento de conversa interna para CRM. — NÃO INICIADO

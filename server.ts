@@ -1386,6 +1386,7 @@ async function startServer() {
       let senderId = '';
       let businessId = '';
       let contactName: string | undefined = undefined;
+      let messageId = ''; // F1.2a — id do evento (wamid/mid) para deduplicação anti-replay da Meta
 
       if (payload.object === "whatsapp_business_account") {
         provider = 'whatsapp_cloud';
@@ -1402,6 +1403,7 @@ async function startServer() {
         if (message) {
           senderId = message.from; // Número do cliente
           incomingMessageText = message.text?.body || '';
+          messageId = message.id || ''; // wamid — chave de dedup (Meta reentrega em retry)
         }
 
         // Recibos de ENTREGA (ADR-082): o WhatsApp Cloud manda `value.statuses[]`
@@ -1445,6 +1447,7 @@ async function startServer() {
           } else {
             senderId = messaging.sender?.id || '';
             incomingMessageText = msgObj?.text || '';
+            messageId = msgObj?.mid || messaging.message?.mid || ''; // mid do DM — chave de dedup
             // Anexo sem texto (figurinha/imagem): coloca um placeholder.
             if (!incomingMessageText && msgObj?.attachments?.length) {
               incomingMessageText = "📎 [Anexo recebido pelo Instagram]";
@@ -1463,8 +1466,20 @@ async function startServer() {
 
       // Se processou a mensagem com sucesso
       if (incomingMessageText && senderId) {
+        // F1.2a (achado X2 / INV-02) — DEDUP do inbound Meta/Cloud + Instagram.
+        // A Meta reentrega o MESMO evento em retries (falha/timeout de resposta);
+        // sem dedup, cada retry reprocessa a mensagem → contato/ticket/resposta em
+        // DUPLICIDADE. `claimWebhookEvent(provider, messageId)` registra
+        // (provider:wamid|mid) e retorna false numa repetição. Sem id confiável →
+        // processa (honesto: não há como deduplicar). Retorna 200 pra Meta parar de
+        // reenviar. Antes deste ponto, só efeitos idempotentes (statuses/recibos).
+        if (messageId && !claimWebhookEvent(provider, messageId)) {
+          console.log(`[${provider.toUpperCase()}] Ignorado: evento repetido (id=${messageId}).`);
+          if (hitId) MetaWebhookLogService.markProcessed(hitId);
+          return res.status(200).send("EVENT_RECEIVED");
+        }
         console.log(`[${provider.toUpperCase()}] Mensagem de ${senderId}: ${incomingMessageText}`);
-        
+
         await dispatchIncomingMessage({
            channelId: null, // mapped by identifier
            organizationId: null,

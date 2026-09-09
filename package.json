@@ -49,6 +49,7 @@
     "test:falatu-bridge-recon": "tsx scripts/test-falatu-bridge-recon.ts",
     "test:falatu-bridge-records": "tsx scripts/test-falatu-bridge-records.ts",
     "test:falatu-bridge-backfill": "tsx scripts/test-falatu-bridge-backfill.ts",
+    "test:falatu-bridge-convergence": "tsx scripts/test-falatu-bridge-convergence.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",

@@ -121,6 +121,7 @@ export class TaskService {
     const ev = String(input.evidenceUrl || "").trim() || null;
     db.prepare(`UPDATE tasks SET result_final = COALESCE(?, result_final), evidence_url = COALESCE(?, evidence_url), status = 'feito', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
       .run(finalNum, ev, id, orgId);
+    this.reflectFalatuMirror(orgId, id, true); // F4.3 — converge com o espelho do Fala Tu
     let msg = "Tarefa concluída";
     if (cur.result_baseline != null && finalNum != null) {
       const delta = Math.round((Number(cur.result_baseline) - finalNum) * 100) / 100;
@@ -164,7 +165,24 @@ export class TaskService {
     const completedAt = status === "feito" ? "CURRENT_TIMESTAMP" : "NULL";
     db.prepare(`UPDATE tasks SET status = ?, completed_at = ${completedAt}, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(status, id, orgId);
     if (status !== cur.status) this.addUpdate(orgId, id, actorId, "status_change", `Status: ${cur.status} → ${status}.`);
+    this.reflectFalatuMirror(orgId, id, status === "feito");
     return this.get(orgId, id);
+  }
+
+  /**
+   * CONVERGÊNCIA (RF-09 §15.2 / F4.3): reflete o BIT de conclusão da tarefa
+   * canônica no espelho do Fala Tu (`falatu_tasks.bridged_task_id = id`), quando
+   * existe. Assim concluir/reabrir no QUADRO converge com o silo — os estados
+   * não divergem por uma ação. UPDATE guardado e idempotente (não chama de volta
+   * o FalaTuService → sem loop); no-op quando não há espelho (0-regressão).
+   */
+  private static reflectFalatuMirror(orgId: string, canonicalTaskId: string, done: boolean): void {
+    try {
+      db.prepare(
+        `UPDATE falatu_tasks SET completed = ?, completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
+         WHERE bridged_task_id = ? AND organization_id = ?`,
+      ).run(done ? 1 : 0, done ? 1 : 0, canonicalTaskId, orgId);
+    } catch (e) { /* espelho best-effort: nunca derruba a ação canônica */ }
   }
 
   static addNote(orgId: string, id: string, text: string, actorId?: string): any {

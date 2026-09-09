@@ -30,6 +30,20 @@ import { logAuthEvent } from "./auditLog.js";
 export type BindingDirection = "inbound" | "outbound";
 
 /**
+ * F2.4 (CA-03) — erro tipado quando a FINALIDADE está desligada pra saída. O
+ * SINK de envio lança isso pra o caller registrar o bloqueio (não como `failed`)
+ * e não reenviar. Só dispara quando a org CONFIGUROU usos e desligou esta
+ * finalidade (nunca no comportamento herdado sem binding).
+ */
+export class OutboundFeatureDisabledError extends Error {
+  code = "outbound_blocked:feature_disabled" as const;
+  constructor(public feature: string, public reason: string) {
+    super(`Envio bloqueado: finalidade '${feature}' desligada (${reason})`);
+    this.name = "OutboundFeatureDisabledError";
+  }
+}
+
+/**
  * Finalidades VÁLIDAS (RF-03 §17.2 "finalidades válidas"). A escrita rejeita
  * chave fora desta lista — evita binding-lixo e mantém o vocabulário estável
  * (a UI lista a partir daqui). Aditiva: novas finalidades entram aqui quando um
@@ -219,6 +233,22 @@ export class ChannelBindingService {
   private static channelInOrg(orgId: string, channelId: string | null | undefined): boolean {
     if (!channelId) return false;
     return !!db.prepare(`SELECT 1 FROM channels WHERE id = ? AND organization_id = ? LIMIT 1`).get(channelId, orgId);
+  }
+
+  /**
+   * F2.4 (CA-03) — gate de SAÍDA por finalidade. Lança `OutboundFeatureDisabledError`
+   * SÓ quando a org configurou usos e a finalidade está DESLIGADA pra saída
+   * (`feature_disabled`). Sem binding (comportamento herdado) → PASSA (0-regressão);
+   * finalidade ligada → passa; canal indisponível NÃO é bloqueio de finalidade
+   * (o envio já vai num canal específico) → passa. Sem finalidade informada → passa.
+   */
+  static assertOutboundAllowed(orgId: string, featureKey?: string | null, opts?: { unitId?: string | null }): void {
+    const feature = String(featureKey || "").trim();
+    if (!orgId || !feature) return;
+    const decision = this.resolve(orgId, feature, { unitId: opts?.unitId ?? null, direction: "outbound" });
+    if (decision.code === "feature_disabled") {
+      throw new OutboundFeatureDisabledError(feature, decision.reason);
+    }
   }
 
   /** Lista os bindings de uma finalidade (para UI/diagnóstico), sem segredos. */

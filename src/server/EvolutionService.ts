@@ -61,6 +61,24 @@ export class EvolutionService {
   }
 
   /**
+   * Verificação NÃO-destrutiva: a instância existe no provedor? (F2.1a — import.)
+   * Lista `/instance/all` e procura pelo nome. Retorna false em rede/erro (nunca
+   * lança) — o caller trata "não confirmado". NÃO cria nada: importar por digitar
+   * um nome que não existe no provedor não deve inventar instância (§8).
+   */
+  static async instanceExists(instanceName: string, config?: EvolutionConfig): Promise<boolean> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg || !instanceName) return false;
+    try {
+      const resp = (await fetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      return list.some((i: any) => i?.name === instanceName || i?.instanceName === instanceName);
+    } catch { return false; }
+  }
+
+  /**
    * Carrega config a partir de ENV. Retorna null se qualquer campo obrigatório
    * faltar — o caller decide se falha (rota /provision) ou pula (onboarding
    * best-effort). Extraído pra permitir override no teste.

@@ -163,6 +163,7 @@ import { StudioVisualRecipeService } from "./src/server/StudioVisualRecipeServic
 import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
+import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
 import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
@@ -1107,12 +1108,22 @@ async function startServer() {
         }
 
         const rawJid = info.Sender || info.sender || info.Chat || info.chat || info.RemoteJid || data.key?.remoteJid || "";
-        const senderId = String(rawJid).split('@')[0].split(':')[0]; // remove sufixo de device (:NN)
+        // F1.2b (achado X3 / RN-004/INV-01) — VALIDA o JID antes de virar telefone.
+        // Antes: `split('@')[0].split(':')[0]` cego → grupo/status/newsletter/lid
+        // viravam "remetente" falso e criavam contato/ticket espúrio. Agora só um
+        // JID INDIVIDUAL com telefone plausível segue; o resto é ignorado (200,
+        // pra Evolution não reenviar). Preserva o número cru individual (0-regressão).
+        const jidClass = classifyWhatsappJid(rawJid);
+        const senderId = jidClass.senderId;
         const fromMe = info.IsFromMe ?? info.fromMe ?? data.key?.fromMe ?? false;
         const pushName = info.PushName || info.pushName || data.pushName || undefined;
         const businessId = payload.instance || evolutionConfig.instanceName || 'evolution_api';
 
         if (fromMe) { console.log("[Evolution Webhook] Ignorado: fromMe."); return res.status(200).send("OK"); }
+        if (jidClass.kind !== "individual") {
+          console.warn(`[Evolution Webhook] Ignorado: JID não-individual (${jidClass.kind}). raw=${String(rawJid).slice(0, 60)}`);
+          return res.status(200).send("OK");
+        }
         if (!senderId) { console.warn("[Evolution Webhook] Ignorado: sem remetente. info=", JSON.stringify(info).slice(0, 300)); return res.status(200).send("OK"); }
         if (!incomingMessageText) { console.warn("[Evolution Webhook] Ignorado: sem texto. chaves de Message=", Object.keys(msgObj).join(',')); return res.status(200).send("OK"); }
 

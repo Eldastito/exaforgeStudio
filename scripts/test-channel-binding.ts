@@ -87,6 +87,26 @@ async function main() {
   // e B não vê os bindings de A
   check("8.2 B não tem bindings de A", ChannelBindingService.list(B).length === 0);
 
+  // ── 9. WRITE controls: upsert cria, valida finalidade, concorrência, remove ──
+  const chW = mkChannel(A, "para-uso");
+  const u1 = ChannelBindingService.upsert(A, "op1", { channelId: chW, featureKey: "recompra" });
+  check("9.1 upsert cria (policyVersion 1)", u1.ok === true && u1.policyVersion === 1 && !!u1.id);
+  check("9.2 finalidade desconhecida rejeitada", ChannelBindingService.upsert(A, "op1", { channelId: chW, featureKey: "xpto" }).code === "invalid_feature");
+  check("9.3 canal de outra org rejeitado", ChannelBindingService.upsert(A, "op1", { channelId: chB, featureKey: "recompra" }).code === "channel_not_in_org");
+  // re-upsert mesma chave → atualiza + bump de versão
+  const u2 = ChannelBindingService.upsert(A, "op1", { channelId: chW, featureKey: "recompra", priority: 5 });
+  check("9.4 re-upsert atualiza + bump policyVersion→2", u2.ok === true && u2.policyVersion === 2);
+  // concorrência otimista: ifPolicyVersion antigo → conflito
+  check("9.5 ifPolicyVersion antigo → version_conflict", ChannelBindingService.upsert(A, "op1", { channelId: chW, featureKey: "recompra", ifPolicyVersion: 1 }).code === "version_conflict");
+  // ifPolicyVersion correto → aplica
+  check("9.6 ifPolicyVersion correto → aplica (→3)", ChannelBindingService.upsert(A, "op1", { channelId: chW, featureKey: "recompra", ifPolicyVersion: 2, priority: 7 }).policyVersion === 3);
+  // o resolvedor enxerga o que foi gravado
+  check("9.7 resolve enxerga o binding escrito", ChannelBindingService.resolve(A, "recompra").channelId === chW);
+  // remove
+  check("9.8 remove ok", ChannelBindingService.remove(A, "op1", u1.id!).ok === true);
+  check("9.9 remove idempotente/ausente → not_found", ChannelBindingService.remove(A, "op1", u1.id!).code === "not_found");
+  check("9.10 após remover, recompra volta a no_binding", ChannelBindingService.resolve(A, "recompra").code === "no_binding");
+
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} channel-binding: ${passed}/${results.length} checks`);

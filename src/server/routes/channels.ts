@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { ChannelProvisioningService } from "../ChannelProvisioningService.js";
+import { ChannelBindingService, KNOWN_FEATURES } from "../ChannelBindingService.js";
 
 const router = Router();
 
@@ -48,6 +49,50 @@ router.get("/whatsapp/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   return res.json(ChannelProvisioningService.status(orgId));
+});
+
+// F2.2 — CONTROLES de usos por finalidade (channel_feature_bindings). Editam a
+// MESMA fonte que o resolvedor lê. owner/admin. Segredos nunca trafegam aqui.
+router.get("/bindings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const feature = typeof req.query.feature === "string" ? req.query.feature : undefined;
+  return res.json({ features: KNOWN_FEATURES, bindings: ChannelBindingService.list(orgId, feature) });
+});
+
+router.post("/bindings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId || null;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const r = ChannelBindingService.upsert(orgId, userId, {
+    channelId: String(b.channelId || ""),
+    featureKey: String(b.featureKey || ""),
+    unitId: b.unitId ?? null,
+    inbound: b.inbound,
+    outbound: b.outbound,
+    executionMode: b.executionMode,
+    priority: b.priority,
+    fallbackChannelId: b.fallbackChannelId ?? null,
+    ifPolicyVersion: b.ifPolicyVersion,
+    origin: "manual",
+  });
+  if (!r.ok) {
+    const status = r.code === "version_conflict" ? 409
+      : (r.code === "invalid_feature" || r.code === "channel_not_in_org" || r.code === "fallback_not_in_org") ? 400
+      : 500;
+    return res.status(status).json({ error: r.error, code: r.code });
+  }
+  return res.json({ ok: true, id: r.id, policyVersion: r.policyVersion });
+});
+
+router.delete("/bindings/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId || null;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = ChannelBindingService.remove(orgId, userId, req.params.id);
+  if (!r.ok) return res.status(r.code === "not_found" ? 404 : 400).json({ error: "Binding não encontrado", code: r.code });
+  return res.json({ ok: true });
 });
 
 // List channels

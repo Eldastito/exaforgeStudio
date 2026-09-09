@@ -165,6 +165,7 @@ import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
+import { EvolutionService } from "./src/server/EvolutionService.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
 import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
@@ -804,177 +805,40 @@ async function startServer() {
   app.post("/api/evolution/instance/connect", async (req, res) => {
     try {
       const { instanceName } = req.body;
-      const finalBaseUrl = (evolutionConfig.baseUrl || process.env.EVOLUTION_BASE_URL || '').replace(/\/$/, '');
-      const finalApiKey = (evolutionConfig.apiKey || process.env.EVOLUTION_API_KEY || '');
       const finalInstance = instanceName || evolutionConfig.instanceName || process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || '';
 
-      if (!finalBaseUrl || !finalApiKey || !finalInstance) {
+      // F1.4 (RF-02 §4 — "transformar em adaptador do serviço consolidado") — esta
+      // rota deixa de reimplementar create+connect+QR inline. Antes, o subscribe ia
+      // em MINÚSCULO (`["messages","connection"]`, linha antiga) que o Evolution GO
+      // DESCARTA em silêncio (achado A7) → a instância ficava SEM eventos; e o QR só
+      // tentava um endpoint, sem o campo `data.qrcode`. Agora delega ao
+      // `EvolutionService.provision` (subscribe MAIÚSCULO + múltiplos endpoints de QR
+      // + campo `data.qrcode` + reset NÃO-destrutivo da F1.3). Contrato de resposta
+      // preservado pro ChannelsPanel: `{ base64 }` | `{ state:'open' }` | 400.
+      const cfg = EvolutionService.getConfig({
+        baseUrl: evolutionConfig.baseUrl || undefined,
+        apiKey: evolutionConfig.apiKey || undefined,
+      });
+      if (!cfg || !finalInstance) {
         return res.status(400).json({ error: "Faltam parâmetros de conexão (URL, API Key ou Instance Name)." });
       }
 
-      console.log(`[Evolution DEBUG] Final BaseURL: ${finalBaseUrl}, Final Instance: ${finalInstance}, Final APIKey (len): ${finalApiKey.length}`);
+      const result = await EvolutionService.provision(finalInstance, cfg);
 
-      let token = finalApiKey;
-      let hasInstance = false;
-      let instanceToken = '';
-      
-      // 1. Tentar pegar a lista de instâncias
-      try {
-        const fetchAll = await fetch(`${finalBaseUrl}/instance/all`, { headers: { apikey: finalApiKey } });
-        if (fetchAll.ok) {
-           const data = await fetchAll.json();
-           const inst = data.data?.find((i: any) => (i.name === finalInstance || i.instanceName === finalInstance));
-           if (inst) {
-                console.log("[Evolution] Instância existente encontrada (token:", (inst.token ? String(inst.token).slice(0, 5) + "…" : "—") + ")");
-                hasInstance = true;
-                instanceToken = inst.token || inst.apikey;
-           }
-        }
-      } catch (err) {}
-
-      // 2. Se não existe, Tentar Criar (Evolution Go ou Evolution API)
-      if (!hasInstance) {
-        try {
-          const createPayload = { 
-             instanceName: finalInstance, name: finalInstance, qrcode: true, 
-             webhook: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] 
-          };
-          
-          let createResp = await fetch(`${finalBaseUrl}/instance/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
-            body: JSON.stringify(createPayload) 
-          });
-          
-          if (!createResp.ok && createResp.status === 400) { // Evolution Go strict mode?
-             createResp = await fetch(`${finalBaseUrl}/instance/create`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': finalApiKey },
-                body: JSON.stringify({ name: finalInstance })
-             });
-          }
-          
-          if (createResp.ok) {
-             const data = await createResp.json();
-             instanceToken = data.data?.token || data.instance?.token || data.hash?.apikey;
-             
-             if (data.qrcode?.base64) {
-                 return res.json({ base64: data.qrcode.base64 }); // Retorno imeditado EvoAPI
-             }
-          }
-        } catch(err) {
-           console.log("[Evolution] Falha ao criar:", err);
-        }
+      if (result.state === 'open') {
+        // Já conectada: reflete no canal pelo identifier ÚNICO (sem inventar org — F1.2c).
+        markEvolutionChannelStatusByIdentifier(finalInstance, 'connected');
+        return res.json({ state: 'open', token: result.token });
       }
-
-      const activeToken = instanceToken || finalApiKey;
-
-      // 3. Conectar e Configurar Webhook no ato (Evolution Go pattern)
-      try {
-        await fetch(`${finalBaseUrl}/instance/connect`, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json', 'apikey': activeToken, 'instance': finalInstance },
-           body: JSON.stringify({ 
-              webhookUrl: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
-              subscribe: ["messages", "connection"]
-           })
-        });
-      } catch(err) {}
-
-      // 4. Se for Evolution API v1/v2, configure webhook (legacy)
-      try {
-        await fetch(`${finalBaseUrl}/webhook/set/${finalInstance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': activeToken },
-          body: JSON.stringify({ 
-             webhook: {
-               url: `${process.env.APP_URL || 'http://localhost:3000'}/api/webhooks/evolution`,
-               byEvents: false,
-               base64: false,
-               events: [ "MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE" ]
-             }
-          })
-        });
-      } catch (err) {}
-
-      // 5. Pegar o QR Code
-      let base64qr = '';
-      try {
-         // Evolution Go pattern
-         console.log(`[Evolution] FINAL BASE URL: ${finalBaseUrl}`);
-         const qrUrl = `${finalBaseUrl}/api/v1/instance/qr`;
-         console.log(`[Evolution] Tentando pegar QR em: ${qrUrl}, Token: ${activeToken?.substring(0, 5)}...`);
-         
-         const qrResp = await fetch(qrUrl, {
-            headers: { 'apikey': activeToken, 'instance': finalInstance }
-         });
-         
-         if (!qrResp.ok) {
-            console.error(`[Evolution] Erro ao buscar QR (URL: ${qrUrl}, Status: ${qrResp.status}):`, await qrResp.text());
-         } else {
-             const contentType = qrResp.headers.get("content-type");
-             if (contentType && contentType.includes("application/json")) {
-                 const qrData = await qrResp.json();
-                 console.log("[Evolution] Resposta QR Code:", JSON.stringify(qrData).substring(0, 200));
-                 if (qrData.base64) base64qr = qrData.base64;
-                 else if (qrData.data?.Qrcode) base64qr = qrData.data.Qrcode;
-                 else if (qrData.qrcode?.base64) base64qr = qrData.qrcode.base64;
-             } else {
-                 console.error("[Evolution] Resposta do QR não é JSON:", await qrResp.text());
-             }
-         }
-      } catch(err) {
-         console.error("[Evolution] Erro ao buscar QR:", err);
+      if (result.qrBase64) {
+        return res.json({ base64: result.qrBase64, token: result.token });
       }
-
-      if (!base64qr) {
-         // Evolution API pattern
-         try {
-             console.log(`[Evolution] FINAL BASE URL LEGACY: ${finalBaseUrl}`);
-             console.log(`[Evolution] Tentando conectar via legacy endpoint para: ${finalInstance}`);
-             const connectResp = await fetch(`${finalBaseUrl}/instance/connect/${finalInstance}`, {
-                headers: { 'apikey': finalApiKey }
-             });
-             
-             if (!connectResp.ok) {
-                console.error(`[Evolution] Erro na conexão legacy (Status: ${connectResp.status}):`, await connectResp.text());
-             } else {
-                 const contentType = connectResp.headers.get("content-type");
-                 if (contentType && contentType.includes("application/json")) {
-                     const connData = await connectResp.json();
-                     console.log("[Evolution] Resposta Conexão Legacy:", JSON.stringify(connData).substring(0, 200));
-                     if (connData.base64) base64qr = connData.base64;
-                     else if (connData.qrcode?.base64) base64qr = connData.qrcode.base64;
-                     else if ((connData.instance?.state === 'open' || connData.state === 'open') && !connData.base64) {
-                         return res.json({ state: 'open' }); // Já conectado
-                     }
-                 } else {
-                     console.error("[Evolution] Resposta de conexão legacy não é JSON:", await connectResp.text());
-                 }
-             }
-         } catch(e){
-             console.error("[Evolution] Erro na conexão legacy:", e);
-         }
-      }
-
-      if (base64qr) {
-         console.log(`[Evolution] QR Code Gerado (length: ${base64qr.length}):`, base64qr.substring(0, 50) + "...");
-         const finalQr = base64qr.startsWith('data:image') ? base64qr : `data:image/png;base64,${base64qr}`;
-         return res.json({ base64: finalQr, token: activeToken });
-      }
-
-      // Se já estava conectado
-      if (hasInstance || activeToken) {
-         // F1.2c (achados A8/A9, SEC-F4) — NÃO inventa `default_org` nem confia no
-         // header x-organization-id (esta rota legada é NÃO autenticada → header
-         // spoofável). Resolve o canal pelo `identifier` da instância (único) e só
-         // ATUALIZA o status. Criar canal novo é do fluxo AUTENTICADO de
-         // provisionamento — não aqui.
-         const updated = markEvolutionChannelStatusByIdentifier(finalInstance, 'connected');
-         if (!updated) console.warn(`[Evolution] connect legacy: instância '${finalInstance}' sem canal cadastrado — não inventa org (default_org removido).`);
-      }
-
-      return res.status(400).json({ error: "Instância pode já estar conectada ou hove um erro na geração do QR Code. Verifique seu painel ou recarregue a página." });
+      // Sem QR: honesto. `needsReset` (F1.3) sinaliza que talvez precise do reset
+      // EXPLÍCITO do operador — o connect NUNCA reseta sozinho.
+      return res.status(400).json({
+        error: result.error || "Instância pode já estar conectada ou houve erro na geração do QR Code. Verifique seu painel ou recarregue a página.",
+        needsReset: result.needsReset || false,
+      });
     } catch (e: any) {
       console.error("[Evolution] Erro ao conectar instância:", e);
       return res.status(500).json({ error: e.message });

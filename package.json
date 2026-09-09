@@ -47,6 +47,7 @@
     "test:reputation-impact": "tsx scripts/test-reputation-impact.ts",
     "test:reputation-health": "tsx scripts/test-reputation-health.ts",
     "test:falatu-bridge-recon": "tsx scripts/test-falatu-bridge-recon.ts",
+    "test:falatu-bridge-records": "tsx scripts/test-falatu-bridge-records.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",

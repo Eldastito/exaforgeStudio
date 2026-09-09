@@ -20,6 +20,9 @@ export function ChannelsPanel() {
 
   const [evolutionStatus, setEvolutionStatus] = useState<'disconnected' | 'connecting_evo' | 'connected_evo'>('disconnected');
   const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
+  // F2.1b — conexão autenticada: modo (adicionar novo × usar/importar existente).
+  const [evoMode, setEvoMode] = useState<'new' | 'existing'>('existing');
+  const [evoBusy, setEvoBusy] = useState(false);
   const [showInstagram, setShowInstagram] = useState(false);
   const [forwardWhats, setForwardWhats] = useState('');
   const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
@@ -33,7 +36,56 @@ export function ChannelsPanel() {
     loadRaw();
     apiFetch('/api/channels/forward-whatsapp').then(r => r.json()).then(d => setForwardWhats(d.forward_whatsapp || '')).catch(() => {});
     apiFetch('/api/areas').then(r => r.json()).then(d => setAreas(Array.isArray(d) ? d : [])).catch(() => {});
+    loadEvoStatus();
   }, []);
+
+  // F2.1b — retomada: reflete o estado real do canal Evolution da org ao abrir a
+  // tela (endpoint autenticado). Se já há um canal conectado, mostra conectado.
+  const loadEvoStatus = () => {
+    apiFetch('/api/channels/whatsapp/status').then(r => r.json()).then((d: any) => {
+      const chs = Array.isArray(d?.channels) ? d.channels : [];
+      if (chs.some((c: any) => c.connected)) setEvolutionStatus('connected_evo');
+    }).catch(() => {});
+  };
+
+  // F2.1b — conecta/importa pelo endpoint AUTENTICADO (org vem da sessão). O
+  // corpo só diz o modo e, no import, o nome da instância.
+  const connectEvolution = async () => {
+    setEvolutionStatus('connecting_evo');
+    setEvolutionQr(null);
+    setEvoBusy(true);
+    const instanceName = (document.getElementById('evo_inst') as HTMLInputElement | null)?.value?.trim() || '';
+    try {
+      const resp = await apiFetch('/api/channels/whatsapp/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(evoMode === 'existing' ? { mode: 'existing', instanceName } : { mode: 'new' }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.qrBase64) {
+        setEvolutionQr(data.qrBase64);
+        if (data.imported) toast.success('Instância importada. Leia o QR Code para conectar.');
+      } else if (resp.ok && data.state === 'open') {
+        setEvolutionStatus('connected_evo');
+        toast.success('Número já conectado.');
+      } else {
+        // Erros tipados do backend (RF-01/§8).
+        const code = data?.code;
+        const msg = code === 'attributed_to_other_org' ? 'Esta instância já pertence a outra empresa.'
+          : code === 'instance_not_found' ? 'Instância não encontrada no provedor. Para criar uma nova, escolha "Adicionar número novo".'
+          : code === 'evolution_failed' ? (data?.needsReset ? 'Não veio o QR. A instância pode estar travada — o operador pode reiniciá-la.' : 'Falha ao falar com o provedor. Tente de novo.')
+          : (data?.error || 'Não foi possível gerar o QR Code.');
+        toast.error(msg);
+        setEvolutionStatus('disconnected');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Erro ao conectar WhatsApp.');
+      setEvolutionStatus('disconnected');
+    } finally {
+      setEvoBusy(false);
+    }
+  };
 
   // Marca/desmarca um canal como INTERNO (número da equipe / Coordenador IA).
   const setChannelKind = async (id: string, internal: boolean) => {
@@ -337,16 +389,40 @@ export function ChannelsPanel() {
               </ol>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10 flex-1">
-               <div className="space-y-2 md:col-span-2">
-                 <label className="text-xs text-slate-400 font-medium">3. Nome da Instância (Instance Name)</label>
-                 <input 
-                   type="text" 
-                   defaultValue="ExaForge"
-                   id="evo_inst"
-                   placeholder="Ex: whatsapp01"
-                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors" 
-                 />
+            <div className="grid grid-cols-1 gap-4 relative z-10 flex-1">
+               {/* F2.1b — escolha do modo (org vem da sessão; nada de API key aqui). */}
+               <div className="space-y-2">
+                 <label className="text-xs text-slate-400 font-medium">3. Como conectar</label>
+                 <div className="flex rounded-lg border border-slate-800 bg-slate-950 p-1 text-xs">
+                   <button
+                     type="button"
+                     onClick={() => setEvoMode('existing')}
+                     className={`flex-1 rounded px-3 py-2 transition-colors ${evoMode === 'existing' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                   >
+                     Usar/importar instância existente
+                   </button>
+                   <button
+                     type="button"
+                     onClick={() => setEvoMode('new')}
+                     className={`flex-1 rounded px-3 py-2 transition-colors ${evoMode === 'new' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                   >
+                     Adicionar número novo
+                   </button>
+                 </div>
+                 {evoMode === 'existing' ? (
+                   <>
+                     <input
+                       type="text"
+                       defaultValue="ExaForge"
+                       id="evo_inst"
+                       placeholder="Ex: ExaForge"
+                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                     />
+                     <p className="text-[11px] text-slate-500">Nome da instância que já existe no seu Evolution. Só conecta se ela pertencer à sua empresa.</p>
+                   </>
+                 ) : (
+                   <p className="text-[11px] text-slate-500">O sistema cria uma instância nova com nome próprio (você não precisa digitar nada) e mostra o QR Code.</p>
+                 )}
                </div>
             </div>
 
@@ -377,59 +453,12 @@ export function ChannelsPanel() {
             ) : null}
 
             <div className="mt-6 pt-6 border-t border-slate-800 flex flex-col md:flex-row gap-4 relative z-10 w-full justify-stretch">
-               <Button 
-                variant="outline"
-                className="flex-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700 transition-colors h-11" 
-                onClick={async () => {
-                  const instanceName = (document.getElementById('evo_inst') as HTMLInputElement).value;
-                  
-                  try {
-                    await fetch('/api/evolution/config', { 
-                      method: 'POST', 
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({ instanceName })
-                    });
-                    toast.success('Configuração Salva! Siga para o Passo 4.');
-                  } catch (e) {
-                    console.error(e);
-                  }
-                }}
+               <Button
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white border-0 transition-colors h-11"
+                disabled={evoBusy}
+                onClick={connectEvolution}
                >
-                 Salvar Configurações
-               </Button>
-               
-               <Button 
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white border-0 transition-colors h-11" 
-                onClick={async () => {
-                  setEvolutionStatus('connecting_evo');
-                  setEvolutionQr(null);
-                  
-                  const instanceName = (document.getElementById('evo_inst') as HTMLInputElement).value;
-
-                  try {
-                    const resp = await fetch('/api/evolution/instance/connect', { 
-                      method: 'POST', 
-                      headers: {'Content-Type': 'application/json'},
-                      body: JSON.stringify({ instanceName })
-                    });
-                    const data = await resp.json();
-                    
-                    if (data.base64) {
-                       setEvolutionQr(data.base64);
-                    } else if (data.instance?.state === 'open' || data.state === 'open') {
-                       setEvolutionStatus('connected_evo');
-                    } else {
-                       toast.error('Não foi possível gerar QR Code. Talvez a instância já esteja conectada?');
-                       setEvolutionStatus('disconnected');
-                    }
-                  } catch (e) {
-                    console.error(e);
-                    toast.error('Erro ao conectar Evolution.');
-                    setEvolutionStatus('disconnected');
-                  }
-                }}
-               >
-                 Conectar / Gerar QR Code
+                 {evoBusy ? 'Conectando…' : (evoMode === 'existing' ? 'Conectar / Importar' : 'Adicionar e gerar QR Code')}
                </Button>
             </div>
             

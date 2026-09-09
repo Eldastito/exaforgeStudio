@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { ManipulationRadarService } from "./ManipulationRadarService.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { OutboundConsentGuardService, OutboundBlockedError } from "./OutboundConsentGuardService.js";
 import { ClientQuietHoursGuardService, OutboundQuietHoursError } from "./ClientQuietHoursGuardService.js";
 import { ClientFrequencyCapGuardService, OutboundFrequencyCapError } from "./ClientFrequencyCapGuardService.js";
@@ -32,10 +33,18 @@ export class MessageProviderService {
    * mensagem no provedor (wamid no WhatsApp Cloud) quando disponível — usado
    * para correlacionar os recibos de entrega (delivered/read) do webhook.
    */
-  static async sendMessage(channelId: string, recipientIdentifier: string, content: string): Promise<string | undefined> {
+  static async sendMessage(channelId: string, recipientIdentifier: string, content: string, opts?: { feature?: string; unitId?: string | null }): Promise<string | undefined> {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+
+    // F2.4 (CA-03) — GATE por finalidade no SINK. Opt-in pelo `feature`: um
+    // produtor que informa a finalidade fica sujeito ao binding (desligar a
+    // finalidade bloqueia o envio, inclusive pendente/enfileirado). Sem `feature`
+    // ou sem binding configurado → passa (0-regressão; ativação por-produtor é F6).
+    if (channel.organization_id && opts?.feature) {
+      ChannelBindingService.assertOutboundAllowed(channel.organization_id, opts.feature, { unitId: opts.unitId ?? null });
+    }
 
     // ADR-169 F5-transversal-A — GATE de consent LGPD no SINK canônico. Opt-in
     // por org (`outbound_consent_required=1`); default OFF = 0-regressão.
@@ -205,10 +214,15 @@ export class MessageProviderService {
    * - evolution/evolution_go: POST no endpoint de mídia (configurável por env).
    * - instagram: não suportado (lança, para o chamador usar o link).
    */
-  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string) {
+  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string, opts?: { feature?: string; unitId?: string | null }) {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+
+    // F2.4 (CA-03) — mesmo gate por finalidade do sendMessage.
+    if (channel.organization_id && opts?.feature) {
+      ChannelBindingService.assertOutboundAllowed(channel.organization_id, opts.feature, { unitId: opts.unitId ?? null });
+    }
 
     let metadada: any = {};
     try { metadada = channel.metadata_json ? JSON.parse(channel.metadata_json) : {}; } catch (e) {}

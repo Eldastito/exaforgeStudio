@@ -175,6 +175,7 @@
     "test:social-golden-paths": "tsx scripts/test-social-golden-paths.ts",
     "test:social-intelligence-hardening": "tsx scripts/test-social-intelligence-hardening.ts",
     "test:security-encryption": "tsx scripts/test-security-encryption.ts",
+    "test:sender-identity": "tsx scripts/test-sender-identity.ts",
     "test:security-config": "tsx scripts/test-security-config.ts",
     "test:security-master": "tsx scripts/test-security-master.ts",
     "test:security-tenant": "tsx scripts/test-security-tenant.ts",

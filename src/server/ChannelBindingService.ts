@@ -23,9 +23,32 @@
  * NÃO decide sozinho ligar/desligar `ai_enabled` (isso é outra política) nem
  * cria tabela de alerta. Read-only sobre bindings + channels.
  */
+import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { logAuthEvent } from "./auditLog.js";
 
 export type BindingDirection = "inbound" | "outbound";
+
+/**
+ * Finalidades VÁLIDAS (RF-03 §17.2 "finalidades válidas"). A escrita rejeita
+ * chave fora desta lista — evita binding-lixo e mantém o vocabulário estável
+ * (a UI lista a partir daqui). Aditiva: novas finalidades entram aqui quando um
+ * produtor conhecido passar a resolver por elas (Fase 6).
+ */
+export const KNOWN_FEATURES = [
+  "atendimento",  // resposta ao cliente / CRM
+  "gestao",       // Fala Tu / Controller / Diretor (uso interno)
+  "campanhas",    // marketing / disparos
+  "cobranca",     // régua de cobrança / fiado / PIX
+  "agenda",       // confirmação/lembrete de compromisso
+  "prospeccao",   // prospecção ativa
+  "recompra",     // recompra / carrinho / recuperação
+  "satisfacao",   // pós-venda / NPS
+  "clinica",      // avisos clínicos
+  "escola",       // comunicação escolar
+] as const;
+export type FeatureKey = (typeof KNOWN_FEATURES)[number];
+export function isKnownFeature(k: string): boolean { return (KNOWN_FEATURES as readonly string[]).includes(String(k || "")); }
 
 export interface BindingDecision {
   ok: boolean;
@@ -113,6 +136,89 @@ export class ChannelBindingService {
       return { ok: false, channelId: null, scope: null, reason: `finalidade desligada para ${direction}`, code: "feature_disabled" };
     }
     return { ok: false, channelId: null, scope: null, reason: "canal do uso indisponível/desabilitado", code: "channel_unavailable" };
+  }
+
+  /**
+   * Cria ou atualiza um binding (RF-03 §17.2 "alterar usos"). Chave natural
+   * (org, feature, unit, channel): se já existe, ATUALIZA campos + incrementa
+   * policy_version; senão INSERE (policy_version=1). Concorrência otimista:
+   * `ifPolicyVersion` (opcional) só aplica se a versão atual bater — senão
+   * `version_conflict` (rejeita alteração com versão antiga). Valida finalidade
+   * conhecida e que canal/fallback pertencem à org. Auditado.
+   */
+  static upsert(
+    orgId: string,
+    actorUserId: string | null,
+    input: {
+      channelId: string;
+      featureKey: string;
+      unitId?: string | null;
+      inbound?: boolean;
+      outbound?: boolean;
+      executionMode?: string;
+      priority?: number;
+      fallbackChannelId?: string | null;
+      ifPolicyVersion?: number;
+      origin?: string;
+    },
+  ): { ok: boolean; id?: string; policyVersion?: number; error?: string; code?: string } {
+    if (!orgId) return { ok: false, error: "organização ausente", code: "org_missing" };
+    const feature = String(input.featureKey || "").trim();
+    if (!isKnownFeature(feature)) return { ok: false, error: `finalidade inválida: ${feature || "(vazia)"}`, code: "invalid_feature" };
+    if (!this.channelInOrg(orgId, input.channelId)) return { ok: false, error: "canal não pertence à organização", code: "channel_not_in_org" };
+    if (input.fallbackChannelId && !this.channelInOrg(orgId, input.fallbackChannelId)) {
+      return { ok: false, error: "canal de fallback não pertence à organização", code: "fallback_not_in_org" };
+    }
+    const unitId = input.unitId ? String(input.unitId) : null;
+    const inbound = input.inbound === false ? 0 : 1;
+    const outbound = input.outbound === false ? 0 : 1;
+    const execMode = input.executionMode === "manual" ? "manual" : "auto";
+    const priority = Number.isFinite(input.priority as number) ? Math.trunc(input.priority as number) : 0;
+    const fallback = input.fallbackChannelId ? String(input.fallbackChannelId) : null;
+
+    const existing = db.prepare(
+      `SELECT id, policy_version FROM channel_feature_bindings
+        WHERE organization_id = ? AND feature_key = ? AND COALESCE(unit_id,'') = COALESCE(?, '') AND channel_id = ?`
+    ).get(orgId, feature, unitId, input.channelId) as any;
+
+    if (existing) {
+      if (input.ifPolicyVersion != null && Number(input.ifPolicyVersion) !== Number(existing.policy_version)) {
+        return { ok: false, error: "a política foi alterada por outra pessoa; recarregue", code: "version_conflict" };
+      }
+      const nextVersion = Number(existing.policy_version) + 1;
+      db.prepare(
+        `UPDATE channel_feature_bindings SET inbound=?, outbound=?, execution_mode=?, priority=?, fallback_channel_id=?, policy_version=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`
+      ).run(inbound, outbound, execMode, priority, fallback, nextVersion, existing.id);
+      logAuthEvent(orgId, actorUserId, existing.id, "CHANNEL_BINDING_UPDATED", { feature, unitId, channelId: input.channelId, inbound, outbound, priority, policyVersion: nextVersion });
+      return { ok: true, id: existing.id, policyVersion: nextVersion };
+    }
+
+    const id = randomUUID();
+    try {
+      db.prepare(
+        `INSERT INTO channel_feature_bindings (id, organization_id, channel_id, feature_key, unit_id, inbound, outbound, execution_mode, priority, fallback_channel_id, policy_version, origin, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      ).run(id, orgId, input.channelId, feature, unitId, inbound, outbound, execMode, priority, fallback, input.origin || "manual", actorUserId);
+    } catch (e: any) {
+      return { ok: false, error: `falha ao gravar binding: ${e?.message || e}`, code: "write_failed" };
+    }
+    logAuthEvent(orgId, actorUserId, id, "CHANNEL_BINDING_CREATED", { feature, unitId, channelId: input.channelId, inbound, outbound, priority });
+    return { ok: true, id, policyVersion: 1 };
+  }
+
+  /** Remove um binding (por id, isolado por org). Auditado. */
+  static remove(orgId: string, actorUserId: string | null, bindingId: string): { ok: boolean; code?: string } {
+    if (!orgId || !bindingId) return { ok: false, code: "bad_request" };
+    const r = db.prepare(`DELETE FROM channel_feature_bindings WHERE id = ? AND organization_id = ?`).run(bindingId, orgId);
+    if (r.changes === 0) return { ok: false, code: "not_found" };
+    logAuthEvent(orgId, actorUserId, bindingId, "CHANNEL_BINDING_DELETED", {});
+    return { ok: true };
+  }
+
+  /** Canal existe e é da org? (não exige estar ativo — pode-se pré-configurar.) */
+  private static channelInOrg(orgId: string, channelId: string | null | undefined): boolean {
+    if (!channelId) return false;
+    return !!db.prepare(`SELECT 1 FROM channels WHERE id = ? AND organization_id = ? LIMIT 1`).get(channelId, orgId);
   }
 
   /** Lista os bindings de uma finalidade (para UI/diagnóstico), sem segredos. */

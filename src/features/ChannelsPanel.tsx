@@ -23,6 +23,17 @@ export function ChannelsPanel() {
   // F2.1b — conexão autenticada: modo (adicionar novo × usar/importar existente).
   const [evoMode, setEvoMode] = useState<'new' | 'existing'>('existing');
   const [evoBusy, setEvoBusy] = useState(false);
+  // F2.2 (UI) — usos por finalidade (channel_feature_bindings).
+  const [bindingFeatures, setBindingFeatures] = useState<string[]>([]);
+  const [bindings, setBindings] = useState<any[]>([]);
+  const [newBindFeature, setNewBindFeature] = useState('');
+  const [newBindChannel, setNewBindChannel] = useState('');
+  const [bindBusy, setBindBusy] = useState(false);
+  const FEATURE_LABELS: Record<string, string> = {
+    atendimento: 'Atendimento ao cliente', gestao: 'Gestão (Fala Tu / interno)', campanhas: 'Campanhas / marketing',
+    cobranca: 'Cobrança / fiado', agenda: 'Agenda / lembretes', prospeccao: 'Prospecção', recompra: 'Recompra / carrinho',
+    satisfacao: 'Pós-venda / satisfação', clinica: 'Avisos clínicos', escola: 'Comunicação escolar',
+  };
   const [showInstagram, setShowInstagram] = useState(false);
   const [forwardWhats, setForwardWhats] = useState('');
   const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
@@ -37,7 +48,39 @@ export function ChannelsPanel() {
     apiFetch('/api/channels/forward-whatsapp').then(r => r.json()).then(d => setForwardWhats(d.forward_whatsapp || '')).catch(() => {});
     apiFetch('/api/areas').then(r => r.json()).then(d => setAreas(Array.isArray(d) ? d : [])).catch(() => {});
     loadEvoStatus();
+    loadBindings();
   }, []);
+
+  // F2.2 (UI) — usos por finalidade.
+  const loadBindings = () => {
+    apiFetch('/api/channels/bindings').then(r => r.json()).then((d: any) => {
+      setBindingFeatures(Array.isArray(d?.features) ? d.features : []);
+      setBindings(Array.isArray(d?.bindings) ? d.bindings : []);
+    }).catch(() => {});
+  };
+  const addBinding = async () => {
+    if (!newBindFeature || !newBindChannel) { toast.error('Escolha a finalidade e o número.'); return; }
+    setBindBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/bindings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featureKey: newBindFeature, channelId: newBindChannel }),
+      });
+      if (r.ok) { toast.success('Uso configurado.'); setNewBindFeature(''); setNewBindChannel(''); loadBindings(); }
+      else {
+        const d = await r.json().catch(() => ({}));
+        toast.error(d?.code === 'version_conflict' ? 'A configuração mudou; recarregue.' : (d?.error || 'Não foi possível salvar o uso.'));
+      }
+    } catch { toast.error('Falha ao salvar o uso.'); } finally { setBindBusy(false); }
+  };
+  const removeBinding = async (id: string) => {
+    setBindBusy(true);
+    try {
+      const r = await apiFetch(`/api/channels/bindings/${id}`, { method: 'DELETE' });
+      if (r.ok) { toast.success('Uso removido.'); loadBindings(); } else toast.error('Não foi possível remover.');
+    } catch { toast.error('Falha ao remover.'); } finally { setBindBusy(false); }
+  };
+  const channelName = (id: string) => { const c = waChannels.find((x: any) => x.id === id); return c?.name || c?.identifier || id.slice(0, 8); };
 
   // F2.1b — retomada: reflete o estado real do canal Evolution da org ao abrir a
   // tela (endpoint autenticado). Se já há um canal conectado, mostra conectado.
@@ -526,6 +569,66 @@ export function ChannelsPanel() {
             ))}
           </div>
           <p className="mt-3 text-[11px] text-slate-500">Para o Coordenador reconhecer cada colaborador, cadastre o WhatsApp dele em <strong>Configurações → Usuários</strong>.</p>
+        </div>
+
+        {/* F2.2 (UI) — Usos por finalidade (channel_feature_bindings) */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+          <div className="flex items-start gap-3 mb-1">
+            <RefreshCw className="w-5 h-5 text-blue-400 mt-0.5" />
+            <div>
+              <h3 className="text-lg font-semibold text-slate-100">Usos por finalidade (opcional)</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Escolha qual número faz cada coisa — atendimento, campanhas, cobrança, agenda… <strong>Sem configurar, tudo segue como está hoje.</strong> Desligar uma finalidade bloqueia só ela, sem afetar as demais.
+              </p>
+            </div>
+          </div>
+
+          {waChannels.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">Conecte um número de WhatsApp acima para configurar os usos.</p>
+          ) : (
+            <div className="mt-4 space-y-3">
+              {/* Lista dos usos configurados */}
+              {bindings.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhum uso configurado — o sistema usa o comportamento padrão.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {bindings.map((b: any) => (
+                    <li key={b.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/50 px-4 py-3 gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-200 truncate">{FEATURE_LABELS[b.feature_key] || b.feature_key}</p>
+                        <p className="text-xs text-slate-500 truncate">
+                          → {channelName(b.channel_id)}
+                          {(b.inbound !== 1 || b.outbound !== 1) && (
+                            <span className="ml-1 text-slate-400">· {b.inbound === 1 ? 'entrada' : ''}{b.inbound === 1 && b.outbound === 1 ? '+' : ''}{b.outbound === 1 ? 'saída' : ''}{b.inbound !== 1 && b.outbound !== 1 ? 'desligado' : ''}</span>
+                          )}
+                        </p>
+                      </div>
+                      <button onClick={() => removeBinding(b.id)} disabled={bindBusy} className="shrink-0 text-slate-400 hover:text-red-400 disabled:opacity-50" title="Remover uso">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Adicionar uso */}
+              <div className="flex flex-col md:flex-row gap-2 pt-2 border-t border-slate-800/70">
+                <select value={newBindFeature} onChange={e => setNewBindFeature(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 flex-1">
+                  <option value="">Finalidade…</option>
+                  {bindingFeatures.map(f => <option key={f} value={f}>{FEATURE_LABELS[f] || f}</option>)}
+                </select>
+                <select value={newBindChannel} onChange={e => setNewBindChannel(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 flex-1">
+                  <option value="">Número…</option>
+                  {waChannels.map((c: any) => <option key={c.id} value={c.id}>{c.name || c.identifier}</option>)}
+                </select>
+                <Button onClick={addBinding} disabled={bindBusy || !newBindFeature || !newBindChannel} className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
+                  {bindBusy ? 'Salvando…' : 'Configurar uso'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Secao base de conhecimento RAG */}

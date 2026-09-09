@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | F0 | F0.1–F0.4 | **EM ANDAMENTO** | `docs/whatsapp-unificado/ANALISE-F0-auditoria-baseline.md` | Contrato Evolution real (Swagger) + fixtures + execução da suíte |
 | F1 | F1.1–F1.4 | **IMPLEMENTADO** (escopo enxuto) | F1.1 (`evolution-credential` 6/6) · F1.2a (`meta-webhook-dedup` 10/10) · F1.2b (`whatsapp-jid` 16/16) · F1.2c (`evolution-channel-status` 10/10) · F1.3 (`evolution-reset` 14/14) · F1.4 (`evolution-connect-subscribe` 5/5) | **G1 atendido** no escopo enxuto; difere pra F1.2d a máquina de estados RF-02 + webhook assinado (A10) |
-| F2 | F2.1–F2.4 | **EM ANDAMENTO** | F2.1a (`channel-provision` 15/15) + F2.1b (UI, tsc+build) | G2 (falta F2.2 · F2.3 · F2.4) |
+| F2 | F2.1–F2.4 | **EM ANDAMENTO** | F2.1 (a+b) + F2.2 backend (`channel-binding` 11/11) | G2 (falta F2.2 UI/controles · F2.3 · F2.4) |
 | F3 | F3.1–F3.4 | NÃO INICIADO | — | G3 |
 | F4 | F4.1–F4.4 | NÃO INICIADO | — | G4 |
 | F5 | F5.1–F5.4 | NÃO INICIADO | — | G5 |
@@ -35,7 +35,7 @@
 
 ### Fase 2 — Conexão autônoma e configuração dos usos
 - [ ] **F2.1** — Importação/criação/QR/retomada disponíveis na UI existente. — **F2.1a (backend) IMPLEMENTADO**: `ChannelProvisioningService` + rotas autenticadas `POST /api/channels/whatsapp/provision` (mode `new`|`existing`) e `GET /api/channels/whatsapp/status`. Org SEMPRE da sessão (RF-01 §7.2, nunca corpo/header); reusa `EvolutionService.provision`; idempotente por `(org,identifier)`; import §8 (nega instância de outra org; importa só a que EXISTE no provedor e está livre; nunca inventa); `EvolutionService.instanceExists` (verificação não-destrutiva); segredos nunca voltam. `test:channel-provision` 15/15; regressões `falatu-solo-whatsapp` 72/72, `security-tenant` 7/7, `channel-health` verdes. **F2.1b (UI) IMPLEMENTADO**: `ChannelsPanel` religado ao endpoint AUTENTICADO (`apiFetch('/api/channels/whatsapp/provision')`) no lugar do `fetch` legado não-autenticado. Toggle de modo "Usar/importar existente" × "Adicionar número novo" (os dois que o dono escolheu); QR/estado vindos do endpoint; retomada ao abrir a tela (`GET /whatsapp/status`); erros tipados tratados (409 outra empresa · 404 não existe · 502/`needsReset` provedor). UI-only, tsc+build verdes. **Fim do F2.1.**
-- [ ] **F2.2** — Usos por funcionalidade e resolvedor aplicados no backend. — NÃO INICIADO
+- [ ] **F2.2** — Usos por funcionalidade e resolvedor aplicados no backend. — **BACKEND IMPLEMENTADO**: tabela `channel_feature_bindings` (aditiva/opt-in, UNIQUE por org+finalidade+unidade+canal) + `ChannelBindingService.resolve()` — resolvedor ÚNICO com precedência unidade→org→nenhum, priority DESC, gate por direção (inbound/outbound), fallback só quando configurado, revalidação de canal (org + não-desabilitado), motivo sempre no retorno. Isolamento (INV-01). **Sem religar os ~20 produtores ainda** (Fase 6) — nasce testado, 0-regressão. `test:channel-binding` 11/11; regressões `channel-provision` 15/15, `security-tenant` 7/7, `channel-health` 8/8. **Falta:** controles de escrita dos bindings (rota/UI) — próxima sub-fatia.
 - [ ] **F2.3** — Preferências migradas sem habilitação indiscriminada. — NÃO INICIADO
 - [ ] **F2.4** — Fluxo móvel e bloqueio de pendências ao desligar validados. — NÃO INICIADO
 

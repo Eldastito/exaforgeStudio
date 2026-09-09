@@ -11397,6 +11397,47 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_target_ops REAL`); } catch(e){}        // % teto (null → 22)
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reserve_base_mode TEXT`); } catch(e){}         // 'revenue'|'gross_margin'|null(auto)
 
+  // PRD WhatsApp Unificado — F2.2 (RF-03) — USOS POR FINALIDADE.
+  // Separa "qual conexão existe" (channels) de "quem/o quê pode usá-la". Fonte
+  // ÚNICA lida pelo resolvedor único (ChannelBindingService). Aditiva/opt-in:
+  // sem linha, nada muda (o resolvedor cai no comportamento herdado). NUNCA cria
+  // tabela de "alerta"/paralela; é só o mapa uso→canal. Escopo:
+  //   - feature_key: finalidade ('atendimento','campanhas','cobranca','agenda',
+  //     'gestao', ...) — texto livre validado pelo produtor conhecido.
+  //   - unit_id NULL = regra da ORG; preenchido = regra da UNIDADE (precede).
+  //   - inbound/outbound: habilita a direção (1/0).
+  //   - execution_mode: 'auto'|'manual' (reservado p/ F2.4/Fase 6).
+  //   - priority: desempate entre regras de mesmo escopo (maior vence).
+  //   - fallback_channel_id: só quando expressamente configurado (nunca "chuta"
+  //     outro número — RF-03).
+  //   - policy_version: versão da política (concorrência otimista na alteração).
+  // UNIQUE por (org, feature, unit, channel) evita binding duplicado.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_feature_bindings (
+        id                  TEXT PRIMARY KEY,
+        organization_id     TEXT NOT NULL,
+        channel_id          TEXT NOT NULL,
+        feature_key         TEXT NOT NULL,
+        unit_id             TEXT,
+        inbound             INTEGER NOT NULL DEFAULT 1,
+        outbound            INTEGER NOT NULL DEFAULT 1,
+        execution_mode      TEXT NOT NULL DEFAULT 'auto',
+        priority            INTEGER NOT NULL DEFAULT 0,
+        fallback_channel_id TEXT,
+        policy_version      INTEGER NOT NULL DEFAULT 1,
+        origin              TEXT,
+        created_by          TEXT,
+        created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cfb_unique
+        ON channel_feature_bindings (organization_id, feature_key, COALESCE(unit_id,''), channel_id);
+      CREATE INDEX IF NOT EXISTS idx_cfb_lookup
+        ON channel_feature_bindings (organization_id, feature_key);
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar channel_feature_bindings', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

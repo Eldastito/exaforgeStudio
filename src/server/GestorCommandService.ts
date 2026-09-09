@@ -4,6 +4,7 @@ import { PermissionService } from "./PermissionService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { DecisionActionService } from "./DecisionActionService.js";
+import { NumberedListContextService } from "./NumberedListContextService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 /**
@@ -28,9 +29,9 @@ export type GestorIntent = "menu" | "saldo" | "a_receber" | "a_pagar" | "priorid
 export interface GestorResult { handled: boolean; reply: string; intent: GestorIntent; denied?: boolean; user?: { id: string; name: string } | null }
 
 export class GestorCommandService {
-  // Memória curta: última lista de aprovações enviada por (org, usuário) — para
-  // resolver "aprovar 2" contra o que foi numerado (como o Coordenador faz).
-  private static lastActions = new Map<string, { ids: string[] }>();
+  // Última lista de aprovações mostrada por (org, usuário) — para resolver
+  // "aprovar 2" contra o que foi numerado. DURÁVEL (CA-06 / F3.4): sobrevive a
+  // restart via NumberedListContextService; escopo 'gestor_approvals'.
 
   // Intents que o Controller "possui" no canal interno — o webhook roteia só
   // estes para cá; menu/greeting/desconhecido caem no Coordenador (tarefas).
@@ -102,7 +103,6 @@ export class GestorCommandService {
     }
     const name = String(user.name || "").trim().split(/\s+/)[0] || "";
     const { intent, index } = this.parse(text);
-    const key = `${orgId}:${user.id}`;
     try { logAuthEvent(orgId, user.id, null, "WA_GESTOR_COMMAND", { intent, from: fromNumber }); } catch { /* noop */ }
 
     // ── Aprovações governadas (Epic 2 / DecisionActionService) ──
@@ -113,14 +113,17 @@ export class GestorCommandService {
       }
       if (intent === "aprovacoes") {
         const pend = DecisionActionService.list(orgId, { status: "awaiting_approval" });
-        this.lastActions.set(key, { ids: pend.map((a: any) => a.id) });
+        NumberedListContextService.remember(orgId, user.id, "gestor_approvals", pend.map((a: any) => a.id));
         const reply = pend.length
           ? `📝 *Aguardando sua decisão:*\n\n${pend.map((a: any, i: number) => `*${i + 1}.* ${a.title}${a.expected_impact != null ? ` (${brl(a.expected_impact)})` : ""}`).join("\n")}\n\nResponda *aprovar 1* ou *dispensar 1*.`
           : "✅ Nada aguardando aprovação no momento.";
         return { handled: true, reply, intent, user: { id: user.id, name: user.name } };
       }
       // aprovar/rejeitar N → resolve o índice contra a última lista enviada.
-      const ids = this.lastActions.get(key)?.ids || DecisionActionService.list(orgId, { status: "awaiting_approval" }).map((a: any) => a.id);
+      // Resolve contra a lista MOSTRADA (durável, CA-06); só recomputa quando o
+      // usuário nunca viu uma lista (nunca mandou "aprovações") — aí não há
+      // ordem "errada" a preservar.
+      const ids = NumberedListContextService.resolvedIds(orgId, user.id, "gestor_approvals") || DecisionActionService.list(orgId, { status: "awaiting_approval" }).map((a: any) => a.id);
       const id = index && index > 0 ? ids[index - 1] : undefined;
       if (!id) return { handled: true, reply: "Não achei essa ação. Manda *aprovações* que eu numero pra você.", intent, user: { id: user.id, name: user.name } };
       const action = DecisionActionService.get(orgId, id);

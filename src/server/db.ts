@@ -11492,6 +11492,27 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar mixed_mode_pending_choices', e); }
 
+  // PRD WhatsApp Unificado — RF-06 / CA-06 (F3.4): contexto DURÁVEL da lista
+  // numerada. Quando o Controller/Coordenador MOSTRAM uma lista numerada
+  // ("1. …, 2. …"), guardam AQUI a ordem exata dos ids. "aprovar 2"/"concluir 2"
+  // resolve contra ESTA lista — não contra uma lista RECOMPUTADA no momento (que
+  // após restart poderia estar reordenada e mapear "2" para a AÇÃO ERRADA, o
+  // exato risco do CA-06). Sobrevive a restart; TTL evita "2" resolver uma lista
+  // velha. 1 contexto por (org, usuário, escopo).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS numbered_list_contexts (
+        organization_id TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        scope           TEXT NOT NULL,
+        item_ids_json   TEXT NOT NULL,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        expires_at      DATETIME NOT NULL,
+        PRIMARY KEY (organization_id, user_id, scope)
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar numbered_list_contexts', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

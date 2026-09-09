@@ -359,6 +359,15 @@ router.get("/bridge/recon", (req: AuthRequest, res): any => {
   res.json(FalaTuBridgeReconService.report(req.organizationId!));
 });
 
+// F4.1 — relatório POR REGISTRO + classificação de conflito (RF-09 §15.1).
+// Read-only; gestores (carrega detalhe de registros operacionais). Paginado.
+router.get("/bridge/records", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores veem o relatório por registro." });
+  const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+  const offset = req.query.offset != null ? Number(req.query.offset) : undefined;
+  res.json(FalaTuBridgeReconService.records(req.organizationId!, { limit, offset }));
+});
+
 // Backfill: liga tarefas históricas ao canônico (só com a flag ligada, idempotente).
 router.post("/bridge/backfill-tasks", (req: AuthRequest, res): any => {
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem rodar o backfill." });

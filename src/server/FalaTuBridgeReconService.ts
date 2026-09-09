@@ -34,6 +34,50 @@ export interface BridgeReconReport {
   overallReady: boolean;
 }
 
+/**
+ * Classificação POR REGISTRO (RF-09 §15.1). Determinística, derivada por query:
+ * - linked_ok            → vínculo válido e coerente (reusar objeto/ID).
+ * - linked_state_divergent → vínculo válido MAS estados diferem (ex.: tarefa
+ *   concluída num lado e não no outro) — conflito de estado, resolver na
+ *   convergência (F4.3). Só tarefas têm paridade de conclusão comparável aqui.
+ * - broken_link          → vínculo aponta pra canônico inexistente (não recriar
+ *   silenciosamente — registrar conflito).
+ * - unlinked_migratable  → registro operacional sem vínculo, com dados
+ *   suficientes pra migrar (tarefa; lista shopping).
+ * - personal_only        → nota/evento pessoal sem equivalente operacional
+ *   (preservar no silo; NÃO forçar tarefa/contato).
+ * NÃO existe categoria "dois objetos possíveis" derivada por heurística: §15.1
+ * proíbe deduplicar por título/valor/data — só com evidência de origem, que o
+ * silo não guarda. Por isso não é inferida aqui.
+ */
+export type RecordClassification =
+  | "linked_ok"
+  | "linked_state_divergent"
+  | "broken_link"
+  | "unlinked_migratable"
+  | "personal_only";
+
+export interface ReconRecord {
+  recordType: "task" | "event" | "list";
+  id: string;
+  title: string;
+  bridged: boolean;
+  bridgedId: string | null;
+  canonicalExists: boolean;
+  classification: RecordClassification;
+  reason: string;
+}
+
+export interface RecordsReport {
+  generatedAt: string;
+  counts: Record<RecordClassification, number>;
+  total: number;
+  returned: number;
+  offset: number;
+  truncated: boolean; // total > offset + returned
+  records: ReconRecord[];
+}
+
 export class FalaTuBridgeReconService {
   private static flag(orgId: string, col: string): boolean {
     const r = db.prepare(`SELECT COALESCE(${col}, 0) e FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
@@ -84,6 +128,89 @@ export class FalaTuBridgeReconService {
       generatedAt: new Date().toISOString(),
       bridges: { tasks, events, lists },
       overallReady: tasks.ready && events.ready && lists.ready,
+    };
+  }
+
+  /**
+   * Relatório POR REGISTRO (RF-09 §15.1): classifica cada registro do silo numa
+   * das situações da política de migração, para o operador RESOLVER vínculos e
+   * conflitos antes de migrar/aposentar. Read-only, derivado por query (RN-004),
+   * isolado por org. `counts` cobre TODA a população; `records` é o detalhe
+   * paginado (offset/limit) na MESMA ordem (tasks→events→lists, created_at ASC).
+   */
+  static records(orgId: string, opts: { limit?: number; offset?: number } = {}): RecordsReport {
+    const limit = Math.min(Math.max(Number(opts.limit) || 200, 1), 1000);
+    const offset = Math.max(Number(opts.offset) || 0, 0);
+    const CAP = 20000; // guarda de memória por tipo (report é gated owner/admin)
+
+    const all: ReconRecord[] = [];
+
+    // ── TASKS: sempre operacionais. Compara conclusão silo × canônico. ──
+    const taskRows = db.prepare(
+      `SELECT f.id, f.title, f.completed, f.bridged_task_id AS bid,
+              t.id AS canon_id, t.status AS canon_status
+         FROM falatu_tasks f
+         LEFT JOIN tasks t ON t.id = f.bridged_task_id AND t.organization_id = f.organization_id
+        WHERE f.organization_id = ? ORDER BY f.created_at ASC LIMIT ?`,
+    ).all(orgId, CAP) as any[];
+    for (const r of taskRows) {
+      let classification: RecordClassification; let reason: string;
+      if (!r.bid) { classification = "unlinked_migratable"; reason = "tarefa sem espelho canônico (candidata a backfill)"; }
+      else if (!r.canon_id) { classification = "broken_link"; reason = "bridged_task_id aponta pra tarefa canônica inexistente"; }
+      else {
+        const siloDone = Number(r.completed) === 1;
+        const canonDone = String(r.canon_status) === "feito";
+        if (siloDone !== canonDone) { classification = "linked_state_divergent"; reason = `conclusão diverge (silo ${siloDone ? "feita" : "aberta"} × canônico ${canonDone ? "feito" : String(r.canon_status)})`; }
+        else { classification = "linked_ok"; reason = "vínculo válido e coerente"; }
+      }
+      all.push({ recordType: "task", id: r.id, title: r.title || "", bridged: !!r.bid, bridgedId: r.bid || null, canonicalExists: !!r.canon_id, classification, reason });
+    }
+
+    // ── EVENTS: contact-gated. Sem espelho = lembrete pessoal por design (o silo ──
+    // não guarda contato pra afirmar migrabilidade). Só drift importa.
+    const eventRows = db.prepare(
+      `SELECT f.id, f.title, f.event_date, f.event_time, f.bridged_appointment_id AS bid,
+              a.id AS canon_id
+         FROM falatu_events f
+         LEFT JOIN appointments a ON a.id = f.bridged_appointment_id AND a.organization_id = f.organization_id
+        WHERE f.organization_id = ? ORDER BY f.created_at ASC LIMIT ?`,
+    ).all(orgId, CAP) as any[];
+    for (const r of eventRows) {
+      let classification: RecordClassification; let reason: string;
+      if (!r.bid) { classification = "personal_only"; reason = "evento sem espelho: lembrete pessoal por design (contact-gated)"; }
+      else if (!r.canon_id) { classification = "broken_link"; reason = "bridged_appointment_id aponta pra agendamento inexistente"; }
+      else { classification = "linked_ok"; reason = "vínculo válido e coerente"; }
+      all.push({ recordType: "event", id: r.id, title: r.title || "", bridged: !!r.bid, bridgedId: r.bid || null, canonicalExists: !!r.canon_id, classification, reason });
+    }
+
+    // ── LISTS: só 'shopping' têm equivalente (requisição); demais são pessoais. ──
+    const listRows = db.prepare(
+      `SELECT f.id, f.title, f.list_type, f.bridged_requisition_id AS bid,
+              r.id AS canon_id
+         FROM falatu_lists f
+         LEFT JOIN purchase_requisitions r ON r.id = f.bridged_requisition_id AND r.organization_id = f.organization_id
+        WHERE f.organization_id = ? ORDER BY f.created_at ASC LIMIT ?`,
+    ).all(orgId, CAP) as any[];
+    for (const r of listRows) {
+      let classification: RecordClassification; let reason: string;
+      if (String(r.list_type) !== "shopping") { classification = "personal_only"; reason = `lista '${r.list_type}' não tem equivalente operacional (só shopping)`; }
+      else if (!r.bid) { classification = "unlinked_migratable"; reason = "lista de compras sem requisição (backfill de listas é fatia futura)"; }
+      else if (!r.canon_id) { classification = "broken_link"; reason = "bridged_requisition_id aponta pra requisição inexistente"; }
+      else { classification = "linked_ok"; reason = "vínculo válido e coerente"; }
+      all.push({ recordType: "list", id: r.id, title: r.title || "", bridged: !!r.bid, bridgedId: r.bid || null, canonicalExists: !!r.canon_id, classification, reason });
+    }
+
+    const counts: Record<RecordClassification, number> = {
+      linked_ok: 0, linked_state_divergent: 0, broken_link: 0, unlinked_migratable: 0, personal_only: 0,
+    };
+    for (const rec of all) counts[rec.classification]++;
+
+    const page = all.slice(offset, offset + limit);
+    return {
+      generatedAt: new Date().toISOString(),
+      counts, total: all.length, returned: page.length, offset,
+      truncated: all.length > offset + page.length,
+      records: page,
     };
   }
 

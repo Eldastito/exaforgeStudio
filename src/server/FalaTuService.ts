@@ -684,9 +684,25 @@ export class FalaTuService {
   }
 
   static toggleTask(orgId: string, userId: string, taskId: string, completed: boolean) {
+    const before = db.prepare(`SELECT bridged_task_id FROM falatu_tasks WHERE id = ? AND organization_id = ? AND user_id = ?`).get(taskId, orgId, userId) as any;
     const r = db.prepare(`UPDATE falatu_tasks SET completed = ?, completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id = ? AND organization_id = ? AND user_id = ?`)
       .run(completed ? 1 : 0, completed ? 1 : 0, taskId, orgId, userId);
     if (r.changes === 0) throw new Error("Tarefa não encontrada.");
+    // CONVERGÊNCIA (RF-09 §15.2 / F4.3): concluir/reabrir no Fala Tu propaga pro
+    // canônico quando a tarefa está bridgeada — os estados nunca divergem por uma
+    // ação. Só o BIT de conclusão viaja: concluir → 'feito'; reabrir só desfaz
+    // 'feito' (não pisa em 'fazendo'/'cancelada', que o silo não conhece).
+    // Best-effort: falha no canônico não derruba a ação do usuário no silo (o
+    // drift eventual fica visível no relatório por registro, F4.1).
+    if (before?.bridged_task_id) {
+      try {
+        const cur = db.prepare(`SELECT status FROM tasks WHERE id = ? AND organization_id = ?`).get(before.bridged_task_id, orgId) as any;
+        if (cur) {
+          if (completed && cur.status !== "feito") TaskService.move(orgId, before.bridged_task_id, "feito", userId);
+          else if (!completed && cur.status === "feito") TaskService.move(orgId, before.bridged_task_id, "a_fazer", userId);
+        }
+      } catch (e) { console.error("[FalaTu] convergência toggleTask→canônico falhou (best-effort)", e); }
+    }
     return db.prepare(`SELECT * FROM falatu_tasks WHERE id = ?`).get(taskId);
   }
 

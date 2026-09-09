@@ -368,10 +368,22 @@ router.get("/bridge/records", (req: AuthRequest, res): any => {
   res.json(FalaTuBridgeReconService.records(req.organizationId!, { limit, offset }));
 });
 
-// Backfill: liga tarefas históricas ao canônico (só com a flag ligada, idempotente).
+// Backfill: liga registros históricos ao canônico (flag ligada, idempotente).
+// F4.2: `dryRun` simula sem efeitos; `limit` pagina; checkpoint em backfill-state.
 router.post("/bridge/backfill-tasks", (req: AuthRequest, res): any => {
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem rodar o backfill." });
-  res.json(FalaTuBridgeReconService.backfillTasks(req.organizationId!));
+  res.json(FalaTuBridgeReconService.backfillTasks(req.organizationId!, { dryRun: req.body?.dryRun === true, limit: req.body?.limit != null ? Number(req.body.limit) : undefined }));
+});
+
+// F4.2: backfill de listas de compras históricas → requisição (draft).
+router.post("/bridge/backfill-lists", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores podem rodar o backfill." });
+  res.json(FalaTuBridgeReconService.backfillLists(req.organizationId!, { dryRun: req.body?.dryRun === true, limit: req.body?.limit != null ? Number(req.body.limit) : undefined }));
+});
+
+// F4.2: checkpoint/contabilidade do backfill (read-only).
+router.get("/bridge/backfill-state", (req: AuthRequest, res): any => {
+  res.json(FalaTuBridgeReconService.backfillState(req.organizationId!));
 });
 
 // Estado da porta de canal (opt-in de envio proativo, separado da flag do módulo).

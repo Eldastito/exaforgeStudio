@@ -11513,6 +11513,27 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar numbered_list_contexts', e); }
 
+  // PRD WhatsApp Unificado — RF-09 §15.2 (F4.2): checkpoint/contabilidade do
+  // backfill de consolidação do Fala Tu. O "mapa de IDs" antigo→canônico são as
+  // colunas `bridged_*_id` (idempotência: reexecutar não recria). Esta tabela
+  // guarda o PROGRESSO por (org, tipo): acumulado migrado, nº de execuções,
+  // último lote e restante — para o operador retomar/observar sem perder conta.
+  // Dry-run (simulação) NÃO escreve aqui (sem efeitos). Aditiva/opt-in.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_bridge_backfill_state (
+        organization_id    TEXT NOT NULL,
+        kind               TEXT NOT NULL,          -- 'tasks' | 'lists'
+        migrated_total     INTEGER NOT NULL DEFAULT 0,
+        runs               INTEGER NOT NULL DEFAULT 0,
+        last_run_migrated  INTEGER NOT NULL DEFAULT 0,
+        last_run_remaining INTEGER,
+        last_run_at        DATETIME,
+        PRIMARY KEY (organization_id, kind)
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar falatu_bridge_backfill_state', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

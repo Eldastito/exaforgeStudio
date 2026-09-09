@@ -14,6 +14,7 @@
  */
 import db from "./db.js";
 import { TaskService } from "./TaskService.js";
+import { PurchaseRequisitionService } from "./PurchaseRequisitionService.js";
 
 const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
@@ -221,12 +222,20 @@ export class FalaTuBridgeReconService {
    * idempotente (só o que está sem `bridged_task_id`); atômico por item. RN-151: não
    * inventa — usa title/description/user_id do próprio silo.
    */
-  static backfillTasks(orgId: string, opts: { limit?: number } = {}): { ok: boolean; reason?: string; backfilled: number; remaining: number } {
-    if (!this.flag(orgId, "falatu_bridge_tasks_enabled")) return { ok: false, reason: "bridge_disabled", backfilled: 0, remaining: 0 };
+  static backfillTasks(orgId: string, opts: { limit?: number; dryRun?: boolean } = {}): { ok: boolean; reason?: string; dryRun: boolean; backfilled: number; wouldBackfill: number; remaining: number } {
+    if (!this.flag(orgId, "falatu_bridge_tasks_enabled")) return { ok: false, reason: "bridge_disabled", dryRun: !!opts.dryRun, backfilled: 0, wouldBackfill: 0, remaining: 0 };
     const limit = Math.min(Math.max(Number(opts.limit) || 500, 1), 2000);
     const rows = db.prepare(
       `SELECT id, user_id, title, description FROM falatu_tasks WHERE organization_id = ? AND bridged_task_id IS NULL ORDER BY created_at ASC LIMIT ?`
     ).all(orgId, limit) as any[];
+
+    // DRY-RUN (§15.1/RF-09 "modo de simulação"): NÃO cria canônico, NÃO carimba,
+    // NÃO grava checkpoint — só relata o que FARIA. Zero efeito externo.
+    if (opts.dryRun) {
+      const remaining = this.n(`SELECT COUNT(*) n FROM falatu_tasks WHERE organization_id = ? AND bridged_task_id IS NULL`, orgId);
+      return { ok: true, dryRun: true, backfilled: 0, wouldBackfill: rows.length, remaining };
+    }
+
     let backfilled = 0;
     for (const r of rows) {
       try {
@@ -235,7 +244,74 @@ export class FalaTuBridgeReconService {
       } catch (e) { /* item ruim não derruba o lote; segue */ }
     }
     const remaining = this.n(`SELECT COUNT(*) n FROM falatu_tasks WHERE organization_id = ? AND bridged_task_id IS NULL`, orgId);
-    return { ok: true, backfilled, remaining };
+    this.recordRun(orgId, "tasks", backfilled, remaining);
+    return { ok: true, dryRun: false, backfilled, wouldBackfill: rows.length, remaining };
+  }
+
+  /**
+   * BACKFILL de listas de COMPRAS históricas (RF-09 §15.2): liga `falatu_lists`
+   * `shopping` SEM requisição via o MESMO caminho da porta viva (F7) —
+   * `matchItemsToProducts` + `addManualItems` (draft; humano aprova). Só itens
+   * que CASAM com o catálogo viram linhas (RN-151, nunca inventa produto); uma
+   * lista sem match não vira requisição e NÃO é carimbada (fica candidata).
+   * Idempotente (só `bridged_requisition_id IS NULL`); dry-run sem efeitos.
+   */
+  static backfillLists(orgId: string, opts: { limit?: number; dryRun?: boolean } = {}): { ok: boolean; reason?: string; dryRun: boolean; backfilled: number; wouldBackfill: number; remaining: number } {
+    if (!this.flag(orgId, "falatu_bridge_lists_enabled")) return { ok: false, reason: "bridge_disabled", dryRun: !!opts.dryRun, backfilled: 0, wouldBackfill: 0, remaining: 0 };
+    const limit = Math.min(Math.max(Number(opts.limit) || 500, 1), 2000);
+    const rows = db.prepare(
+      `SELECT id, user_id FROM falatu_lists WHERE organization_id = ? AND list_type = 'shopping' AND bridged_requisition_id IS NULL ORDER BY created_at ASC LIMIT ?`
+    ).all(orgId, limit) as any[];
+    const remainingNow = () => this.n(`SELECT COUNT(*) n FROM falatu_lists WHERE organization_id = ? AND list_type = 'shopping' AND bridged_requisition_id IS NULL`, orgId);
+
+    if (opts.dryRun) return { ok: true, dryRun: true, backfilled: 0, wouldBackfill: rows.length, remaining: remainingNow() };
+
+    let backfilled = 0;
+    for (const r of rows) {
+      try {
+        const items = db.prepare(`SELECT name FROM falatu_list_items WHERE organization_id = ? AND list_id = ?`).all(orgId, r.id) as any[];
+        if (!items.length) continue; // lista vazia → não vira requisição
+        const { matched } = PurchaseRequisitionService.matchItemsToProducts(orgId, items.map((it) => ({ name: String(it.name).trim() })));
+        if (!matched.length) continue; // nenhum item casa o catálogo → fica candidata (RN-151)
+        const req = PurchaseRequisitionService.addManualItems(orgId, matched.map((m: any) => ({ productServiceId: m.productServiceId, quantity: m.quantity })), r.user_id);
+        if (req?.id) { db.prepare(`UPDATE falatu_lists SET bridged_requisition_id = ? WHERE id = ? AND organization_id = ?`).run(req.id, r.id, orgId); backfilled++; }
+      } catch (e) { /* item ruim não derruba o lote; segue */ }
+    }
+    const remaining = remainingNow();
+    this.recordRun(orgId, "lists", backfilled, remaining);
+    return { ok: true, dryRun: false, backfilled, wouldBackfill: rows.length, remaining };
+  }
+
+  /**
+   * Eventos NÃO são backfilláveis: o espelho canônico (appointment) exige contato
+   * real + data + hora, e o silo NÃO guarda contato — fabricar seria inventar
+   * (RN-151). Eventos sem espelho são lembretes pessoais por design (§15.1).
+   * Honesto: no-op explícito.
+   */
+  static backfillEvents(_orgId: string): { ok: boolean; reason: string; dryRun: boolean; backfilled: number; wouldBackfill: number; remaining: number } {
+    return { ok: false, reason: "not_applicable_contact_gated", dryRun: false, backfilled: 0, wouldBackfill: 0, remaining: 0 };
+  }
+
+  /** Contabilidade/checkpoint por (org, tipo). Só execuções REAIS gravam. */
+  private static recordRun(orgId: string, kind: "tasks" | "lists", migrated: number, remaining: number): void {
+    try {
+      db.prepare(
+        `INSERT INTO falatu_bridge_backfill_state (organization_id, kind, migrated_total, runs, last_run_migrated, last_run_remaining, last_run_at)
+         VALUES (?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(organization_id, kind) DO UPDATE SET
+           migrated_total = migrated_total + excluded.migrated_total,
+           runs = runs + 1,
+           last_run_migrated = excluded.last_run_migrated,
+           last_run_remaining = excluded.last_run_remaining,
+           last_run_at = CURRENT_TIMESTAMP`,
+      ).run(orgId, kind, migrated, migrated, remaining);
+    } catch (e) { console.error("[FalaTuBridgeRecon] recordRun falhou (best-effort)", e); }
+  }
+
+  /** Estado do backfill (checkpoint/contagens) por tipo. Read-only. */
+  static backfillState(orgId: string): { tasks: any | null; lists: any | null } {
+    const get = (kind: string) => db.prepare(`SELECT kind, migrated_total, runs, last_run_migrated, last_run_remaining, last_run_at FROM falatu_bridge_backfill_state WHERE organization_id = ? AND kind = ?`).get(orgId, kind) || null;
+    return { tasks: get("tasks"), lists: get("lists") };
   }
 }
 

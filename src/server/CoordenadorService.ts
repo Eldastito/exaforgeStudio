@@ -4,6 +4,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 import { ModuleService } from "./ModuleService.js";
 import { TaskService } from "./TaskService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
+import { NumberedListContextService } from "./NumberedListContextService.js";
 import { phoneMatches } from "./phoneMatch.js";
 
 const PRIO_EMOJI: Record<string, string> = { alta: "🔴", media: "🟡", baixa: "⚪" };
@@ -17,8 +18,9 @@ const PRIO_EMOJI: Record<string, string> = { alta: "🔴", media: "🟡", baixa:
  * organização. Número desconhecido recebe um aviso e nada é executado.
  */
 export class CoordenadorService {
-  // Memória curta: última lista numerada por colaborador (para "concluir 2").
-  private static lastList = new Map<string, { ids: string[]; at: number }>();
+  // Última lista numerada mostrada ao colaborador (para "concluir 2"). DURÁVEL
+  // (CA-06 / F3.4): sobrevive a restart via NumberedListContextService; escopo
+  // 'coordenador_tasks'.
 
   private static resolveUser(orgId: string, fromNumber: string): any | null {
     const users = db.prepare(
@@ -65,14 +67,15 @@ export class CoordenadorService {
 
     const raw = String(text || "").trim();
     const msg = raw.toLowerCase();
-    const key = `${orgId}:${user.id}`;
     const name = this.firstName(user);
     if (!raw) { await reply(this.menu(name)); return; }
 
     // Resolve o índice citado ("concluir 2") contra a última lista enviada.
     const taskByIndex = (n: number): any | null => {
-      const remembered = this.lastList.get(key);
-      const ids = remembered?.ids || this.openTasks(orgId, user.id).map(t => t.id);
+      // Resolve contra a lista MOSTRADA (durável, CA-06); só recomputa quando o
+      // colaborador nunca viu uma lista (nunca mandou "tarefas") — aí não há
+      // ordem "errada" a preservar.
+      const ids = NumberedListContextService.resolvedIds(orgId, user.id, "coordenador_tasks") || this.openTasks(orgId, user.id).map(t => t.id);
       const id = ids[n - 1];
       if (!id) return null;
       return TaskService.get(orgId, id);
@@ -85,7 +88,7 @@ export class CoordenadorService {
       }
       if (/^(tarefas|minhas tarefas|o que tenho|lista|listar)/.test(msg)) {
         const tasks = this.openTasks(orgId, user.id);
-        this.lastList.set(key, { ids: tasks.map(t => t.id), at: Date.now() });
+        NumberedListContextService.remember(orgId, user.id, "coordenador_tasks", tasks.map(t => t.id));
         await reply(`📋 *Suas tarefas:*\n\n${this.fmtList(tasks)}`);
         return;
       }
@@ -120,7 +123,7 @@ export class CoordenadorService {
       }
 
       // ── Linguagem natural: a IA mapeia para uma ação sobre as tarefas ──
-      await this.handleNatural(orgId, user, key, raw, reply);
+      await this.handleNatural(orgId, user, raw, reply);
     } catch (e: any) {
       console.error("[Coordenador] erro:", e);
       await reply("Tive um problema agora. Tenta de novo em instantes? 🙏");
@@ -128,9 +131,9 @@ export class CoordenadorService {
   }
 
   /** Interpreta uma frase livre como uma ação (list/start/complete/help/create/menu). */
-  private static async handleNatural(orgId: string, user: any, key: string, raw: string, reply: (m: string) => any): Promise<void> {
+  private static async handleNatural(orgId: string, user: any, raw: string, reply: (m: string) => any): Promise<void> {
     const tasks = this.openTasks(orgId, user.id);
-    this.lastList.set(key, { ids: tasks.map(t => t.id), at: Date.now() });
+    NumberedListContextService.remember(orgId, user.id, "coordenador_tasks", tasks.map(t => t.id));
     const listed = tasks.map((t, i) => `${i + 1}. ${t.title}`).join("\n") || "(sem tarefas em aberto)";
     const prompt = `Você interpreta a mensagem de um colaborador sobre as TAREFAS dele e devolve só JSON.
 Tarefas em aberto (numeradas):

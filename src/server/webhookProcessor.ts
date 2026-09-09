@@ -29,6 +29,7 @@ import { CoordenadorService } from "./CoordenadorService.js";
 import { GestorCommandService } from "./GestorCommandService.js";
 import { FalaTuWhatsAppService } from "./FalaTuWhatsAppService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
+import { MixedModeInboundService } from "./MixedModeInboundService.js";
 import { BusinessTutorService } from "./BusinessTutorService.js";
 import { MaestroService } from "./MaestroService.js";
 import { ProspectExecutionService } from "./ProspectExecutionService.js";
@@ -86,6 +87,62 @@ export async function dispatchIncomingMessage(payload: Parameters<typeof process
     return;
   }
   await processIncomingMessage(payload, io);
+}
+
+/**
+ * Handling INTERNO comum (canal de gestão): FalaTu (captura) → Controller/Diretor
+ * → Coordenador. Extraído do bloco `kind==='internal'` para ser REUSADO tanto pelo
+ * canal interno quanto pelo desvio de MODO MISTO (F3.3b): quando o roteador §10
+ * decide `internal` num canal de atendimento, a gestão do gestor é atendida por
+ * este mesmo caminho — sem criar contato/ticket de cliente (§10.8). Sempre resolve
+ * a mensagem (responde e retorna); não cria CRM.
+ */
+async function runInternalInbound(orgId: string, channel: any, payload: { senderId: string; text?: string | null }): Promise<void> {
+  // FalaTu (ADR-151 Fatia 3): gatilho explícito "anota …" (ou confere/descarta de
+  // um item pendente) vira captura no inbox do FalaTu. Vem ANTES do Controller de
+  // propósito: o fallback dele manda mensagem livre de gestor pro Diretor IA, o
+  // que engoliria o "anota". Áudio já chega transcrito em payload.text (ADR-102).
+  try {
+    const f = await FalaTuWhatsAppService.handle(orgId, payload.senderId, payload.text || '');
+    if (f.handled) {
+      if (f.reply) await MessageProviderService.sendMessage(channel.id, payload.senderId, f.reply);
+      return;
+    }
+  } catch (e) {
+    console.error('[FalaTu] Falha na captura via canal interno:', e);
+  }
+
+  // ADR-154 F4.2 — SILÊNCIO em Solo dedicado + trigger_only: se o FalaTu não
+  // capturou o gatilho, a mensagem NÃO vai pro Controller/Coordenador/Diretor IA.
+  try {
+    const s = db.prepare(`SELECT whatsapp_instance_kind, falatu_reply_mode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    if (s?.whatsapp_instance_kind === 'dedicated' && s?.falatu_reply_mode === 'trigger_only') return;
+  } catch { /* segue fluxo suíte (fail-open) */ }
+
+  // Controller Financeiro IA (ADR-139): comandos CLAROS de gestão (saldo, a
+  // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.
+  try {
+    const g = await GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
+    if (GestorCommandService.shouldRoute(g)) {
+      if (g.intent === 'pergunta_negocio') {
+        await MessageProviderService.sendMessage(channel.id, payload.senderId, 'Deixa eu ver isso pra você… 💭');
+        // CA-04: 'pergunta_negocio' só sai com isManager (owner/admin) →
+        // pode ver dinheiro; passamos explícito p/ o panorama não ser redigido.
+        const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '', { canSeeMoney: true });
+        await MessageProviderService.sendMessage(channel.id, payload.senderId, answer);
+        return;
+      }
+      await MessageProviderService.sendMessage(channel.id, payload.senderId, g.reply);
+      return;
+    }
+  } catch (e) {
+    console.error('[Controller] Falha ao processar comando de gestão:', e);
+  }
+  try {
+    await CoordenadorService.handleInbound(orgId, channel.id, payload.senderId, payload.text || '');
+  } catch (e) {
+    console.error('[Coordenador] Falha ao processar mensagem interna:', e);
+  }
 }
 
 export async function processIncomingMessage(
@@ -169,68 +226,7 @@ export async function processIncomingMessage(
   // COLABORADOR — não de um cliente. Roteamos para o Coordenador IA e saímos:
   // NÃO cria contato/ticket nem aciona o fluxo de atendimento ao cliente.
   if (channel.kind === 'internal') {
-    // FalaTu (ADR-151 Fatia 3): gatilho explícito "anota …" (ou confere/
-    // descarta de um item pendente) vira captura no inbox do FalaTu. Vem ANTES
-    // do Controller de propósito: o fallback dele manda mensagem livre de
-    // gestor pro Diretor IA, o que engoliria o "anota". Áudio já chega
-    // transcrito em payload.text (transcrição roda no webhook, ADR-102).
-    try {
-      const f = await FalaTuWhatsAppService.handle(orgId, payload.senderId, payload.text || '');
-      if (f.handled) {
-        if (f.reply) await MessageProviderService.sendMessage(channel.id, payload.senderId, f.reply);
-        return;
-      }
-    } catch (e) {
-      console.error('[FalaTu] Falha na captura via canal interno:', e);
-    }
-
-    // ADR-154 F4.2 — SILÊNCIO em Solo dedicado + trigger_only: se o FalaTu
-    // não capturou o gatilho ("anota…"/"confere"/"descarta"/"é N"), a
-    // mensagem NÃO vai pro Controller/Coordenador/Diretor IA. Guardrail
-    // RN-154: o assistente pessoal NÃO interfere com a vida do dono do
-    // número. Uma única linha, escopo cirúrgico — orgs suíte
-    // (whatsapp_instance_kind='shared' OU falatu_reply_mode='always')
-    // seguem 100% do fluxo abaixo. Try/catch pra jamais bloquear suíte
-    // por falha de consulta.
-    try {
-      const s = db.prepare(`SELECT whatsapp_instance_kind, falatu_reply_mode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
-      if (s?.whatsapp_instance_kind === 'dedicated' && s?.falatu_reply_mode === 'trigger_only') return;
-    } catch { /* segue fluxo suíte (fail-open) */ }
-
-    // Controller Financeiro IA (ADR-139): quando a org habilitou o gestor por
-    // WhatsApp e o número é de um gestor, comandos CLAROS de gestão (saldo, a
-    // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.
-    // Greeting/menu/tarefas caem no Coordenador (fluxo atual, sem duplicar).
-    try {
-      const g = await GestorCommandService.handle(orgId, payload.senderId, payload.text || '');
-      if (GestorCommandService.shouldRoute(g)) {
-        // Pergunta livre de negócio ("quanto o Marcos vendeu esse mês?"): o
-        // Controller (síncrono/determinístico) só reconheceu que é uma pergunta
-        // de gestor sem comando fixo — quem responde é o Diretor Executivo IA
-        // (LLM sobre dados reais). Manda um "pensando" primeiro (a IA demora
-        // alguns segundos), igual ao Coordenador faz em "ajuda N".
-        if (g.intent === 'pergunta_negocio') {
-          await MessageProviderService.sendMessage(channel.id, payload.senderId, 'Deixa eu ver isso pra você… 💭');
-          // CA-04: este ramo só é alcançado quando GestorCommandService já
-          // reconheceu o remetente como GESTOR (owner/admin — ver
-          // GestorCommandService.handle, intent 'pergunta_negocio' só sai com
-          // isManager). Logo, pode ver dinheiro; passamos explícito para o
-          // panorama não ser redigido para o próprio gestor.
-          const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '', { canSeeMoney: true });
-          await MessageProviderService.sendMessage(channel.id, payload.senderId, answer);
-          return;
-        }
-        await MessageProviderService.sendMessage(channel.id, payload.senderId, g.reply);
-        return;
-      }
-    } catch (e) {
-      console.error('[Controller] Falha ao processar comando de gestão:', e);
-    }
-    try {
-      await CoordenadorService.handleInbound(orgId, channel.id, payload.senderId, payload.text || '');
-    } catch (e) {
-      console.error('[Coordenador] Falha ao processar mensagem interna:', e);
-    }
+    await runInternalInbound(orgId, channel, payload);
     return;
   }
 
@@ -246,6 +242,31 @@ export async function processIncomingMessage(
     if (handled) return;
   } catch (e) {
     console.error('[Tutor] resposta do dono falhou:', e);
+  }
+
+  // ===== MODO MISTO (RF-04 §10, F3.3b) — opt-in por org =====
+  // ANTES de criar contato/ticket: se o remetente é uma identidade INTERNA e o
+  // contexto não é claramente de cliente, roteia pra gestão (mesmo caminho
+  // interno) ou pergunta "atendimento ou gestão?" — um gestor consultando o
+  // negócio pelo número comercial NÃO vira ticket de atendimento (CA-04 §10.8).
+  // Flag desligada → nem entra aqui (0-regressão). Fail-open pro atendimento:
+  // qualquer erro na decisão cai no fluxo de hoje.
+  if (MixedModeInboundService.isEnabled(orgId)) {
+    try {
+      const d = MixedModeInboundService.decide(orgId, channel, payload);
+      if (d.lane === 'internal') {
+        await runInternalInbound(orgId, channel, payload);
+        return;
+      }
+      if (d.lane === 'ask_which') {
+        MixedModeInboundService.setPending(orgId, channel.id, payload.senderId);
+        await MessageProviderService.sendMessage(channel.id, payload.senderId, MixedModeInboundService.choicePrompt());
+        return;
+      }
+      // attendance / skip / demais → segue o fluxo de atendimento normal abaixo.
+    } catch (e) {
+      console.error('[MixedMode] decisão falhou (fail-open p/ atendimento):', e);
+    }
   }
 
   // 1. Resolve Contact

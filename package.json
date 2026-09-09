@@ -176,6 +176,7 @@
     "test:social-intelligence-hardening": "tsx scripts/test-social-intelligence-hardening.ts",
     "test:security-encryption": "tsx scripts/test-security-encryption.ts",
     "test:mixed-mode-router": "tsx scripts/test-mixed-mode-router.ts",
+    "test:mixed-mode-inbound": "tsx scripts/test-mixed-mode-inbound.ts",
     "test:phone-possession": "tsx scripts/test-phone-possession.ts",
     "test:sender-identity": "tsx scripts/test-sender-identity.ts",
     "test:security-config": "tsx scripts/test-security-config.ts",

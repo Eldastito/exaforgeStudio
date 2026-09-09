@@ -41,6 +41,11 @@ export interface ConnectAndQrResult {
   state?: string; // 'open' se já conectada
   token?: string;
   error?: string;
+  // F1.3 (RF-02/INV-07/CA-02): quando o QR não veio, sinaliza que um RESET
+  // (delete+recreate) PODE ajudar — mas o reset é operação EXPLÍCITA do operador
+  // (`resetInstance`), nunca autocorreção silenciosa. QR ausente ≠ autorização
+  // pra apagar a sessão.
+  needsReset?: boolean;
 }
 
 export class EvolutionService {
@@ -227,46 +232,15 @@ export class EvolutionService {
       qrBase64 = await tryFetchQr();
     }
 
-    // F4.1f — auto-heal do client zumbi. Visto em produção: o whatsmeow do
-    // Evolution GO pode ficar com um client em memória NÃO logado cujo loop
-    // de QR já expirou. Nesse estado o GetQr entra no branch "Client exists
-    // but not connected" e NUNCA reinicia a sessão — o QR fica vazio pra
-    // sempre.
-    //
-    // Remédio (validado no fonte + teste manual): forcereconnect NÃO serve
-    // pra instância nunca-pareada (exige `number` e procura um device JÁ
-    // pareado no whatsmeow_device). O caminho certo é DELETE
-    // /instance/delete/:id (AuthAdmin) — Disconnect() no client + limpeza de
-    // clientPointer/killChannel/cache — e RECRIAR a instância do zero.
-    // Só roda quando as 3 tentativas normais falharam E temos o instanceId.
-    if (!qrBase64 && instanceId) {
-      try {
-        await fetch(`${cfg.baseUrl}/instance/delete/${instanceId}`, {
-          method: "DELETE",
-          headers: { apikey: cfg.apiKey },
-        });
-        const recreated = await this.createInstance(instanceName, config);
-        if (recreated.ok && recreated.token) {
-          // Token/instância novos — o closure de tryFetchQr lê `activeToken`,
-          // e o caller grava o token retornado no canal; reatribuir o param
-          // mantém os dois consistentes.
-          activeToken = recreated.token;
-          // O registro de webhook+subscribe do passo 1 morreu com o delete —
-          // re-registra na instância nova antes de pedir o QR.
-          try {
-            await fetch(`${cfg.baseUrl}/instance/connect`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
-              body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
-            });
-          } catch { /* best-effort */ }
-          for (let attempt = 0; attempt < 2 && !qrBase64; attempt++) {
-            await new Promise((r) => setTimeout(r, 3000));
-            qrBase64 = await tryFetchQr();
-          }
-        }
-      } catch { /* best-effort — sem heal, devolve o erro padrão abaixo */ }
-    }
+    // F1.3 (RF-02/INV-07/CA-02) — REMOVIDO o auto-heal destrutivo que antes,
+    // quando o QR vinha vazio, apagava (`DELETE /instance/delete/:id`) e recriava
+    // a instância AUTOMATICAMENTE. Isso violava o invariante: "QR ausente em
+    // sessão conectada significa que pareamento não é necessário, NÃO autorização
+    // para reset" — o delete silencioso podia derrubar uma sessão ativa (ex.: um
+    // evento fora de ordem ou uma corrida no GetQr) sem prova nem consentimento.
+    // A capacidade de reset foi preservada em `resetInstance` (operação EXPLÍCITA,
+    // exposta só a operador autorizado, com confirmação no produto). O connect
+    // apenas SINALIZA `needsReset` no retorno vazio; quem decide resetar é humano.
 
     // 3. Fallback legacy — /instance/connect/<name> (Evolution API Node oficial).
     // Este endpoint devolve o próprio QR na resposta do "connect" — comportamento
@@ -292,7 +266,43 @@ export class EvolutionService {
       const finalQr = qrBase64.startsWith("data:image") ? qrBase64 : `data:image/png;base64,${qrBase64}`;
       return { ok: true, qrBase64: finalQr, token: activeToken };
     }
-    return { ok: false, error: "QR não obtido (Evolution retornou vazio)" };
+    // QR vazio: honesto. Sinaliza `needsReset` só quando temos o instanceId (o
+    // reset EXPLÍCITO precisa dele) — a UI/rota oferece o reset ao operador com
+    // confirmação; nunca resetamos aqui (F1.3).
+    return { ok: false, error: "QR não obtido (Evolution retornou vazio)", needsReset: !!instanceId };
+  }
+
+  /**
+   * RESET EXPLÍCITO de uma instância travada (F1.3 — RF-02/INV-07/CA-02).
+   *
+   * Faz o que o antigo auto-heal fazia (DELETE /instance/delete/:id + recriar +
+   * reconectar + QR), MAS como operação DELIBERADA: só deve ser chamada a partir
+   * de uma rota autenticada de operador autorizado, com confirmação explícita no
+   * produto e ciência do impacto (a sessão atual é encerrada). Nunca é disparada
+   * automaticamente pelo caminho de conexão. Idempotente do ponto de vista do
+   * caller: recria a instância e devolve QR/estado como o provision normal.
+   */
+  static async resetInstance(
+    instanceName: string,
+    instanceId: string,
+    config?: EvolutionConfig,
+  ): Promise<ConnectAndQrResult> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg) return { ok: false, error: "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados" };
+    if (!instanceId) return { ok: false, error: "resetInstance exige instanceId" };
+    // Apaga o client zumbi (Disconnect + limpeza no whatsmeow) — AuthAdmin.
+    try {
+      await fetch(`${cfg.baseUrl}/instance/delete/${instanceId}`, {
+        method: "DELETE",
+        headers: { apikey: cfg.apiKey },
+      });
+    } catch { /* best-effort — se o delete falhar, o create abaixo ainda tenta */ }
+    // Recria do zero e reconecta pelo caminho normal (que registra webhook + QR).
+    const recreated = await this.createInstance(instanceName, config);
+    if (!recreated.ok || !recreated.token) {
+      return { ok: false, error: recreated.error || "Falha ao recriar instância no reset" };
+    }
+    return this.connectAndGetQr(instanceName, recreated.token, config, recreated.instanceId);
   }
 
   /**

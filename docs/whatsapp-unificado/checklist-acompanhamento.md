@@ -11,7 +11,7 @@
 | Fase | Itens | Estado | Evidência | Pendência para o gate |
 |---|---|---|---|---|
 | F0 | F0.1–F0.4 | **EM ANDAMENTO** | `docs/whatsapp-unificado/ANALISE-F0-auditoria-baseline.md` | Contrato Evolution real (Swagger) + fixtures + execução da suíte |
-| F1 | F1.1–F1.4 | NÃO INICIADO | — | G1 |
+| F1 | F1.1–F1.4 | **EM ANDAMENTO** | F1.3 implementado (`test:evolution-reset` 14/14) | G1 (falta F1.1/F1.2/F1.4) |
 | F2 | F2.1–F2.4 | NÃO INICIADO | — | G2 |
 | F3 | F3.1–F3.4 | NÃO INICIADO | — | G3 |
 | F4 | F4.1–F4.4 | NÃO INICIADO | — | G4 |
@@ -30,7 +30,7 @@
 ### Fase 1 — Corrigir fundação da conexão
 - [ ] **F1.1** — Configuração, credenciais e normalização centralizadas. — NÃO INICIADO
 - [ ] **F1.2** — Empresa, webhook protegido e estados corretos. — NÃO INICIADO
-- [ ] **F1.3** — Provisionamento idempotente; sessão protegida contra reset automático. — NÃO INICIADO
+- [ ] **F1.3** — Provisionamento idempotente; sessão protegida contra reset automático. — **IMPLEMENTADO** (removido o delete+recreate silencioso de `connectAndGetQr`; capacidade preservada em `resetInstance` EXPLÍCITO/operador; retorno honesto `needsReset`. `test:evolution-reset` 14/14; regressão `test:falatu-solo-whatsapp` 72/72. VALIDADO vira `[x]` quando a suíte rodar no CI + a rota/UI de reset da Fase 2 expor a operação com confirmação).
 - [ ] **F1.4** — Rotas legadas e Solo compatíveis com a fundação comum. — NÃO INICIADO
 
 ### Fase 2 — Conexão autônoma e configuração dos usos

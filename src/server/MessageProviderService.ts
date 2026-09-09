@@ -7,6 +7,27 @@ import { ClientFrequencyCapGuardService, OutboundFrequencyCapError } from "./Cli
 
 export class MessageProviderService {
   /**
+   * F1.1 (RF-02/INV-01, achado A6) — resolução ÚNICA da credencial + base +
+   * instância pra um canal Evolution. Ponto único (antes o mesmo cálculo estava
+   * duplicado em sendMessage e sendDocument, com prioridade errada).
+   *
+   * PRIORIDADE CORRIGIDA: o token do CANAL vence; a env é só FALLBACK.
+   *   Antes: `process.env.EVOLUTION_API_KEY || channel.token_encrypted` — a chave
+   *   GLOBAL do deploy sobrescrevia o token da instância de TODO canal, quebrando
+   *   isolamento multi-tenant (RF-02: "sem sobrescrever a configuração de todos os
+   *   clientes"; o /send/text do Evolution GO autentica pelo token DA INSTÂNCIA).
+   *   Agora: `channel.token_encrypted || process.env.EVOLUTION_API_KEY`.
+   * 0-regressão pro deploy single-tenant atual: canal SEM token salvo continua
+   *   caindo na env (comportamento idêntico ao anterior). Canal COM token passa a
+   *   usar o próprio — que é o correto e o que o provisionamento já grava.
+   */
+  private static resolveEvolutionSend(channel: any, metadada: any): { token: string; baseUrl: string; instanceName: string } {
+    const token = channel.token_encrypted || process.env.EVOLUTION_API_KEY || '';
+    const baseUrl = (metadada?.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br').replace(/[\/\\]$/, '');
+    return { token, baseUrl, instanceName: channel.identifier };
+  }
+
+  /**
    * Envia uma mensagem para o contato, abstraindo o provedor. Retorna o id da
    * mensagem no provedor (wamid no WhatsApp Cloud) quando disponível — usado
    * para correlacionar os recibos de entrega (delivered/read) do webhook.
@@ -138,14 +159,11 @@ export class MessageProviderService {
        }
        return data?.messages?.[0]?.id || data?.message_id || undefined;
     } else if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
-        // Prioriza a chave do ambiente (fonte da verdade no deploy) e só usa a do
-        // canal como fallback — evita um token antigo/errado salvo no banco vencer.
-        const token = process.env.EVOLUTION_API_KEY || channel.token_encrypted || '';
-        const baseUrl = metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br';
-        const instanceName = channel.identifier;
+        // F1.1: credencial resolvida no ponto único (token do canal primeiro).
+        const { token, baseUrl, instanceName } = this.resolveEvolutionSend(channel, metadada);
 
         // Evolution GO: endpoint é /send/text (a instância vem pelo token no header, não na URL)
-        const endpoint = `${baseUrl.replace(/[\/\\]$/, '')}${process.env.EVOLUTION_SEND_PATH || '/send/text'}`;
+        const endpoint = `${baseUrl}${process.env.EVOLUTION_SEND_PATH || '/send/text'}`;
         // Evolution GO usa corpo plano: { number, text, delay }
         const sendData = {
            number: recipientIdentifier,
@@ -216,9 +234,8 @@ export class MessageProviderService {
     }
 
     if (channel.provider === 'evolution_go' || channel.provider === 'evolution') {
-      const token = process.env.EVOLUTION_API_KEY || channel.token_encrypted || '';
-      const baseUrl = (metadada.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br').replace(/[\/\\]$/, '');
-      const instanceName = channel.identifier;
+      // F1.1: credencial resolvida no ponto único (token do canal primeiro).
+      const { token, baseUrl, instanceName } = this.resolveEvolutionSend(channel, metadada);
       const headers: any = {
         'Content-Type': 'application/json',
         'apikey': token, 'token': token, 'Authorization': `Bearer ${token}`, 'instance': instanceName,

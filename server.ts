@@ -164,6 +164,7 @@ import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
+import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
 import { setUsageOrg } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
@@ -964,15 +965,13 @@ async function startServer() {
 
       // Se já estava conectado
       if (hasInstance || activeToken) {
-         try {
-           const orgId = req.headers['x-organization-id'] || 'default_org';
-           const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', finalInstance);
-           if (!existing) {
-             db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status, token_encrypted, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-               uuidv4(), orgId, 'evolution', 'Evolution API', finalInstance, 'connected', activeToken, JSON.stringify({ baseUrl: finalBaseUrl })
-             );
-           }
-         } catch(e) {}
+         // F1.2c (achados A8/A9, SEC-F4) — NÃO inventa `default_org` nem confia no
+         // header x-organization-id (esta rota legada é NÃO autenticada → header
+         // spoofável). Resolve o canal pelo `identifier` da instância (único) e só
+         // ATUALIZA o status. Criar canal novo é do fluxo AUTENTICADO de
+         // provisionamento — não aqui.
+         const updated = markEvolutionChannelStatusByIdentifier(finalInstance, 'connected');
+         if (!updated) console.warn(`[Evolution] connect legacy: instância '${finalInstance}' sem canal cadastrado — não inventa org (default_org removido).`);
       }
 
       return res.status(400).json({ error: "Instância pode já estar conectada ou hove um erro na geração do QR Code. Verifique seu painel ou recarregue a página." });
@@ -1188,21 +1187,14 @@ async function startServer() {
         console.log(`[Evolution Webhook] Status da conexão: ${payload.data?.state || payload.data?.status}`);
         if ((payload.data?.state === 'open' || payload.data?.status === 'open') && (global as any).io) {
            (global as any).io.emit("wa_web_status", { status: 'connected_evo' });
-           // Save to DB
-           try {
-              const busId = payload.instance || evolutionConfig.instanceName;
-              if (busId) {
-                const orgId = 'default_org';
-                const existing = db.prepare('SELECT id FROM channels WHERE organization_id = ? AND provider = ? AND identifier = ?').get(orgId, 'evolution', busId);
-                if (!existing) {
-                  db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, ?, ?, ?, ?)`).run(
-                    uuidv4(), orgId, 'evolution', 'Evolution API', busId, 'connected'
-                  );
-                } else {
-                  db.prepare(`UPDATE channels SET status = 'connected' WHERE id = ?`).run((existing as any).id);
-                }
-              }
-           } catch(e) {}
+           // Save to DB — F1.2c: resolve pelo identifier ÚNICO; nunca inventa
+           // default_org. Só atualiza canal já cadastrado (o insert sob org
+           // inventada foi removido — A8/A9).
+           const busId = payload.instance || evolutionConfig.instanceName;
+           if (busId) {
+             const updated = markEvolutionChannelStatusByIdentifier(String(busId), 'connected');
+             if (!updated) console.warn(`[Evolution Webhook] connection.update: instância '${busId}' sem canal cadastrado — não inventa org.`);
+           }
         }
       }
 

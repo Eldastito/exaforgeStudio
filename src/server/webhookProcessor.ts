@@ -211,7 +211,12 @@ export async function processIncomingMessage(
         // alguns segundos), igual ao Coordenador faz em "ajuda N".
         if (g.intent === 'pergunta_negocio') {
           await MessageProviderService.sendMessage(channel.id, payload.senderId, 'Deixa eu ver isso pra você… 💭');
-          const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '');
+          // CA-04: este ramo só é alcançado quando GestorCommandService já
+          // reconheceu o remetente como GESTOR (owner/admin — ver
+          // GestorCommandService.handle, intent 'pergunta_negocio' só sai com
+          // isManager). Logo, pode ver dinheiro; passamos explícito para o
+          // panorama não ser redigido para o próprio gestor.
+          const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '', { canSeeMoney: true });
           await MessageProviderService.sendMessage(channel.id, payload.senderId, answer);
           return;
         }

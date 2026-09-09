@@ -322,7 +322,11 @@ export class FalaTuAskService {
       case "open_question":
       default: {
         // Pergunta aberta → agentes de IA (motor único, grounded no panorama).
-        const text = await ExecutiveAdvisorService.ask(orgId, q);
+        // CA-04/INV-11: a pergunta aberta é `needsMoney:false`, então NÃO passa
+        // pelo gate acima — mas o panorama do Diretor carrega financeiro. Projeta
+        // por usuário: quem não pode ver dinheiro recebe o panorama redigido, em
+        // vez de o faturamento vazar por "como estão minhas finanças?".
+        const text = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user) });
         return { kind: "open_question", answer: text, date: cls.date, grounded: false, moneyRestricted: false };
       }
     }

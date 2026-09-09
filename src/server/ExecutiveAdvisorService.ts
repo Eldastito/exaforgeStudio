@@ -39,9 +39,17 @@ REGRAS:
    * e só ANEXA os blocos de OUTROS domínios (padrões/comissão/sinais/eficácia/
    * plano). Flag desligada por padrão: organizações existentes não mudam.
    */
-  static buildPanorama(orgId: string): string {
+  static buildPanorama(orgId: string, opts: { canSeeMoney?: boolean } = {}): string {
+    // Projeção por usuário (RF-04 / CA-04 / INV-11): quando o chamador informa
+    // que o usuário NÃO pode ver dinheiro (§73), o panorama redige os blocos
+    // financeiros — metas em R$, pilar Financeiro, comissão, recomendações de
+    // plano e o impacto em R$ dos sinais. Default = mostra (0-regressão: os
+    // chamadores/testes existentes seguem recebendo o panorama completo; a
+    // proteção vale quando o chamador passa `canSeeMoney:false` para um perfil
+    // restrito — pergunta aberta pelo WhatsApp/web deixa de vazar financeiro).
+    const money = opts.canSeeMoney !== false;
     const base = ContextEngineService.render(orgId);
-    return base + this.executiveBlock(orgId) + this.goalsBlock(orgId) + this.retailPatternsBlock(orgId) + this.retailCommissionBlock(orgId) + this.businessSignalsBlock(orgId) + this.learnedEffectivenessBlock(orgId) + this.planRecommendationsBlock(orgId);
+    return base + this.executiveBlock(orgId, { canSeeMoney: money }) + this.goalsBlock(orgId, { canSeeMoney: money }) + this.retailPatternsBlock(orgId) + (money ? this.retailCommissionBlock(orgId) : "") + this.businessSignalsBlock(orgId, { canSeeMoney: money }) + this.learnedEffectivenessBlock(orgId) + (money ? this.planRecommendationsBlock(orgId) : "");
   }
 
   /**
@@ -50,9 +58,13 @@ REGRAS:
    * meta" e o ritmo esperado — fatos derivados do snapshot/analytics (RN-004),
    * nunca inventados. Bloco INERTE: sem meta definida, some (0 regressão).
    */
-  static goalsBlock(orgId: string): string {
+  static goalsBlock(orgId: string, opts: { canSeeMoney?: boolean } = {}): string {
     try {
-      const { goals } = BusinessGoalService.progress(orgId);
+      const money = opts.canSeeMoney !== false;
+      const { goals: allGoals } = BusinessGoalService.progress(orgId);
+      // Sem permissão de dinheiro: metas em R$ (receita) saem; metas de contagem
+      // (atendimentos etc.) seguem, pois não expõem faturamento.
+      const goals = money ? allGoals : allGoals.filter((g) => g.unit !== "BRL");
       if (!goals.length) return "";
       const fmt = (v: number, unit: string) => (unit === "BRL" ? `R$ ${Number(v).toFixed(2)}` : `${v}`);
       const lines = goals.map((g) => {
@@ -72,8 +84,9 @@ REGRAS:
    * Honesto: indicador sem fonte NÃO entra (não vira 0). Bloco best-effort — falha
    * na composição não derruba o panorama.
    */
-  static executiveBlock(orgId: string): string {
+  static executiveBlock(orgId: string, opts: { canSeeMoney?: boolean } = {}): string {
     try {
+      const money = opts.canSeeMoney !== false;
       const snap = ExecutiveBusinessSnapshotService.read(orgId);
       const con = ExecutiveConstraintService.assess(orgId);
       const PILLAR_PT: Record<string, string> = { commercial: "Comercial", operations: "Operações", finance: "Financeiro" };
@@ -82,11 +95,15 @@ REGRAS:
 
       const lines: string[] = [];
       for (const key of ["commercial", "operations", "finance"] as const) {
+        // Sem permissão de dinheiro (§73/CA-04): o pilar Financeiro inteiro sai —
+        // saúde/indicadores dele expõem faturamento/liquidez.
+        if (key === "finance" && !money) continue;
         const p = snap.pillars?.[key];
         if (!p) continue;
         // Só indicadores COM valor (available + não-null) entram — nunca inventa 0.
+        // Sem dinheiro, indicadores em R$ também saem dos demais pilares.
         const inds = (p.indicators || [])
-          .filter((i: any) => i.availability === "available" && i.value != null)
+          .filter((i: any) => i.availability === "available" && i.value != null && (money || i.unit !== "BRL"))
           .slice(0, 4)
           .map((i: any) => `${i.label} ${fmt(i.value, i.unit)}`);
         const exc = (p.exceptions || []).length;
@@ -254,14 +271,17 @@ ${lines.join("\n")}`;
    * ranqueado por impacto — não só varejo. O Diretor narra e sugere a partir dos
    * fatos do ledger de sinais; NUNCA inventa número.
    */
-  static businessSignalsBlock(orgId: string): string {
+  static businessSignalsBlock(orgId: string, opts: { canSeeMoney?: boolean } = {}): string {
     try {
+      const money = opts.canSeeMoney !== false;
       const pri = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 8 }).global;
       if (!pri.length) return "";
       const lines = pri.map((p: any) => {
         let imp = "";
         if (p.impact && Number(p.impact.amount) > 0) {
-          if (p.impact.unit === "BRL") imp = ` (impacto R$ ${p.impact.amount})`;
+          // Impacto em R$ só quando o usuário pode ver dinheiro (§73/CA-04); o
+          // fato e a ação seguem visíveis, e impactos não-monetários (un) também.
+          if (p.impact.unit === "BRL") imp = money ? ` (impacto R$ ${p.impact.amount})` : "";
           else if (p.impact.unit === "units") imp = ` (impacto ${p.impact.amount} un)`;
           else imp = ` (impacto ${p.impact.amount}${p.impact.unit ? ` ${p.impact.unit}` : ""})`;
         }
@@ -288,11 +308,19 @@ ${lines.join("\n")}`;
     } catch { return ""; }
   }
 
-  /** Responde uma pergunta do gestor usando o panorama real do negócio. */
-  static async ask(orgId: string, question: string): Promise<string> {
+  /**
+   * Responde uma pergunta do gestor usando o panorama real do negócio.
+   *
+   * `opts.canSeeMoney` (RF-04 / CA-04 / INV-11): projeção por usuário. Quando o
+   * chamador resolve que o usuário NÃO pode ver dinheiro (§73), o panorama é
+   * redigido (financeiro/metas/comissão/plano/impacto R$ saem) ANTES de ir ao
+   * LLM — pergunta aberta deixa de ser um contorno do gate de dinheiro. Default
+   * (undefined) = mostra tudo (0-regressão para as rotas owner/admin já gated).
+   */
+  static async ask(orgId: string, question: string, opts: { canSeeMoney?: boolean } = {}): Promise<string> {
     const q = String(question || "").trim();
     if (!q) return "Faça uma pergunta sobre o seu negócio (ex.: \"por que minhas vendas caíram?\").";
-    const panorama = this.buildPanorama(orgId);
+    const panorama = this.buildPanorama(orgId, { canSeeMoney: opts.canSeeMoney });
     const prompt = `${this.GUARDRAILS}
 
 PANORAMA DO NEGÓCIO (dados reais, últimos 30 dias salvo indicação):

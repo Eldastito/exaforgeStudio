@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ExecutiveAdvisorService } from "../ExecutiveAdvisorService.js";
+import { FalaTuAskService } from "../FalaTuAskService.js";
 import { ExecutiveVisionService } from "../ExecutiveVisionService.js";
 import { ExecutiveBusinessSnapshotService } from "../ExecutiveBusinessSnapshotService.js";
 import { ExecutiveConstraintService } from "../ExecutiveConstraintService.js";
@@ -29,11 +30,16 @@ router.get("/effectiveness", (req: AuthRequest, res): any => {
 });
 
 // POST /api/executive/ask — pergunta livre do gestor ao Diretor IA.
+// CA-04/INV-11: esta rota não tem `requireRole` (permite gerente, que vê
+// dinheiro por role_profile, não só owner/admin). O gate de dinheiro vai no
+// panorama: projeta por usuário via a MESMA régua do FalaTuAsk (§73) — perfil
+// sem dinheiro recebe o panorama redigido, em vez de faturamento org-wide.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    res.json({ text: await ExecutiveAdvisorService.ask(orgId, req.body?.question) });
+    const canSeeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    res.json({ text: await ExecutiveAdvisorService.ask(orgId, req.body?.question, { canSeeMoney }) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

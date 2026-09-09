@@ -927,6 +927,7 @@
     "test:executive-mission-bridge": "tsx scripts/test-executive-mission-bridge.ts",
     "test:executive-finance": "tsx scripts/test-executive-finance.ts",
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
+    "test:executive-money-projection": "tsx scripts/test-executive-money-projection.ts",
     "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",
     "test:ceo-golden-path": "tsx scripts/test-ceo-golden-path.ts",
     "test:ceo-hardening": "tsx scripts/test-ceo-hardening.ts",

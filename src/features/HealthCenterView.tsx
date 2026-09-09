@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useStore } from '@/src/store/useStore';
@@ -9,6 +9,17 @@ import type { ViewMode } from '@/src/store/useStore';
 // as 3 prioridades do dia com impacto em R$ e uma ação. Global (todas as verticais).
 
 const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+
+// "atualizado há X" — relativo e curto (agora / há 40s / há 3min / há 1h).
+function agoLabel(ts: number | null, now: number): string {
+  if (!ts) return '';
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 5) return 'agora';
+  if (s < 60) return `há ${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `há ${m}min`;
+  return `há ${Math.floor(m / 60)}h`;
+}
 
 const STATUS_UI: Record<string, { label: string; cls: string; bar: string }> = {
   saudavel: { label: 'Saudável', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/5', bar: 'bg-emerald-500' },
@@ -27,14 +38,39 @@ export function HealthCenterView() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'tutor' | 'gestor'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('healthMode') === 'gestor' ? 'gestor' : 'tutor'));
   const setModePersist = (m: 'tutor' | 'gestor') => { setMode(m); try { localStorage.setItem('healthMode', m); } catch { /* noop */ } };
-  const load = useCallback(() => {
-    setLoading(true);
-    apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(() => setLoading(false));
+  // Auto-refresh: os números do backend já são consultados ao vivo a cada request;
+  // a tela só não recarregava sozinha. `refreshing` é a atualização SILENCIOSA (sem
+  // o spinner de tela cheia), `updatedAt` mostra "atualizado há Xs".
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const inFlight = useRef(false);
+  const load = useCallback((opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent;
+    if (inFlight.current) return; // não empilha refreshes concorrentes (foco + timer no mesmo instante)
+    inFlight.current = true;
+    if (silent) setRefreshing(true); else setLoading(true);
+    const done = () => { inFlight.current = false; if (silent) setRefreshing(false); else setLoading(false); setUpdatedAt(Date.now()); };
+    apiFetch('/api/health-center').then((r) => r.json()).then((x: any) => setD(x)).catch(() => {}).finally(done);
     apiFetch('/api/health-center/survival-index').then((r) => r.json()).then((x: any) => { if (typeof x?.score === 'number') setIdx(x); }).catch(() => {});
     // Métricas do loop fechado (DI-3): valor protegido + acurácia + aceitação.
     apiFetch('/api/decision-intelligence/metrics').then((r) => r.json()).then((x: any) => setMetrics(x)).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh a cada 60s SÓ com a aba visível (não gasta request em aba de fundo)
+  // + atualiza ao voltar o foco pra tela (pega a venda que entrou enquanto você estava fora).
+  useEffect(() => {
+    const REFRESH_MS = 60_000;
+    const tick = () => { if (typeof document === 'undefined' || document.visibilityState === 'visible') load({ silent: true }); };
+    const timer = setInterval(tick, REFRESH_MS);
+    const onVis = () => { if (document.visibilityState === 'visible') load({ silent: true }); };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(timer); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis); };
+  }, [load]);
+
+  // Mantém o "atualizado há X" vivo sem refazer request (só re-renderiza o rótulo).
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 15_000); return () => clearInterval(t); }, []);
 
   const aplicar = async (p: any) => {
     setBusy(true);
@@ -66,9 +102,21 @@ export function HealthCenterView() {
               <p className="text-sm text-zinc-400">O que mudou, por que importa e o que fazer primeiro — no máximo 3 prioridades por dia.</p>
             </div>
           </div>
-          <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px] shrink-0">
-            <button onClick={() => setModePersist('tutor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'tutor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}><GraduationCap className="w-3.5 h-3.5" /> Tutor</button>
-            <button onClick={() => setModePersist('gestor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'gestor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Gestor</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Atualizar agora + quando foi a última leitura (auto a cada 60s com a aba aberta). */}
+            <button
+              onClick={() => load({ silent: true })}
+              disabled={refreshing || loading}
+              title="Atualizar agora"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 disabled:opacity-60"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{updatedAt ? `Atualizado ${agoLabel(updatedAt, now)}` : 'Atualizar'}</span>
+            </button>
+            <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px]">
+              <button onClick={() => setModePersist('tutor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'tutor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}><GraduationCap className="w-3.5 h-3.5" /> Tutor</button>
+              <button onClick={() => setModePersist('gestor')} className={`inline-flex items-center gap-1 rounded px-2 py-1 ${mode === 'gestor' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Gestor</button>
+            </div>
           </div>
         </div>
 

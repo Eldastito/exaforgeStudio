@@ -1,10 +1,54 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
+import { ChannelProvisioningService } from "../ChannelProvisioningService.js";
 
 const router = Router();
+
+// F2.1a (RF-01 / CA-01) — conexão AUTENTICADA e org-scoped de WhatsApp: o
+// assinante conecta/importa o número pelo ZapFlow, sem tocar no Evolution
+// Manager. A org vem SEMPRE da sessão (protectedApi já roda requireAuth +
+// requireOrganizationAccess); o corpo só diz o MODO e, no import, a instância.
+// Segredos nunca voltam pra tela (só qr/estado/channelId). requireRole limita a
+// quem gerencia canais (owner/admin).
+router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId || null;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const mode = req.body?.mode === "existing" ? "existing" : "new";
+  const instanceName = typeof req.body?.instanceName === "string" ? req.body.instanceName : undefined;
+  try {
+    const r = await ChannelProvisioningService.provision(orgId, userId, { mode, instanceName });
+    if (!r.ok) {
+      const status = r.code === "attributed_to_other_org" ? 409
+        : r.code === "instance_not_found" ? 404
+        : r.code === "evolution_failed" ? 502
+        : 400;
+      return res.status(status).json({ error: r.error, code: r.code, needsReset: r.needsReset || false });
+    }
+    return res.json({
+      ok: true,
+      channelId: r.channelId,
+      instanceName: r.instanceName,
+      qrBase64: r.qrBase64,
+      state: r.state,
+      imported: !!r.imported,
+      alreadyExists: !!r.alreadyExists,
+    });
+  } catch (e: any) {
+    console.error("[Channels] whatsapp/provision fatal:", e);
+    return res.status(500).json({ error: e?.message || "Falha no provisionamento" });
+  }
+});
+
+// Estado dos canais Evolution da org (sem segredos) — pra UI e retomada do QR.
+router.get("/whatsapp/status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  return res.json(ChannelProvisioningService.status(orgId));
+});
 
 // List channels
 router.get("/", (req: AuthRequest, res) => {

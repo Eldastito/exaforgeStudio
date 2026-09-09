@@ -19,6 +19,25 @@ import { RetailAdoptionService } from "./RetailAdoptionService.js";
 function num(v: any): number { return Number(v || 0); }
 function money(v: number): number { return Math.round(v * 100) / 100; }
 
+/**
+ * Rótulo legível da variante para o gestor (ADR-132 Fatia 4 — detalhamento).
+ * Prefere o nome pronto da variante ("M / Azul"); senão compõe do que existir
+ * (tamanho/cor/tipo). NUNCA inventa: sem nenhum atributo, devolve null (o item
+ * fica só com o nome do produto). Não deriva "tam"/"cor" quando não há dado.
+ */
+function variantLabelOf(r: { v_name?: any; v_size?: any; v_color?: any; v_type?: any }): string | null {
+  const vName = String(r.v_name || "").trim();
+  if (vName) return vName;
+  const parts: string[] = [];
+  const size = String(r.v_size || "").trim();
+  const color = String(r.v_color || "").trim();
+  const type = String(r.v_type || "").trim();
+  if (size) parts.push(`tam ${size}`);
+  if (color) parts.push(color);
+  if (type && !size && !color) parts.push(type); // tipo só quando não há tam/cor mais específicos
+  return parts.length ? parts.join(", ") : null;
+}
+
 export class RetailImpactService {
   /** Impacto do MÊS ('YYYY-MM'): valor comprovado (R$) + atividade (contagens). */
   static monthly(orgId: string, month: string): any {
@@ -275,30 +294,41 @@ export class RetailImpactService {
          FROM inventory_items WHERE organization_id = ? AND quantity_available > 0`
     ).get(orgId) as any;
 
+    // LEFT JOIN em product_variants resolve o RÓTULO da variante (modelo/tamanho/cor)
+    // — o gestor precisa saber QUAL peça (camisa/bermuda/calça), modelo e tamanho
+    // não giram, não só "5 itens" (ADR-132 Fatia 4). Sem variante, cai no produto.
     const rows = db.prepare(
-      `SELECT pid, vid, qty, cost, name, last_out FROM (
+      `SELECT pid, vid, qty, cost, name, v_name, v_size, v_color, v_type, last_out FROM (
          SELECT ii.product_service_id AS pid, ii.variant_id AS vid, ii.quantity_available AS qty,
                 COALESCE(ii.avg_cost,0) AS cost, ps.name AS name,
+                pv.name AS v_name, pv.size AS v_size, pv.color AS v_color, pv.variant_type AS v_type,
                 (SELECT MAX(sm.created_at) FROM stock_movements sm
                    WHERE sm.organization_id = ii.organization_id
                      AND sm.product_service_id = ii.product_service_id
                      AND sm.type = 'saida') AS last_out
            FROM inventory_items ii
            LEFT JOIN products_services ps ON ps.id = ii.product_service_id
+           LEFT JOIN product_variants pv ON pv.id = ii.variant_id AND pv.organization_id = ii.organization_id
           WHERE ii.organization_id = ? AND ii.quantity_available > 0
        ) WHERE last_out IS NULL OR last_out < datetime('now', ?)
        ORDER BY (qty * cost) DESC`
     ).all(orgId, `-${days} days`) as any[];
 
-    const slow = rows.map((r) => ({
-      productId: r.pid,
-      variantId: r.vid || null,
-      name: r.name || null,
-      quantity: num(r.qty),
-      avgCost: money(num(r.cost)),
-      capital: money(num(r.qty) * num(r.cost)),
-      lastSaleAt: r.last_out || null,
-    }));
+    const slow = rows.map((r) => {
+      const variantLabel = variantLabelOf(r);
+      const name = r.name || null;
+      return {
+        productId: r.pid,
+        variantId: r.vid || null,
+        name,
+        variantLabel, // ex.: "M / Azul", "tam 42", "Vermelho" — null se não houver variante
+        label: variantLabel ? `${name || "Item"} — ${variantLabel}` : name, // rótulo pronto pro gestor
+        quantity: num(r.qty),
+        avgCost: money(num(r.cost)),
+        capital: money(num(r.qty) * num(r.cost)),
+        lastSaleAt: r.last_out || null,
+      };
+    });
     const slowMoverCapital = money(slow.reduce((a, s) => a + s.capital, 0));
 
     const MAX_LIST = 50;

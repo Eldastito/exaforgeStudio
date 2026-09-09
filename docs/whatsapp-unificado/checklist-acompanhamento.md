@@ -11,7 +11,7 @@
 | Fase | Itens | Estado | Evidência | Pendência para o gate |
 |---|---|---|---|---|
 | F0 | F0.1–F0.4 | **EM ANDAMENTO** | `docs/whatsapp-unificado/ANALISE-F0-auditoria-baseline.md` | Contrato Evolution real (Swagger) + fixtures + execução da suíte |
-| F1 | F1.1–F1.4 | **EM ANDAMENTO** | F1.3 implementado (`test:evolution-reset` 14/14) | G1 (falta F1.1/F1.2/F1.4) |
+| F1 | F1.1–F1.4 | **EM ANDAMENTO** | F1.3 (`test:evolution-reset` 14/14) + F1.1-credencial (`test:evolution-credential` 6/6) | G1 (falta F1.2/F1.4 + normalização de ID/eventos) |
 | F2 | F2.1–F2.4 | NÃO INICIADO | — | G2 |
 | F3 | F3.1–F3.4 | NÃO INICIADO | — | G3 |
 | F4 | F4.1–F4.4 | NÃO INICIADO | — | G4 |
@@ -28,7 +28,7 @@
 - [ ] **F0.4** — Baseline, simulação de migração e plano de reversão registrados. — **IMPLEMENTADO** (25/25 testes existem; schema/flags/rollback registrados; simulação numérica de migração fica para F4.1 em modo sem efeitos).
 
 ### Fase 1 — Corrigir fundação da conexão
-- [ ] **F1.1** — Configuração, credenciais e normalização centralizadas. — NÃO INICIADO
+- [ ] **F1.1** — Configuração, credenciais e normalização centralizadas. — **PARCIAL/IMPLEMENTADO** (credencial Evolution centralizada em `MessageProviderService.resolveEvolutionSend`, com prioridade corrigida — token do CANAL primeiro, env fallback; achado A6/RF-02/INV-01. `test:evolution-credential` 6/6; regressões `instagram-send`/`falatu-solo-whatsapp` 72/72/`delivery-receipts`/`channel-health` verdes). **Falta ainda:** normalização de ID/eventos do webhook (movida para junto de F1.2, onde vive a identidade); criptografia real do token de canal — achado X1 — fica como fatia irmã com migração compatível.
 - [ ] **F1.2** — Empresa, webhook protegido e estados corretos. — NÃO INICIADO
 - [ ] **F1.3** — Provisionamento idempotente; sessão protegida contra reset automático. — **IMPLEMENTADO** (removido o delete+recreate silencioso de `connectAndGetQr`; capacidade preservada em `resetInstance` EXPLÍCITO/operador; retorno honesto `needsReset`. `test:evolution-reset` 14/14; regressão `test:falatu-solo-whatsapp` 72/72. VALIDADO vira `[x]` quando a suíte rodar no CI + a rota/UI de reset da Fase 2 expor a operação com confirmação).
 - [ ] **F1.4** — Rotas legadas e Solo compatíveis com a fundação comum. — NÃO INICIADO

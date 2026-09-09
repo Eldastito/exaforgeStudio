@@ -5,6 +5,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { ChannelProvisioningService } from "../ChannelProvisioningService.js";
 import { ChannelBindingService, KNOWN_FEATURES } from "../ChannelBindingService.js";
+import { ChannelBindingMigrationService } from "../ChannelBindingMigrationService.js";
 
 const router = Router();
 
@@ -84,6 +85,16 @@ router.post("/bindings", requireRole("owner", "admin"), (req: AuthRequest, res):
     return res.status(status).json({ error: r.error, code: r.code });
   }
   return res.json({ ok: true, id: r.id, policyVersion: r.policyVersion });
+});
+
+// F2.3 — migração das preferências existentes → bindings (perfil de
+// compatibilidade). dryRun é o DEFAULT: para APLICAR, envie {dryRun:false}.
+router.post("/bindings/migrate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  const userId = req.user?.userId || null;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const dryRun = !(req.body?.dryRun === false || req.query?.apply === "1");
+  return res.json(ChannelBindingMigrationService.migrate(orgId, userId, { dryRun }));
 });
 
 router.delete("/bindings/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

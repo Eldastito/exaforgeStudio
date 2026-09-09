@@ -11472,6 +11472,26 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar user_phone_bindings', e); }
 
+  // PRD WhatsApp Unificado — RF-04 §10 (F3.3b): MODO MISTO opt-in + escolha pendente.
+  // Flag `mixed_mode_enabled` (default 0 → caminho inbound IDÊNTICO ao de hoje).
+  // `mixed_mode_pending_choices`: quando o remetente tem os dois papéis e não há
+  // contexto claro (§10.7), o webhook pergunta "atendimento ou gestão?" e guarda
+  // um pendente por (org, canal, remetente) até a resposta — durável (sobrevive a
+  // restart). A versão robusta/generalizada da desambiguação é a F3.4.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN mixed_mode_enabled INTEGER DEFAULT 0`); } catch (e) { /* já existe */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mixed_mode_pending_choices (
+        organization_id TEXT NOT NULL,
+        channel_id      TEXT NOT NULL,
+        sender_id       TEXT NOT NULL,
+        expires_at      DATETIME NOT NULL,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, channel_id, sender_id)
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar mixed_mode_pending_choices', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

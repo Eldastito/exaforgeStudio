@@ -914,6 +914,7 @@
     "test:evolution-connect-subscribe": "tsx scripts/test-evolution-connect-subscribe.ts",
     "test:channel-provision": "tsx scripts/test-channel-provision.ts",
     "test:channel-binding": "tsx scripts/test-channel-binding.ts",
+    "test:channel-binding-migration": "tsx scripts/test-channel-binding-migration.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",
     "test:falatu-embeddings": "tsx scripts/test-falatu-embeddings.ts",
     "test:falatu-rag": "tsx scripts/test-falatu-rag.ts",

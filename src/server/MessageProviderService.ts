@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { ManipulationRadarService } from "./ManipulationRadarService.js";
 import { ChannelBindingService } from "./ChannelBindingService.js";
+import { EncryptionService } from "./EncryptionService.js";
 import { OutboundConsentGuardService, OutboundBlockedError } from "./OutboundConsentGuardService.js";
 import { ClientQuietHoursGuardService, OutboundQuietHoursError } from "./ClientQuietHoursGuardService.js";
 import { ClientFrequencyCapGuardService, OutboundFrequencyCapError } from "./ClientFrequencyCapGuardService.js";
@@ -23,7 +24,7 @@ export class MessageProviderService {
    *   usar o próprio — que é o correto e o que o provisionamento já grava.
    */
   private static resolveEvolutionSend(channel: any, metadada: any): { token: string; baseUrl: string; instanceName: string } {
-    const token = channel.token_encrypted || process.env.EVOLUTION_API_KEY || '';
+    const token = EncryptionService.decrypt(channel.token_encrypted) || process.env.EVOLUTION_API_KEY || '';
     const baseUrl = (metadada?.baseUrl || process.env.EVOLUTION_BASE_URL || 'https://evolutiongo.tesseractauto.com.br').replace(/[\/\\]$/, '');
     return { token, baseUrl, instanceName: channel.identifier };
   }
@@ -116,7 +117,7 @@ export class MessageProviderService {
 
     if (channel.provider === 'whatsapp_cloud' || channel.provider === 'instagram') {
        // Cloud API ou Instagram
-       const token = channel.token_encrypted;
+       const token = EncryptionService.decrypt(channel.token_encrypted);
        if (!token) throw new Error("Token não configurado para este canal");
        
        let endpoint = '';
@@ -228,7 +229,7 @@ export class MessageProviderService {
     try { metadada = channel.metadata_json ? JSON.parse(channel.metadata_json) : {}; } catch (e) {}
 
     if (channel.provider === 'whatsapp_cloud') {
-      const token = channel.token_encrypted;
+      const token = EncryptionService.decrypt(channel.token_encrypted);
       if (!token) throw new Error("Token não configurado para este canal");
       const endpoint = `https://graph.facebook.com/v19.0/${channel.identifier}/messages`;
       const body: any = {

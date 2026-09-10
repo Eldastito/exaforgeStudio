@@ -62,6 +62,7 @@
     "test:feature-routing-comercial": "tsx scripts/test-feature-routing-comercial.ts",
     "test:feature-routing-vocab": "tsx scripts/test-feature-routing-vocab.ts",
     "test:whatsapp-health-ca10": "tsx scripts/test-whatsapp-health-ca10.ts",
+    "test:security-channel-token": "tsx scripts/test-security-channel-token.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",

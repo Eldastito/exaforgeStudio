@@ -119,6 +119,7 @@ export class EncryptionService {
     encCol("organization_settings", "organization_id", "integration_token");
     encCol("oauth_connections", "id", "access_token");
     encCol("oauth_connections", "id", "refresh_token");
+    encCol("channels", "id", "token_encrypted"); // X1: token do canal (WhatsApp/IG/FB) em repouso
 
     // Backfill hash columns for lookup-by-value secrets.
     const hashCol = (table: string, idCol: string, secretCol: string, hashCol: string) => {

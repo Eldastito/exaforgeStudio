@@ -4,6 +4,7 @@ import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
 import { AuthRequest } from "../middleware/auth.js";
 import { JWT_SECRET } from "../config/secret.js";
+import { EncryptionService } from "../EncryptionService.js";
 
 const router = Router();
 
@@ -122,10 +123,10 @@ export async function instagramCallback(req: any, res: any) {
     const existing = db.prepare("SELECT id FROM channels WHERE provider = 'instagram' AND organization_id = ?").get(orgId) as any;
     if (existing) {
       db.prepare("UPDATE channels SET token_encrypted = ?, identifier = ?, name = ?, status = 'connected', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(longToken, businessId || existing.identifier, username ? `Instagram @${username}` : 'Instagram Direct', existing.id);
+        .run(EncryptionService.encrypt(longToken), businessId || existing.identifier, username ? `Instagram @${username}` : 'Instagram Direct', existing.id);
     } else {
       db.prepare("INSERT INTO channels (id, organization_id, provider, name, identifier, token_encrypted, status) VALUES (?, ?, 'instagram', ?, ?, ?, 'connected')")
-        .run(uuidv4(), orgId, username ? `Instagram @${username}` : 'Instagram Direct', businessId, longToken);
+        .run(uuidv4(), orgId, username ? `Instagram @${username}` : 'Instagram Direct', businessId, EncryptionService.encrypt(longToken));
     }
     console.log(`[IG OAuth] Conta conectada via OAuth: @${username || '?'} (id ${businessId}) org ${orgId}`);
 

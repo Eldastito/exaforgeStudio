@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { ChannelProvisioningService } from "../ChannelProvisioningService.js";
+import { EncryptionService } from "../EncryptionService.js";
 import { ChannelBindingService, KNOWN_FEATURES } from "../ChannelBindingService.js";
 import { ChannelBindingMigrationService } from "../ChannelBindingMigrationService.js";
 
@@ -149,7 +150,7 @@ router.post("/", (req: AuthRequest, res) => {
     db.prepare(`
       INSERT INTO channels (id, organization_id, provider, name, identifier, webhook_secret, token_encrypted, metadata_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, orgId, provider, name, identifier || null, webhook_secret || null, token_encrypted || null, JSON.stringify(metadata_json || {}));
+    `).run(id, orgId, provider, name, identifier || null, webhook_secret || null, EncryptionService.encrypt(token_encrypted || null), JSON.stringify(metadata_json || {}));
     
     logAuthEvent(orgId, userId, id, 'CHANNEL_CREATED', { name, provider });
     
@@ -177,7 +178,7 @@ router.put("/:id", (req: AuthRequest, res) => {
   // Marca o canal como interno (Coordenador IA) ou de cliente.
   if (kind !== undefined) { updates.push("kind = ?"); params.push(kind === 'internal' ? 'internal' : 'client'); }
   if (webhook_secret !== undefined) { updates.push("webhook_secret = ?"); params.push(webhook_secret); }
-  if (token_encrypted !== undefined) { updates.push("token_encrypted = ?"); params.push(token_encrypted); }
+  if (token_encrypted !== undefined) { updates.push("token_encrypted = ?"); params.push(EncryptionService.encrypt(token_encrypted)); }
   if (metadata_json !== undefined) { updates.push("metadata_json = ?"); params.push(JSON.stringify(metadata_json)); }
   
   if (updates.length === 0) return res.json({ message: "No updates" });

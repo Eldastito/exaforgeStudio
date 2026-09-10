@@ -642,6 +642,20 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-09-10 (Fatia 6.1b — UI: CTA "Ver valor proporcional" na aba Plano e Expansões)
+
+- **Fase:** 6, Fatia 6.1b — UI que consome o preview da F6.1. UI-only sobre endpoint já testado.
+- **Itens executados:**
+  1. `PlanoExpansoesPanel` (`src/features/SettingsView.tsx`) — bloco "Próximos níveis" ganhou o CTA **"Ver valor proporcional →"** por plano-alvo. Ao clicar, chama `POST /api/billing/upgrade/preview` (`apiFetch`, autenticado) e expande um painel inline com: diferença mensal, valor proporcional a pagar agora (ou "valor cheio no checkout" p/ 'new' / "a calcular" quando `unknown` — honesto, espelha o backend), dias restantes/renovação mantida, módulos ganhos/perdidos, warnings, e o botão **"Continuar em Cobrança →"**.
+  2. G-153-3 preservada: o clique só SIMULA (read-only); a contratação segue em Cobrança (`onGoToCobranca`). 403 → toast "apenas gestores" (dinheiro role-gated no backend).
+- **Arquivos alterados:** `src/features/SettingsView.tsx` (state `previews`/`previewingId`/`openPreviewId` + `simulateUpgrade` + `fmtDate` + render do painel). Nenhum backend tocado.
+- **Testes:** `tsc --noEmit` limpo; `npm run build` limpo. Backend já coberto por `test:billing-preview` (21/21 na F6.1). UI-only — sem harness de teste de componente no repo.
+- **Resultado:** o CTA de upgrade deixou de ser placeholder — o dono vê o valor proporcional (§19) antes de ir pra Cobrança. Aditivo puro, reversível.
+- **Pendências:** nenhuma nova. Confirm/checkout reais seguem gated (Decisão #2 + Asaas).
+- **Próximo passo:** F3.4 (editor de blueprint) ou desbloquear Fase 5 (Decisão #2 jurídica).
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

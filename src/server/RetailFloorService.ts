@@ -18,6 +18,7 @@
  *    flag para a UI avisar.
  */
 import db from "./db.js";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 import { randomUUID, createHash, timingSafeEqual } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 
@@ -69,7 +70,9 @@ export class RetailFloorSettingsService {
   static inCalibration(orgId: string, today?: string): boolean {
     const s = this.get(orgId);
     if (!s.calibrationUntil) return false;
-    const day = today || new Date().toISOString().slice(0, 10);
+    // Dia COMERCIAL da org (fuso), não UTC — a janela de calibração terminava/
+    // começava no instante errado perto da meia-noite UTC. Kill-switch 6B (off → UTC).
+    const day = today || BusinessTimeService.businessDate(orgId);
     return day <= s.calibrationUntil;
   }
 

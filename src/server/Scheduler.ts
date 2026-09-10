@@ -2195,7 +2195,12 @@ export class Scheduler {
           LIMIT 300
         `).all(orgId, `-${hours} hours`) as any[];
 
-        if (!orders.length) continue;
+        // Atendimentos realizados sem pesquisa (salão/clínica opera em
+        // appointments, não em orders): mesmo template, mesma janela, dedup por
+        // atendimento no próprio seletor. `dueAppointments` nunca inventa data
+        // de conclusão — se não sabe quando terminou, não pergunta.
+        const appts = SatisfactionService.dueAppointments(orgId, hours);
+        if (!orders.length && !appts.length) continue;
         const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
 
         for (const o of orders) {
@@ -2215,6 +2220,26 @@ export class Scheduler {
             console.log(`[Scheduler] Pesquisa de satisfação enviada para ${o.contact_number} (pedido ${o.id}).`);
           } catch (e) {
             console.error('[Scheduler] Falha ao enviar pesquisa de satisfação', o.id, e);
+          }
+        }
+
+        for (const a of appts) {
+          try {
+            if (!a.contact_number) {
+              // Sem número: registra como pulada (dedup) para não reprocessar.
+              const sid = SatisfactionService.create(orgId, { contactId: a.contact_id, ticketId: a.ticket_id, appointmentId: a.id });
+              if (sid) db.prepare(`UPDATE satisfaction_surveys SET status = 'skipped' WHERE id = ?`).run(sid);
+              continue;
+            }
+            const channelId = a.contact_channel || fallbackChannel?.id;
+            if (!channelId) continue;
+            const first = (a.contact_name || '').trim().split(/\s+/)[0] || '';
+            const message = tpl.replace(/\{nome\}/gi, first);
+            await MessageProviderService.sendMessage(channelId, a.contact_number, message);
+            SatisfactionService.create(orgId, { contactId: a.contact_id, ticketId: a.ticket_id, appointmentId: a.id });
+            console.log(`[Scheduler] Pesquisa de satisfação enviada para ${a.contact_number} (atendimento ${a.id}).`);
+          } catch (e) {
+            console.error('[Scheduler] Falha ao enviar pesquisa de satisfação (atendimento)', a.id, e);
           }
         }
       } catch (e) {

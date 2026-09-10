@@ -11567,6 +11567,13 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar falatu_last_result', e); }
 
+  // CSAT por ATENDIMENTO (não só por pedido): salão/clínica opera em
+  // `appointments`, não em `orders`. Coluna aditiva liga a pesquisa ao
+  // atendimento realizado; dedup por atendimento (índice). O score-capture do
+  // webhook resolve por contato (`pendingForContact`), independe da origem.
+  try { db.exec(`ALTER TABLE satisfaction_surveys ADD COLUMN appointment_id TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_satisfaction_appointment ON satisfaction_surveys(appointment_id)`); } catch(e){}
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

@@ -65,14 +65,48 @@ export class SatisfactionService {
     } catch (e) { console.error("[CSAT] Falha ao registrar nota", e); }
   }
 
-  /** Cria a pesquisa (status 'sent') para um pedido — uma por pedido. */
-  static create(orgId: string, params: { contactId: string; ticketId?: string; orderId?: string }): string | null {
+  /**
+   * Cria a pesquisa (status 'sent') — uma por pedido OU por atendimento. O
+   * salão/clínica opera em `appointments`, não em `orders`; `appointmentId`
+   * permite medir CSAT do serviço realizado (a dedup por atendimento vive no
+   * caller `dueAppointments`). Origem (order/appointment) não afeta a captura
+   * do score no webhook, que resolve por contato.
+   */
+  static create(orgId: string, params: { contactId: string; ticketId?: string; orderId?: string; appointmentId?: string }): string | null {
     try {
       const id = uuidv4();
-      db.prepare(`INSERT INTO satisfaction_surveys (id, organization_id, ticket_id, contact_id, order_id) VALUES (?, ?, ?, ?, ?)`)
-        .run(id, orgId, params.ticketId || null, params.contactId, params.orderId || null);
+      db.prepare(`INSERT INTO satisfaction_surveys (id, organization_id, ticket_id, contact_id, order_id, appointment_id) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, orgId, params.ticketId || null, params.contactId, params.orderId || null, params.appointmentId || null);
       return id;
     } catch (e) { console.error("[CSAT] Falha ao criar pesquisa", e); return null; }
+  }
+
+  /**
+   * Atendimentos REALIZADOS elegíveis a CSAT: `status='completed'`, com um
+   * instante de conclusão conhecido (checkout_at, senão scheduled_end) já
+   * ultrapassado há `hoursAfter` horas, e SEM pesquisa criada ainda (dedup por
+   * appointment_id). Nunca inventa: se não há como saber quando terminou
+   * (ambos nulos), o atendimento não entra (RN-004/RN-151). Read-only.
+   */
+  static dueAppointments(orgId: string, hoursAfter = 24, now: Date = new Date()): any[] {
+    const h = Math.max(0, Math.floor(hoursAfter));
+    const cutoff = new Date(now.getTime() - h * 3600 * 1000).toISOString();
+    try {
+      return db.prepare(`
+        SELECT a.id, a.contact_id, a.ticket_id,
+               COALESCE(a.checkout_at, a.scheduled_end) AS ended_at,
+               c.identifier AS contact_number, c.name AS contact_name, c.channel_id AS contact_channel
+        FROM appointments a
+        JOIN contacts c ON c.id = a.contact_id AND c.organization_id = a.organization_id
+        WHERE a.organization_id = ?
+          AND a.status = 'completed'
+          AND COALESCE(a.checkout_at, a.scheduled_end) IS NOT NULL
+          AND datetime(COALESCE(a.checkout_at, a.scheduled_end)) <= datetime(?)
+          AND NOT EXISTS (SELECT 1 FROM satisfaction_surveys s WHERE s.organization_id = a.organization_id AND s.appointment_id = a.id)
+        ORDER BY ended_at ASC
+        LIMIT 300
+      `).all(orgId, cutoff) as any[];
+    } catch (e) { console.error("[CSAT] Falha ao listar atendimentos elegíveis", e); return []; }
   }
 
   /** Resposta automática ao receber a nota (agradece; pede desculpas se detrator). */

@@ -55,6 +55,18 @@ export function currentOrgId(): string | null {
   return usageContext.getStore()?.orgId || null;
 }
 
+/**
+ * Deriva o `module` do consumo de IA a partir do path de uma rota autenticada
+ * (`/api/<seg>/...` já sem o prefixo `/api` dentro do protectedApi → `/<seg>/`).
+ * O 1º segmento é a área que originou a chamada (studio/executive/prospects/…),
+ * dimensão útil pra atribuir custo por módulo (ANALISE-ESTADO-FINAL §6: hoje o
+ * caminho autenticado grava module='legacy'). Sem segmento → 'legacy'.
+ */
+export function moduleFromApiPath(path: string): string {
+  const seg = String(path || "").split("/").filter(Boolean)[0] || "";
+  return (seg || "legacy").toLowerCase();
+}
+
 /** Contexto completo (org + usuário + módulo + correlação). Sempre retorna algo (defaults). */
 export function currentUsageContext(): UsageContext {
   const s = usageContext.getStore();

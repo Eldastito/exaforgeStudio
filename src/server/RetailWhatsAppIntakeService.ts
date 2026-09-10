@@ -17,6 +17,7 @@ import db from "./db.js";
 import { RetailStoreService } from "./RetailStoreService.js";
 import { RetailClosingService, RetailTaskService, RetailResponsibleService } from "./RetailOpsService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 
 export interface RetailInboundPayload {
   text?: string;
@@ -46,8 +47,12 @@ export class RetailWhatsAppIntakeService {
    * tratou (fechamento por foto/valor, ou orientação com pendência aberta) ou
    * `null` quando não é caso de fechamento (deixa seguir o fluxo normal).
    */
-  static async handleInbound(orgId: string, store: any, payload: RetailInboundPayload): Promise<{ reply: string } | null> {
-    const date = payload.date || new Date().toISOString().slice(0, 10);
+  static async handleInbound(orgId: string, store: any, payload: RetailInboundPayload, now: Date = new Date()): Promise<{ reply: string } | null> {
+    // Sem data explícita, o fechamento entra no DIA COMERCIAL da org (fuso), não
+    // no dia UTC — senão a loja que fotografa/manda o fechamento após ~21h no Rio
+    // registra em D+1 (o exato sintoma "boleta some"), e não tem como corrigir a
+    // data. Honra o kill-switch 6B (desligado → UTC, 0-regressão).
+    const date = payload.date || BusinessTimeService.businessDate(orgId, now);
     const text = String(payload.text || "");
 
     // 0) BAIXA de MALOTE / ESCALA por confirmação (ADR-108): a pessoa responde

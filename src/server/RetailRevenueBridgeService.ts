@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 
 /**
  * Ponte Fechamento → Faturamento (Operação da Rede → Motor de Caixa / Diretor).
@@ -89,31 +90,37 @@ export class RetailRevenueBridgeService {
    * filtros de período do Dashboard/Analytics (currentFilter), mas por
    * `closing_date`/`sale_date` em vez de `created_at`.
    */
-  private static periodWhere(col: string, period: string): string {
-    if (period === "today") return `AND date(${col}) = date('now')`;
-    if (period === "week") return `AND date(${col}) >= date('now', '-7 days')`;
-    if (period === "month") return `AND date(${col}) >= date('now', '-30 days')`;
+  // A âncora "hoje" é o DIA COMERCIAL da org (fuso), não `date('now')` (UTC) —
+  // senão após ~21h no Rio a receita/venda do dia cai em D+1 (o mesmo bug
+  // "boleta some" da Fatia 1A). Honra o kill-switch 6B: com `retail_business_date_v1`
+  // desligado, `businessDate` volta ao UTC (0-regressão). `today` é 'YYYY-MM-DD'
+  // derivado (nunca entrada do usuário) — interpolação segura.
+  private static periodWhere(orgId: string, col: string, period: string, now: Date): string {
+    const today = BusinessTimeService.businessDate(orgId, now);
+    if (period === "today") return `AND date(${col}) = '${today}'`;
+    if (period === "week") return `AND date(${col}) >= date('${today}', '-7 days')`;
+    if (period === "month") return `AND date(${col}) >= date('${today}', '-30 days')`;
     return ""; // all
   }
 
   /** Faturamento das lojas (fechamentos elegíveis) no período do Dashboard. */
-  static revenueForPeriod(orgId: string, period: string): number {
+  static revenueForPeriod(orgId: string, period: string, now: Date = new Date()): number {
     try {
       const r = db.prepare(
         `SELECT COALESCE(SUM(${VALUE_EXPR}), 0) s
            FROM retail_daily_closings
           WHERE organization_id = ? AND ${ELIGIBLE_PREDICATE}
-            ${this.periodWhere("closing_date", period)}`
+            ${this.periodWhere(orgId, "closing_date", period, now)}`
       ).get(orgId) as any;
       return round2(r.s);
     } catch { return 0; }
   }
 
   /** Nº de vendas do PDV (boletas) no período — para a contagem de "vendas". */
-  static salesCountForPeriod(orgId: string, period: string): number {
+  static salesCountForPeriod(orgId: string, period: string, now: Date = new Date()): number {
     try {
       const r = db.prepare(
-        `SELECT COUNT(*) n FROM retail_pdv_sales WHERE organization_id = ? ${this.periodWhere("sale_date", period)}`
+        `SELECT COUNT(*) n FROM retail_pdv_sales WHERE organization_id = ? ${this.periodWhere(orgId, "sale_date", period, now)}`
       ).get(orgId) as any;
       return Number(r?.n || 0);
     } catch { return 0; }

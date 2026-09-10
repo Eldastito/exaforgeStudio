@@ -107,7 +107,11 @@ export async function classify(text: string, opts: { today?: string } = {}): Pro
 
   let raw = "";
   try {
-    raw = await _chat(sample, { system, json: true, temperature: 0 });
+    // ADR-154 F2: classificação de intenção é tarefa de BAIXA complexidade
+    // (JSON mode + temp 0 + whitelist estrita na saída) → tier 'economy'. Se o
+    // modelo econômico devolver algo fora do enum, o fallback pra 'unknown'
+    // abaixo protege o pipeline (0-regressão de comportamento).
+    raw = await _chat(sample, { system, json: true, temperature: 0, tier: "economy" });
   } catch (e: any) {
     return { intent: "unknown", confidence: 0, rationale: `LLM erro: ${e?.message || e}`, promiseDate: null };
   }

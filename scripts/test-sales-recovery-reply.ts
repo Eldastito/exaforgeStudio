@@ -81,7 +81,9 @@ async function main() {
   };
   let nextChatResponse: string = '{"intent":"unknown","reason":"default"}';
   let chatShouldThrow = false;
-  __setSalesReplyChatForTests(async () => {
+  let lastChatOpts: any = null;
+  __setSalesReplyChatForTests(async (_prompt: string, opts: any) => {
+    lastChatOpts = opts;
     if (chatShouldThrow) throw new Error("openai timeout");
     return nextChatResponse;
   });
@@ -133,6 +135,9 @@ async function main() {
     const r = await classify(`teste ${label}`);
     check(`classify(${label}): retorna ${label}`, r.intent === label && r.confidence > 0);
   }
+  // ADR-154 F2: a classificação roteia pro tier 'economy'.
+  check("classify usa tier 'economy' (ADR-154 F2)", lastChatOpts?.tier === "economy");
+
   nextChatResponse = '{"intent":"fantasia","reason":"foi"}';
   const rFake = await classify("qualquer");
   check("intent fora do enum → unknown", rFake.intent === "unknown");

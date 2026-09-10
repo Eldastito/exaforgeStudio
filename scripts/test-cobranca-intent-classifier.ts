@@ -115,6 +115,9 @@ async function main() {
     check(`classify(${label}): retorna intent=${label} + confidence>0`, r.intent === label && r.confidence > 0);
   }
 
+  // ===== 1b. ADR-154 F2: a classificação roteia pro tier 'economy' =====
+  check("classify usa tier 'economy' (ADR-154 F2)", chatCalls.length > 0 && chatCalls[chatCalls.length - 1].opts?.tier === "economy");
+
   // ===== 2. LLM devolve valor fora do enum → unknown =====
   nextChatResponse = '{"intent":"fantasia_qualquer","reason":"foi"}';
   const rFake = await classify("qualquer coisa");

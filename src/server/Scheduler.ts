@@ -52,6 +52,7 @@ import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import { BusinessTimeService } from "./BusinessTimeService.js";
+import { RuntimeAlertPublisher } from "./RuntimeAlertPublisher.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
@@ -1057,6 +1058,7 @@ export class Scheduler {
     try { this.retailImpactSnapshotPass(); } catch (e: any) { console.error('[Scheduler] retailImpactSnapshotPass error', e.message); }
     try { this.retailDailyTasksPass(); } catch (e: any) { console.error('[Scheduler] retailDailyTasksPass error', e.message); }
     try { this.retailOpsSignalsPass(); } catch (e: any) { console.error('[Scheduler] retailOpsSignalsPass error', e.message); }
+    try { this.runtimeAlertsPass(); } catch (e: any) { console.error('[Scheduler] runtimeAlertsPass error', e.message); }
     await this.retailPatternLearnPass().catch(e => console.error('[Scheduler] aprendizado de padrões falhou', e));
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
     // Depois do sync Alterdata: concilia atendimento declarado × vendas do PDV
@@ -1493,6 +1495,20 @@ export class Scheduler {
     } catch { /* tabela ainda não migrada */ }
     for (const orgId of ids) {
       try { RetailOpsSignalPublisher.run(orgId); } catch (e) { console.error('[Retail] ops signals falhou', orgId, e); }
+    }
+  }
+
+  // ADR-152 §17 — torna as exceções do Runtime PROATIVAS: publica em
+  // business_signals (dedupe) processos escalados/falhos, SLA vencido/EM RISCO,
+  // jobs na dead-letter, confirmações vencidas e processos SEM EVOLUÇÃO; e
+  // auto-resolve os que sumiram. Audiência: orgs com qualquer artefato de runtime.
+  static runtimeAlertsPass() {
+    const ids = new Set<string>();
+    try { for (const o of db.prepare(`SELECT DISTINCT organization_id FROM process_instances WHERE status IN ('escalated','failed','executing','waiting_external_response')`).all() as any[]) ids.add(o.organization_id); } catch { /* tabela ainda não migrada */ }
+    try { for (const o of db.prepare(`SELECT DISTINCT organization_id FROM decision_actions WHERE status = 'approved' AND deadline_at IS NOT NULL`).all() as any[]) ids.add(o.organization_id); } catch { /* idem */ }
+    try { for (const o of db.prepare(`SELECT DISTINCT organization_id FROM background_jobs WHERE status = 'failed'`).all() as any[]) ids.add(o.organization_id); } catch { /* idem */ }
+    for (const orgId of ids) {
+      try { RuntimeAlertPublisher.run(orgId); } catch (e) { console.error('[Runtime] alerts falhou', orgId, e); }
     }
   }
 

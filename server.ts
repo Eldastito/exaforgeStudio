@@ -95,6 +95,7 @@ import socialRoutes from "./src/server/routes/social.js";
 import growthRoutes from "./src/server/routes/growth.js";
 import decisionIntelligenceRoutes from "./src/server/routes/decisionIntelligence.js";
 import recommendationsRoutes from "./src/server/routes/recommendations.js";
+import billingRoutes from "./src/server/routes/billing.js";
 import actionsRoutes from "./src/server/routes/actions.js";
 import uxRoutes from "./src/server/routes/ux.js";
 import { httpMetricsMiddleware } from "./src/server/HttpMetricsCollector.js";
@@ -731,6 +732,9 @@ async function startServer() {
   protectedApi.use("/decision-intelligence", decisionIntelligenceRoutes);
   // ADR-153 F7.3 — recomendações de upgrade + cooldown (LGPD §14 / PRD §15).
   protectedApi.use("/billing/recommendations", recommendationsRoutes);
+  // ADR-153 F6.1 — catálogo/snapshot/preview de plano (proporcionalidade §19).
+  // Montado DEPOIS de /billing/recommendations (rota mais específica vence).
+  protectedApi.use("/billing", billingRoutes);
   protectedApi.use("/actions", actionsRoutes);
   // ADR-163 F8 — superfícies "Executando" + "Resultados" (composição pura).
   protectedApi.use("/ux", uxRoutes);

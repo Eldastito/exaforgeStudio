@@ -63,7 +63,7 @@ Cada item aponta a fatia do `PLANO-DE-IMPLEMENTACAO.md` que o entrega.
 
 - [~] Tabelas `subscription_change_requests`, `upgrade_recommendations`, `terms_versions`. F7.3 entregou `upgrade_recommendations` (ledger + cooldown). `subscription_change_requests` fica pra F5.2; `terms_versions` pra F5.1 (bloqueada Decisão #2).
 - [ ] Métodos: `preview, confirm, cancel`. Fatia 5.2.
-- [ ] Rotas `/api/billing/{plans,current,checkout,upgrade/preview,upgrade/confirm,downgrade}`. Fatias 5.3 + 6.1 + 6.2.
+- [~] Rotas `/api/billing/{plans,current,checkout,upgrade/preview,upgrade/confirm,downgrade}`. **F6.1 (preview) fechou** `GET /plans`, `GET /current`, `POST /upgrade/preview` (`SubscriptionOrchestratorService.preview` + `routes/billing.ts`, `test:billing-preview` 21/21). `checkout`/`upgrade/confirm`/`downgrade` (cobrança real) seguem BLOQUEADOS — Fatias 5.3/6.2 (Decisão #2 ToS + Asaas homologado).
 - [ ] Proporcionalidade upgrade imediato. Fatia 6.1.
 - [ ] Downgrade agendado no próximo ciclo. Fatia 6.2.
 - [ ] Idempotência via `subscription_change_requests.provider_reference`. Fatia 5.2.
@@ -190,7 +190,7 @@ Já mapeado em §11.2. Ver Fatia 3.1 + 3.3 + 3.4.
 
 Entitlements: [ ] `/me`, [ ] `/modules`, [ ] `/resource/:key` — Fatia 1.1.
 Blueprints: [x] `GET /api/admin/blueprints` + `GET /:id`, [x] `POST /api/admin/blueprints`, [x] `POST /:id/publish` + `POST /:id/deprecate`, [x] `POST /api/admin/organizations/:id/blueprint` + `GET /api/admin/organizations/:id/blueprint` + `GET /.../blueprint/preview`. F3.1 entregou todas.
-Planos: [ ] `GET /billing/plans`, [ ] `GET /billing/current`, [ ] `POST /billing/checkout`, [ ] `POST /billing/upgrade/preview`, [ ] `POST /billing/upgrade/confirm`, [ ] `POST /billing/downgrade` — Fatias 5.3 + 6.1 + 6.2.
+Planos: [x] `GET /billing/plans` (F6.1), [x] `GET /billing/current` (F6.1), [ ] `POST /billing/checkout` (gated), [x] `POST /billing/upgrade/preview` (F6.1), [ ] `POST /billing/upgrade/confirm` (gated), [ ] `POST /billing/downgrade` (gated) — F6.1 fechou os 3 de leitura/preview; confirm/checkout/downgrade dependem de Decisão #2 (ToS) + Asaas homologado (Fatias 5.3 + 6.2).
 Recomendação: [x] `GET /api/billing/recommendations`, [x] `POST .../:id/dismiss`, [x] `POST .../:id/accept` (não executa upgrade — G-153-3) — F7.3. Adicionalmente `GET /api/billing/recommendations/:id` (detalhe).
 
 ## §27 — Segurança

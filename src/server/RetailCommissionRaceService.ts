@@ -522,9 +522,44 @@ export class RetailCommissionRaceService {
           quotaHit, tierPercent: t?.percent || 0, tierAmount, paBonus, weeklyTotal,
           deviationPrize: 0, // preenchido no ranking da rede
           scheduledDays, offDays, daysInMonth,
+          paAmbiguous: false, // marcado adiante se houver homônimo na loja
           total: 0, // fechado depois do desvio
         };
       }).sort((a, b) => b.sales - a.sales);
+
+      // ── HOMÔNIMO na mesma loja (detectar + sinalizar) ──
+      // Dois vendedores DISTINTOS (matrículas/usuários diferentes) com nome
+      // normalizado idêntico na MESMA loja compartilham o alias `nom:<nome>` — o
+      // mesmo alias que reconcilia a MESMA pessoa entre fontes (manual/floor).
+      // Efeito: o `addRoster` os FUNDE num só (a venda de um pode não aparecer) e
+      // o denominador de P.A (lido por `max` no bucket `nom:`) fica não-confiável.
+      // De quem é cada venda/atendimento é INDECIDÍVEL pelos dados, então NÃO
+      // silenciamos nem pagamos número duvidoso: detectamos a colisão nas linhas
+      // de ORIGEM (antes da fusão) e MARCAMOS as linhas do mês afetadas
+      // (`paAmbiguous`) + expomos a colisão (`paAmbiguities`) pro gestor
+      // desambiguar (corrigir matrícula/nome). 0 ruído no caso normal.
+      const srcById = new Map<string, Map<string, { matricula: string | null; sellerUserId: string | null; sellerName: string }>>();
+      for (const r of monthRows) {
+        if (r.storeId !== st.id) continue;
+        const nn = norm(r.sellerName);
+        if (!nn) continue;
+        const idKey = r.sellerUserId ? `user:${r.sellerUserId}` : (r.matricula ? `mat:${r.matricula}` : `nom:${nn}`);
+        const g = srcById.get(nn) || new Map();
+        g.set(idKey, { matricula: r.matricula, sellerUserId: r.sellerUserId, sellerName: r.sellerName });
+        srcById.set(nn, g);
+      }
+      const paAmbiguities: Array<{ name: string; sellers: Array<{ sellerKey: string; sellerName: string; matricula: string | null }> }> = [];
+      const collidingNames = new Set<string>();
+      for (const [nn, g] of srcById) {
+        if (g.size < 2) continue; // ≥2 identidades DISTINTAS de mesmo nome na loja
+        collidingNames.add(nn);
+        const sellers = Array.from(g.values());
+        paAmbiguities.push({
+          name: sellers[0].sellerName,
+          sellers: sellers.map((v) => ({ sellerKey: primaryKeyOf(v.sellerUserId, v.matricula, v.sellerName), sellerName: v.sellerName, matricula: v.matricula })),
+        });
+      }
+      if (collidingNames.size) for (const s of monthly) if (collidingNames.has(norm(s.sellerName))) s.paAmbiguous = true;
 
       // ── Gerente ──
       const storeQuotaMonth = round2(Array.from(daily.values()).reduce((a, v) => a + v, 0));
@@ -572,7 +607,7 @@ export class RetailCommissionRaceService {
         };
       }
       storeReports.push({
-        storeId: st.id, storeName: st.name, weeks: weekly, monthly,
+        storeId: st.id, storeName: st.name, weeks: weekly, monthly, paAmbiguities,
         store: { quota: storeQuotaMonth, sales: storeSalesMonth, deviation: storeQuotaMonth > 0 ? round2((storeSalesMonth / storeQuotaMonth - 1) * 10000) / 100 : null },
         manager,
       });
@@ -722,8 +757,14 @@ export class RetailCommissionRaceService {
       : null;
 
     const visible = opts?.storeId ? storeReports.filter((sr) => sr.storeId === opts.storeId) : storeReports;
+    // Resumo transversal das colisões de P.A por homônimo (por loja) — pro
+    // gestor resolver antes de confiar no bônus de P.A. Respeita o filtro de loja.
+    const paAmbiguities = visible
+      .filter((sr) => (sr.paAmbiguities || []).length)
+      .map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, groups: sr.paAmbiguities }));
     return {
       month, weeks, stores: visible, unassigned,
+      paAmbiguities, paAmbiguityCount: paAmbiguities.reduce((a, s) => a + s.groups.length, 0),
       networkDeviation: {
         sellers: eligibleSellers.slice(0, Math.max(sellerPrizes.length, 3)).map((s: any) => ({ sellerKey: s.sellerKey, sellerName: s.sellerName, storeName: s.storeName, attainment: s.attainment, prize: s.deviationPrize })),
         stores: eligibleStores.slice(0, Math.max(managerPrizes.length, 3)).map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, deviation: sr.store.deviation, prize: sr.manager.deviationPrize })),

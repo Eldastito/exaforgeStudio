@@ -4321,6 +4321,37 @@ function RaceSection({ stores }: { stores: any[] }) {
       </div>
       <p className="mt-1 text-[11px] text-zinc-500">O padrão da sua planilha: bateu a cota 1% · +10% 1,5% · +20% 2% · +30% 3% (vale a maior) · P.A ≥ 2,50 com cota · 1º/2º da semana · desvio de cota da rede · bloco do gerente. Cota individual vem do cadastro semanal ou da escala (cota da loja ÷ escalados). Ajuste tudo em “Configurar corrida”.</p>
 
+      {/* Vendas SEM loja atribuída — não entram na corrida (por que "não confere"). */}
+      {race && race.unassigned && (
+        <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+          <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {race.unassigned.sellerCount} venda(s) sem loja atribuída — {brl(race.unassigned.sales)} fora da corrida</div>
+          <p className="mt-1 text-amber-200/80">{race.unassigned.note}</p>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-amber-100/90">
+            {race.unassigned.sellers.map((s: any) => (
+              <span key={s.sellerKey}>{s.sellerName}{s.matricula ? ` (${s.matricula})` : ''}: <strong>{brl(s.sales)}</strong></span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Homônimos na mesma loja — P.A pode estar incorreto até desambiguar. */}
+      {race && race.paAmbiguityCount > 0 && (
+        <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
+          <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Vendedores com o mesmo nome na loja — o P.A pode ficar incorreto</div>
+          <p className="mt-1 text-amber-200/80">Desambigue (corrija matrícula/nome): o cálculo de atendimentos/P.A não distingue vendedores homônimos na mesma loja.</p>
+          <div className="mt-1 space-y-0.5 text-amber-100/90">
+            {race.paAmbiguities.map((st: any) => (
+              <div key={st.storeId || st.storeName}>
+                <span className="text-amber-300">{st.storeName}:</span>{' '}
+                {st.groups.map((g: any, i: number) => (
+                  <span key={i}>{i > 0 ? ' · ' : ''}{g.name} ({g.sellers.map((x: any) => x.matricula || x.sellerKey).join(' vs ')})</span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {race && race.stores.map((sr: any) => (
         <div key={sr.storeId} className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="flex flex-wrap items-center gap-2">

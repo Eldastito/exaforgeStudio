@@ -348,7 +348,7 @@ export class SalesRecoveryPlaybookService {
           correlationId: anchorCorr || null, createdBy: input.actorId || "sales-recovery-runtime",
         });
       } else {
-        messageId = await MessageProviderService.sendMessage(channelId, phone, finalText);
+        messageId = await MessageProviderService.sendMessage(channelId, phone, finalText, { feature: "recompra" });
       }
     }
     catch (e: any) {

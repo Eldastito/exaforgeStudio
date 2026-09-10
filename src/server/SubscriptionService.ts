@@ -234,7 +234,7 @@ export class SubscriptionService {
       const base = (process.env.APP_URL || process.env.CORS_ORIGIN || "").replace(/\/$/, "");
       const link = `${base}/api/public/subscription/portal?token=${token}`;
       const msg = `Olá${contact.name ? `, ${contact.name}` : ""}! Acesse seu portal de assinatura para ver suas faturas e pagamentos:\n${link}\n\n(Link válido por 24h)`;
-      await MessageProviderService.sendMessage(channel.id, contact.identifier, msg);
+      await MessageProviderService.sendMessage(channel.id, contact.identifier, msg, { feature: "cobranca" });
       return true;
     } catch (e) {
       console.error("[Subscription] Falha ao enviar link do portal:", e);

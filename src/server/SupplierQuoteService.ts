@@ -131,7 +131,7 @@ export class SupplierQuoteService {
         // (a) WhatsApp — canal primário.
         if (canWhats) {
           const message = this.buildQuoteMessage(o?.business_name || "", s.name, items);
-          await MessageProviderService.sendMessage(channelId, s.identifier, message);
+          await MessageProviderService.sendMessage(channelId, s.identifier, message, { feature: "compras" });
         }
         // (b) E-mail — canal paralelo, degrada em silêncio se falhar.
         if (canEmail) {

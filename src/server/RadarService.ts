@@ -521,7 +521,8 @@ export class RadarService {
       if (!absoluteUrl) throw new Error("Configure APP_URL para enviar o link por WhatsApp — o link precisa ser público.");
       await MessageProviderService.sendMessage(
         activeChannel.id, phone!,
-        `Olá, ${respondent.name}! Você foi convidado(a) a responder o diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}. Acesse: ${absoluteUrl}`
+        `Olá, ${respondent.name}! Você foi convidado(a) a responder o diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}. Acesse: ${absoluteUrl}`,
+        { feature: "gestao" }
       );
     } else if (channel === "email") {
       if (!absoluteUrl) throw new Error("Configure APP_URL para enviar o link por e-mail — o link precisa ser público.");
@@ -768,7 +769,8 @@ export class RadarService {
     if (channel === "whatsapp") {
       await MessageProviderService.sendDocument(
         activeChannel.id, session.contact_phone, url, "diagnostico-radar.pdf",
-        `Aqui está o relatório do diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}.`
+        `Aqui está o relatório do diagnóstico Radar de Execução IA de ${session.company_name || "sua empresa"}.`,
+        { feature: "gestao" }
       );
     } else {
       // Anexo binário de verdade (ADR-026, deixado de fora na ADR-017 —

@@ -762,9 +762,25 @@ export class RetailCommissionRaceService {
     const paAmbiguities = visible
       .filter((sr) => (sr.paAmbiguities || []).length)
       .map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, groups: sr.paAmbiguities }));
+
+    // DUPLA CONTAGEM por FONTE (a reclamação "o sistema mostra mais que a venda
+    // real"): vendedor com PDV + manual/ERP no período tem a venda física contada
+    // duas vezes. Surfaceia por loja, com a composição por fonte, pro gestor
+    // reconciliar (ou marcar `seller_source='manual'` na loja p/ excluir o PDV).
+    const dsBystore = new Map<string, { storeId: string | null; storeName: string; sellers: any[] }>();
+    for (const r of monthRows) {
+      if (!(r as any).doubleSourced) continue;
+      if (opts?.storeId && r.storeId !== opts.storeId) continue;
+      const k = r.storeId || `semLoja:${r.storeName}`;
+      const g = dsBystore.get(k) || { storeId: r.storeId, storeName: r.storeName, sellers: [] };
+      g.sellers.push({ sellerName: r.sellerName, matricula: r.matricula, sales: r.sales, salesBySource: (r as any).salesBySource || {} });
+      dsBystore.set(k, g);
+    }
+    const doubleSourced = Array.from(dsBystore.values());
     return {
       month, weeks, stores: visible, unassigned,
       paAmbiguities, paAmbiguityCount: paAmbiguities.reduce((a, s) => a + s.groups.length, 0),
+      doubleSourced, doubleSourcedCount: doubleSourced.reduce((a, s) => a + s.sellers.length, 0),
       networkDeviation: {
         sellers: eligibleSellers.slice(0, Math.max(sellerPrizes.length, 3)).map((s: any) => ({ sellerKey: s.sellerKey, sellerName: s.sellerName, storeName: s.storeName, attainment: s.attainment, prize: s.deviationPrize })),
         stores: eligibleStores.slice(0, Math.max(managerPrizes.length, 3)).map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, deviation: sr.store.deviation, prize: sr.manager.deviationPrize })),

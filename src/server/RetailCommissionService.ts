@@ -373,9 +373,9 @@ export class RetailCommissionService {
    * efetiva daquela loja). Dedup por (loja + userId/matrícula/nome) dentro da
    * MESMA loja — não funde a mesma pessoa entre lojas diferentes.
    */
-  static salesBySellerStore(orgId: string, start: string, end: string): Array<{ storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; source: string }> {
+  static salesBySellerStore(orgId: string, start: string, end: string): Array<{ storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; source: string; salesBySource: Record<string, number>; doubleSourced: boolean }> {
     const norm = (name: string) => String(name || "").trim().toLowerCase();
-    type Row = { storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; sources: Set<string> };
+    type Row = { storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; sources: Set<string>; bySource: Record<string, number> };
     const map = new Map<string, Row>();
     const nameToKey = new Map<string, string>();
 
@@ -384,10 +384,13 @@ export class RetailCommissionService {
       const n = norm(name);
       const nk = `${storeKey}::${n}`;
       const k = (userId && `${storeKey}::user:${userId}`) || (matricula && `${storeKey}::mat:${matricula}`) || nameToKey.get(nk) || `${storeKey}::nom:${n}`;
-      const cur = map.get(k) || { storeId, storeName, sellerUserId: userId || null, sellerName: name, matricula: matricula || null, sales: 0, pecas: 0, orders: 0, sources: new Set<string>() };
+      const cur = map.get(k) || { storeId, storeName, sellerUserId: userId || null, sellerName: name, matricula: matricula || null, sales: 0, pecas: 0, orders: 0, sources: new Set<string>(), bySource: {} as Record<string, number> };
       cur.sales = round2(cur.sales + (Number(sales) || 0));
       cur.pecas += Number(pecas) || 0;
       cur.orders += Number(orders) || 0;
+      // Composição por FONTE (rastreabilidade de "por que o valor não confere"):
+      // guarda quanto cada fonte contribuiu, pra o valor final ser explicável.
+      cur.bySource[source] = round2((cur.bySource[source] || 0) + (Number(sales) || 0));
       if (userId && !cur.sellerUserId) cur.sellerUserId = userId;
       if (matricula && !cur.matricula) cur.matricula = matricula;
       cur.sources.add(source);
@@ -446,7 +449,18 @@ export class RetailCommissionService {
     for (const r of pdv) add(r.store_id || null, r.store_name, r.user_id || null, String(r.matricula), r.mapped_name || `Matrícula ${r.matricula}`, Number(r.sv) || 0, Number(r.p) || 0, Number(r.n) || 0, "pdv");
 
     return Array.from(map.values())
-      .map((v) => ({ storeId: v.storeId, storeName: v.storeName, sellerUserId: v.sellerUserId, sellerName: v.sellerName, matricula: v.matricula, sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+") }))
+      .map((v) => ({
+        storeId: v.storeId, storeName: v.storeName, sellerUserId: v.sellerUserId, sellerName: v.sellerName, matricula: v.matricula,
+        sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+"),
+        salesBySource: v.bySource,
+        // DUPLA CONTAGEM FÍSICA: o PDV é o feed cru da venda física; manual/ERP são
+        // RE-LANÇAMENTOS da MESMA venda física. Quando o mesmo vendedor tem PDV +
+        // (manual OU ERP) no período, as duas somam e o valor infla (a venda física
+        // entra duas vezes) — a menos que a loja esteja marcada `seller_source='manual'`
+        // (aí o PDV já é excluído acima). `zappflow` (pedido online) é canal DISTINTO,
+        // não conta como dupla. Sinaliza pro gestor reconciliar / marcar a fonte da loja.
+        doubleSourced: (Number(v.bySource["pdv"]) || 0) > 0 && ((Number(v.bySource["manual"]) || 0) > 0 || (Number(v.bySource["erp"]) || 0) > 0),
+      }))
       .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.sales - a.sales);
   }
 

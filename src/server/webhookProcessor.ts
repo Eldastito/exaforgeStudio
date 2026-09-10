@@ -10,6 +10,7 @@ import { setUsageOrg } from "./usageContext.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { deliverBotMessage } from "./botOutbound.js";
 import { CadenceService } from "./CadenceService.js";
+import { LgpdService } from "./LgpdService.js";
 import { NotificationService } from "./NotificationService.js";
 import { AttendanceAreaService } from "./AttendanceAreaService.js";
 import { AppointmentService } from "./AppointmentService.js";
@@ -79,6 +80,21 @@ function webhookQueueEnabled(): boolean {
   if (explicit === "true") return true;
   if (explicit === "false") return false;
   return process.env.NODE_ENV === "production";
+}
+
+// Regex de opt-out ("PARAR" e sinônimos) — exportada pra manter uma fonte única.
+export const OPT_OUT_RE = /^(sair|parar|pare|cancelar|descadastrar|stop|remover|nao quero|não quero)\b/;
+
+/**
+ * Opt-out UNIFICADO do cliente. Marca `marketing_opt_out` E revoga o consentimento
+ * `comunicacoes` — o MESMO escopo que `OutboundConsentGuardService` checa no sink
+ * de saída. Sem revogar o consentimento, em modo consent-required o "PARAR" era
+ * IGNORADO: cadências/lembretes/follow-ups continuavam saindo mesmo depois de a
+ * pessoa pedir para parar (violação de LGPD Art.14). Best-effort e idempotente.
+ */
+export function applyOptOut(orgId: string, contactId: string): void {
+  try { db.prepare('UPDATE contacts SET marketing_opt_out = 1 WHERE id = ?').run(contactId); } catch (e) { /* noop */ }
+  try { LgpdService.revokeConsent(orgId, contactId, "comunicacoes", null); } catch (e) { /* noop */ }
 }
 
 export async function dispatchIncomingMessage(payload: Parameters<typeof processIncomingMessage>[0], io: any) {
@@ -334,10 +350,12 @@ export async function processIncomingMessage(
   } catch (e) { /* noop */ }
 
   // Opt-out de campanhas: se o cliente pedir para sair, marca e NÃO recebe mais
-  // mensagens ativas (obrigatório para não ser marcado como spam).
+  // mensagens ativas (obrigatório para não ser marcado como spam). Revoga também
+  // o consentimento `comunicacoes` que o gate de saída checa (senão, em modo
+  // consent-required, o "PARAR" era ignorado).
   const optOutText = (payload.text || '').trim().toLowerCase();
-  if (/^(sair|parar|pare|cancelar|descadastrar|stop|remover|nao quero|não quero)\b/.test(optOutText)) {
-    try { db.prepare('UPDATE contacts SET marketing_opt_out = 1 WHERE id = ?').run(contact.id); } catch(e){}
+  if (OPT_OUT_RE.test(optOutText)) {
+    applyOptOut(orgId, contact.id);
   }
 
   // 4. Emit to Organization Room (Frontend multi-tenant support)

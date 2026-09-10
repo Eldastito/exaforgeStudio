@@ -4352,6 +4352,24 @@ function RaceSection({ stores }: { stores: any[] }) {
         </div>
       )}
 
+      {/* Venda contada em DUAS fontes (PDV + planilha/ERP) — infla o valor exibido. */}
+      {race && race.doubleSourcedCount > 0 && (
+        <div className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 p-2.5 text-[11px] text-red-200">
+          <div className="flex items-center gap-1.5 font-medium"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {race.doubleSourcedCount} vendedor(es) com venda contada em DUAS fontes — o valor pode estar inflado</div>
+          <p className="mt-1 text-red-200/80">A mesma venda física entra pelo PDV e pelo lançamento manual/ERP e é somada. Marque a loja como fonte “manual” (aí o PDV é ignorado) ou reconcilie os lançamentos.</p>
+          <div className="mt-1 space-y-0.5 text-red-100/90">
+            {race.doubleSourced.map((st: any) => (
+              <div key={st.storeId || st.storeName}>
+                <span className="text-red-300">{st.storeName}:</span>{' '}
+                {st.sellers.map((s: any, i: number) => (
+                  <span key={i}>{i > 0 ? ' · ' : ''}{s.sellerName}{s.matricula ? ` (${s.matricula})` : ''}: <strong>{brl(s.sales)}</strong> = {Object.entries(s.salesBySource || {}).filter(([, v]: any) => v > 0).map(([src, v]: any) => `${src} ${brl(v)}`).join(' + ')}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {race && race.stores.map((sr: any) => (
         <div key={sr.storeId} className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="flex flex-wrap items-center gap-2">

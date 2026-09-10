@@ -25,6 +25,7 @@ import "../FileDeliveryService.js";
 import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
+import { WhatsAppHealthService } from "../WhatsAppHealthService.js";
 import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
 import { FalaTuThreadService } from "../FalaTuThreadService.js";
 import { FalaTuHomeService } from "../FalaTuHomeService.js";
@@ -390,6 +391,14 @@ router.get("/bridge/recon", (req: AuthRequest, res): any => {
 
 // F4.1 — relatório POR REGISTRO + classificação de conflito (RF-09 §15.1).
 // Read-only; gestores (carrega detalhe de registros operacionais). Paginado.
+// F6.4 (CA-10): saúde do envio pelo operador — canal × etapa + dica de
+// recuperação, token-safe. `metrics` traz os números mínimos (§18.6).
+router.get("/whatsapp-health", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores veem a saúde dos canais." });
+  const orgId = req.organizationId!;
+  res.json({ channels: WhatsAppHealthService.channelHealth(orgId), metrics: WhatsAppHealthService.metrics(orgId) });
+});
+
 router.get("/bridge/records", (req: AuthRequest, res): any => {
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores veem o relatório por registro." });
   const limit = req.query.limit != null ? Number(req.query.limit) : undefined;

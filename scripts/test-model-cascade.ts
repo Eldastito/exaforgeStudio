@@ -46,6 +46,25 @@ async function main() {
   // ── 4. economia real: o econômico difere do standard (roteável) ──
   check("4.1 economy ≠ standard (há o que economizar)", CHAT_MODEL_ECONOMY !== CHAT_MODEL);
 
+  // ── 5. FIAÇÃO: os callers de baixa complexidade roteiam pro tier 'economy'
+  // (ADR-154 F2/F3). Guarda de regressão a nível de fonte: se alguém remover o
+  // tier de um desses call sites, o teste falha. `chat()`/`_chat()`/`llm.chat()`
+  // com json+temperature no MESMO call precisa carregar tier:"economy".
+  const root = path.resolve(new URL("..", import.meta.url).pathname, "src/server");
+  const wiredEconomy = (file: string): boolean => {
+    let src = "";
+    try { src = fs.readFileSync(path.join(root, file), "utf8"); } catch { return false; }
+    // um call de chat (aliased ou via namespace) com json:true e tier:"economy".
+    return /(?:\b_chat|\bchat|llm\.chat)\([^)]*json:\s*true[^)]*tier:\s*["']economy["']/s.test(src)
+      || /(?:\b_chat|\bchat|llm\.chat)\([^)]*tier:\s*["']economy["'][^)]*json:\s*true/s.test(src);
+  };
+  check("5.1 F2: CollectionIntentClassifier no economy", wiredEconomy("CollectionIntentClassifier.ts"));
+  check("5.2 F2: SalesRecoveryReplyClassifier no economy", wiredEconomy("SalesRecoveryReplyClassifier.ts"));
+  check("5.3 F3: llm.parseInventoryReply no economy", wiredEconomy("llm.ts"));
+  check("5.4 F3: TaskAudioService.extractTaskFromText no economy", wiredEconomy("TaskAudioService.ts"));
+  check("5.5 F3: PurchaseRequisitionService.extractOrderFromText no economy", wiredEconomy("PurchaseRequisitionService.ts"));
+  check("5.6 F3: FalaTuService.interpret no economy", wiredEconomy("FalaTuService.ts"));
+
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name} ${x.detail ? `(${x.detail})` : ""}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} model-cascade: ${passed}/${results.length} checks`);

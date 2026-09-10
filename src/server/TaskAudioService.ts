@@ -36,7 +36,9 @@ export class TaskAudioService {
       names.length ? `Nomes da equipe (case o assignee com o mais próximo destes): ${names.join("; ")}` : "",
     ].filter(Boolean).join("\n");
     try {
-      const raw = await chat(text, { json: true, temperature: 0, system });
+      // ADR-154 F3: extração de tarefa de baixa complexidade (JSON + priority
+      // whitelist + dueAt regex + isTask gated + fallback) → tier 'economy'.
+      const raw = await chat(text, { json: true, temperature: 0, system, tier: "economy" });
       const p = JSON.parse(raw || "{}");
       const title = String(p.title || "").trim();
       const priority = PRIORITIES.includes(String(p.priority)) ? String(p.priority) : "media";

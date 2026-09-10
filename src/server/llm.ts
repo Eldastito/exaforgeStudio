@@ -677,7 +677,9 @@ export async function classifyInventoryPhoto(base64: string, mimetype = "image/j
  */
 export async function parseInventoryReply(text: string, awaiting: string[]): Promise<{ costPrice?: number; marginPercent?: number; salePrice?: number; quantity?: number }> {
   const system = `Extraia valores numéricos de uma resposta de lojista brasileiro sobre um produto que está cadastrando. Campos possíveis: costPrice (quanto pagou/custo), marginPercent (margem de lucro em %), salePrice (preço de venda final, se ele disse direto), quantity (quantidade em estoque, unidades inteiras). Responda SOMENTE um JSON só com os campos que a mensagem realmente informa (omita o resto, NUNCA invente ou assuma um valor não dito). Campos que a IA está aguardando nesta pergunta: ${awaiting.join(", ")}.`;
-  const raw = await chat(text, { json: true, temperature: 0, system });
+  // ADR-154 F3: extração numérica de baixa complexidade (JSON + coerção estrita
+  // por campo + omissão do não-informado) → tier 'economy'.
+  const raw = await chat(text, { json: true, temperature: 0, system, tier: "economy" });
   try {
     const parsed = JSON.parse(raw || "{}");
     const out: { costPrice?: number; marginPercent?: number; salePrice?: number; quantity?: number } = {};

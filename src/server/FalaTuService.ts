@@ -219,7 +219,10 @@ export class FalaTuService {
         text = text ? `${text}\n${transcript}` : transcript;
       }
       if (!text) throw new Error("Entrada vazia.");
-      raw = await llm.chat(text, { json: true, temperature: 0.2, system });
+      // ADR-154 F3: extração para o inbox (JSON + normalizeExtraction: intent
+      // whitelist, datas por regex, confidence clamp) + revisão humana no inbox
+      // (nunca auto-executa) → tier 'economy'.
+      raw = await llm.chat(text, { json: true, temperature: 0.2, system, tier: "economy" });
     }
 
     let parsed: any = {};

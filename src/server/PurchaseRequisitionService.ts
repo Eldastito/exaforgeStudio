@@ -149,7 +149,9 @@ export class PurchaseRequisitionService {
       catalog.length ? `Catálogo (use estes nomes quando casar): ${catalog.slice(0, 120).join("; ")}` : "",
     ].filter(Boolean).join("\n");
     try {
-      const raw = await chat(text, { json: true, temperature: 0, system });
+      // ADR-154 F3: extração de pedido de compra de baixa complexidade (JSON +
+      // quantity clamp + filtro de itens + isOrder gated + fallback) → 'economy'.
+      const raw = await chat(text, { json: true, temperature: 0, system, tier: "economy" });
       const parsed = JSON.parse(raw || "{}");
       const items = Array.isArray(parsed.items) ? parsed.items
         .map((it: any) => ({ name: String(it.name || "").trim(), quantity: Math.max(1, parseInt(String(it.quantity), 10) || 1), note: it.note ? String(it.note) : undefined }))

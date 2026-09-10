@@ -168,7 +168,7 @@ import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
 import { EvolutionService } from "./src/server/EvolutionService.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
-import { setUsageOrg } from "./src/server/usageContext.js";
+import { setUsageContext, moduleFromApiPath } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -586,7 +586,18 @@ async function startServer() {
   protectedApi.use(requireOrganizationAccess);
 
   // Atribui o consumo de IA das chamadas desta requisição à empresa do usuário.
-  protectedApi.use((req: any, _res, next) => { setUsageOrg(req.organizationId || null); next(); });
+  // ADR-154: além da org, atribui o USUÁRIO e o MÓDULO (derivado do 1º segmento
+  // da rota) — antes o caminho autenticado gravava tudo como module='legacy',
+  // impossibilitando custo-por-módulo/usuário (ANALISE-ESTADO-FINAL §6). Aditivo:
+  // sem afetar a org já atribuída; só enriquece a atribuição.
+  protectedApi.use((req: any, _res, next) => {
+    setUsageContext({
+      orgId: req.organizationId || null,
+      userId: req.user?.userId || null,
+      module: moduleFromApiPath(req.path),
+    });
+    next();
+  });
 
   // GATING DE MÓDULOS: bloqueia rotas de módulos opcionais que a organização
   // não tem habilitados (deriva o módulo do 1º segmento do path). Rotas core/

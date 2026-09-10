@@ -31,9 +31,9 @@ import { ArtifactService } from "./ArtifactService.js";
 
 export type FileFormat = "pdf" | "xlsx" | "docx";
 const RECOGNIZED_FORMATS: FileFormat[] = ["pdf", "xlsx", "docx"];
-// Geradores que EXISTEM hoje no HEAD (PDF/XLSX). DOCX chega na F5.2 — declarado no
-// contrato, mas honesto de que ainda não há gerador (nunca renomeia PDF pra .docx).
-const GENERATOR_READY: Record<FileFormat, boolean> = { pdf: true, xlsx: true, docx: false };
+// Geradores que EXISTEM hoje no HEAD. PDF (pdfkit), XLSX e DOCX (F5.2, OOXML real
+// via DocxService) — todos produzem arquivo editável de verdade (nunca renomeiam).
+const GENERATOR_READY: Record<FileFormat, boolean> = { pdf: true, xlsx: true, docx: true };
 
 type QueryStatus = "ready" | "pending_domain_query";
 

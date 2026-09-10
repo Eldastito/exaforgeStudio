@@ -15,8 +15,9 @@ import { ContextEngineService } from "./ContextEngineService.js";
 import { ReportPdfService } from "./ReportPdfService.js";
 import { ArtifactService } from "./ArtifactService.js";
 import { buildXlsx, XLSX_MIME, CellValue } from "./XlsxService.js";
+import { buildDocx, DOCX_MIME } from "./DocxService.js";
 
-export type ReportFormat = "pdf" | "xlsx";
+export type ReportFormat = "pdf" | "xlsx" | "docx";
 
 export class FalaTuReportService {
   /**
@@ -33,13 +34,24 @@ export class FalaTuReportService {
     redactedPaths: string[];
   }> {
     const userId = user?.userId || user?.id || null;
-    const format: ReportFormat = opts.format === "xlsx" ? "xlsx" : "pdf";
+    const format: ReportFormat = opts.format === "xlsx" ? "xlsx" : opts.format === "docx" ? "docx" : "pdf";
     const ctx = ContextEngineService.buildForUser(orgId, user);
     const domains = (ctx.snapshot && ctx.snapshot.domains) || {};
 
     let content: Buffer;
     let mimeType: string;
-    if (format === "xlsx") {
+    if (format === "docx") {
+      // DOCX real (§13.3): mesmas seções do PDF, renderizadas como WordprocessingML
+      // editável — herda a mesma projeção por papel (domínios sem acesso nem entram).
+      const sections: Array<{ heading: string; lines: string[] }> = [];
+      if (ctx.narrative) sections.push({ heading: "Panorama", lines: ctx.narrative.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 60) });
+      const domLines = Object.entries(domains).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 300)}`);
+      if (domLines.length) sections.push({ heading: "Domínios (números do período)", lines: domLines });
+      if (!sections.length) sections.push({ heading: "Panorama", lines: ["Sem dados suficientes para o período."] });
+      const footer = ctx.droppedDomains.length ? `Alguns domínios foram omitidos conforme seu nível de acesso: ${ctx.droppedDomains.join(", ")}.` : undefined;
+      content = buildDocx({ title: "Resumo Executivo", subtitle: "Contexto do período, no seu nível de acesso.", sections, footer });
+      mimeType = DOCX_MIME;
+    } else if (format === "xlsx") {
       // Planilha: uma linha por (domínio, métrica, valor). Números viram célula
       // numérica; objetos, texto. Herda a projeção (domínios sem acesso nem entram).
       const rows: CellValue[][] = [["Domínio", "Métrica", "Valor"]];

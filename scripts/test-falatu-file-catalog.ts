@@ -95,7 +95,7 @@ async function main() {
 
   // ── 8. formatGeneratorReady honesto ──
   const rDoc = CAT.resolve(orgA, owner, { kind: "executive_summary", format: "docx", conversationId: "conv-doc" });
-  check("8.1 docx: plano resolve mas gerador NÃO pronto (até F5.2)", rDoc.ok && rDoc.format === "docx" && rDoc.formatGeneratorReady === false);
+  check("8.1 docx: gerador pronto (F5.2 — DocxService real)", rDoc.ok && rDoc.format === "docx" && rDoc.formatGeneratorReady === true);
   check("8.2 pdf/xlsx: gerador pronto", r1.formatGeneratorReady === true && r2.formatGeneratorReady === true);
 
   // ── 9. localizar artefato existente (RBAC por classificação) ──

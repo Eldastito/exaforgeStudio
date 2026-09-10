@@ -2859,9 +2859,14 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       if (x.boletaFinal) setBoletaFinal(String(x.boletaFinal));
       if (x.malote) setMalote(String(x.malote));
       if (x.pos) { setPosCred(x.pos.creditoValor ? String(x.pos.creditoValor) : ''); setPosCredQtd(x.pos.creditoQtd ? String(x.pos.creditoQtd) : ''); setPosDeb(x.pos.debitoValor ? String(x.pos.debitoValor) : ''); setPosDebQtd(x.pos.debitoQtd ? String(x.pos.debitoQtd) : ''); }
-      setScanNote(x.needsReview
-        ? `Leitura com baixa confiança (${x.confidence}%). CONFIRA cada campo antes de salvar.`
-        : `IA leu a folha (confiança ${x.confidence}%). Confira e salve.`);
+      setScanNote(
+        x.readError === 'truncated'
+          ? 'A folha é grande e a leitura veio INCOMPLETA — a IA salvou só o que conseguiu ler. Complete os campos que faltaram e confira antes de salvar.'
+          : x.readError === 'unreadable'
+            ? 'Não consegui ler esta foto (pode estar cortada, escura ou tremida). Tente uma foto mais nítida da folha inteira ou informe os valores manualmente.'
+            : x.needsReview
+              ? `Leitura com baixa confiança (${x.confidence}%). CONFIRA cada campo antes de salvar.`
+              : `IA leu a folha (confiança ${x.confidence}%). Confira e salve.`);
       // Dupla checagem: trava o salvar até o humano confirmar os valores.
       setScanPending(true);
       setScanConfirmed(false);

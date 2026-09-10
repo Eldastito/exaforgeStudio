@@ -386,8 +386,25 @@ export class RetailClosingService {
     const closing = this.getOrCreate(orgId, storeId, date);
     const rosterNames = this.rosterNames(orgId, storeId);
     const extractor = _closingExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractClosingFromImage(b, m, rosterNames));
+    // `readError` explica com HONESTIDADE por que a leitura falhou, em vez de
+    // devolver "confiança 0%" silencioso (que o gestor lê como "a IA não leu"):
+    //  - 'truncated'  → a folha era grande demais e o JSON veio cortado (o prefixo
+    //                   legível foi salvo, mas vai pra conferência humana);
+    //  - 'unreadable' → nem o prefixo foi recuperável (foto ilegível/resposta vazia).
     let parsed: any = {};
-    try { parsed = JSON.parse((await extractor(base64, mimetype)) || "{}"); } catch { parsed = {}; }
+    let readError: string | null = null;
+    const raw = (await extractor(base64, mimetype)) || "{}";
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // JSON quebrado (tipicamente cortado por limite de tokens): tenta salvar o
+      // prefixo legível — nunca inventa o pedaço que faltou.
+      const { repairTruncatedJson } = await import("./llm.js");
+      const repaired = repairTruncatedJson(raw);
+      if (repaired) { try { parsed = JSON.parse(repaired); readError = "truncated"; } catch { parsed = {}; readError = "unreadable"; } }
+      else { parsed = {}; readError = "unreadable"; }
+    }
+    if (parsed?._truncated) readError = readError || "truncated";
 
     const methods = ["dinheiro", "pix", "credito", "debito", "voucher", "troca", "outros"];
     const items = methods.map((m) => ({ paymentMethod: m, informedAmount: Number(parsed?.[m] || 0) })).filter((i) => i.informedAmount > 0);
@@ -419,13 +436,14 @@ export class RetailClosingService {
       }
     } catch { /* extração rica é opcional — os totais acima já foram gravados */ }
 
-    // Baixa confiança OU total ausente → precisa de conferência humana.
+    // Baixa confiança OU total ausente OU leitura cortada/ilegível → precisa de
+    // conferência humana. Uma leitura truncada NUNCA vira 'extracted' silencioso.
     const minConf = Number(process.env.RETAIL_CLOSING_MIN_CONFIDENCE || 80);
-    const status = (confidence >= minConf && informedTotal > 0) ? "extracted" : "needs_review";
+    const status = (confidence >= minConf && informedTotal > 0 && !readError) ? "extracted" : "needs_review";
     db.prepare(`UPDATE retail_daily_closings SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(status, orgId, closing.id);
-    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status }); } catch { /* noop */ }
+    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status, readError }); } catch { /* noop */ }
 
-    return { closing: this.get(orgId, closing.id), extraction: { ...parsed, informedTotal, confidence, needsReview: status === "needs_review" } };
+    return { closing: this.get(orgId, closing.id), extraction: { ...parsed, informedTotal, confidence, needsReview: status === "needs_review", readError } };
   }
 
   // ── Fase C2 — fechamento noturno completo (padrão da folha da loja) ────────

@@ -510,6 +510,64 @@ export function sellerRosterHint(names: Array<string | null | undefined>): strin
   return ` VENDEDORES CADASTRADOS DESTA LOJA (referência): ${clean.join(", ")}. Ao ler cada NOME manuscrito, associe ao nome MAIS PARECIDO desta lista (mesmo com erro de grafia/acento/abreviação ou só o primeiro nome) e devolva o nome exatamente como está na lista. Só mantenha o que leu se NENHUM da lista for claramente parecido.`;
 }
 
+/**
+ * Repara um JSON que veio CORTADO (truncado por limite de tokens) ou embrulhado
+ * em cerca ```json. É a defesa contra "a foto parou de ler / baixa confiança 0%":
+ * quando a resposta da visão estoura o `max_tokens`, o JSON chega incompleto e o
+ * `JSON.parse` cru falha — antes isso virava um `{}` silencioso (confiança 0), que
+ * o gestor lê como "a IA não conseguir ler", sem saber que na verdade a folha era
+ * grande demais pro limite. Aqui salvamos o PREFIXO legível: cortamos no último
+ * valor completo, descartamos chave/valor pela metade e fechamos os colchetes/
+ * chaves abertos. NUNCA inventa dado — só preserva o que já estava escrito e
+ * descarta o pedaço cortado. Devolve o JSON reparado (string) ou null se nem o
+ * prefixo for recuperável.
+ */
+export function repairTruncatedJson(raw: string): string | null {
+  let s = String(raw || "").trim();
+  if (!s) return null;
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try { JSON.parse(s); return s; } catch { /* segue pro reparo */ }
+
+  // 1ª passada: acha o ÚLTIMO ponto de corte SEGURO — nunca confiamos num número
+  // solto no fim (um "1500" cortado vira "15", que parece completo e CORROMPERIA o
+  // valor). Só é seguro cortar:
+  //   - DEPOIS de um `}`/`]` (a estrutura fechou por inteiro), ou
+  //   - ANTES de uma `,` fora de string (o par chave:valor anterior está completo).
+  // Assim descartamos sempre o campo que estava sendo escrito quando cortou.
+  let inStr = false, esc = false, lastSafe = -1;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "}" || c === "]") lastSafe = i + 1; // inclui o fechamento
+    else if (c === ",") lastSafe = i;              // corta ANTES da vírgula
+  }
+  if (lastSafe < 0) return null;
+  let head = s.slice(0, lastSafe).trim().replace(/,\s*$/, "");
+  if (!head) return null;
+
+  // 2ª passada: recomputa a pilha de colchetes/chaves abertos no prefixo salvo e
+  // fecha na ordem inversa.
+  const stack: string[] = [];
+  let inStr2 = false, esc2 = false;
+  for (let i = 0; i < head.length; i++) {
+    const c = head[i];
+    if (inStr2) { if (esc2) { esc2 = false; } else if (c === "\\") { esc2 = true; } else if (c === '"') { inStr2 = false; } continue; }
+    if (c === '"') inStr2 = true;
+    else if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if (c === "}" || c === "]") stack.pop();
+  }
+  let repaired = head;
+  for (let i = stack.length - 1; i >= 0; i--) repaired += stack[i];
+  try { JSON.parse(repaired); return repaired; } catch { return null; }
+}
+
 export async function extractClosingFromImage(base64: string, mimetype = "image/jpeg", sellerNames: Array<string | null | undefined> = []): Promise<string> {
   const system = `Você é um assistente de leitura de FOLHAS DE FECHAMENTO DE CAIXA de loja no varejo brasileiro. A folha do dia costuma ter: valores por forma de pagamento (dinheiro, PIX), CRÉDITO e DÉBITO abertos POR BANDEIRA (ex.: Amex/Master/Visa/Elo no crédito; Redshop/Eletron/Elo no débito), despesas do dia, um RANKING por vendedor (nome, valor vendido, atendimentos "A/P" e peças "P/A"), cadastros de clientes, boleta inicial/final, malote e às vezes um comprovante de POS (Clover etc.) grampeado com "vendas por forma de pagamento". Extraia o que estiver legível e devolva SOMENTE um JSON:
 {"dinheiro": <número ou null>, "pix": <número ou null>, "credito": <número, TOTAL do crédito, ou null>, "debito": <número, TOTAL do débito, ou null>, "voucher": <número ou null>, "troca": <número ou null>, "outros": <número ou null>, "total": <número, o total escrito na folha, ou null>,
@@ -534,11 +592,27 @@ Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use sepa
       },
     ] as any,
     temperature: 0.1,
-    max_tokens: 1800,
+    // A folha do fechamento é RICA (formas de pagamento + bandeiras + despesas +
+    // ranking de 10+ vendedores + boletas + POS): 1800 tokens estourava e cortava
+    // o JSON no meio (→ parse falha → confiança 0 → "parou de ler"). 4000 cobre a
+    // folha cheia com folga; se ainda assim cortar, `finish_reason === 'length'`
+    // dispara o reparo abaixo em vez de devolver um JSON quebrado.
+    max_tokens: 4000,
     response_format: { type: "json_object" },
   });
   recordUsage(process.env.OPENAI_VISION_MODEL || CHAT_MODEL, "vision", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0);
-  return res.choices[0]?.message?.content || "";
+  const content = res.choices[0]?.message?.content || "";
+  // Truncou no limite de tokens: salva o prefixo legível e MARCA `_truncated`
+  // pra folha ir pra conferência humana (nunca 'extracted' silencioso).
+  if (res.choices[0]?.finish_reason === "length") {
+    const repaired = repairTruncatedJson(content);
+    let obj: any = {};
+    try { obj = repaired ? JSON.parse(repaired) : {}; } catch { obj = {}; }
+    obj._truncated = true;
+    if (typeof obj.confidence === "number") obj.confidence = Math.min(obj.confidence, 50);
+    return JSON.stringify(obj);
+  }
+  return content;
 }
 
 /**

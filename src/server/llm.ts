@@ -30,6 +30,38 @@ export const CHAT_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 export const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || "text-embedding-3-small";
 export const TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
 
+/**
+ * ADR-154 F1 (cascata de modelo) — SELEÇÃO POR NÍVEL no sink genérico `chat()`.
+ *
+ * Contexto/gap: `chat()` (usado por `AIOrchestratorService` e pelos agentes
+ * legados) chamava SEMPRE o `CHAT_MODEL` fixo (caro), sem a cascata
+ * determinístico→econômico→caro que o custo de IA exige (ANALISE-ESTADO-FINAL §6).
+ *
+ * Esta fatia é a PRIMITIVA mínima: mapeia um NÍVEL declarado pelo caller a um
+ * modelo, por regra determinística e via env. NÃO é um segundo Model Router — o
+ * roteador por-capacidade das Skills (`SkillOsModelRouterService`, PRD 4 F5) segue
+ * sendo o motor único daquele caminho (§184); aqui é só a escolha de modelo do
+ * caminho genérico OpenAI, que não passa por catálogo/health.
+ *
+ * 0-REGRESSÃO POR CONSTRUÇÃO: quem não passa `tier` (todos os callers de hoje)
+ * cai em 'standard' = `CHAT_MODEL` — comportamento idêntico. A economia só
+ * acontece quando um caller OPTA por 'economy' (fatia seguinte liga os de baixa
+ * complexidade: classificadores, extrações curtas). 'premium' default = standard
+ * (sem inventar um modelo mais caro que a org não configurou).
+ */
+export type ChatTier = "economy" | "standard" | "premium";
+export const CHAT_MODEL_ECONOMY = process.env.OPENAI_MODEL_ECONOMY || "gpt-4o-mini";
+export const CHAT_MODEL_PREMIUM = process.env.OPENAI_MODEL_PREMIUM || CHAT_MODEL;
+
+/** Nível → modelo (determinístico). Nível ausente/desconhecido → standard. */
+export function pickChatModel(tier?: ChatTier): string {
+  switch (tier) {
+    case "economy": return CHAT_MODEL_ECONOMY;
+    case "premium": return CHAT_MODEL_PREMIUM;
+    default: return CHAT_MODEL; // 'standard' e qualquer valor inesperado
+  }
+}
+
 export function isAIConfigured(): boolean {
   return !!process.env.OPENAI_API_KEY;
 }
@@ -104,23 +136,31 @@ function recordUsage(
   } catch { /* medição nunca pode quebrar o atendimento */ }
 }
 
-/** Chat completion. Use json:true para forçar resposta em JSON. */
+/**
+ * Chat completion. Use json:true para forçar resposta em JSON.
+ * `tier` (ADR-154 F1) escolhe o modelo por nível: 'economy' (barato) para
+ * tarefas simples, 'standard' (default = CHAT_MODEL) para o resto, 'premium'
+ * quando configurado. Omitir `tier` mantém o modelo de sempre (0-regressão).
+ */
 export async function chat(
   prompt: string,
-  opts: { temperature?: number; json?: boolean; system?: string } = {}
+  opts: { temperature?: number; json?: boolean; system?: string; tier?: ChatTier } = {}
 ): Promise<string> {
   const messages: { role: "system" | "user"; content: string }[] = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: prompt });
 
+  const model = pickChatModel(opts.tier);
   const t0 = Date.now();
   const res = await getClient().chat.completions.create({
-    model: CHAT_MODEL,
+    model,
     messages,
     temperature: opts.temperature ?? 0.4,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),
   });
-  recordUsage(CHAT_MODEL, "chat", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0, undefined, Date.now() - t0);
+  // Contabiliza o modelo REALMENTE usado (o preço de 'economy' é menor — o
+  // ledger precisa refletir a economia, não o CHAT_MODEL fixo).
+  recordUsage(model, "chat", res.usage?.prompt_tokens || 0, res.usage?.completion_tokens || 0, undefined, Date.now() - t0);
   return res.choices[0]?.message?.content || "";
 }
 

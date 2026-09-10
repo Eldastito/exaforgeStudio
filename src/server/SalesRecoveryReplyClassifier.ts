@@ -77,7 +77,10 @@ export async function classify(text: string): Promise<SalesReplyClassificationRe
   }
 
   let raw = "";
-  try { raw = await _chat(sample, { system: SYSTEM_PROMPT, json: true, temperature: 0 }); }
+  // ADR-154 F2: classificação de intenção de baixa complexidade (JSON + temp 0
+  // + whitelist na saída) → tier 'economy'; o fallback 'unknown' protege se o
+  // modelo econômico sair do enum (0-regressão de comportamento).
+  try { raw = await _chat(sample, { system: SYSTEM_PROMPT, json: true, temperature: 0, tier: "economy" }); }
   catch (e: any) { return { intent: "unknown", confidence: 0, rationale: `LLM erro: ${e?.message || e}` }; }
 
   let parsed: any = null;

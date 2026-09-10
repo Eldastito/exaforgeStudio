@@ -191,7 +191,7 @@ export class ClinicReminderService {
        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')`
     ).run(id, orgId, appointmentId, apt.contact_id, channelId, contact.identifier, templateKey);
 
-    const sender: MessageSender = opts.sender || MessageProviderService.sendMessage.bind(MessageProviderService);
+    const sender: MessageSender = opts.sender || ((ch, to, text) => MessageProviderService.sendMessage(ch, to, text, { feature: "agenda" }));
     try {
       const result = await sender(channelId, contact.identifier, message);
       const providerMessageId = typeof result === "string" ? result

@@ -249,7 +249,7 @@ export class ClinicAddendumNoticeService {
       channelId, toIdentifier: contact.identifier, status: "queued", portalTokenId: tokenInfo.id,
     });
 
-    const sender: NoticeSender = opts.sender || MessageProviderService.sendMessage.bind(MessageProviderService);
+    const sender: NoticeSender = opts.sender || ((ch, to, text) => MessageProviderService.sendMessage(ch, to, text, { feature: "clinica" }));
     try {
       const result = await sender(channelId, contact.identifier, message);
       const providerMessageId = typeof result === "string" ? result

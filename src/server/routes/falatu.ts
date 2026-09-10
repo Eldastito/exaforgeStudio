@@ -18,6 +18,7 @@ import { FalatuRefundService, FalatuRefundError } from "../FalatuRefundService.j
 import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOfferService.js";
 import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineService.js";
 import { FalaTuReportService } from "../FalaTuReportService.js";
+import { FileRequestCatalogService } from "../FileRequestCatalogService.js";
 import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
@@ -306,6 +307,31 @@ router.post("/reports/summary", async (req: AuthRequest, res): Promise<any> => {
   const format = req.body?.format === "xlsx" ? "xlsx" : "pdf"; // §65: "me manda em Excel"
   try { res.json(await FalaTuReportService.executiveSummary(req.organizationId!, req.user, { correlationId, format })); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// PRD WhatsApp Unificado F5.1 (RF-07 §13.1/§13.2/§13.3) — CATÁLOGO de arquivos
+// pela conversa: interpreta + AUTORIZA o pedido e forma o resultado estruturado,
+// SEM gerar arquivo (geração é F5.2, entrega F5.3). `catalog` lista o que o usuário
+// pode pedir; `resolve` resolve um pedido (ou "isso" via ref:'last', §13.3).
+router.get("/files/catalog", (req: AuthRequest, res): any => {
+  res.json({ catalog: FileRequestCatalogService.list(req.organizationId!, req.user) });
+});
+
+router.post("/files/resolve", (req: AuthRequest, res): any => {
+  const b = req.body || {};
+  const conversationId = typeof b.conversationId === "string" ? b.conversationId : "";
+  if (!conversationId) return res.status(400).json({ error: "conversationId é obrigatório." });
+  const format = ["pdf", "xlsx", "docx"].includes(b.format) ? b.format : undefined;
+  const ref = b.ref === "last" ? "last" : undefined;
+  try {
+    res.json(FileRequestCatalogService.resolve(req.organizationId!, req.user, {
+      kind: typeof b.kind === "string" ? b.kind : undefined,
+      ref, format, conversationId,
+      period: b.period, filters: b.filters, unitId: b.unitId ?? null,
+      correlationId: typeof b.correlationId === "string" ? b.correlationId : null,
+      remember: b.remember !== false,
+    }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // PRD 1 Fase 2.4 (CA7, §17-18) — INTAKE: o Fala Tu recebe um documento

@@ -11534,6 +11534,32 @@ const initDb = () => {
     `);
   } catch (e) { console.error('[DB] Falha ao criar falatu_bridge_backfill_state', e); }
 
+  // PRD WhatsApp Unificado F5.1 (RF-07 §13.1/§13.3) — memória do ÚLTIMO resultado
+  // consultado por usuário/conversa, para reexportar "isso" (ex.: "me manda isso em
+  // Excel") com o MESMO recorte e snapshot congelado. Uma linha por (org, usuário,
+  // conversa) — upsert; a referência sempre aponta pro último resultado daquela
+  // conversa. `snapshot_json` congela o resultado estruturado (fonte + instante +
+  // ausência de dado), então trocar só o FORMATO não reconsulta nem muda os números.
+  // Aditiva/opt-in por uso; isolada por organization_id.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS falatu_last_result (
+        organization_id  TEXT NOT NULL,
+        user_id          TEXT NOT NULL,
+        conversation_id  TEXT NOT NULL,
+        catalog_key      TEXT NOT NULL,          -- entrada do catálogo (§13.2)
+        format           TEXT,                   -- pdf | xlsx | docx (formato pedido)
+        params_json      TEXT,                   -- período/filtros/unidade do recorte
+        snapshot_json    TEXT,                   -- resultado estruturado CONGELADO
+        source           TEXT,                   -- fonte da consulta
+        queried_at       DATETIME,               -- instante da consulta (§13.3)
+        correlation_id   TEXT,
+        created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, user_id, conversation_id)
+      );
+    `);
+  } catch (e) { console.error('[DB] Falha ao criar falatu_last_result', e); }
+
   // ADR-199 F0c-1 — rebuild UNIQUE(email) → UNIQUE(organization_id, email). É o passo
   // de MAIOR risco do projeto, então SÓ roda quando FEATURE_ORG_GROUPS está ligada
   // (canary): mergear o PR NÃO altera o schema de produção. Idempotente (no-op se já

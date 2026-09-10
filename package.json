@@ -59,6 +59,7 @@
     "test:delivery-failure-taxonomy": "tsx scripts/test-delivery-failure-taxonomy.ts",
     "test:feature-routing-cobranca": "tsx scripts/test-feature-routing-cobranca.ts",
     "test:feature-routing-clinica": "tsx scripts/test-feature-routing-clinica.ts",
+    "test:feature-routing-comercial": "tsx scripts/test-feature-routing-comercial.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",

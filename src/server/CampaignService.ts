@@ -158,7 +158,7 @@ export class CampaignService {
         }
 
         try {
-          await MessageProviderService.sendMessage(channelId, rec.identifier, this.personalize(message, contact?.name));
+          await MessageProviderService.sendMessage(channelId, rec.identifier, this.personalize(message, contact?.name), { feature: "campanhas" });
           db.prepare(`UPDATE campaign_recipients SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?`).run(rec.id);
           db.prepare(`UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ?`).run(campaignId);
           sentToday++;

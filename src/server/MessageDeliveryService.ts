@@ -49,9 +49,11 @@ const DEGRADED_MIN = Math.max(1, Number(process.env.CONTINUITY_DELIVERY_DEGRADED
 /** Sender injetável — produção usa o provedor real; testes injetam um fake.
  * Devolve o id do provedor (wamid) quando disponível, para correlacionar os
  * recibos de entrega. */
-export type DeliverySender = (channelId: string, recipient: string, content: string) => Promise<string | void>;
-let sender: DeliverySender = async (channelId, recipient, content) => {
-  return await MessageProviderService.sendMessage(channelId, recipient, content);
+export type DeliverySender = (channelId: string, recipient: string, content: string, feature?: string | null) => Promise<string | void>;
+let sender: DeliverySender = async (channelId, recipient, content, feature) => {
+  // F6.1: repassa a FINALIDADE ao sink pra o gate de finalidade se aplicar
+  // também no caminho assíncrono (sem `feature` = comportamento herdado).
+  return await MessageProviderService.sendMessage(channelId, recipient, content, { feature: feature || undefined });
 };
 
 type DeliveryRow = {
@@ -63,6 +65,7 @@ type DeliveryRow = {
   command_id: string | null;
   recipient: string;
   content: string;
+  feature: string | null;
   attempt_count: number;
   max_attempts: number;
 };
@@ -83,14 +86,14 @@ export class MessageDeliveryService {
    */
   static enqueue(orgId: string, input: {
     messageId: string; channelId: string; recipient: string; content: string;
-    ticketId?: string | null; commandId?: string | null;
+    ticketId?: string | null; commandId?: string | null; feature?: string | null;
   }): string {
     const id = randomUUID();
     db.prepare(
       `INSERT INTO message_deliveries
-         (id, organization_id, message_id, ticket_id, channel_id, command_id, recipient, content, status, max_attempts, next_attempt_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, CURRENT_TIMESTAMP)`
-    ).run(id, orgId, input.messageId, input.ticketId || null, input.channelId, input.commandId || null, input.recipient, input.content, MAX_ATTEMPTS);
+         (id, organization_id, message_id, ticket_id, channel_id, command_id, recipient, content, feature, status, max_attempts, next_attempt_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, CURRENT_TIMESTAMP)`
+    ).run(id, orgId, input.messageId, input.ticketId || null, input.channelId, input.commandId || null, input.recipient, input.content, input.feature || null, MAX_ATTEMPTS);
     // Caminho rápido: tenta já, sem esperar o tick do timer. Só quando o
     // dispatcher está ativo (boot chamou start()); nos testes o timer fica
     // desligado e o dispatch é dirigido manualmente (determinístico).
@@ -108,7 +111,7 @@ export class MessageDeliveryService {
     dispatching = true;
     try {
       const due = db.prepare(
-        `SELECT id, organization_id, message_id, ticket_id, channel_id, command_id, recipient, content, attempt_count, max_attempts
+        `SELECT id, organization_id, message_id, ticket_id, channel_id, command_id, recipient, content, feature, attempt_count, max_attempts
            FROM message_deliveries
           WHERE status = 'queued' AND next_attempt_at <= CURRENT_TIMESTAMP
           ORDER BY next_attempt_at ASC
@@ -145,7 +148,7 @@ export class MessageDeliveryService {
     ).run(attempt, `+${delaySec} seconds`, d.id);
 
     try {
-      const providerMessageId = await sender(d.channel_id, d.recipient, d.content);
+      const providerMessageId = await sender(d.channel_id, d.recipient, d.content, d.feature);
       this.markSent(d, attempt, typeof providerMessageId === "string" ? providerMessageId : null);
       return "sent";
     } catch (e: any) {

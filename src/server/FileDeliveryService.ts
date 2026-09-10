@@ -93,11 +93,16 @@ export class FileDeliveryService {
     const fileName = `${String(title).replace(/[^\w\sÀ-ÿ.-]/g, "").trim().slice(0, 60) || "arquivo"}.${ext}`;
 
     // 3. Entrega nativa com MIME tipado; fallback declarado pro LINK (§13.4).
+    // Finalidade "gestao" (F6.1): relatório/documento é uso de GESTÃO — o gate de
+    // finalidade se aplica. ("falatu" não era finalidade válida → gate no-op.)
     try {
-      await MessageProviderService.sendDocument(channelId, toIdentifier, url, fileName, input.caption, { mimeType, feature: "falatu" });
+      await MessageProviderService.sendDocument(channelId, toIdentifier, url, fileName, input.caption, { mimeType, feature: "gestao" });
       return { sent: true, native: true, url, artifactId: artifactId! };
-    } catch {
-      await MessageProviderService.sendMessage(channelId, toIdentifier, `📎 Seu arquivo (link seguro, expira em minutos): ${url}`);
+    } catch (e: any) {
+      // Uso desativado pelo gate NÃO vira link — pausar é a decisão de política
+      // (§14); mandar o link burlaria o gate. Só cai pro link em falha de anexo.
+      if (e?.code === "outbound_blocked:feature_disabled") return { sent: false, reason: "feature_disabled" };
+      await MessageProviderService.sendMessage(channelId, toIdentifier, `📎 Seu arquivo (link seguro, expira em minutos): ${url}`, { feature: "gestao" });
       return { sent: true, native: false, url, artifactId: artifactId! };
     }
   }

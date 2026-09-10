@@ -659,6 +659,9 @@ const initDb = () => {
   // (WhatsApp Cloud `statuses[]`) com a entrega pelo id do provedor (wamid).
   try { db.exec(`ALTER TABLE message_deliveries ADD COLUMN provider_message_id TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_message_deliveries_provider ON message_deliveries (organization_id, provider_message_id)`); } catch(e){}
+  // F6.1 (RF-03/RF-08): carrega a FINALIDADE pela fila até o sink — sem isso o
+  // caminho assíncrono perdia o `feature` e o gate de finalidade não se aplicava.
+  try { db.exec(`ALTER TABLE message_deliveries ADD COLUMN feature TEXT`); } catch(e){}
 
   // Continuity Layer (ADR-082, Fase 4a) — REGISTRO DE NÓS EDGE + protocolo de
   // sync. Um "ZappFlow Edge" é um processo/instalação local do cliente que

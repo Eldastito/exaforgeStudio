@@ -74,7 +74,7 @@ export class ProspectExecutionService {
         })) || null;
       } else {
         // sendMessage agora devolve o id do provedor (wamid) como string.
-        const wamid = await MessageProviderService.sendMessage(ch.id, phone, o.body);
+        const wamid = await MessageProviderService.sendMessage(ch.id, phone, o.body, { feature: "prospeccao" });
         providerMessageId = (typeof wamid === "string" && wamid) ? wamid : null;
       }
       sentVia = "whatsapp";

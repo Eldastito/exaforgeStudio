@@ -46,6 +46,34 @@ const BACKOFF_SECONDS = (process.env.CONTINUITY_DELIVERY_BACKOFF_SECONDS || "30,
 const STUCK_ATTEMPTS = Math.max(1, Number(process.env.CONTINUITY_DELIVERY_STUCK_ATTEMPTS || 3));
 const DEGRADED_MIN = Math.max(1, Number(process.env.CONTINUITY_DELIVERY_DEGRADED_MIN || 3));
 
+export type SendFailureClass = "permanent" | "transient" | "unknown";
+
+/**
+ * F6.2 (RF-08/CA-08): classifica o erro de envio ao provedor em três resultados
+ * DISTINGUÍVEIS — pura/determinística (roda em CI). O ponto do CA-08 é NÃO tratar
+ * tudo como "tenta de novo": um número inválido não melhora com retry, e um
+ * timeout SEM resposta pode já ter entregue (repetir = efeito duplicado).
+ *   - permanent: o provedor recusou por algo que retry não conserta (número
+ *     inválido, opt-out/bloqueado, 4xx de autorização/validação) → não retenta.
+ *   - unknown:   pediu e não veio resposta (timeout/abort/socket hang up) → NÃO
+ *     sabemos se entregou; segura pra reconciliar antes de repetir.
+ *   - transient: indisponibilidade passageira (5xx, reset de conexão, 429) →
+ *     retenta com backoff (comportamento herdado).
+ * Sem sinal claro → transient (o mais conservador: só custa uma nova tentativa,
+ * nunca perde a mensagem nem duplica).
+ */
+export function classifySendError(err: any): SendFailureClass {
+  const msg = String(err?.message || err || "").toLowerCase();
+  const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status) || (msg.match(/\b(4\d\d|5\d\d)\b/) ? Number(RegExp.$1) : 0);
+  // Indeterminado: pediu, não respondeu — pode ter entregue.
+  if (/\b(timeout|timed out|etimedout|econnaborted|esockettimedout|socket hang up|aborted|abort)\b/.test(msg)) return "unknown";
+  // Permanente: retry não conserta.
+  if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422) return "permanent";
+  if (/\b(invalid|inexistente|não existe|nao existe|not found|forbidden|unauthorized|opt.?out|opt-out|blocked|bloqueado|descadastr|número inválido|numero invalido|invalid.*(number|recipient|wa_id))\b/.test(msg)) return "permanent";
+  // Transitório: indisponibilidade passageira (default conservador).
+  return "transient";
+}
+
 /** Sender injetável — produção usa o provedor real; testes injetam um fake.
  * Devolve o id do provedor (wamid) quando disponível, para correlacionar os
  * recibos de entrega. */
@@ -105,8 +133,8 @@ export class MessageDeliveryService {
    * Processa todas as entregas vencidas (status='queued' e next_attempt_at <= agora).
    * Reentrância protegida: um dispatch por vez. Retorna um resumo.
    */
-  static async dispatchDue(limit = 50): Promise<{ sent: number; retried: number; failed: number }> {
-    const summary = { sent: 0, retried: 0, failed: 0 };
+  static async dispatchDue(limit = 50): Promise<{ sent: number; retried: number; failed: number; unknown: number }> {
+    const summary = { sent: 0, retried: 0, failed: 0, unknown: 0 };
     if (dispatching) return summary;
     dispatching = true;
     try {
@@ -130,8 +158,8 @@ export class MessageDeliveryService {
     return summary;
   }
 
-  /** Uma tentativa de entrega. Retorna o efeito ('sent' | 'retried' | 'failed'). */
-  private static async attemptOne(d: DeliveryRow): Promise<"sent" | "retried" | "failed"> {
+  /** Uma tentativa de entrega. Retorna o efeito ('sent' | 'retried' | 'failed' | 'unknown'). */
+  private static async attemptOne(d: DeliveryRow): Promise<"sent" | "retried" | "failed" | "unknown"> {
     const attempt = d.attempt_count + 1;
     const maxAttempts = d.max_attempts || MAX_ATTEMPTS;
     const delaySec = BACKOFF_SECONDS[Math.min(attempt - 1, BACKOFF_SECONDS.length - 1)];
@@ -153,12 +181,17 @@ export class MessageDeliveryService {
       return "sent";
     } catch (e: any) {
       const errMsg = String(e?.message || e).slice(0, 500);
-      if (attempt >= maxAttempts) {
-        this.markFailed(d, attempt, errMsg);
-        return "failed";
-      }
+      const cls = classifySendError(e);
+      // Permanente: retry não conserta → falha JÁ (não gasta as tentativas).
+      if (cls === "permanent") { this.markFailed(d, attempt, errMsg, "permanent"); return "failed"; }
+      // Indeterminado (CA-08): pode ter entregue → NÃO repete em silêncio; segura
+      // pra reconciliar (o pré-claim já empurrou next_attempt_at, mas 'unknown'
+      // sai da fila e não é reprocessado automaticamente).
+      if (cls === "unknown") { this.markUnknown(d, attempt, errMsg); return "unknown"; }
+      // Transitório: retenta com backoff, até o teto.
+      if (attempt >= maxAttempts) { this.markFailed(d, attempt, errMsg, "transient"); return "failed"; }
       // Continua 'queued'; next_attempt_at já foi agendado pelo pré-claim.
-      db.prepare(`UPDATE message_deliveries SET last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(errMsg, d.id);
+      db.prepare(`UPDATE message_deliveries SET last_error = ?, failure_class = 'transient', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(errMsg, d.id);
       return "retried";
     }
   }
@@ -176,24 +209,56 @@ export class MessageDeliveryService {
     this.emit(d, "sent");
   }
 
-  private static markFailed(d: DeliveryRow, attempt: number, errMsg: string) {
+  private static markFailed(d: DeliveryRow, attempt: number, errMsg: string, failureClass: SendFailureClass = "transient") {
     db.prepare(
       `UPDATE message_deliveries
-          SET status = 'failed', attempt_count = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
+          SET status = 'failed', attempt_count = ?, last_error = ?, failure_class = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`
-    ).run(attempt, errMsg, d.id);
+    ).run(attempt, errMsg, failureClass, d.id);
     try { db.prepare(`UPDATE messages SET delivery_status = 'failed', delivery_error = ? WHERE id = ?`).run(errMsg, d.message_id); } catch { /* noop */ }
-    try { logAuthEvent(d.organization_id, "system", d.recipient, "MESSAGE_SEND_FAILED", { ticketId: d.ticket_id, deliveryId: d.id, attempts: attempt, error: errMsg }); } catch { /* noop */ }
-    ContinuityService.append(d.organization_id, { aggregateType: "message", aggregateId: d.message_id, eventType: "message.failed", payload: { ticketId: d.ticket_id, deliveryId: d.id, error: errMsg } });
+    try { logAuthEvent(d.organization_id, "system", d.recipient, "MESSAGE_SEND_FAILED", { ticketId: d.ticket_id, deliveryId: d.id, attempts: attempt, error: errMsg, failureClass }); } catch { /* noop */ }
+    ContinuityService.append(d.organization_id, { aggregateType: "message", aggregateId: d.message_id, eventType: "message.failed", payload: { ticketId: d.ticket_id, deliveryId: d.id, error: errMsg, failureClass } });
     this.emit(d, "failed", errMsg);
-    // Alerta ao operador: a mensagem não chegou depois de todas as tentativas.
+    // Alerta ao operador: a mensagem não chegou. Permanente vs transitório muda a ação.
     try {
       NotificationService.push({
         organizationId: d.organization_id,
         title: "Uma mensagem não pôde ser entregue",
-        message: `Após ${attempt} tentativas o provedor seguiu recusando. Verifique a conexão do canal. Detalhe: ${errMsg.slice(0, 180)}`,
+        message: failureClass === "permanent"
+          ? `O destino foi recusado de forma definitiva (ex.: número inválido/opt-out). Não vamos repetir. Detalhe: ${errMsg.slice(0, 180)}`
+          : `Após ${attempt} tentativas o provedor seguiu recusando. Verifique a conexão do canal. Detalhe: ${errMsg.slice(0, 180)}`,
         type: "alert",
         dedupeKey: `msg_delivery_failed:${d.channel_id}`,
+        dedupeWindowMin: 60,
+      });
+    } catch { /* noop */ }
+  }
+
+  /**
+   * F6.2 (CA-08): resultado INDETERMINADO — o provedor não respondeu, mas o envio
+   * pode ter chegado. Marca 'unknown' e SAI da fila (não é reprocessado
+   * automaticamente): repetir às cegas duplicaria o efeito. Fica aguardando
+   * RECONCILIAÇÃO — um recibo do provedor por wamid (`markProviderStatus`) resolve
+   * quando existir; senão o operador decide. Limitação documentada: sem API de
+   * consulta do provedor, não há prova automática de entrega (§14).
+   */
+  private static markUnknown(d: DeliveryRow, attempt: number, errMsg: string) {
+    db.prepare(
+      `UPDATE message_deliveries
+          SET status = 'unknown', attempt_count = ?, last_error = ?, failure_class = 'unknown', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`
+    ).run(attempt, errMsg, d.id);
+    try { db.prepare(`UPDATE messages SET delivery_status = 'unknown' WHERE id = ?`).run(d.message_id); } catch { /* noop */ }
+    try { logAuthEvent(d.organization_id, "system", d.recipient, "MESSAGE_SEND_UNKNOWN", { ticketId: d.ticket_id, deliveryId: d.id, attempts: attempt, error: errMsg }); } catch { /* noop */ }
+    ContinuityService.append(d.organization_id, { aggregateType: "message", aggregateId: d.message_id, eventType: "message.send_unknown", payload: { ticketId: d.ticket_id, deliveryId: d.id, error: errMsg } });
+    this.emit(d, "unknown", errMsg);
+    try {
+      NotificationService.push({
+        organizationId: d.organization_id,
+        title: "Um envio ficou com resultado indeterminado",
+        message: `O provedor não respondeu a tempo; a mensagem pode ou não ter chegado. Não vamos repetir automaticamente para evitar envio duplicado — reconciliando.`,
+        type: "alert",
+        dedupeKey: `msg_delivery_unknown:${d.channel_id}`,
         dedupeWindowMin: 60,
       });
     } catch { /* noop */ }
@@ -249,7 +314,7 @@ export class MessageDeliveryService {
   }
 
   /** Notifica o painel ao vivo. Casa pelo commandId (id do balão otimista) ou pelo id do servidor. */
-  private static emit(d: DeliveryRow, status: "queued" | "sent" | "delivered" | "failed", error?: string) {
+  private static emit(d: DeliveryRow, status: "queued" | "sent" | "delivered" | "failed" | "unknown", error?: string) {
     try {
       const io = (global as any).io;
       if (io) io.to(`org:${d.organization_id}`).emit("message_delivery_status", {

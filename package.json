@@ -54,6 +54,7 @@
     "test:falatu-file-catalog": "tsx scripts/test-falatu-file-catalog.ts",
     "test:falatu-docx": "tsx scripts/test-falatu-docx.ts",
     "test:falatu-file-delivery": "tsx scripts/test-falatu-file-delivery.ts",
+    "test:falatu-file-ca07": "tsx scripts/test-falatu-file-ca07.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",
     "test:falatu-home-today": "tsx scripts/test-falatu-home-today.ts",
     "test:ux-presentation": "tsx scripts/test-ux-presentation.ts",

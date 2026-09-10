@@ -63,6 +63,9 @@ export type SendFailureClass = "permanent" | "transient" | "unknown";
  * nunca perde a mensagem nem duplica).
  */
 export function classifySendError(err: any): SendFailureClass {
+  // F6.4: bloqueio do gate de finalidade (F2.4/F6.3) é PERMANENTE — retry não
+  // ajuda até o dono religar a finalidade no binding. Não gasta backoff à toa.
+  if (err?.code === "outbound_blocked:feature_disabled") return "permanent";
   const msg = String(err?.message || err || "").toLowerCase();
   const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status) || (msg.match(/\b(4\d\d|5\d\d)\b/) ? Number(RegExp.$1) : 0);
   // Indeterminado: pediu, não respondeu — pode ter entregue.

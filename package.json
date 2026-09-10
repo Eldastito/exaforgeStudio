@@ -633,6 +633,7 @@
     "test:optout-revokes-consent": "tsx scripts/test-optout-revokes-consent.ts",
     "test:business-goal-sla": "tsx scripts/test-business-goal-sla.ts",
     "test:runtime-alerts": "tsx scripts/test-runtime-alerts.ts",
+    "test:csat-appointment": "tsx scripts/test-csat-appointment.ts",
     "test:dashboard-retail-revenue": "tsx scripts/test-dashboard-retail-revenue.ts",
     "test:retail-pattern-memory": "tsx scripts/test-retail-pattern-memory.ts",
     "test:scheduler-retail-auto-learn": "tsx scripts/test-scheduler-retail-auto-learn.ts",

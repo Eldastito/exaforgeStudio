@@ -4,6 +4,7 @@ import { BusinessSnapshotV2Service } from "./BusinessSnapshotV2Service.js";
 import { AnalyticsService } from "./AnalyticsService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { PnlCostReconciliationService } from "./PnlCostReconciliationService.js";
+import { TicketSlaService } from "./TicketSlaService.js";
 
 // ── CEO Operating Layer (ADR-190) — taxonomia executiva do registro de métricas ──
 export const EXECUTIVE_PILLARS = ["commercial", "operations", "finance"] as const;
@@ -193,6 +194,15 @@ export class BusinessGoalService {
       // Só há CSAT no repo (NPS real é `unknown` — não fabricamos 0–10). Sem respostas → unavailable.
       availability: (orgId: string) => { try { return (Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.csat?.responses) || 0) > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
       derive: (orgId: string) => { try { return Number((AnalyticsService.getMetrics(orgId, { period: "month" } as any) as any)?.csat?.satisfactionPct) || 0; } catch { return 0; } },
+    },
+    sla_compliance: {
+      label: "SLA de atendimento (%)", unit: "percent", pillar: "operations", basis: "derived",
+      source: "Tickets avaliados × estourados (SLA)", betterDirection: "up",
+      // Read-only: deriva das colunas persistidas pelo monitor de SLA (o Scheduler
+      // roda o evaluateOrg). SLA desligado ou sem tickets avaliados → unavailable
+      // (não inventa 100%). NUNCA chama evaluateOrg aqui (ele tem efeito colateral).
+      availability: (orgId: string) => { try { return TicketSlaService.compliance(orgId).evaluated > 0 ? "available" : "unavailable"; } catch { return "unavailable"; } },
+      derive: (orgId: string) => { try { return TicketSlaService.compliance(orgId).compliancePct ?? 0; } catch { return 0; } },
     },
 
     // FINANCEIRO — dependem de registro/integração; availability honesta (§31/§32/§33)

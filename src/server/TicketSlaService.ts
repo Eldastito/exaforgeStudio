@@ -107,6 +107,26 @@ export class TicketSlaService {
    * persiste due/breach/segment e notifica o responsável no 1º estouro sem
    * resposta. Idempotente e best-effort. Devolve contadores (usado em teste).
    */
+  /**
+   * READ-ONLY: compliance de SLA derivada das colunas JÁ PERSISTIDAS por
+   * `evaluateOrg` (`sla_due_at`/`sla_breached`), sem efeito colateral. É o
+   * read model pro KPI de operações do Diretor IA — NÃO chame `evaluateOrg`
+   * de leitura (ele faz UPDATE + notifica). O Scheduler mantém as colunas
+   * frescas. `compliancePct` = (avaliados − estourados)/avaliados; null sem
+   * avaliados (não inventa 100%). SLA desligado → tudo zero/null.
+   */
+  static compliance(orgId: string): { evaluated: number; breached: number; compliancePct: number | null } {
+    if (!this.config(orgId).enabled) return { evaluated: 0, breached: 0, compliancePct: null };
+    const r = db.prepare(
+      `SELECT COUNT(*) evaluated, COALESCE(SUM(CASE WHEN sla_breached = 1 THEN 1 ELSE 0 END), 0) breached
+         FROM tickets WHERE organization_id = ? AND sla_due_at IS NOT NULL`
+    ).get(orgId) as any;
+    const evaluated = Number(r?.evaluated || 0);
+    const breached = Number(r?.breached || 0);
+    const compliancePct = evaluated > 0 ? Math.round(((evaluated - breached) / evaluated) * 1000) / 10 : null;
+    return { evaluated, breached, compliancePct };
+  }
+
   static evaluateOrg(orgId: string): { evaluated: number; breached: number; notified: number } {
     const cfg = this.config(orgId);
     if (!cfg.enabled) return { evaluated: 0, breached: 0, notified: 0 };

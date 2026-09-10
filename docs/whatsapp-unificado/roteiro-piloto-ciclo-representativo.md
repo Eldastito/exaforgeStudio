@@ -78,8 +78,15 @@ falha sem explicação, migração não reconciliada.
 
 ## 5. Depois da observação
 
+- **Gate de ampliação (F7.3)** → rodar `GET /api/falatu/pilot-readiness`
+  (owner/admin) ao fim da janela: veredito ADVISÓRIO dos gates OBJETIVOS de
+  reconciliação (migração sem elo quebrado/divergência · fila sem preso/`unknown`
+  não reconciliado · canais sem webhook rejeitado). `ready:false` lista os
+  `blockers` a resolver ANTES de ampliar; `warnings` são atenção, não bloqueio.
+  Limiares (`maxQueueAgeSec`/`maxUnknown`) vêm da baseline, não de SLA inventado.
 - **Regressões observadas** → F7.3 (a IA corrige, quando autorizada e com acesso
-  ao piloto; reconcilia migração/filas). Só ampliar com os gates cumpridos.
+  ao piloto; reconcilia migração/filas). Só ampliar com os gates cumpridos
+  (o `pilot-readiness` acima verde).
 - **Sem regressão crítica e piloto aprovado** → então, e só então, F7.4 (retirar
   duplicatas elegíveis: consumidores migrados, equivalência comprovada, dados
   reconciliados, rollback exercitado, sem escritor paralelo).

@@ -153,7 +153,7 @@ const CollectionSendReminderHandler: CommandHandler = {
     const message = String(p.messageTemplate || CollectionCopy.reminder(variant, { amount, dueDate: p.dueDate, description: p.description })).trim();
     let messageId: string | undefined;
     try {
-      messageId = await MessageProviderService.sendMessage(String(p.channelId), String(p.phone), message);
+      messageId = await MessageProviderService.sendMessage(String(p.channelId), String(p.phone), message, { feature: "cobranca" });
     } catch (e: any) { throwHandler("external_unavailable", `Falha ao enviar WhatsApp: ${e?.message || e}`); }
 
     try { logAuthEvent(orgId, "runtime", null, "RUNTIME_COLLECTION_SENT", { receivableId: p.receivableId, phone: p.phone, amount, paymentId, messageId: messageId || null, variant }); } catch { /* noop */ }

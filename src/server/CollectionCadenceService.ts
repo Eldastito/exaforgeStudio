@@ -225,7 +225,7 @@ export class CollectionCadenceService {
     try {
       messageId = viaExecutor
         ? await this.sendViaExecutor(row, msg, attempt)
-        : await MessageProviderService.sendMessage(row.channelId, row.phone, msg);
+        : await MessageProviderService.sendMessage(row.channelId, row.phone, msg, { feature: "cobranca" });
     }
     catch (e: any) {
       // Envio falhou — reverte a reserva pra permitir retry.

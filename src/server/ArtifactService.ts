@@ -161,4 +161,20 @@ export class ArtifactService {
   static signedUrlForUser(orgId: string, user: any, id: string, ttlMs = DEFAULT_SIGNED_TTL_MS, now = Date.now()): string | null {
     return this.getForUser(orgId, user, id) ? this.signedUrl(orgId, id, ttlMs, now) : null;
   }
+
+  // F5.3 (§13.4): URL assinada ABSOLUTA. O provedor de WhatsApp baixa o arquivo
+  // server-to-server, então precisa de URL absoluta (o retorno de `signedUrl` é
+  // relativo). Sem APP_URL configurada não há como formar absoluta → null honesto
+  // (o chamador cai pro fallback/erro em vez de mandar um link quebrado).
+  static absoluteSignedUrl(orgId: string, id: string, ttlMs = DEFAULT_SIGNED_TTL_MS, now = Date.now()): string | null {
+    const rel = this.signedUrl(orgId, id, ttlMs, now);
+    if (!rel) return null;
+    const base = (process.env.APP_URL || "").replace(/\/$/, "");
+    return base ? `${base}${rel}` : null;
+  }
+
+  /** URL assinada absoluta só se o usuário pode acessar o artefato (revalida na entrega). */
+  static absoluteSignedUrlForUser(orgId: string, user: any, id: string, ttlMs = DEFAULT_SIGNED_TTL_MS, now = Date.now()): string | null {
+    return this.getForUser(orgId, user, id) ? this.absoluteSignedUrl(orgId, id, ttlMs, now) : null;
+  }
 }

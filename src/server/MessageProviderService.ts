@@ -214,7 +214,7 @@ export class MessageProviderService {
    * - evolution/evolution_go: POST no endpoint de mídia (configurável por env).
    * - instagram: não suportado (lança, para o chamador usar o link).
    */
-  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string, opts?: { feature?: string; unitId?: string | null }) {
+  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string, opts?: { feature?: string; unitId?: string | null; mimeType?: string }) {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
@@ -256,7 +256,10 @@ export class MessageProviderService {
       };
 
       // Corpos candidatos (forks da Evolution divergem nos nomes de campo).
-      const bodyA = { number: recipientIdentifier, mediatype: 'document', mimetype: 'application/pdf', media: fileUrl, fileName, caption, delay: 1200 };
+      // F5.3 (§13.4): MIME tipado — não fixa mais application/pdf (XLSX/DOCX
+      // sairiam rotulados errado). Default PDF preserva os chamadores existentes.
+      const mimetype = opts?.mimeType || 'application/pdf';
+      const bodyA = { number: recipientIdentifier, mediatype: 'document', mimetype, media: fileUrl, fileName, caption, delay: 1200 };
       const bodyB = { number: recipientIdentifier, type: 'document', url: fileUrl, fileName, caption, delay: 1200 };
       const bodyC = { number: recipientIdentifier, document: fileUrl, fileName, caption, delay: 1200 };
 

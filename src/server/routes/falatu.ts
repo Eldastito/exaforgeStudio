@@ -19,6 +19,9 @@ import { FalatuSaveOfferService, CANCELLATION_REASONS } from "../FalatuSaveOffer
 import { ContextEngineService as FalaTuContextEngine } from "../ContextEngineService.js";
 import { FalaTuReportService } from "../FalaTuReportService.js";
 import { FileRequestCatalogService } from "../FileRequestCatalogService.js";
+// Registra o handler do job "deliver_file" (F5.3) no boot — side-effect import,
+// pra fila achar o handler mesmo se ninguém tocou a rota ainda.
+import "../FileDeliveryService.js";
 import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";

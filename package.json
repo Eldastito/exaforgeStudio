@@ -636,6 +636,7 @@
     "test:csat-appointment": "tsx scripts/test-csat-appointment.ts",
     "test:model-cascade": "tsx scripts/test-model-cascade.ts",
     "test:ai-usage-attribution": "tsx scripts/test-ai-usage-attribution.ts",
+    "test:retail-commission-unassigned-store": "tsx scripts/test-retail-commission-unassigned-store.ts",
     "test:dashboard-retail-revenue": "tsx scripts/test-dashboard-retail-revenue.ts",
     "test:retail-pattern-memory": "tsx scripts/test-retail-pattern-memory.ts",
     "test:scheduler-retail-auto-learn": "tsx scripts/test-scheduler-retail-auto-learn.ts",

@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
@@ -43,7 +44,10 @@ function daysBefore(dateISO: string, days: number): string {
 
 export class RetailOpsSignalPublisher {
   static run(orgId: string, opts: { asOf?: string; windowDays?: number } = {}): { published: number; resolved: number; reserves: number } {
-    const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.asOf || "")) ? opts.asOf! : new Date().toISOString().slice(0, 10);
+    // `asOf` sem valor = dia COMERCIAL da org (fuso), não UTC — a janela/dedupe
+    // dos sinais rolava no instante errado perto da meia-noite UTC. Kill-switch
+    // 6B respeitado (off → UTC, 0-regressão).
+    const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.asOf || "")) ? opts.asOf! : BusinessTimeService.businessDate(orgId);
     const windowDays = Math.max(1, Number(opts.windowDays || 30));
     const start = daysBefore(asOf, windowDays);
 

@@ -51,6 +51,7 @@ import { FashionTryOnService } from "./FashionTryOnService.js";
 import { RevenueIntelligenceService } from "./RevenueIntelligenceService.js";
 import { RetailTaskService } from "./RetailOpsService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailOpsSignalPublisher } from "./RetailOpsSignalPublisher.js";
 import { RetailPatternMemoryService } from "./RetailPatternMemoryService.js";
 import { VerticalIntelligenceReminderService } from "./VerticalIntelligenceReminderService.js";
@@ -1793,7 +1794,11 @@ export class Scheduler {
       ).all() as any[];
     } catch { return; } // colunas ainda não migradas
     for (const o of orgs) {
-      try { RetailImpactService.snapshotDaily(o.organization_id, today); } catch (e) { /* best-effort */ }
+      // Passa o dia COMERCIAL da org (fuso), não o `today` UTC do throttle — o
+      // snapshot idempotente por (org, dia) tem que fechar o dia certo. O guard
+      // `_lastRetailSnap` (UTC) só evita reprocessar o passe; a data do snapshot
+      // é per-org. Kill-switch 6B respeitado dentro do businessDate.
+      try { RetailImpactService.snapshotDaily(o.organization_id, BusinessTimeService.businessDate(o.organization_id)); } catch (e) { /* best-effort */ }
     }
   }
 

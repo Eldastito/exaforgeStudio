@@ -13,6 +13,7 @@
  * Só leitura agregada; isolado por organização.
  */
 import { randomUUID } from "node:crypto";
+import { BusinessTimeService } from "./BusinessTimeService.js";
 import db from "./db.js";
 import { RetailAdoptionService } from "./RetailAdoptionService.js";
 
@@ -146,7 +147,10 @@ export class RetailImpactService {
    * Chamado pelo Scheduler. Retorna true se gravou.
    */
   static snapshotDaily(orgId: string, today?: string): boolean {
-    const date = today || new Date().toISOString().slice(0, 10);
+    // Dia COMERCIAL da org (fuso), não UTC — senão o snapshot idempotente por
+    // (org, dia) fecha o dia errado perto da meia-noite UTC. Honra o kill-switch
+    // 6B (off → UTC, 0-regressão).
+    const date = today || BusinessTimeService.businessDate(orgId);
     const exists = db.prepare(`SELECT 1 FROM retail_impact_snapshots WHERE organization_id = ? AND snapshot_date = ?`).get(orgId, date);
     if (exists) return false;
 

@@ -29,6 +29,7 @@
  */
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { EncryptionService } from "./EncryptionService.js";
 import { EvolutionService } from "./EvolutionService.js";
 import { logAuthEvent } from "./auditLog.js";
 
@@ -129,7 +130,7 @@ export class ChannelProvisioningService {
 
     try {
       db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(result.state === "open" ? "connected" : "awaiting_qr", result.token || null, channelId);
+        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
     } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId}:`, e); }
 
     logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISIONED", {

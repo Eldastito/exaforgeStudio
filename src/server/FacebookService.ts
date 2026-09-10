@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { EncryptionService } from "./EncryptionService.js";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -18,7 +19,7 @@ export class FacebookService {
     ).get(orgId) as any;
     if (!ch || !ch.token_encrypted) return null;
     const name = (ch.name || "").replace(/^Facebook\s*/i, "").trim();
-    return { token: ch.token_encrypted, pageId: ch.identifier, name };
+    return { token: EncryptionService.decrypt(ch.token_encrypted), pageId: ch.identifier, name };
   }
 
   static isConnected(orgId: string): boolean {

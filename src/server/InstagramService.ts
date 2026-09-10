@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { EncryptionService } from "./EncryptionService.js";
 import { chat, describeImage } from "./llm.js";
 import { StudioService, type BrandProfile } from "./StudioService.js";
 import { ModuleService } from "./ModuleService.js";
@@ -21,7 +22,7 @@ export class InstagramService {
     ).get(orgId) as any;
     if (!ch || !ch.token_encrypted) return null;
     const username = (ch.name || "").replace(/^Instagram\s*@?/i, "").trim();
-    return { token: ch.token_encrypted, igId: ch.identifier, username };
+    return { token: EncryptionService.decrypt(ch.token_encrypted), igId: ch.identifier, username };
   }
 
   static isConnected(orgId: string): boolean {

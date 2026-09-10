@@ -693,9 +693,37 @@ export class RetailCommissionRaceService {
       };
     }
 
+    // ── Vendas SEM LOJA (não entram na corrida por loja) — NUNCA silenciar ──
+    // Correção de anomalia (comissão por loja "não confere"): linhas de venda com
+    // `store_id` NULL (pedido/lançamento manual/ERP sem loja escolhida) casavam
+    // com NENHUMA loja no filtro `r.storeId === st.id` acima e eram DESCARTADAS
+    // da apuração — o vendedor aparecia com R$0 / "não bateu cota" e o total da
+    // loja saía subvalorizado, sem qualquer aviso. Não dá pra INVENTAR a loja (o
+    // vendedor não tem loja fixa — `retail_sellers` não tem store_id), então
+    // SURFACEAMOS a lacuna como pendência acionável: o gestor atribui a loja no
+    // lançamento/pedido e a comissão passa a aparecer. Isolado por org; só na
+    // visão de rede (sem filtro de loja) — uma venda sem loja não é de loja X.
+    const unassignedRows = opts?.storeId ? [] : monthRows.filter((r) => !r.storeId);
+    const unassigned = unassignedRows.length
+      ? {
+          reason: "sem_loja",
+          note: "Vendas sem loja atribuída não entram na corrida — atribua a loja no lançamento/pedido para a comissão do vendedor aparecer.",
+          sellerCount: unassignedRows.length,
+          sales: round2(unassignedRows.reduce((a, r) => a + (Number(r.sales) || 0), 0)),
+          pecas: unassignedRows.reduce((a, r) => a + (Number(r.pecas) || 0), 0),
+          sellers: unassignedRows
+            .map((r) => ({
+              sellerKey: primaryKeyOf(r.sellerUserId, r.matricula, r.sellerName),
+              sellerName: r.sellerName, matricula: r.matricula,
+              sales: round2(Number(r.sales) || 0), pecas: Number(r.pecas) || 0, source: r.source,
+            }))
+            .sort((a, b) => b.sales - a.sales),
+        }
+      : null;
+
     const visible = opts?.storeId ? storeReports.filter((sr) => sr.storeId === opts.storeId) : storeReports;
     return {
-      month, weeks, stores: visible,
+      month, weeks, stores: visible, unassigned,
       networkDeviation: {
         sellers: eligibleSellers.slice(0, Math.max(sellerPrizes.length, 3)).map((s: any) => ({ sellerKey: s.sellerKey, sellerName: s.sellerName, storeName: s.storeName, attainment: s.attainment, prize: s.deviationPrize })),
         stores: eligibleStores.slice(0, Math.max(managerPrizes.length, 3)).map((sr) => ({ storeId: sr.storeId, storeName: sr.storeName, deviation: sr.store.deviation, prize: sr.manager.deviationPrize })),

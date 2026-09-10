@@ -618,6 +618,30 @@ Log operacional das fatias do plano. Cada sessão adiciona 1 entrada.
 
 ---
 
+### Sessão 2026-09-10 (Fatia 6.1 — billing preview: catálogo + snapshot + proporcionalidade)
+
+- **Fase:** 6 (Upgrade com proporcionalidade), Fatia 6.1 — **só o caminho de LEITURA/PREVIEW** (não-gated). O `confirm`/`checkout`/`downgrade` (cobrança real) seguem BLOQUEADOS por Decisão #2 (ToS jurídico) + Asaas homologado — fora desta fatia.
+- **Contexto:** primeira fatia após o PRD WhatsApp Unificado fechar (F0–F7). Escolhida por ser o resto de MAIOR valor × 100% AI-actionable deste PRD (o CTA "Fazer upgrade" da aba Plano e Expansões era placeholder).
+- **Itens executados:**
+  1. `SubscriptionOrchestratorService.preview(orgId, targetPlanId)` — read-only/determinístico. §19: UPGRADE imediato + proporcional ao período restante (`priceDelta × dias_restantes/dias_no_período`), renovação mantida; DOWNGRADE no próximo ciclo, sem cobrança, avisa módulos perdidos; NEW (org sem plano) → proporcional `null` (checkout cheio, não inventa); sem ciclo → `prorationBasis='unknown'` + amount `null` (RN-004, não inventa). Diff de módulos (gained/lost) por plano base.
+  2. `routes/billing.ts` — `GET /api/billing/plans`, `GET /api/billing/current`, `POST /api/billing/upgrade/preview`. Dinheiro role-gated (§73 — só owner/admin). Montado DEPOIS de `/billing/recommendations` (rota mais específica vence).
+  3. Teste E2E offline.
+- **Arquivos criados:**
+  - `src/server/SubscriptionOrchestratorService.ts` — só `preview` (confirm/cancel são F5.2/5.3, gated).
+  - `src/server/routes/billing.ts` — 3 rotas (2 GET + 1 POST preview).
+  - `scripts/test-billing-preview.ts` — **21/21 checks** (upgrade proporcional 15/30 → ~600; downgrade próximo ciclo + avisa perdas; same; new → null; sem ciclo → unknown/null; plano inexistente; read-only não muda o plano; isolamento).
+- **Arquivos alterados:**
+  - `server.ts` — 1 import + 1 mount `/billing` (aditivo; recommendations continua funcionando).
+  - `package.json` — `test:billing-preview`.
+  - `MATRIZ-DE-COBERTURA-DO-PRD.md` — linhas 66/193 (plans/current/upgrade-preview `[x]`; checkout/confirm/downgrade seguem `[ ]` gated).
+- **Testes:** `test:billing-preview` 21/21; `tsc --noEmit` limpo; regressões `test:entitlement-service` 50/50, `test:upgrade-matrix` 93/93, `test:vertical-plan-intersection` OK.
+- **Decisões micro:** (i) preview NÃO cobra, NÃO aceita termos, NÃO toca provedor — puro cálculo (o gated fica em F5.2/5.3); (ii) sem ciclo definido → não inventa proporcional (`unknown`/null + warning); (iii) upgrade nunca perde módulo (F2.1) — o teste reafirma; (iv) dinheiro role-gated na rota (§73).
+- **Resultado:** o CTA "Fazer upgrade" tem read-model real (comparação + proporcional). Aditivo puro.
+- **Pendências:** nenhuma nova. Confirm/checkout/downgrade continuam bloqueados por Decisão #2 (ToS) + Asaas homologado (decisões do dono/terceiro).
+- **Próximo passo:** decidir com o dono: (a) UI — ligar o CTA da aba Plano e Expansões no `POST /upgrade/preview` (mostra proporcional antes de mandar pra Cobrança); (b) F3.4 editor de blueprint (limits/features); (c) desbloquear Fase 5 (Decisão #2 jurídica). Confirm/checkout reais seguem gated.
+
+---
+
 ## Sessão AAAA-MM-DD (template para próxima)
 
 - **Fase:** …

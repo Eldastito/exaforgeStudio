@@ -64,6 +64,7 @@
     "test:whatsapp-health-ca10": "tsx scripts/test-whatsapp-health-ca10.ts",
     "test:piloto-ciclo-representativo": "tsx scripts/test-piloto-ciclo-representativo.ts",
     "test:pilot-readiness": "tsx scripts/test-pilot-readiness.ts",
+    "test:billing-preview": "tsx scripts/test-billing-preview.ts",
     "test:security-channel-token": "tsx scripts/test-security-channel-token.ts",
     "test:channel-state-machine": "tsx scripts/test-channel-state-machine.ts",
     "test:navigation-manifest": "tsx scripts/test-navigation-manifest.ts",

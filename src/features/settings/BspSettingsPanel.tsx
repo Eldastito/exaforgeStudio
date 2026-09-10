@@ -1,22 +1,28 @@
 /**
  * BspSettingsPanel — Track C F5 do PRD-BSP-01.
  *
- * Aba "Business Skills Pack" em Configurações. Compõe 3 cards:
+ * Aba "Business Skills Pack" em Configurações. Compõe 5 cards:
  *  1. Status do gate + toggles por dimensão (pricing / rfp / local_marketing)
  *  2. Editor do quote_template (header/greeting/footer/conditions/signature)
  *  3. Preview de sugestão de preço (POST-ish via GET com querystring)
+ *  4. Local Marketing — matches contato ↔ concorrente monitorado (F3)
+ *  5. Métricas de orçamento por vendedor (F2, RN-BSP-05)
  *
  * Consome:
- *   GET  /api/bsp/access          — status de cada dimensão (soft launch + allowed)
- *   GET  /api/bsp/config          — config atual
- *   PATCH /api/bsp/config         — salva enabled_dimensions + quote_template
- *   PUT  /api/bsp/rfp/template    — reset ao default (body = null)
- *   GET  /api/bsp/pricing/suggest — preview de preço
+ *   GET  /api/bsp/access                     — status de cada dimensão (soft launch + allowed)
+ *   GET  /api/bsp/config                     — config atual
+ *   PATCH /api/bsp/config                    — salva enabled_dimensions + quote_template
+ *   PUT  /api/bsp/rfp/template               — reset ao default (body = null)
+ *   GET  /api/bsp/pricing/suggest            — preview de preço
+ *   POST /api/bsp/local-marketing/enrich     — recomputa o cruzamento (F3)
+ *   GET  /api/bsp/local-marketing/matches    — lista os matches (F3)
+ *   GET  /api/bsp/rfp/metrics/by-agent       — métricas por vendedor (F2)
  *
- * PT-BR em toda UI (RN-BSP-11).
+ * Dimensão desabilitada → o endpoint responde 403; a UI mostra o aviso e o CTA
+ * para religar (nunca quebra). PT-BR em toda UI (RN-BSP-11).
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Package, Save, Loader2, RotateCcw, Calculator, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Package, Save, Loader2, RotateCcw, Calculator, ShieldCheck, ShieldOff, Users, BarChart3, RefreshCw } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 
@@ -64,6 +70,48 @@ export function BspSettingsPanel() {
   const [preview, setPreview] = useState<any>(null);
   const [previewing, setPreviewing] = useState(false);
 
+  // F3 — Local Marketing (contato ↔ concorrente monitorado)
+  const [matches, setMatches] = useState<any[]>([]);
+  const [lmBlocked, setLmBlocked] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  // F2 — métricas de orçamento por vendedor (RN-BSP-05)
+  const [metrics, setMetrics] = useState<any[]>([]);
+  const [metricsBlocked, setMetricsBlocked] = useState(false);
+
+  const loadMatches = useCallback(async () => {
+    try {
+      const r = await apiFetch('/api/bsp/local-marketing/matches?limit=200');
+      if (r.status === 403) { setLmBlocked(true); setMatches([]); return; }
+      setLmBlocked(false);
+      const j = await r.json();
+      setMatches(Array.isArray(j?.matches) ? j.matches : []);
+    } catch { setMatches([]); }
+  }, []);
+
+  const loadMetrics = useCallback(async () => {
+    try {
+      const r = await apiFetch('/api/bsp/rfp/metrics/by-agent?days=30');
+      if (r.status === 403) { setMetricsBlocked(true); setMetrics([]); return; }
+      setMetricsBlocked(false);
+      const j = await r.json();
+      setMetrics(Array.isArray(j?.metrics) ? j.metrics : []);
+    } catch { setMetrics([]); }
+  }, []);
+
+  const runEnrich = async () => {
+    setEnriching(true);
+    try {
+      const r = await apiFetch('/api/bsp/local-marketing/enrich', { method: 'POST' });
+      if (r.status === 403) { setLmBlocked(true); toast.error('Local Marketing está desabilitado.'); return; }
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+      toast.success(`Cruzamento atualizado: ${j.matched} match(es) em ${j.contacts_checked} contato(s) × ${j.competitors_active} concorrente(s).`);
+      await loadMatches();
+    } catch (e: any) {
+      toast.error(`Erro no cruzamento: ${e?.message || e}`);
+    } finally { setEnriching(false); }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -93,7 +141,7 @@ export function BspSettingsPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadMatches(); loadMetrics(); }, [load, loadMatches, loadMetrics]);
 
   const toggleDim = (d: Dimension) => {
     setEnabled(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
@@ -325,6 +373,93 @@ export function BspSettingsPanel() {
                 <> · target margin: <span className="text-zinc-200">{(preview.target_margin_used * 100).toFixed(0)}%</span></>}
             </div>
             <div className="text-xs text-zinc-500">{preview.reasoning}</div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Card 4: Local Marketing (contato ↔ concorrente) ── */}
+      <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+              <Users className="w-4 h-4" /> Local Marketing — contatos que são concorrentes
+            </h3>
+            <p className="text-xs text-zinc-500 mt-1">
+              Contatos do CRM cujo identificador casa com um concorrente que você monitora. Sinal para outreach diferenciado.
+            </p>
+          </div>
+          <button
+            onClick={runEnrich}
+            disabled={enriching || lmBlocked}
+            className="text-xs text-teal-300 hover:text-teal-200 flex items-center gap-1 disabled:opacity-50"
+          >
+            {enriching ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Atualizar cruzamento
+          </button>
+        </div>
+        {lmBlocked ? (
+          <p className="text-xs text-amber-400">Dimensão desabilitada — ligue "Local Marketing" acima e salve para usar.</p>
+        ) : matches.length === 0 ? (
+          <p className="text-xs text-zinc-500">Nenhum match ainda. Cadastre concorrentes monitorados e clique em "Atualizar cruzamento".</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left font-medium py-1.5 pr-3">Contato</th>
+                  <th className="text-left font-medium py-1.5 pr-3">Identificador</th>
+                  <th className="text-left font-medium py-1.5 pr-3">Concorrente</th>
+                  <th className="text-left font-medium py-1.5">Plataforma</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matches.map((m, i) => (
+                  <tr key={`${m.contact_id}-${m.competitor_id}-${i}`} className="border-b border-zinc-800/50">
+                    <td className="py-1.5 pr-3 text-zinc-200">{m.contact_name || <span className="text-zinc-500">(sem nome)</span>}</td>
+                    <td className="py-1.5 pr-3 text-zinc-400 font-mono">{m.contact_identifier}</td>
+                    <td className="py-1.5 pr-3 text-zinc-200">{m.competitor_display_name || m.competitor_handle}</td>
+                    <td className="py-1.5 text-zinc-400">{m.competitor_platform}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* ── Card 5: métricas de orçamento por vendedor (RFP) ── */}
+      <section className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
+        <h3 className="text-sm font-semibold text-zinc-200 mb-1 flex items-center gap-2">
+          <BarChart3 className="w-4 h-4" /> Orçamentos por vendedor (últimos 30 dias)
+        </h3>
+        <p className="text-xs text-zinc-500 mb-3">Envio, aceite e taxa de conversão de orçamentos por responsável.</p>
+        {metricsBlocked ? (
+          <p className="text-xs text-amber-400">Dimensão desabilitada — ligue "RFP (orçamentos)" acima e salve para usar.</p>
+        ) : metrics.length === 0 ? (
+          <p className="text-xs text-zinc-500">Nenhum orçamento enviado nos últimos 30 dias.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-500 border-b border-zinc-800">
+                  <th className="text-left font-medium py-1.5 pr-3">Vendedor</th>
+                  <th className="text-right font-medium py-1.5 pr-3">Enviados</th>
+                  <th className="text-right font-medium py-1.5 pr-3">Aceitos</th>
+                  <th className="text-right font-medium py-1.5 pr-3">Recusados</th>
+                  <th className="text-right font-medium py-1.5">Conversão</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map((m, i) => (
+                  <tr key={`${m.agent}-${i}`} className="border-b border-zinc-800/50">
+                    <td className="py-1.5 pr-3 text-zinc-200 font-mono">{m.agent}</td>
+                    <td className="py-1.5 pr-3 text-right text-zinc-300">{m.sent}</td>
+                    <td className="py-1.5 pr-3 text-right text-emerald-300">{m.accepted}</td>
+                    <td className="py-1.5 pr-3 text-right text-zinc-400">{m.declined}</td>
+                    <td className="py-1.5 text-right text-teal-300">{(Number(m.conversion_rate) * 100).toFixed(0)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>

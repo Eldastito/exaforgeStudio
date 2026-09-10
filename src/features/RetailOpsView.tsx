@@ -4293,6 +4293,19 @@ function RaceSection({ stores }: { stores: any[] }) {
       if (d && !d.error) setRace(d); else toast.error(d?.error || 'Falha ao apurar a corrida.');
     } finally { setLoading(false); }
   };
+  // Resolve a dupla contagem PDV+manual num clique: marca a loja como fonte
+  // 'manual' (aí o cálculo IGNORA o PDV e usa só a planilha/lançamento). Decisão
+  // EXPLÍCITA do gestor (por isso o confirm avisa que o PDV será ignorado) — não
+  // inferimos sozinhos. Reusa o PATCH de loja já existente; recarrega a corrida.
+  const markStoreManual = async (sid: string | null, storeName: string) => {
+    if (!sid) { toast.error('Loja sem cadastro (filial não casada) — não dá pra marcar a fonte.'); return; }
+    if (!window.confirm(`Marcar "${storeName}" como fonte MANUAL?\n\nO cálculo passa a IGNORAR o PDV desta loja e usar só a planilha/lançamento manual. Confirme que a planilha tem TODOS os vendedores da loja — senão quem só está no PDV fica de fora.`)) return;
+    try {
+      const res = await apiFetch(`/api/retailops/stores/${sid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sellerSource: 'manual' }) });
+      if (res.ok) { toast.success(`"${storeName}" marcada como fonte manual — PDV ignorado. Reapurando…`); await load(); }
+      else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao marcar a fonte da loja.'); }
+    } catch { toast.error('Falha ao marcar a fonte da loja.'); }
+  };
   const createRun = async () => {
     if (!window.confirm(`Gerar a PRÉVIA da corrida de ${month}? A aprovação continua manual (nada é pago automaticamente).`)) return;
     setRunning(true);
@@ -4364,6 +4377,9 @@ function RaceSection({ stores }: { stores: any[] }) {
                 {st.sellers.map((s: any, i: number) => (
                   <span key={i}>{i > 0 ? ' · ' : ''}{s.sellerName}{s.matricula ? ` (${s.matricula})` : ''}: <strong>{brl(s.sales)}</strong> = {Object.entries(s.salesBySource || {}).filter(([, v]: any) => v > 0).map(([src, v]: any) => `${src} ${brl(v)}`).join(' + ')}</span>
                 ))}
+                {st.storeId && (
+                  <button onClick={() => markStoreManual(st.storeId, st.storeName)} className="ml-2 rounded border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-100 hover:bg-red-500/25">Marcar loja como fonte manual (ignora PDV)</button>
+                )}
               </div>
             ))}
           </div>

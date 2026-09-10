@@ -662,6 +662,10 @@ const initDb = () => {
   // F6.1 (RF-03/RF-08): carrega a FINALIDADE pela fila até o sink — sem isso o
   // caminho assíncrono perdia o `feature` e o gate de finalidade não se aplicava.
   try { db.exec(`ALTER TABLE message_deliveries ADD COLUMN feature TEXT`); } catch(e){}
+  // F6.2 (RF-08/CA-08): classe da falha — permanent (não retenta) · transient
+  // (retenta com backoff) · unknown (resultado indeterminado após timeout →
+  // reconcilia antes de repetir, nunca repete efeito em silêncio).
+  try { db.exec(`ALTER TABLE message_deliveries ADD COLUMN failure_class TEXT`); } catch(e){}
 
   // Continuity Layer (ADR-082, Fase 4a) — REGISTRO DE NÓS EDGE + protocolo de
   // sync. Um "ZappFlow Edge" é um processo/instalação local do cliente que

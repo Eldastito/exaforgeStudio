@@ -5,6 +5,7 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { logAuthEvent } from "../auditLog.js";
 import { ChannelProvisioningService } from "../ChannelProvisioningService.js";
 import { EncryptionService } from "../EncryptionService.js";
+import { ChannelStateService } from "../ChannelStateService.js";
 import { ChannelBindingService, KNOWN_FEATURES } from "../ChannelBindingService.js";
 import { ChannelBindingMigrationService } from "../ChannelBindingMigrationService.js";
 
@@ -51,6 +52,14 @@ router.get("/whatsapp/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   return res.json(ChannelProvisioningService.status(orgId));
+});
+
+// F1.2d (RF-02/CA-02) — estados LÓGICOS da conexão (sessão/webhook/administração/
+// operação) derivados do enum plano. Read-only, token-safe.
+router.get("/states", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  return res.json({ channels: ChannelStateService.list(orgId), webhookEnforced: ChannelStateService.webhookEnforced() });
 });
 
 // F2.2 — CONTROLES de usos por finalidade (channel_feature_bindings). Editam a

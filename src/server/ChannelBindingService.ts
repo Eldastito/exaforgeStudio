@@ -60,6 +60,8 @@ export const KNOWN_FEATURES = [
   "satisfacao",   // pós-venda / NPS
   "clinica",      // avisos clínicos
   "escola",       // comunicação escolar
+  "vendas",       // orçamento / follow-up de venda ao cliente (F6.3d)
+  "compras",      // cotação com fornecedor / suprimentos (F6.3d)
 ] as const;
 export type FeatureKey = (typeof KNOWN_FEATURES)[number];
 export function isKnownFeature(k: string): boolean { return (KNOWN_FEATURES as readonly string[]).includes(String(k || "")); }

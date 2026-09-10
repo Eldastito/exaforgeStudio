@@ -24,7 +24,7 @@ const actor = (req: any) => req.user?.userId || req.user?.id;
 const channelSend = (orgId: string): ((target: string, message: string) => any) | null => {
   const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
   if (!channel) return null;
-  return (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+  return (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
 };
 
 // ── Alunos ──────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ router.post("/students/:studentId/digest/send-test", async (req: AuthRequest, re
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
   if (!channel) return res.status(400).json({ error: "Nenhum canal conectado para enviar." });
-  const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+  const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
   try {
     const r = await SchoolDigestService.sendNow(orgId, req.params.studentId, { send });
     if (!r.sent) return res.status(400).json({ error: "Nenhum responsável com consentimento e telefone válido." });
@@ -205,7 +205,7 @@ router.post("/teachers/:teacherId/agenda/send-test", async (req: AuthRequest, re
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
   if (!channel) return res.status(400).json({ error: "Nenhum canal conectado para enviar." });
-  const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+  const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
   try {
     const r = await TeacherDigestService.sendNow(orgId, req.params.teacherId, { send });
     if (!r.sent) return res.status(400).json({ error: "Professor sem opt-in, telefone válido ou aulas hoje." });

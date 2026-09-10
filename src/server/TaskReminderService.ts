@@ -128,7 +128,7 @@ export class TaskReminderService {
         if (!this.pendingCandidates(orgId).length) continue;
         const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
         if (!channel) continue; // sem canal WhatsApp → só in-app
-        const res = await this.remindForOrg(orgId, (to, msg) => MessageProviderService.sendMessage(channel.id, to, msg), { hourSP: hourInTz(now) });
+        const res = await this.remindForOrg(orgId, (to: string, msg: string) => MessageProviderService.sendMessage(channel.id, to, msg, { feature: "gestao" }), { hourSP: hourInTz(now) });
         total += res.sent;
       } catch (e) { console.error("[TaskReminder] org falhou", orgId, e); }
     }

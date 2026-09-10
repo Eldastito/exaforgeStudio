@@ -213,7 +213,7 @@ export class QuoteService {
             const msg = q.followup_count === 0
               ? `Oi${first ? `, ${first}` : ''}! Passei pra saber se conseguiu olhar o orçamento que te mandei (total R$ ${Number(q.total_amount || 0).toFixed(2)}). Posso ajudar com alguma dúvida? 😊`
               : `Oi${first ? `, ${first}` : ''}! Última vez que te chamo por aqui sobre o orçamento — caso ainda faça sentido, é só me dizer e eu separo tudo pra você. 🙏`;
-            await MessageProviderService.sendMessage(channelId, q.contact_number, msg);
+            await MessageProviderService.sendMessage(channelId, q.contact_number, msg, { feature: "vendas" });
             db.prepare(`UPDATE quotes SET followup_count = COALESCE(followup_count,0) + 1, last_followup_at = CURRENT_TIMESTAMP WHERE id = ?`).run(q.id);
           } catch (e) { console.error('[Quote] Falha no follow-up', q.id, e); }
         }

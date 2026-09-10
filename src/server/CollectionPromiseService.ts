@@ -274,7 +274,7 @@ export class CollectionPromiseService {
           correlationId: anchor?.correlation_id || null, createdBy: "promise-runtime",
         });
       } else {
-        messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg);
+        messageId = await MessageProviderService.sendMessage(row.channelId, row.phone, msg, { feature: "cobranca" });
       }
     }
     catch (e: any) {

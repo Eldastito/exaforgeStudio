@@ -94,7 +94,7 @@ export class CollectionResendPixService {
           correlationId: anchor?.correlation_id || null, createdBy: "resend-pix-runtime",
         });
       } else {
-        messageId = await MessageProviderService.sendMessage(opts.channelId, opts.phone, msg);
+        messageId = await MessageProviderService.sendMessage(opts.channelId, opts.phone, msg, { feature: "cobranca" });
       }
     }
     catch (e: any) { return this.fail(orgId, opts.actionId, "sendMessage_error", e?.message); }

@@ -59,7 +59,7 @@ async function main() {
   check("2.2 MIME tipado docx (não application/pdf)", lastDoc?.opts?.mimeType === DOCX_MIME);
   check("2.3 URL ABSOLUTA (APP_URL) pro artefato", typeof lastDoc?.url === "string" && lastDoc.url.startsWith("https://app.test/api/public/artifacts/"));
   check("2.4 nome do arquivo com extensão .docx", typeof lastDoc?.fileName === "string" && lastDoc.fileName.endsWith(".docx"));
-  check("2.5 feature 'falatu' no gate de finalidade", lastDoc?.opts?.feature === "falatu");
+  check("2.5 finalidade 'gestao' no gate (F6.1 — 'falatu' não era válida)", lastDoc?.opts?.feature === "gestao");
 
   // ── 3. localizar artefato existente + entregar ──
   const art = AS.create(orgId, { kind: "report", title: "Vendas Maio", mimeType: XLSX_MIME, content: Buffer.from("PKxx"), origin: "falatu", createdBy: owner.userId });

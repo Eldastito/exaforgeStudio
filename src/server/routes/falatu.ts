@@ -26,6 +26,7 @@ import { ArtifactService } from "../ArtifactService.js";
 import { FalaTuFileIntakeService } from "../FalaTuFileIntakeService.js";
 import { SmartInboxService } from "../SmartInboxService.js";
 import { WhatsAppHealthService } from "../WhatsAppHealthService.js";
+import { PilotReadinessService } from "../PilotReadinessService.js";
 import { FalaTuApprovalService } from "../FalaTuApprovalService.js";
 import { FalaTuThreadService } from "../FalaTuThreadService.js";
 import { FalaTuHomeService } from "../FalaTuHomeService.js";
@@ -397,6 +398,15 @@ router.get("/whatsapp-health", (req: AuthRequest, res): any => {
   if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores veem a saúde dos canais." });
   const orgId = req.organizationId!;
   res.json({ channels: WhatsAppHealthService.channelHealth(orgId), metrics: WhatsAppHealthService.metrics(orgId) });
+});
+
+// F7.3 (RF §21 §531/§602) — prontidão de AMPLIAÇÃO: veredito ADVISÓRIO dos gates
+// objetivos de reconciliação (migração + filas + canais), read-only. owner/admin.
+router.get("/pilot-readiness", (req: AuthRequest, res): any => {
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Apenas gestores veem a prontidão do piloto." });
+  const maxQueueAgeSec = req.query.maxQueueAgeSec != null ? Number(req.query.maxQueueAgeSec) : undefined;
+  const maxUnknown = req.query.maxUnknown != null ? Number(req.query.maxUnknown) : undefined;
+  res.json(PilotReadinessService.assess(req.organizationId!, { maxQueueAgeSec, maxUnknown }));
 });
 
 router.get("/bridge/records", (req: AuthRequest, res): any => {

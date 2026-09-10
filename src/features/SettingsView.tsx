@@ -1078,6 +1078,12 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
   const [recHistory, setRecHistory] = useState<any[]>([]);
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [loading, setLoading] = useState(true);
+  // ADR-153 F6.1 (UI) — preview de proporcionalidade por plano-alvo. Consome
+  // POST /api/billing/upgrade/preview (read-only, NÃO cobra). G-153-3: o clique
+  // só SIMULA; a contratação continua sendo em Cobrança.
+  const [previews, setPreviews] = useState<Record<string, any>>({});
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [openPreviewId, setOpenPreviewId] = useState<string | null>(null);
 
   const loadPlanSignals = () => {
     apiFetch('/api/signals?domain=plan&status=open')
@@ -1122,6 +1128,31 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
   };
 
   const brl = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // ADR-153 F6.1 (UI) — simula a mudança de plano (proporcionalidade §19). Se já
+  // aberto, recolhe. Read-only: nunca contrata (G-153-3).
+  const simulateUpgrade = async (planId: string) => {
+    if (openPreviewId === planId) { setOpenPreviewId(null); return; }
+    if (previews[planId]) { setOpenPreviewId(planId); return; }
+    setPreviewingId(planId);
+    try {
+      const r = await apiFetch('/api/billing/upgrade/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetPlanId: planId }),
+      });
+      if (r.status === 403) { toast.error('Apenas gestores podem simular mudança de plano.'); return; }
+      const d = await r.json();
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível simular o upgrade.'); return; }
+      setPreviews(prev => ({ ...prev, [planId]: d }));
+      setOpenPreviewId(planId);
+    } catch (e) { toast.error('Erro ao simular o upgrade.'); }
+    finally { setPreviewingId(null); }
+  };
+
+  const fmtDate = (iso: string | null) => {
+    if (!iso) return null;
+    try { return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return null; }
+  };
 
   // Ordem tier — pra "próximos níveis" (skip current + skip cortesia).
   const TIER_ORDER = ['autonomo', 'start', 'growth', 'scale', 'enterprise'];
@@ -1287,6 +1318,50 @@ function PlanoExpansoesPanel({ onGoToCobranca }: { onGoToCobranca: () => void })
                       <p className="text-xs text-zinc-500 mt-2">
                         IA: {p.features?.ai_monthly_limit === 0 ? 'ilimitado' : p.features?.ai_monthly_limit?.toLocaleString('pt-BR')} · Usuários: {p.features?.users_limit === 0 ? 'ilimitado' : p.features?.users_limit}
                       </p>
+                      {/* ADR-153 F6.1 (UI) — CTA de simulação do valor proporcional. */}
+                      <button
+                        onClick={() => simulateUpgrade(p.id)}
+                        disabled={previewingId === p.id}
+                        className="mt-3 text-xs text-teal-300 hover:text-teal-200 font-medium disabled:opacity-50"
+                      >
+                        {previewingId === p.id ? 'Calculando…' : openPreviewId === p.id ? 'Ocultar valor proporcional' : 'Ver valor proporcional →'}
+                      </button>
+                      {openPreviewId === p.id && previews[p.id]?.ok && (() => {
+                        const pv = previews[p.id];
+                        return (
+                          <div className="mt-3 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3 text-xs space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-400">Diferença mensal</span>
+                              <b className="text-zinc-100">{brl(pv.priceDelta)}/mês</b>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-400">A pagar agora (proporcional)</span>
+                              {pv.prorationAmount != null ? (
+                                <b className="text-teal-300">{brl(pv.prorationAmount)}</b>
+                              ) : (
+                                <span className="text-amber-300">{pv.direction === 'new' ? 'valor cheio no checkout' : 'a calcular no checkout'}</span>
+                              )}
+                            </div>
+                            {pv.breakdown?.daysRemaining != null && pv.breakdown?.daysInPeriod != null && (
+                              <p className="text-[11px] text-zinc-500">
+                                {pv.breakdown.daysRemaining} de {pv.breakdown.daysInPeriod} dias restantes no ciclo · renovação {fmtDate(pv.renewalAt) ? `mantida em ${fmtDate(pv.renewalAt)}` : 'mantida'}
+                              </p>
+                            )}
+                            {pv.modulesGained?.length > 0 && (
+                              <p className="text-[11px] text-emerald-300">Ganha: {pv.modulesGained.slice(0, 6).join(', ')}{pv.modulesGained.length > 6 ? ` +${pv.modulesGained.length - 6}` : ''}</p>
+                            )}
+                            {pv.modulesLost?.length > 0 && (
+                              <p className="text-[11px] text-red-300">Perde: {pv.modulesLost.join(', ')}</p>
+                            )}
+                            {Array.isArray(pv.warnings) && pv.warnings.map((w: string, i: number) => (
+                              <p key={i} className="text-[11px] text-amber-300">⚠ {w}</p>
+                            ))}
+                            <button onClick={onGoToCobranca} className="mt-1 text-xs text-teal-300 hover:text-teal-200 font-semibold">
+                              Continuar em Cobrança →
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

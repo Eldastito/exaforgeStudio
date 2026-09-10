@@ -344,7 +344,7 @@ export class ClinicMonthlyReportDeliveryService {
       channelId, toIdentifier: contact.identifier, status: "queued",
     });
 
-    const sender: DocSender = opts.sender || MessageProviderService.sendDocument.bind(MessageProviderService);
+    const sender: DocSender = opts.sender || ((ch, to, url, name, caption) => MessageProviderService.sendDocument(ch, to, url, name, caption, { feature: "gestao" }));
     try {
       const result = await sender(channelId, contact.identifier, fileUrl, filename, caption);
       const providerMessageId = typeof result === "string" ? result

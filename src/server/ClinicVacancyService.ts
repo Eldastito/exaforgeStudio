@@ -145,7 +145,7 @@ export class ClinicVacancyService {
       const message = `Olá, ${contact.name || "paciente"}! Abriu uma vaga com ${apt.professional_name_snapshot || "seu profissional"} em ${fmtSlot(apt.scheduled_start)}. Se quiser, responda **SIM** que já agendo pra você — a oferta vale por 2 horas. Se preferir esperar seu retorno normal, é só ignorar. — ${org?.business_name || "Clínica"}`;
 
       try {
-        const sender = opts.sender || MessageProviderService.sendMessage.bind(MessageProviderService);
+        const sender = opts.sender || ((ch: string, to: string, text: string) => MessageProviderService.sendMessage(ch, to, text, { feature: "agenda" }));
         const result = await sender(channelId, contact.identifier, message);
         const providerMessageId = typeof result === "string" ? result
           : (result?.messages?.[0]?.id || result?.key?.id || result?.id || null);

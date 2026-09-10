@@ -255,7 +255,7 @@ export class ClinicDocumentDeliveryService {
         : `Seu recibo — ${contact.name || "paciente"}. Guarde este arquivo.`;
     const caption = opts?.caption || defaultCaption;
 
-    const sender: DocSender = opts?.sender || MessageProviderService.sendDocument.bind(MessageProviderService);
+    const sender: DocSender = opts?.sender || ((ch, to, url, name, caption) => MessageProviderService.sendDocument(ch, to, url, name, caption, { feature: "clinica" }));
     try {
       const result = await sender(channelId, contact.identifier, fileUrl, filename, caption);
       const providerMessageId = result?.messages?.[0]?.id || result?.key?.id || result?.id || null;

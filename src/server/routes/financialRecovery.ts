@@ -9,6 +9,7 @@ import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RecoveryAssessmentService } from "../RecoveryAssessmentService.js";
 import { RecoveryDebtService } from "../RecoveryDebtService.js";
+import { RecoveryViabilityService } from "../RecoveryViabilityService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
 
 const router = Router();
@@ -41,6 +42,15 @@ router.get("/assessment", (req: AuthRequest, res): any => {
     const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
     const period = typeof req.query?.period === "string" ? req.query.period : undefined;
     res.json(RecoveryAssessmentService.assess(orgId, { includeMoney, period }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// GET /viability — IRF (Índice de Recuperabilidade Financeira) + diagnóstico estrutural
+// (crise operacional×financeira). Determinístico; não expõe R$ (score/%/labels/razões).
+router.get("/viability", (req: AuthRequest, res): any => {
+  try {
+    const period = typeof req.query?.period === "string" ? req.query.period : undefined;
+    res.json(RecoveryViabilityService.viability(req.organizationId!, { period }));
   } catch (e: any) { fail(res, e); }
 });
 

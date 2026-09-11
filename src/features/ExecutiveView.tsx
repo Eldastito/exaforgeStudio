@@ -250,6 +250,117 @@ function RecoveryCard() {
   );
 }
 
+// PRD 04b — IDO (Índice de Dependência Operacional). Polaridade: MAIOR = mais dependente
+// (pior). Cores refletem isso (saudável=verde, crítico=vermelho).
+const IDO_FAIXA_UI: Record<string, { label: string; cls: string }> = {
+  saudavel: { label: 'Baixa dependência', cls: 'text-emerald-300 border-emerald-800 bg-emerald-950/30' },
+  moderado: { label: 'Dependência moderada', cls: 'text-amber-300 border-amber-800 bg-amber-950/30' },
+  alto: { label: 'Alta dependência', cls: 'text-orange-300 border-orange-800 bg-orange-950/30' },
+  critico: { label: 'Dependência crítica', cls: 'text-red-300 border-red-800 bg-red-950/30' },
+  indefinido: { label: 'Indefinido', cls: 'text-zinc-400 border-zinc-700 bg-zinc-900' },
+};
+
+// Diagnóstico de dependência operacional (PRD 04b). Self-gated/falha-fechada: se a rota
+// falhar (sem permissão etc.), o card some (0-regressão). Consome /api/operational-dependency.
+function IdoCard() {
+  const [ov, setOv] = useState<any | null | undefined>(undefined); // undefined=carregando, null=indisponível
+  const [q, setQ] = useState<any | null>(null);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState('');
+
+  const load = () => apiFetch('/api/operational-dependency').then(r => (r.ok ? r.json() : null)).then(d => setOv(d)).catch(() => setOv(null));
+  useEffect(() => { load(); }, []);
+
+  const openForm = () => {
+    setExpanded(x => !x);
+    if (!q) apiFetch('/api/operational-dependency/questionnaire').then(r => r.json()).then(d => { setQ(d); setAnswers((ov && ov.latest && ov.latest.answers) || {}); }).catch(() => {});
+  };
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/operational-dependency/assess', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao registrar');
+      toast.success('Diagnóstico registrado.'); setExpanded(false); await load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+  const saveTarget = async () => {
+    const t = target.trim() === '' ? null : Number(target);
+    try {
+      const r = await apiFetch('/api/operational-dependency/target', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: t }) });
+      if (!r.ok) throw new Error();
+      toast.success('Meta salva.'); setTarget(''); await load();
+    } catch { toast.error('Erro ao salvar meta'); }
+  };
+
+  if (ov === undefined || ov === null) return null; // carregando/indisponível → nada
+  const latest = ov.latest; const cmp = ov.comparison || {};
+  const faixa = latest ? (IDO_FAIXA_UI[latest.faixa] || IDO_FAIXA_UI.indefinido) : null;
+  const topDims = latest?.components ? [...latest.components].filter((c: any) => c.hasData).sort((a: any, b: any) => b.score - a.score).slice(0, 2) : [];
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5"><Target className="h-4 w-4 text-indigo-400" /> Dependência operacional (IDO)</div>
+        {latest && latest.ido != null && faixa && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${faixa.cls}`}>IDO {latest.ido} · {faixa.label}</span>}
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-0.5">Quanto sua empresa depende de você e de pessoas-chave. Maior = mais dependente.</div>
+
+      {latest && latest.ido != null ? (
+        <div className="mt-3 space-y-1.5 text-sm">
+          {topDims.length > 0 && (
+            <div className="text-zinc-300">Onde mais depende: {topDims.map((c: any) => `${c.label.replace(/ \(.*\)$/, '')} (${c.score})`).join(' · ')}</div>
+          )}
+          <div className="text-[12px] text-zinc-400">
+            Evolução: {cmp.before != null ? `antes ${cmp.before}` : 'antes —'} · {cmp.current != null ? `hoje ${cmp.current}` : 'hoje —'} · {cmp.target != null ? `meta ${cmp.target}` : 'meta —'}
+            {cmp.delta != null && cmp.delta !== 0 && <span className={cmp.delta > 0 ? 'text-emerald-400' : 'text-red-400'}> · {cmp.delta > 0 ? `caiu ${cmp.delta}` : `subiu ${-cmp.delta}`} pts</span>}
+          </div>
+          {latest.confidence && <div className="text-[11px] text-zinc-600">Confiança do diagnóstico: {latest.confidence}.</div>}
+        </div>
+      ) : (
+        <div className="mt-3 text-sm text-zinc-400">Ainda sem diagnóstico. Responda o questionário para medir a dependência da sua operação.</div>
+      )}
+
+      <div className="mt-3">
+        <Button variant="outline" size="sm" onClick={openForm} className="border-zinc-700 text-zinc-300">
+          {expanded ? 'Ocultar questionário' : (latest ? 'Refazer diagnóstico' : 'Fazer diagnóstico')}
+        </Button>
+      </div>
+
+      {expanded && q && (
+        <div className="mt-3 space-y-3 border-t border-zinc-800 pt-3">
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="text-[11px] text-zinc-400">Meta de IDO (0-100, opcional)</label>
+              <input type="number" min={0} max={100} value={target} onChange={(e) => setTarget(e.target.value)} placeholder={cmp.target != null ? String(cmp.target) : '—'} className="w-24 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100" />
+            </div>
+            <Button variant="outline" size="sm" onClick={saveTarget} className="border-zinc-700 text-zinc-300">Salvar meta</Button>
+          </div>
+          <div className="space-y-2.5">
+            {q.questions.map((qq: any) => (
+              <div key={qq.id}>
+                <div className="text-[13px] text-zinc-200">{qq.text}</div>
+                <div className="mt-1 flex gap-1 flex-wrap">
+                  {q.scale.labels.map((lbl: string, val: number) => (
+                    <button key={val} onClick={() => setAnswers((a) => ({ ...a, [qq.id]: val }))}
+                      className={`text-[11px] px-2 py-1 rounded border ${answers[qq.id] === val ? 'border-indigo-500 bg-indigo-950/40 text-indigo-200' : 'border-zinc-700 bg-zinc-950 text-zinc-400 hover:text-zinc-200'}`}>
+                      {val} · {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <Button size="sm" onClick={submit} disabled={busy} className="bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50">Registrar diagnóstico</Button>
+          <div className="text-[11px] text-zinc-600">O IDO é orientativo; responda o que souber — sem resposta suficiente, não inventamos número.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MinhaEmpresaTab() {
   const [snap, setSnap] = useState<any | null>(null);
   const [con, setCon] = useState<any | null>(null);
@@ -361,6 +472,9 @@ function MinhaEmpresaTab() {
 
       {/* Entry point do Financial Recovery OS (F3.1 / PR-9b) — self-gated, falha-fechada. */}
       <RecoveryCard />
+
+      {/* IDO — Índice de Dependência Operacional (PRD 04b) — self-gated, falha-fechada. */}
+      <IdoCard />
 
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={load} className="border-zinc-700 text-zinc-300"><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Atualizar</Button>

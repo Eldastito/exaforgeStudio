@@ -16,6 +16,7 @@
  */
 import { randomUUID } from "crypto";
 import db from "./db.js";
+import { intervalsOverlap } from "./schedulingOverlap.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ClinicProfessionalRelationshipService } from "./ClinicProfessionalRelationshipService.js";
 import { ProfessionalScheduleConfigService } from "./ProfessionalScheduleConfigService.js";
@@ -90,7 +91,7 @@ export class ProfessionalAvailabilityService {
       while (t + duration <= w.endMinute) {
         const startISO = isoAt(dateISO, t), endISO = isoAt(dateISO, t + duration);
         const s = toMs(startISO), e = toMs(endISO);
-        const overlaps = busy.some((b) => e > b.start && s < b.end);
+        const overlaps = busy.some((b) => intervalsOverlap(s, e, b.start, b.end));
         if (!overlaps && s >= nowMs) out.push({ start: startISO, end: endISO, startMinute: t, durationMin: duration });
         t += duration + (w.bufferMin || 0);
       }

@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { intervalsOverlap } from "./schedulingOverlap.js";
 import { BalcaoService } from "./BalcaoService.js";
 
 /**
@@ -108,7 +109,7 @@ export class ComigoAgendaService {
       const st = toMs(r.scheduled_start);
       if (st == null) continue;
       const en = toMs(r.scheduled_end) ?? (st + DEFAULT_DURATION_MIN * 60000);
-      if (en > startMs && st < endMs) {
+      if (intervalsOverlap(st, en, startMs, endMs)) {
         out.push({ id: r.id, title: r.title, scheduled_start: r.scheduled_start, scheduled_end: r.scheduled_end });
       }
     }

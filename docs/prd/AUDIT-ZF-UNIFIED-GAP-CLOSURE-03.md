@@ -231,3 +231,18 @@ Confirmado (§2): a receita de varejo já entra no DRE (`ManagerialDreService` v
 
 - **F1.1 choke-point (EXTEND, real):** flags `*_via_executor_enabled` seguem DEFAULT 0 (default = bypass) + bypass do Edge `SEND_MESSAGE`. Fechar vira o default `0→1` do envio real (WhatsApp/PIX/e-mail) em produção → exige OK explícito + rollout faseado (shadow→canary→migrar→default→remover branch→ESLint guard). NÃO fazer sob "segue" genérico.
 - **F1.2/F1.3/F1.5** (SchedulingKernel, SignalReactionPolicy, Entitlement fallback): dívida técnica de convergência, desacoplada deste PRD (Onda 3).
+
+### 10.5 F1.2 (Scheduling Kernel) — RECLASSIFICADA: fachada única → extração da PRIMITIVA (DUP-002 superdimensionado)
+
+Auditoria dos 4 detectores de conflito mostrou que **NÃO há motor de conflito a unificar** — são 4 domínios legitimamente diferentes:
+
+| Detector | Tabela | Recurso | Tempo | Regra própria |
+| --- | --- | --- | --- | --- |
+| `ClinicAgendaService.findConflicts` | `appointments` | profissional **+ sala** | ms-epoch | capacity + sessão de grupo (RN-006) |
+| `ComigoAgendaService.findConflicts` | `appointments` | nenhum (solo, 1 agenda) | ms-epoch | qualquer sobreposição conflita |
+| `ProfessionalAvailabilityService` | `clinic_slot_holds`+`appointments` | `relationship_id` | ISO (SQL) | hold atômico + TTL |
+| `ReservationService` | `reservations` | `resource_id` | `start_at/end_at` | capacity por unidade |
+
+- **DUP-002 estava superdimensionado:** o Comigo não "duplica" o Clinic — é uma agenda de recurso único, mais simples de propósito. Unificar os 4 atrás de uma fachada seria **abstração prematura** (forçaria o solo a herdar profissional/sala, ou o clínico a perder capacity/grupo — regressão nos dois sentidos).
+- **A única duplicação real é o PREDICADO de sobreposição meia-aberta** (`aStart < bEnd && aEnd > bStart`), hand-rolled em cada um. Extraído em `src/server/schedulingOverlap.ts` (`intervalsOverlap`, puro). Os **3 sites in-memory** (Clinic/Comigo/ProfessionalAvailability) passaram a chamá-lo; os que filtram no SQL seguem com o mesmo predicado no WHERE (não dá pra chamar JS lá dentro), com a convenção documentada no módulo.
+- **0-regressão comprovada:** `test:scheduling-overlap` trava a tabela-verdade **e** a equivalência exata com a expressão legada em 2401 combinações; regressões verdes (clinic-agenda 27/27 · comigo-agenda · clinic-reschedule 42/42 · professional-availability 27/27 · reservation-service · professional-booking 23/23). **F1.3/F1.5 seguem abertas** (Onda 3).

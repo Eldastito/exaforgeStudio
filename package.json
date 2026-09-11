@@ -970,6 +970,7 @@
     "test:recovery-scenario": "tsx scripts/test-recovery-scenario.ts",
     "test:recovery-plan": "tsx scripts/test-recovery-plan.ts",
     "test:recovery-escalation-dataroom": "tsx scripts/test-recovery-escalation-dataroom.ts",
+    "test:financial-recovery-golden-path": "tsx scripts/test-financial-recovery-golden-path.ts",
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
     "test:executive-money-projection": "tsx scripts/test-executive-money-projection.ts",
     "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",

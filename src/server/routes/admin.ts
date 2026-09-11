@@ -273,6 +273,12 @@ router.get("/brand-core/published", (_req: AuthRequest, res): any => {
   try { return res.json(BrandCoreService.getPublished()); }
   catch (error: any) { return res.status(500).json({ error: error.message }); }
 });
+// PRD 02 — resolver da message house (posicionamento verbal + claims proibidos reusando
+// restrictedClaims). Consumidores pedem isto em vez de hardcodar. not_configured sem publicada.
+router.get("/brand-core/messaging", (_req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.getBrandMessaging()); }
+  catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
 router.get("/brand-core/versions", (_req: AuthRequest, res): any => {
   try { return res.json({ versions: BrandCoreService.listVersions() }); }
   catch (error: any) { return res.status(500).json({ error: error.message }); }

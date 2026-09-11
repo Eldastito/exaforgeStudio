@@ -14,7 +14,7 @@ function check(name: string, ok: boolean) { results.push({ name, ok }); if (!ok)
 
 async function main() {
   const db = (await import("../src/server/db.js")).default;
-  const { BrandCoreService } = await import("../src/server/BrandCoreService.js");
+  const { BrandCoreService, brandCoreDefaults } = await import("../src/server/BrandCoreService.js");
 
   // ── 1. Estado vazio: fallback honesto (nunca inventa) ──
   check("1.1 getPublished vazio → not_configured", (BrandCoreService.getPublished() as any).status === "not_configured");
@@ -85,6 +85,25 @@ async function main() {
   check("8.1 auditou created/updated/published/restored/deleted", ["brand_core.draft_created", "brand_core.draft_updated", "brand_core.version_published", "brand_core.version_restored_to_draft", "brand_core.draft_deleted"].every((t) => types.includes(t)));
   const cols = db.prepare("PRAGMA table_info(brand_core_versions)").all() as any[];
   check("8.2 tabela é GLOBAL (sem organization_id — marca única da plataforma)", !cols.some((c) => c.name === "organization_id"));
+
+  // ── 9. PRD 02 — Message House (estende o mesmo snapshot; sem store novo) ──
+  const defs = brandCoreDefaults();
+  check("9.1 defaults semeiam a message house", !!defs.messaging.tagline && defs.messaging.functionalMessages.length > 0);
+  // Resolver getBrandMessaging: V2 publicada → configured + prohibitedClaims reusa restrictedClaims (não duplica).
+  const bm = BrandCoreService.getBrandMessaging();
+  const pubClaims = (BrandCoreService.getPublished() as any).restrictedClaims || [];
+  check("9.2 getBrandMessaging configured (V2)", bm.configured === true && bm.version === 2 && !!bm.messaging);
+  check("9.3 prohibitedClaims reusa restrictedClaims (sem duplicar)", JSON.stringify(bm.messaging!.prohibitedClaims) === JSON.stringify(pubClaims) && pubClaims.length > 0);
+  // Merge parcial da messaging no draft (não zera os outros campos).
+  const dm = BrandCoreService.createDraft("master@zapflow");
+  const updated = BrandCoreService.updateDraft({ messaging: { tagline: "TAG-X" } }, dm.revision, "master@zapflow");
+  check("9.4 messaging.tagline atualizada", updated.snapshot.messaging.tagline === "TAG-X");
+  check("9.5 merge parcial preserva masterMessage", !!updated.snapshot.messaging.masterMessage);
+  BrandCoreService.discardDraft("master@zapflow");
+  // Normalização de versão LEGADA (pré-PRD 02, snapshot sem messaging) → messaging vazio, não quebra.
+  db.prepare(`INSERT INTO brand_core_versions (id, version, status, snapshot_json, revision) VALUES ('legacy-99', 99, 'archived', ?, 1)`).run(JSON.stringify({ essence: "legado" }));
+  const legacy = BrandCoreService.getVersion(99);
+  check("9.6 versão legada sem messaging → normalizada (não quebra)", !!legacy.snapshot.messaging && Array.isArray(legacy.snapshot.messaging.functionalMessages) && legacy.snapshot.messaging.tagline === null);
 
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name}`);

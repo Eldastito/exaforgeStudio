@@ -967,6 +967,7 @@
     "test:recovery-viability": "tsx scripts/test-recovery-viability.ts",
     "test:debt-priority": "tsx scripts/test-debt-priority.ts",
     "test:survival-budget": "tsx scripts/test-survival-budget.ts",
+    "test:recovery-scenario": "tsx scripts/test-recovery-scenario.ts",
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
     "test:executive-money-projection": "tsx scripts/test-executive-money-projection.ts",
     "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",

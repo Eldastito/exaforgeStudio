@@ -749,15 +749,21 @@ const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
 // QUOTA-001 (Fatia 3B): resumo ÚNICO da cota total da loja — cota, realizado,
 // diferença R$, atingimento %, status; e (opcional) a soma das cotas individuais
 // e a divergência vs a cota da loja (QUOTA-002, exibida, nunca ajustada sozinha).
-function StoreQuotaSummary({ quota, realized, individualQuotaTotal, compact }: { quota: number; realized: number; individualQuotaTotal?: number | null; compact?: boolean }) {
+function StoreQuotaSummary({ quota, realized, individualQuotaTotal, hasData, compact }: { quota: number; realized: number; individualQuotaTotal?: number | null; hasData?: boolean; compact?: boolean }) {
   const q = Number(quota) || 0, r = Number(realized) || 0;
+  // `hasData === false` = nenhuma folha INFORMADA no período → não é "vendeu R$0 /
+  // faltou", é "ainda não lançaram o fechamento". Mostra "sem dados" em vez de
+  // pintar "Faltou R$<cota>" (o que fazia "Grande Rio zerado" parecer venda zero).
+  // Default (undefined) = comportamento antigo, pra não quebrar outros usos.
+  const noData = hasData === false;
   const diff = Math.round((r - q) * 100) / 100;
   const pct = q > 0 ? Math.round((r / q) * 1000) / 10 : null;
-  const status = q <= 0 ? 'sem_cota' : r >= q ? (r === q ? 'atingida' : 'superada') : 'abaixo';
+  const status = noData ? 'sem_dados' : q <= 0 ? 'sem_cota' : r >= q ? (r === q ? 'atingida' : 'superada') : 'abaixo';
   const cls = status === 'superada' || status === 'atingida' ? 'text-emerald-300' : status === 'abaixo' ? 'text-amber-300' : 'text-zinc-500';
-  const label = status === 'sem_cota' ? 'sem cota' : status === 'abaixo' ? 'abaixo' : status === 'atingida' ? 'atingida' : 'superada';
+  const label = status === 'sem_dados' ? 'sem dados' : status === 'sem_cota' ? 'sem cota' : status === 'abaixo' ? 'abaixo' : status === 'atingida' ? 'atingida' : 'superada';
   const indDiv = individualQuotaTotal != null && q > 0 ? Math.round((individualQuotaTotal - q) * 100) / 100 : null;
   if (compact) {
+    if (noData) return <span className="text-[11px] text-zinc-500">cota {brl(q)} · <span className="text-zinc-500" title="Nenhum fechamento informado no período — falta lançar a folha, não é venda zero">sem fechamento informado</span></span>;
     return (
       <span className="text-[11px] text-zinc-500">
         loja {brl(r)} / cota {brl(q)}{pct != null && <> · <span className={cls}>{pct}%</span> ({diff >= 0 ? '+' : ''}{brl(diff)})</>}
@@ -768,9 +774,13 @@ function StoreQuotaSummary({ quota, realized, individualQuotaTotal, compact }: {
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px]">
         <span className="text-zinc-400">Cota da loja <strong className="text-zinc-200">{brl(q)}</strong></span>
-        <span className="text-zinc-400">Realizado <strong className="text-zinc-200">{brl(r)}</strong></span>
-        <span className={cls}>Diferença <strong>{diff >= 0 ? '+' : ''}{brl(diff)}</strong></span>
-        {pct != null && <span className={cls}>Atingimento <strong>{pct}%</strong></span>}
+        {noData
+          ? <span className="text-zinc-500" title="Nenhum fechamento informado no período — falta lançar a folha, não é venda zero">Sem fechamento informado ainda</span>
+          : <>
+            <span className="text-zinc-400">Realizado <strong className="text-zinc-200">{brl(r)}</strong></span>
+            <span className={cls}>Diferença <strong>{diff >= 0 ? '+' : ''}{brl(diff)}</strong></span>
+            {pct != null && <span className={cls}>Atingimento <strong>{pct}%</strong></span>}
+          </>}
         <span className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${cls} border-current/30`}>{label}</span>
       </div>
       {individualQuotaTotal != null && (
@@ -4395,7 +4405,7 @@ function RaceSection({ stores }: { stores: any[] }) {
         <div key={sr.storeId} className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-zinc-100">{sr.storeName}</span>
-            <StoreQuotaSummary quota={sr.store.quota} realized={sr.store.sales} compact />
+            <StoreQuotaSummary quota={sr.store.quota} realized={sr.store.sales} hasData={sr.store.hasData} compact />
             <span className="ml-auto text-[11px] text-zinc-400">vendedores <strong className="text-emerald-300">{brl(sr.totals.sellers)}</strong>{sr.manager ? <> · gerente <strong className="text-emerald-300">{brl(sr.totals.manager)}</strong></> : null}</span>
           </div>
           <div className="mt-2 overflow-x-auto">
@@ -4457,7 +4467,7 @@ function RaceSection({ stores }: { stores: any[] }) {
           </button>
           {openWeeks[sr.storeId] && sr.weeks.map((w: any) => (
             <div key={w.start} className="mt-2 rounded border border-zinc-800/70 p-2">
-              <div className="text-[11px] text-zinc-400">{w.start.slice(8)}/{w.start.slice(5, 7)} → {w.end.slice(8)}/{w.end.slice(5, 7)} · loja {brl(w.storeSales)} / cota {brl(w.storeQuota)}</div>
+              <div className="text-[11px] text-zinc-400">{w.start.slice(8)}/{w.start.slice(5, 7)} → {w.end.slice(8)}/{w.end.slice(5, 7)} · {w.storeHasData === false ? <span className="text-zinc-500" title="Nenhum fechamento informado nesta semana — falta lançar a folha, não é venda zero">sem fechamento informado</span> : <>loja {brl(w.storeSales)}</>} / cota {brl(w.storeQuota)}</div>
               <div className="mt-1 grid gap-1">
                 {w.sellers.filter((s: any) => s.sales > 0 || s.quota > 0).map((s: any) => (
                   <div key={s.sellerKey} className="flex items-center gap-2 text-[11px]">

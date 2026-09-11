@@ -298,6 +298,29 @@ async function main() {
   const planB = RetailCommissionRaceService.getPlan(B, loja2.id);
   check("Org B não herda o plano da org A", planB.source === "default");
 
+  // ── "sem dados" ≠ "Faltou R$0" (loja/semana SEM fechamento informado) ──────
+  // Regressão "Grande Rio zerado na 1ª semana": loja com COTA mas SEM folha
+  // informada não pode aparecer como "vendeu R$0 / Faltou R$<cota>" — tem que
+  // dizer `hasData:false` (falta lançar), distinto de um R$0 informado de verdade.
+  {
+    const lojaGR = RetailStoreService.create(A, { name: "Grande Rio", code: "GR" });
+    quota.run(randomUUID(), A, lojaGR.id, "2026-08-03", 2000); // tem cota…
+    // …mas NENHUM fechamento informado ainda.
+    const raceGR = RetailCommissionRaceService.raceMonth(A, "2026-08");
+    const srGR = raceGR.stores.find((s: any) => s.storeId === lojaGR.id);
+    check("Loja sem fechamento informado: store.hasData = false", srGR?.store?.hasData === false, `hasData=${srGR?.store?.hasData}`);
+    check("Loja sem fechamento informado: venda = 0 (mas sinalizada como sem dados)", srGR?.store?.sales === 0);
+    check("Semana sem fechamento informado: storeHasData = false", srGR?.weeks?.every((w: any) => w.storeHasData === false) === true);
+
+    // Agora um fechamento informado de R$0 DE VERDADE (folha lançada, loja não vendeu):
+    const closeZero = db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total) VALUES (?, ?, ?, ?, 'received', 0)`);
+    closeZero.run(randomUUID(), A, lojaGR.id, "2026-08-03");
+    const raceGR2 = RetailCommissionRaceService.raceMonth(A, "2026-08");
+    const srGR2 = raceGR2.stores.find((s: any) => s.storeId === lojaGR.id);
+    check("R$0 INFORMADO de verdade: store.hasData = true (não é 'sem dados')", srGR2?.store?.hasData === true, `hasData=${srGR2?.store?.hasData}`);
+    check("R$0 informado: venda segue 0 (real, não inventada)", srGR2?.store?.sales === 0);
+  }
+
   // ── Saída ─────────────────────────────────────────────────────────────────
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok ? "" : `  → ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} PASS`);

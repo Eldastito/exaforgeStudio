@@ -294,10 +294,23 @@ export class RetailCommissionRaceService {
     return new Map(rows.map((r) => [String(r.quota_date), Number(r.quota_amount) || 0]));
   }
 
-  /** Venda oficial da loja no intervalo = fechamentos diários (Fase G). */
+  /**
+   * Venda oficial da loja no intervalo = fechamentos diários (Fase G), COM o sinal
+   * `hasData`: distingue "R$0 informado de verdade" de "nenhuma folha informada
+   * ainda" (RN-004, null ≠ zero). Sem esse sinal, uma loja/semana SEM fechamento
+   * informado somava `COALESCE(...,0)` = 0 e a tela pintava "Faltou R$<cota>" — o
+   * gestor lia como "a loja vendeu ZERO" quando na verdade a folha só não foi
+   * lançada (ex.: "Grande Rio zerado na 1ª semana"). `hasData` conta só linhas com
+   * `informed_total` preenchido (fechamento PENDENTE, nunca informado, não conta).
+   */
+  private static storeSalesInfo(orgId: string, storeId: string, start: string, end: string): { sales: number; hasData: boolean } {
+    const q = db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s, COUNT(CASE WHEN informed_total IS NOT NULL THEN 1 END) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
+    return { sales: Number(q?.s || 0), hasData: Number(q?.n || 0) > 0 };
+  }
+
+  /** Venda oficial da loja (só o número) — mantém os callers de cálculo de prêmio. */
   private static storeSales(orgId: string, storeId: string, start: string, end: string): number {
-    const q = db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
-    return Number(q?.s || 0);
+    return this.storeSalesInfo(orgId, storeId, start, end).sales;
   }
 
   /**
@@ -484,8 +497,8 @@ export class RetailCommissionRaceService {
         apply(perSeller[1], 2);
 
         const storeWeekQuota = round2(Array.from(daily.entries()).filter(([d]) => d >= w.start && d <= w.end).reduce((a, [, v]) => a + v, 0));
-        const storeWeekSales = round2(this.storeSales(orgId, st.id, w.start, w.end));
-        return { ...w, sellers: perSeller, storeQuota: storeWeekQuota, storeSales: storeWeekSales };
+        const wInfo = this.storeSalesInfo(orgId, st.id, w.start, w.end);
+        return { ...w, sellers: perSeller, storeQuota: storeWeekQuota, storeSales: round2(wInfo.sales), storeHasData: wInfo.hasData };
       });
 
       // ── Mensal por vendedor ──
@@ -563,7 +576,8 @@ export class RetailCommissionRaceService {
 
       // ── Gerente ──
       const storeQuotaMonth = round2(Array.from(daily.values()).reduce((a, v) => a + v, 0));
-      const storeSalesMonth = round2(this.storeSales(orgId, st.id, mStart, mEnd));
+      const mInfo = this.storeSalesInfo(orgId, st.id, mStart, mEnd);
+      const storeSalesMonth = round2(mInfo.sales);
       let manager: any = null;
       if (st.manager_user_id) {
         const u = db.prepare(`SELECT name, email FROM users WHERE id = ? AND organization_id = ?`).get(st.manager_user_id, orgId) as any;
@@ -608,7 +622,7 @@ export class RetailCommissionRaceService {
       }
       storeReports.push({
         storeId: st.id, storeName: st.name, weeks: weekly, monthly, paAmbiguities,
-        store: { quota: storeQuotaMonth, sales: storeSalesMonth, deviation: storeQuotaMonth > 0 ? round2((storeSalesMonth / storeQuotaMonth - 1) * 10000) / 100 : null },
+        store: { quota: storeQuotaMonth, sales: storeSalesMonth, hasData: mInfo.hasData, deviation: storeQuotaMonth > 0 ? round2((storeSalesMonth / storeQuotaMonth - 1) * 10000) / 100 : null },
         manager,
       });
     }

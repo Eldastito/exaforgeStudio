@@ -751,6 +751,7 @@
     "test:falatu-entitlement": "tsx scripts/test-falatu-entitlement.ts",
     "test:scheduling-overlap": "tsx scripts/test-scheduling-overlap.ts",
     "test:brand-core": "tsx scripts/test-brand-core.ts",
+    "test:brand-vertical-profile": "tsx scripts/test-brand-vertical-profile.ts",
     "test:operational-dependency": "tsx scripts/test-operational-dependency.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
     "test:falatu-ask-recovery": "tsx scripts/test-falatu-ask-recovery.ts",

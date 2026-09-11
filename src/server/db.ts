@@ -9231,6 +9231,21 @@ const initDb = () => {
   // Meta de IDO (opt-in, por-org). Nullable: sem meta definida pelo dono → não inventa alvo.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN operational_dependency_target INTEGER`); } catch(e){}
 
+  // PRD "Evolução de Marca" / PRD 07 — comunicação por VERTICAL. A marca INSTITUCIONAL do
+  // ZapFlow adaptada por nicho (dor/linguagem/exemplos) — a essência/promessa/mecanismo são
+  // HERDADAS do Brand Core (PRD 01), nunca redefinidas pela vertical. GLOBAL (escopo
+  // plataforma, master-only), 1 linha por vertical. Aditiva.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS brand_vertical_profiles (
+        vertical TEXT PRIMARY KEY,       -- chave em verticals.ts (moda|petshop|saude|advocacia|...)
+        profile_json TEXT NOT NULL,      -- overlay (pains/outcomes/terminology/objections/...); SEM essência
+        updated_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar brand_vertical_profiles (PRD 07)', e); }
+
   // PRD 11 / ADR-168 F2 — Campaign Objective Contract. Liga um OBJETIVO de campanha
   // (do `CAMPAIGN_OBJECTIVES` do Estúdio) a uma MÉTRICA DE META de negócio
   // (`BusinessGoalService`, ex.: revenue/appointments), com um `correlation_id` que o

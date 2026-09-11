@@ -464,6 +464,7 @@ export function AdminMasterView() {
       <LaborLawCurationPanel />
       <TaxRateCurationPanel />
       <HelpCurationPanel />
+      <BrandCorePanel />
 
       <AuditLogsPanel />
     </div>
@@ -1903,6 +1904,240 @@ function OverviewCard({ icon, label, value, sub }: { icon: React.ReactNode; labe
       <div className="flex items-center gap-2 text-xs text-zinc-400">{icon} {label}</div>
       <div className="text-2xl font-bold text-zinc-100 mt-2">{value}</div>
       {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// PRD 01 (Evolução de Marca) — Admin UI do BRAND CORE institucional do ZapFlow (fatia 01b).
+// Marca da PLATAFORMA (master-only, GLOBAL), NÃO do tenant. Edita via draft → publica versão
+// (arquiva a anterior) → restaura versão antiga como novo draft. Concorrência otimista por
+// `revision`. Consome /api/admin/brand-core* (fundação backend do PRD 01). Nunca publica sozinho.
+const BRAND_CORE_TEXT_FIELDS: { key: string; label: string; long?: boolean }[] = [
+  { key: 'essence', label: 'Essência', long: true },
+  { key: 'purpose', label: 'Propósito', long: true },
+  { key: 'category', label: 'Categoria' },
+  { key: 'positioning', label: 'Posicionamento', long: true },
+  { key: 'promise', label: 'Promessa' },
+  { key: 'coreProblem', label: 'Problema central' },
+  { key: 'enemy', label: 'Inimigo (conceitual)' },
+];
+const BRAND_CORE_LIST_FIELDS: { key: string; label: string }[] = [
+  { key: 'coreProblemManifestations', label: 'Manifestações do problema' },
+  { key: 'functionalBenefits', label: 'Benefícios funcionais' },
+  { key: 'emotionalBenefits', label: 'Benefícios emocionais' },
+  { key: 'brandAttributes', label: 'Atributos da marca' },
+  { key: 'approvedClaims', label: 'Claims aprovados' },
+  { key: 'restrictedClaims', label: 'Claims restritos / proibidos' },
+];
+const BRAND_CORE_REQUIRED = ['essence', 'purpose', 'category', 'positioning', 'promise', 'coreProblem'];
+
+function BrandCorePanel() {
+  const [state, setState] = useState<any>(null);
+  const [form, setForm] = useState<any>(null);      // form de strings (evita jank de array-em-textarea)
+  const [revision, setRevision] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const arrToLines = (a: any) => (Array.isArray(a) ? a.join('\n') : '');
+  const linesToArr = (v: any) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const slug = (s: string, i: number) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || `step_${i + 1}`;
+
+  const initForm = (snap: any) => ({
+    ...Object.fromEntries(BRAND_CORE_TEXT_FIELDS.map((f) => [f.key, snap?.[f.key] || ''])),
+    ...Object.fromEntries(BRAND_CORE_LIST_FIELDS.map((f) => [f.key, arrToLines(snap?.[f.key])])),
+    audiencePrimary: arrToLines(snap?.targetAudience?.primary),
+    transformBefore: arrToLines(snap?.transformation?.before),
+    transformAfter: arrToLines(snap?.transformation?.after),
+    mechanism: (snap?.mechanism?.steps || []).map((s: any) => s.label).join('\n'),
+    differentiators: (snap?.differentiators || []).map((d: any) => `${d.title} :: ${d.description}`).join('\n'),
+  });
+
+  const load = async () => {
+    try {
+      const r = await apiFetch('/api/admin/brand-core');
+      const s = r.ok ? await r.json() : null;
+      setState(s);
+      if (s?.draft) { setForm(initForm(s.draft.snapshot)); setRevision(s.draft.revision); }
+      else { setForm(null); setRevision(0); }
+    } catch { /* noop */ }
+  };
+  useEffect(() => { if (open && state === null) load(); }, [open]);
+
+  const setField = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const buildPatch = () => {
+    const f = form || {};
+    const patch: any = {};
+    for (const t of BRAND_CORE_TEXT_FIELDS) patch[t.key] = String(f[t.key] || '').trim() || null;
+    for (const l of BRAND_CORE_LIST_FIELDS) patch[l.key] = linesToArr(f[l.key]);
+    patch.targetAudience = { primary: linesToArr(f.audiencePrimary) };
+    patch.transformation = { before: linesToArr(f.transformBefore), after: linesToArr(f.transformAfter) };
+    patch.mechanism = { steps: linesToArr(f.mechanism).map((label: string, i: number) => ({ key: slug(label, i), label, order: i + 1 })) };
+    patch.differentiators = linesToArr(f.differentiators).map((line: string) => {
+      const idx = line.indexOf('::'); const title = (idx >= 0 ? line.slice(0, idx) : line).trim(); const description = idx >= 0 ? line.slice(idx + 2).trim() : '';
+      return { title, description };
+    }).filter((d: any) => d.title || d.description);
+    return patch; // proofPoints OMITIDO de propósito → preservado pelo mergeSnapshot do service
+  };
+
+  // Espelho client-side da validação de publicação (§36) — só pra habilitar/desabilitar o botão.
+  const missing = (() => {
+    if (!form) return ['(sem draft)'];
+    const m = BRAND_CORE_REQUIRED.filter((k) => !String(form[k] || '').trim());
+    if (!linesToArr(form.transformBefore).length || !linesToArr(form.transformAfter).length) m.push('transformation');
+    if (!linesToArr(form.mechanism).length) m.push('mechanism');
+    return m;
+  })();
+
+  const createDraft = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/admin/brand-core/draft', { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao criar draft');
+      toast.success('Draft criado — revise e publique.'); await load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+
+  // Salva o draft (PUT). Retorna a nova revisão ou null (conflito/erro — já avisou).
+  const doSave = async (): Promise<number | null> => {
+    const r = await apiFetch('/api/admin/brand-core/draft', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ patch: buildPatch(), expectedRevision: revision }) });
+    if (r.status === 409) { toast.error('Outro admin alterou o draft. Recarregando…'); await load(); return null; }
+    if (!r.ok) { toast.error((await r.json().catch(() => ({}))).error || 'Falha ao salvar'); return null; }
+    const d = await r.json(); setRevision(d.revision); return d.revision;
+  };
+  const save = async () => { setBusy(true); try { if (await doSave() != null) toast.success('Draft salvo.'); } finally { setBusy(false); } };
+
+  const publish = async () => {
+    if (missing.length) { toast.error('Campos obrigatórios pendentes: ' + missing.join(', ')); return; }
+    const ok = await confirmDialog('Publicar esta versão? Ela vira a oficial do Brand Core do ZapFlow; a atual vai para o histórico (arquivada).', { confirmText: 'Publicar' });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const rev = await doSave(); // publica exatamente o que está na tela
+      if (rev == null) return;
+      const r = await apiFetch('/api/admin/brand-core/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision: rev }) });
+      if (r.status === 422) { const j = await r.json().catch(() => ({})); toast.error('Não publicado — faltam: ' + (j.missing || []).join(', ')); return; }
+      if (r.status === 409) { toast.error('Draft alterado. Recarregando…'); await load(); return; }
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao publicar');
+      toast.success('Brand Core publicado.'); await load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+
+  const discard = async () => {
+    const ok = await confirmDialog('Descartar o rascunho? A versão publicada e o histórico não são afetados.', { danger: true, confirmText: 'Descartar' });
+    if (!ok) return;
+    setBusy(true);
+    try { await apiFetch('/api/admin/brand-core/draft', { method: 'DELETE' }); toast.success('Draft descartado.'); await load(); }
+    catch { toast.error('Erro ao descartar'); }
+    finally { setBusy(false); }
+  };
+
+  const restore = async (version: number) => {
+    const ok = await confirmDialog(`Restaurar a versão ${version}? Cria um NOVO draft a partir dela (o histórico é preservado).`, { confirmText: 'Restaurar como draft' });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/admin/brand-core/restore/${version}`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao restaurar');
+      toast.success(`Draft criado a partir da versão ${version}.`); await load();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+
+  const pub = state?.published;
+  const draft = state?.draft;
+  const versions: any[] = state?.versions || [];
+
+  const textField = (t: { key: string; label: string; long?: boolean }) => (
+    <div key={t.key}>
+      <label className="text-[11px] text-zinc-400">{t.label}{BRAND_CORE_REQUIRED.includes(t.key) && <span className="text-amber-400"> *</span>}</label>
+      {t.long
+        ? <textarea rows={2} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[13px] text-zinc-100" value={form[t.key] || ''} onChange={(e) => setField(t.key, e.target.value)} />
+        : <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[13px] text-zinc-100" value={form[t.key] || ''} onChange={(e) => setField(t.key, e.target.value)} />}
+    </div>
+  );
+  const listField = (key: string, label: string, hint = 'um item por linha') => (
+    <div key={key}>
+      <label className="text-[11px] text-zinc-400">{label} <span className="text-zinc-600">({hint})</span></label>
+      <textarea rows={3} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[12px] text-zinc-100" value={form[key] || ''} onChange={(e) => setField(key, e.target.value)} />
+    </div>
+  );
+
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center gap-2">
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Building2 className="w-5 h-5 text-indigo-400" /> Marca ZapFlow — Brand Core</h3>
+        <button onClick={() => setOpen((o) => !o)} className="ml-auto text-[11px] rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1">{open ? 'Fechar' : 'Abrir'}</button>
+      </div>
+      <p className="text-xs text-zinc-500 mt-1">
+        Fonte única da marca <strong className="text-zinc-300">institucional do ZapFlow</strong> (a plataforma — não a marca do cliente). Edite em rascunho e publique; a versão publicada é imutável e vai para o histórico ao ser substituída. Nada é publicado automaticamente.
+      </p>
+
+      {open && !state && <div className="mt-4 text-sm text-zinc-500">Carregando…</div>}
+
+      {open && state && (
+        <div className="mt-4 space-y-4">
+          {/* Estado atual */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-[13px]">
+            {pub
+              ? <div>Versão publicada: <strong className="text-emerald-300">V{pub.version}</strong>{pub.publishedAt && <span className="text-zinc-500"> · em {new Date(pub.publishedAt).toLocaleString('pt-BR')}</span>}{pub.publishedBy && <span className="text-zinc-500"> · por {pub.publishedBy}</span>}</div>
+              : <div className="text-amber-300">Nenhuma versão publicada ainda (estado não configurado).</div>}
+          </div>
+
+          {/* Editor de draft */}
+          {draft ? (
+            <div className="rounded-xl border border-indigo-900/50 bg-indigo-950/10 p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="rounded-full border border-indigo-700 bg-indigo-900/30 px-2 py-0.5 text-[10px] text-indigo-200">Draft V{draft.version}</span>
+                {draft.sourceVersion && <span className="text-[10px] text-zinc-500">a partir da V{draft.sourceVersion}</span>}
+                <button onClick={discard} disabled={busy} className="ml-auto inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200 disabled:opacity-50"><Trash2 className="w-3 h-3" /> Descartar</button>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {BRAND_CORE_TEXT_FIELDS.map(textField)}
+              </div>
+              <div className="mt-3 grid sm:grid-cols-2 gap-3">
+                {listField('audiencePrimary', 'Público-alvo (primário)')}
+                {listField('coreProblemManifestations', 'Manifestações do problema')}
+                {listField('transformBefore', 'Transformação — Antes')}
+                {listField('transformAfter', 'Transformação — Depois')}
+                {listField('mechanism', 'Mecanismo (etapas, em ordem)')}
+                {listField('differentiators', 'Diferenciais', 'um por linha: título :: descrição')}
+                {listField('functionalBenefits', 'Benefícios funcionais')}
+                {listField('emotionalBenefits', 'Benefícios emocionais')}
+                {listField('brandAttributes', 'Atributos da marca')}
+                {listField('approvedClaims', 'Claims aprovados')}
+                {listField('restrictedClaims', 'Claims restritos / proibidos')}
+              </div>
+              {missing.length > 0 && <div className="mt-3 text-[11px] text-amber-300">Pendente para publicar: {missing.join(', ')}</div>}
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={save} disabled={busy} className="text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 disabled:opacity-50">Salvar draft</button>
+                <button onClick={publish} disabled={busy || missing.length > 0} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"><CheckCircle2 className="w-3.5 h-3.5" /> Publicar V{draft.version}</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={createDraft} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> {pub ? 'Editar como novo draft' : 'Criar Brand Core (draft inicial)'}</button>
+          )}
+
+          {/* Histórico */}
+          {versions.length > 0 && (
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="text-[11px] font-medium text-zinc-300 mb-2 flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-500" /> Histórico</div>
+              <div className="space-y-1">
+                {versions.map((v) => (
+                  <div key={v.version} className="flex items-center gap-2 text-[12px]">
+                    <span className="text-zinc-300">V{v.version}</span>
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${v.status === 'published' ? 'border-emerald-800 text-emerald-300' : v.status === 'draft' ? 'border-indigo-800 text-indigo-300' : 'border-zinc-700 text-zinc-500'}`}>{v.status}</span>
+                    {v.publishedAt && <span className="text-zinc-600">{new Date(v.publishedAt).toLocaleDateString('pt-BR')}</span>}
+                    {v.status === 'archived' && !draft && <button onClick={() => restore(v.version)} className="ml-auto text-[11px] text-indigo-300 hover:text-indigo-200">Restaurar como draft</button>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

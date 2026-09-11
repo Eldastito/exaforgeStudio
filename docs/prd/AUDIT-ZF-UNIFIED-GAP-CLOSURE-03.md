@@ -206,3 +206,28 @@ Princípio: **valor barato e reuso-pesado primeiro; greenfield caro por último;
 ## 9. Guardrails herdados (não regredir)
 
 Isolamento multi-tenant · CREATE-then-ALTER · `business_signals` (nunca tabela de alerta paralela) · fato≠hipótese (fact/estimate/hypothesis) · LLM não calcula número financeiro crítico (determinístico primeiro) · IA sugere, humano decide · nunca parecer jurídico · nunca aceitar/assinar/renegociar dívida autonomamente · escalonamento profissional quando ultrapassar planejamento operacional · null≠0 · aprovação humana em ação financeira sensível.
+
+---
+
+## 10. Addendum — reconciliação pós-implementação (F3 fechado; F1.4 reclassificada)
+
+### 10.1 Onda 2 (Financial Recovery OS / F3) — FECHADA
+
+7 PRs em produção (todos aditivos, opt-in por `financial_recovery_enabled`, determinísticos, reversíveis): PR-5 Debt Map + Assessment (`recovery_debt_items`, único CREATE de dados) · PR-6 IRF (ESTENDE `survival_index`) + diagnóstico de crise · PR-7 Debt Priority + Survival Budget · PR-8 Scenario Engine + "quanto prometer?" + Negociação · PR-9 Recovery Plan + sugestão de Missão · PR-10 Escalonamento profissional + Data Room · PR-11 Golden path GP-01 + hardening + runbook (`docs/runbook/financial-recovery-operacao.md`). Confirmado o TL;DR §0: ~75% composição, 1 CREATE de dados.
+
+### 10.2 F1.4 (Financial Event Identity) — RECLASSIFICADA: CREATE → ALREADY_DONE + DEFER
+
+A investigação do código (não da narrativa do PRD) mostrou que a F1.4 **não deve virar motor novo** (violaria a própria regra "sem mecanismo paralelo"):
+
+- **Identidade canônica de caixa JÁ EXISTE (ALREADY_DONE):** `cash_events` tem `UNIQUE(organization_id, source_type, source_id)` (`idx_cash_events_source`, `db.ts`), e `FinancialLedgerService.recordEvent` usa `INSERT OR IGNORE` só creditando o saldo quando o insert acontece — a MESMA origem (PDV/pedido/fechamento/recebível) nunca dobra o caixa. É exatamente a "chave forte `(org,source,external_id)`" que o PRD pediria criar.
+- **Overlap pedido↔fechamento é irresolvível por chave (DEFER):** `retail_daily_closings` é AGREGADO diário por loja (sem transação linha-a-linha ligada aos `orders`). Casar uma venda individual a um fechamento por chave é impossível — e forçar criaria ERRO financeiro. O `PnlReconciliationService` já trata isso HONESTAMENTE (sinal advisory `overlap_risk`, `basis:hypothesis`, `impactAmount:null`, nunca dobra em silêncio). Resolver de fato exigiria fechamento linha-a-linha (mudança de modelo de dados), não um motor de match — DEFER.
+- **Invariante travada (PR-12):** `test:financial-truth-invariants` codifica como regressão a chave canônica do `cash_events` e o overlap advisório — em vez de construir o motor.
+
+### 10.3 F2.1 (retail→DRE) — verificação
+
+Confirmado (§2): a receita de varejo já entra no DRE (`ManagerialDreService` via `ReportsService.retailPhysicalFlow`) e a detecção de dupla contagem já existe (`PnlReconciliationService.overlapRisk` + `ConsolidatedResultService.publishDoubleCountSignal`). O `test:financial-truth-invariants` também trava o "total = a+b+c, sem dedup silencioso" como invariante. Não recriar o PR #1447.
+
+### 10.4 Pendências de F1 que permanecem ABERTAS (precisam de decisão/rollout próprio)
+
+- **F1.1 choke-point (EXTEND, real):** flags `*_via_executor_enabled` seguem DEFAULT 0 (default = bypass) + bypass do Edge `SEND_MESSAGE`. Fechar vira o default `0→1` do envio real (WhatsApp/PIX/e-mail) em produção → exige OK explícito + rollout faseado (shadow→canary→migrar→default→remover branch→ESLint guard). NÃO fazer sob "segue" genérico.
+- **F1.2/F1.3/F1.5** (SchedulingKernel, SignalReactionPolicy, Entitlement fallback): dívida técnica de convergência, desacoplada deste PRD (Onda 3).

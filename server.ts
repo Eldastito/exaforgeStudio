@@ -101,6 +101,7 @@ import actionsRoutes from "./src/server/routes/actions.js";
 import uxRoutes from "./src/server/routes/ux.js";
 import { httpMetricsMiddleware } from "./src/server/HttpMetricsCollector.js";
 import insightsRoutes from "./src/server/routes/insights.js";
+import operationalDependencyRoutes from "./src/server/routes/operationalDependency.js";
 import controlerRoutes from "./src/server/routes/controler.js";
 import plansRoutes from "./src/server/routes/plans.js";
 import { PlanService } from "./src/server/PlanService.js";
@@ -752,6 +753,7 @@ async function startServer() {
   // ADR-163 F8 — superfícies "Executando" + "Resultados" (composição pura).
   protectedApi.use("/ux", uxRoutes);
   protectedApi.use("/insights", insightsRoutes);
+  protectedApi.use("/operational-dependency", operationalDependencyRoutes);
   protectedApi.use("/controler", controlerRoutes);
   protectedApi.use("/gestor", gestorRoutes);
   protectedApi.use("/people", peopleRoutes);

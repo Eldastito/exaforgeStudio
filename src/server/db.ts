@@ -9204,6 +9204,33 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar brand_core_versions (PRD Brand Core)', e); }
 
+  // PRD "Evolução de Marca" / PRD 04 — IDO (Índice de Dependência Operacional). É a dor
+  // central da marca (dependência operacional) virada DIAGNÓSTICO mensurável: questionário
+  // → score 0-100 (ponderado, determinístico) por dimensão. POR-ORG (o dono avalia a PRÓPRIA
+  // operação). Cada submit é um SNAPSHOT append-only (histórico + comparação temporal
+  // ANTES→HOJE→META). Espelha a máquina de score do SurvivalIndexService (sem motor paralelo);
+  // a entrada é o questionário, não dados operacionais. Aditiva, opt-in de uso.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS operational_dependency_assessments (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        ido_score REAL,                 -- 0-100 (null se sem resposta suficiente — não inventa)
+        faixa TEXT,
+        confidence TEXT,
+        model_version INTEGER NOT NULL DEFAULT 1,
+        answers_json TEXT NOT NULL,
+        components_json TEXT NOT NULL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_op_dependency_org
+        ON operational_dependency_assessments (organization_id, created_at DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar operational_dependency_assessments (PRD 04 IDO)', e); }
+  // Meta de IDO (opt-in, por-org). Nullable: sem meta definida pelo dono → não inventa alvo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN operational_dependency_target INTEGER`); } catch(e){}
+
   // PRD 11 / ADR-168 F2 — Campaign Objective Contract. Liga um OBJETIVO de campanha
   // (do `CAMPAIGN_OBJECTIVES` do Estúdio) a uma MÉTRICA DE META de negócio
   // (`BusinessGoalService`, ex.: revenue/appointments), com um `correlation_id` que o

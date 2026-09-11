@@ -34,8 +34,10 @@ import db from "./db.js";
 import { BusinessTimeService } from "./BusinessTimeService.js";
 import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.js";
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
+import { RecoveryAssessmentService } from "./RecoveryAssessmentService.js";
+import { RecoveryPlanService } from "./RecoveryPlanService.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable";
+export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable" | "financial_recovery";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -146,6 +148,12 @@ const APPOINTMENT_VERB_RE = /\b(?:agenda(?:r)?|agende|marca(?:r)?|marque)\b/i;
 const APPOINTMENT_NOUN_RE = /\b(reuni[aã]o|compromisso|consulta|atendimento|visita|call|encontro|hor[aá]rio)\b/i;
 // F12 (recebível/fiado) — registro de conta A RECEBER (dinheiro futuro).
 const RECEIVABLE_KW_RE = /\b(receb[íi]ve(l|is)|fiado|a\s*receber|conta[s]?\s*a\s*receber)\b/i;
+// Recuperação financeira (Fala Tu → F3, PRD-ZF-UNIFIED-GAP-CLOSURE-03) — o dono
+// descreve CRISE de caixa/dívida na linguagem dele ("tô no vermelho", "muita
+// dívida", "quanto tempo eu aguento", "como recupero a empresa"). Só INTERCEPTA o
+// que hoje cairia em open_question (checado por ÚLTIMO em classify) → 0-regressão
+// dura. Não casa perguntas de venda/folga nem os registros (cues distintos).
+const RECOVERY_RE = /\brecupera(?:r|[çc][aã]o)\b|\bno vermelho\b|\bendivid\w*|\bquebrar\b|\bquebrando\b|\bfechar as portas\b|\bcrise financeira\b|\bem crise\b|\bsobreviv\w*|\bt[oô] apertad|\bsem (?:dinheiro|caixa) (?:pra|para) pagar\b|\bn[aã]o (?:vou )?conseguir pagar\b|\bd[ií]vidas?\b|\bt[oô] devendo\b|\bestou devendo\b|\bquanto tempo (?:eu )?(?:aguento|aguent|sobrevivo|de caixa)\b/i;
 
 export class FalaTuAskService {
   /**
@@ -199,6 +207,13 @@ export class FalaTuAskService {
     // Faturamento total num dia.
     if (SALES_RE.test(t)) {
       return { kind: "sales_on_day", date, needsMoney: true };
+    }
+    // Recuperação financeira: crise de caixa/dívida. Checado POR ÚLTIMO — só rouba
+    // do open_question (perguntas datadas de venda/folga e os registros já casaram
+    // acima). needsMoney:false porque a resposta NÃO expõe R$ no texto (só IRF/
+    // fôlego/plano); os valores vão no `data`, redigidos por papel (§73).
+    if (RECOVERY_RE.test(t)) {
+      return { kind: "financial_recovery", date: null, needsMoney: false };
     }
     return { kind: "open_question", date, needsMoney: false };
   }
@@ -291,6 +306,63 @@ export class FalaTuAskService {
   }
 
   /**
+   * Resposta de RECUPERAÇÃO FINANCEIRA (F3). COMPÕE o `RecoveryPlanService` (que já
+   * compõe assessment/IRF/priorização/orçamento) — read-only, determinístico, NÃO
+   * recalcula nem inventa. O TEXTO é livre de R$ (só IRF/fôlego/crise/plano — que o
+   * módulo não trata como dinheiro); os valores em R$ ficam no `data.plan`, já
+   * redigido por papel quando `includeMoney=false` (§73). Sem dados → ADMITE.
+   */
+  private static answerRecovery(orgId: string, includeMoney: boolean): FalaTuAskResult {
+    const plan = safe(() => RecoveryPlanService.plan(orgId, { includeMoney }), null as any);
+    const mission = safe(() => RecoveryPlanService.suggestMission(orgId), null as any);
+    const irf = plan?.irf;                 // { score, faixa } | null
+    const runway = plan?.runway;           // { survivalDays, firstRupture } | null
+    const hasDiag = !!plan && (irf?.score != null || (runway && runway.survivalDays != null));
+
+    if (!hasDiag) {
+      return {
+        kind: "financial_recovery", date: null, grounded: true, moneyRestricted: false,
+        answer: "Ainda não consigo montar seu quadro de recuperação — faltam dados de caixa e/ou o Mapa da Dívida. Lance o caixa e as contas (e cadastre suas dívidas) que eu monto o diagnóstico: fôlego, índice de recuperabilidade e o plano de ação.",
+        data: { plan: plan || null },
+      };
+    }
+
+    const FAIXA: Record<string, string> = { recuperavel: "recuperável", dificil: "difícil", critico: "crítico", indefinido: "indefinido" };
+    const CRISE: Record<string, string> = {
+      operational: "crise operacional — a operação perde dinheiro antes da dívida",
+      financial: "crise financeira — a operação gera caixa, mas a dívida aperta",
+      mixed: "crise mista — operação e dívida pressionam juntas",
+      stable: "quadro estável no momento",
+      undetermined: "quadro ainda indefinido (dados parciais)",
+    };
+
+    const parts: string[] = [];
+    if (irf?.score != null) parts.push(`Índice de Recuperabilidade (IRF): ${irf.score}/100 — faixa ${FAIXA[irf.faixa] || irf.faixa}.`);
+    const shape = plan?.crisis?.shape;
+    if (shape && CRISE[shape]) parts.push(`Diagnóstico: ${CRISE[shape]}.`);
+    if (runway?.survivalDays != null) {
+      let r = `Fôlego de caixa estimado: ~${runway.survivalDays} dia(s).`;
+      if (runway.firstRupture?.weeksAhead != null) r += ` Primeira ruptura projetada em ~${runway.firstRupture.weeksAhead} semana(s).`;
+      parts.push(r);
+    }
+    const titles = (plan?.sections || []).map((s: any) => s.title).filter(Boolean);
+    if (titles.length) parts.push(`O plano prioriza, nesta ordem: ${titles.join(" → ")}.`);
+    if (plan?.professionalReviewRecommended) parts.push("⚠️ Recomendo validação com um profissional (contador/advogado) — há risco jurídico ou quadro misto.");
+    if (mission?.missionLayerEnabled) {
+      if (mission.draft) parts.push(`Posso registrar a missão "${mission.draft.title}" (meta: IRF ≥ ${mission.draft.targetValue}) pra acompanhar — confirme em Missões; não crio sozinho.`);
+      else if (mission.alreadyCovered) parts.push("Você já tem uma missão de recuperação em andamento.");
+    }
+    if (!includeMoney) parts.push("(Os valores em R$ do quadro estão ocultos pelo seu perfil — mostro o diagnóstico sem os números.)");
+    if (plan?.disclaimer) parts.push(plan.disclaimer);
+
+    return {
+      kind: "financial_recovery", date: null, grounded: true, moneyRestricted: false,
+      answer: parts.join(" "),
+      data: { plan, mission },
+    };
+  }
+
+  /**
    * Ponto de entrada: recebe a pergunta em linguagem natural e devolve a
    * resposta. `user` traz role/role_profile_id pro gate de dinheiro. `opts.now`
    * permite injetar a data nos testes.
@@ -319,6 +391,16 @@ export class FalaTuAskService {
       case "cash_on_day": return this.answerCashOnDay(orgId, date);
       case "sales_on_day": return this.answerSalesOnDay(orgId, date);
       case "who_is_off": return this.answerWhoIsOff(orgId, date);
+      case "financial_recovery": {
+        // Porta conversacional pro Financial Recovery OS (F3). Só responde se o
+        // módulo está LIGADO (opt-in) — off → não anuncia, cai na pergunta aberta
+        // (motor único, 0-regressão). Dinheiro role-gated via includeMoney.
+        if (RecoveryAssessmentService.isEnabled(orgId)) {
+          return this.answerRecovery(orgId, this.canSeeMoney(orgId, user));
+        }
+        const off = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user) });
+        return { kind: "open_question", answer: off, date: cls.date, grounded: false, moneyRestricted: false };
+      }
       case "open_question":
       default: {
         // Pergunta aberta → agentes de IA (motor único, grounded no panorama).
@@ -460,3 +542,6 @@ function fmtDate(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
+
+// Compõe read-models do F3 sem propagar erro pro caller (RN-FR-7 read-only).
+function safe<T>(fn: () => T, fb: T): T { try { return fn(); } catch { return fb; } }

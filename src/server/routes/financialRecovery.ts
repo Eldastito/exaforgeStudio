@@ -12,6 +12,7 @@ import { RecoveryDebtService } from "../RecoveryDebtService.js";
 import { RecoveryViabilityService } from "../RecoveryViabilityService.js";
 import { DebtPriorityService } from "../DebtPriorityService.js";
 import { SurvivalBudgetService } from "../SurvivalBudgetService.js";
+import { RecoveryScenarioService } from "../RecoveryScenarioService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
 
 const router = Router();
@@ -70,6 +71,39 @@ router.get("/survival-budget", (req: AuthRequest, res): any => {
   try {
     const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
     res.json(SurvivalBudgetService.suggest(orgId, { includeMoney }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ── Simulador / Negociação (F3.9/F3.10/F3.11) — determinístico, dinheiro role-gated ──
+// POST /scenario/simulate — testa alavancas (cortar/renegociar/antecipar/aumentar); reporta
+// baseline × factOnly × scenario (fato ≠ hipótese nunca somados).
+router.post("/scenario/simulate", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    res.json(RecoveryScenarioService.simulate(orgId, { levers: req.body?.levers, minCash: Number(req.body?.minCash) || 0, includeMoney }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// POST /scenario/commitment — "quanto podemos prometer?": um acordo proposto é compatível
+// com a projeção? Nunca "aceite".
+router.post("/scenario/commitment", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    const b = req.body || {};
+    res.json(RecoveryScenarioService.commitmentAffordability(orgId, { downPayment: Number(b.downPayment) || 0, monthlyAmount: Number(b.monthlyAmount) || 0, installments: Number(b.installments) || 0, minCash: Number(b.minCash) || 0, includeMoney }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// POST /scenario/negotiation — propõe parcela que cabe no caixa + rascunho de mensagem.
+// O ZapFlow não aceita/assina/renegocia sozinho.
+router.post("/scenario/negotiation", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    const b = req.body || {};
+    res.json(RecoveryScenarioService.negotiationProposal(orgId, { debtTotal: Number(b.debtTotal) || 0, maxInstallments: Number(b.maxInstallments) || 12, minCash: Number(b.minCash) || 0, includeMoney }));
   } catch (e: any) { fail(res, e); }
 });
 

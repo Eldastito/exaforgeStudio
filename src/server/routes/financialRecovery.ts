@@ -14,6 +14,8 @@ import { DebtPriorityService } from "../DebtPriorityService.js";
 import { SurvivalBudgetService } from "../SurvivalBudgetService.js";
 import { RecoveryScenarioService } from "../RecoveryScenarioService.js";
 import { RecoveryPlanService } from "../RecoveryPlanService.js";
+import { ProfessionalEscalationService } from "../ProfessionalEscalationService.js";
+import { RecoveryDataRoomService } from "../RecoveryDataRoomService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
 
 const router = Router();
@@ -89,6 +91,21 @@ router.get("/plan", (req: AuthRequest, res): any => {
 // GET /plan/mission-suggestion — RASCUNHO de missão de recuperação (sugere, nunca cria).
 router.get("/plan/mission-suggestion", (req: AuthRequest, res): any => {
   try { res.json(RecoveryPlanService.suggestMission(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+
+// GET /escalation — gatilhos de escalonamento profissional (F3.17). Sinaliza, nunca parecer.
+router.get("/escalation", (req: AuthRequest, res): any => {
+  try { res.json(ProfessionalEscalationService.assess(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+
+// GET /data-room — pacote organizado pra contador/advogado/banco/credor (F3.19). Dinheiro role-gated.
+router.get("/data-room", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    const period = typeof req.query?.period === "string" ? req.query.period : undefined;
+    res.json(RecoveryDataRoomService.assemble(orgId, { includeMoney, period }));
+  } catch (e: any) { fail(res, e); }
 });
 
 // ── Simulador / Negociação (F3.9/F3.10/F3.11) — determinístico, dinheiro role-gated ──

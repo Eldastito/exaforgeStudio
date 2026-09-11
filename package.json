@@ -749,6 +749,7 @@
     "test:connected-financials": "tsx scripts/test-connected-financials.ts",
     "test:connected-financials-hardening": "tsx scripts/test-connected-financials-hardening.ts",
     "test:falatu-entitlement": "tsx scripts/test-falatu-entitlement.ts",
+    "test:scheduling-overlap": "tsx scripts/test-scheduling-overlap.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
     "test:falatu-ask-recovery": "tsx scripts/test-falatu-ask-recovery.ts",
     "test:falatu-ask-whatsapp": "tsx scripts/test-falatu-ask-whatsapp.ts",

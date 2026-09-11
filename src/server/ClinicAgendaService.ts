@@ -2,6 +2,7 @@ import db from "./db.js";
 import { randomUUID, createHash } from "node:crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { AppointmentService } from "./AppointmentService.js";
+import { intervalsOverlap } from "./schedulingOverlap.js";
 import { ClinicProfessionalAbsenceService } from "./ClinicProfessionalAbsenceService.js";
 
 /**
@@ -218,7 +219,7 @@ export class ClinicAgendaService {
       const st = AppointmentService.ms(r.scheduled_start);
       if (st == null) continue;
       const en = AppointmentService.ms(r.scheduled_end) ?? (st + this.durationMin(orgId, r) * 60000);
-      if (en > opts.startMs && st < opts.endMs) {
+      if (intervalsOverlap(st, en, opts.startMs, opts.endMs)) {
         // Se estamos criando/atualizando um appointment DA MESMA sessão, ignora
         // outros participantes da mesma sessão — RN-006. Isso elimina o falso
         // conflito "profissional já ocupado" quando adicionamos o 2º, 3º, ...

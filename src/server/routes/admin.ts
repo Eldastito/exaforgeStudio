@@ -21,6 +21,7 @@ import { CapacityHeadroomService } from "../CapacityHeadroomService.js";
 import { CapacityForecastService } from "../CapacityForecastService.js";
 import { VpsSpecProfileService } from "../VpsSpecProfileService.js";
 import { SloDefinitionService } from "../SloDefinitionService.js";
+import { BrandCoreService } from "../BrandCoreService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
@@ -258,6 +259,63 @@ router.post("/slo", (req: AuthRequest, res): any => {
   try {
     return res.json(SloDefinitionService.set(req.body || {}));
   } catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+
+// PRD "Evolução de Marca" / PRD 01 — BRAND CORE INSTITUCIONAL (marca da PLATAFORMA ZapFlow).
+// GLOBAL, master-only (herda requireMasterAdmin do mount /api/admin). Versionado: draft →
+// publish (arquiva a anterior) → restore-to-draft. Concorrência otimista por `revision`.
+// Nenhum consumidor é migrado neste PRD — a fundação só passa a existir.
+router.get("/brand-core", (_req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.getState()); }
+  catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.get("/brand-core/published", (_req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.getPublished()); }
+  catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.get("/brand-core/versions", (_req: AuthRequest, res): any => {
+  try { return res.json({ versions: BrandCoreService.listVersions() }); }
+  catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.get("/brand-core/version/:version", (req: AuthRequest, res): any => {
+  try {
+    const v = BrandCoreService.getVersion(Number(req.params.version));
+    if (!v) return res.status(404).json({ error: "Versão não encontrada." });
+    return res.json(v);
+  } catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.post("/brand-core/draft", (req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.createDraft(req.user?.email || "master")); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+router.put("/brand-core/draft", (req: AuthRequest, res): any => {
+  try {
+    const { patch, expectedRevision } = req.body || {};
+    if (expectedRevision == null) return res.status(400).json({ error: "expectedRevision obrigatório." });
+    return res.json(BrandCoreService.updateDraft(patch || {}, Number(expectedRevision), req.user?.email || "master"));
+  } catch (error: any) {
+    if (error?.code === "CONFLICT") return res.status(409).json({ error: "Esta versão foi atualizada por outro usuário. Recarregue para revisar.", currentRevision: error.currentRevision });
+    return res.status(400).json({ error: error.message });
+  }
+});
+router.delete("/brand-core/draft", (req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.discardDraft(req.user?.email || "master")); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+router.post("/brand-core/publish", (req: AuthRequest, res): any => {
+  try {
+    const { expectedRevision } = req.body || {};
+    if (expectedRevision == null) return res.status(400).json({ error: "expectedRevision obrigatório." });
+    return res.json(BrandCoreService.publish(req.user?.email || "master", Number(expectedRevision)));
+  } catch (error: any) {
+    if (error?.code === "CONFLICT") return res.status(409).json({ error: "O draft foi alterado. Recarregue antes de publicar.", currentRevision: error.currentRevision });
+    if (error?.code === "INCOMPLETE") return res.status(422).json({ error: "Brand Core não pode ser publicado — campos obrigatórios pendentes.", missing: error.missing });
+    return res.status(400).json({ error: error.message });
+  }
+});
+router.post("/brand-core/restore/:version", (req: AuthRequest, res): any => {
+  try { return res.json(BrandCoreService.restoreToDraft(Number(req.params.version), req.user?.email || "master")); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
 });
 
 // Master Admin - SaaS overview (métricas agregadas de todas as empresas)

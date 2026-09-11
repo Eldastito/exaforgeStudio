@@ -79,5 +79,6 @@ Isolamento por `organization_id` (ou escopo GLOBAL master-only p/ Brand Core ins
 ## 5. Estado (a atualizar conforme fatias forem entregues)
 
 - [x] Fase 0 — auditoria + Reuse Map (este doc)
-- [ ] PRD 01 — Brand Core institucional (aguardando gate/aprovação do dono)
+- [x] **PRD 01 — Brand Core institucional** — `BrandCoreService` + tabela GLOBAL `brand_core_versions` (draft/publish/archive/restore + concorrência otimista) + resolver `getBrandCoreContext()` + rotas master-only `/api/admin/brand-core*` + seed DRAFT (defaults, sem auto-publish) + auditoria `brand_core.*`. Aditivo, não toca tenant. `test:brand-core` (27). **Admin UI (frontend) e migração de consumidores ficam para fatias seguintes** (o PRD 01 entrega a fundação backend; §30 exige só que o resolver exista, não migrar consumidores).
+- [ ] PRD 01b — Admin UI do Brand Core (tela no AdminMasterView)
 - [ ] PRD 02..08 — conforme sequência revisada acima

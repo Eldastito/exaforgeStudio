@@ -9177,6 +9177,33 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar brand_dna_versions (ADR-168 F1)', e); }
 
+  // PRD "Evolução de Marca" / PRD 01 — BRAND CORE INSTITUCIONAL do ZapFlow (marca da
+  // PLATAFORMA, não do tenant). GLOBAL (sem organization_id, escopo platform, master-only)
+  // — espelha o versionamento canônico de `brand_dna_versions`, mas para a marca única da
+  // ZapFlow. status draft|published|archived (só 1 published ativa). `revision` faz o
+  // controle otimista de concorrência do draft. `source_version` marca a versão de origem
+  // num restore. Aditiva; nunca reordenar (convenção nº 2).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS brand_core_versions (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'draft',   -- draft | published | archived
+        snapshot_json TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,     -- optimistic concurrency (só do draft)
+        source_version INTEGER,                  -- versão de origem num restore/clone
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        published_by TEXT,
+        published_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_brand_core_versions_status
+        ON brand_core_versions (status, version DESC);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar brand_core_versions (PRD Brand Core)', e); }
+
   // PRD 11 / ADR-168 F2 — Campaign Objective Contract. Liga um OBJETIVO de campanha
   // (do `CAMPAIGN_OBJECTIVES` do Estúdio) a uma MÉTRICA DE META de negócio
   // (`BusinessGoalService`, ex.: revenue/appointments), com um `correlation_id` que o

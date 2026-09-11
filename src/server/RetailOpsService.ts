@@ -393,16 +393,33 @@ export class RetailClosingService {
     //  - 'unreadable' → nem o prefixo foi recuperável (foto ilegível/resposta vazia).
     let parsed: any = {};
     let readError: string | null = null;
-    const raw = (await extractor(base64, mimetype)) || "{}";
+    // A CHAMADA de visão em si pode FALHAR (cota/billing da IA estourado, timeout,
+    // modelo indisponível, imagem rejeitada, chave inválida). Antes isso subia como
+    // exceção → o route devolvia um 500 opaco ("Falha ao ler a folha…") que o gestor
+    // lê como "o app quebrou" e some sem saída. Aqui a falha da IA vira o MESMO
+    // caminho gracioso de uma foto ilegível: readError 'unreadable' + folha em
+    // needs_review pra preencher à mão. O motivo real fica no log/áudit (nunca
+    // inventa valor). Isso é o que faz a folha "não parar de funcionar" de vez —
+    // sempre há a saída manual, com mensagem honesta, em vez de erro de sistema.
+    let extractorError: string | null = null;
+    let raw = "{}";
     try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // JSON quebrado (tipicamente cortado por limite de tokens): tenta salvar o
-      // prefixo legível — nunca inventa o pedaço que faltou.
-      const { repairTruncatedJson } = await import("./llm.js");
-      const repaired = repairTruncatedJson(raw);
-      if (repaired) { try { parsed = JSON.parse(repaired); readError = "truncated"; } catch { parsed = {}; readError = "unreadable"; } }
-      else { parsed = {}; readError = "unreadable"; }
+      raw = (await extractor(base64, mimetype)) || "{}";
+    } catch (e: any) {
+      extractorError = String(e?.message || e || "vision_failed").slice(0, 300);
+      readError = "unreadable";
+    }
+    if (!extractorError) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        // JSON quebrado (tipicamente cortado por limite de tokens): tenta salvar o
+        // prefixo legível — nunca inventa o pedaço que faltou.
+        const { repairTruncatedJson } = await import("./llm.js");
+        const repaired = repairTruncatedJson(raw);
+        if (repaired) { try { parsed = JSON.parse(repaired); readError = "truncated"; } catch { parsed = {}; readError = "unreadable"; } }
+        else { parsed = {}; readError = "unreadable"; }
+      }
     }
     if (parsed?._truncated) readError = readError || "truncated";
 
@@ -441,7 +458,11 @@ export class RetailClosingService {
     const minConf = Number(process.env.RETAIL_CLOSING_MIN_CONFIDENCE || 80);
     const status = (confidence >= minConf && informedTotal > 0 && !readError) ? "extracted" : "needs_review";
     db.prepare(`UPDATE retail_daily_closings SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(status, orgId, closing.id);
-    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status, readError }); } catch { /* noop */ }
+    // `readErrorDetail` guarda o MOTIVO real da falha da IA (mensagem da API) só no
+    // áudit/log — é o que permite diagnosticar "por que não leu" (cota, modelo,
+    // chave) sem expor detalhe técnico assustador pro gestor na tela.
+    if (extractorError) { try { console.error("[Retail Closing OCR] vision falhou:", extractorError); } catch { /* noop */ } }
+    try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_SCANNED", { informedTotal, confidence, status, readError, readErrorDetail: extractorError || undefined }); } catch { /* noop */ }
 
     return { closing: this.get(orgId, closing.id), extraction: { ...parsed, informedTotal, confidence, needsReview: status === "needs_review", readError } };
   }

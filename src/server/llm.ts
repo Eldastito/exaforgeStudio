@@ -568,6 +568,29 @@ export function repairTruncatedJson(raw: string): string | null {
   try { JSON.parse(repaired); return repaired; } catch { return null; }
 }
 
+/**
+ * Chamada de VISÃO robusta a diferenças de contrato entre modelos. Modelos mais
+ * novos (série "o" / gpt-5 etc.) REJEITAM `max_tokens` (exigem `max_completion_tokens`)
+ * e `temperature` != 1 — se OPENAI_VISION_MODEL apontar pra um deles, a chamada
+ * legada dá 400 e a folha "não lê" (virava 500 opaco). Aqui detectamos ESSE 400
+ * específico e repetimos UMA vez com o contrato novo. 0-regressão pro gpt-4o: o
+ * retry só dispara no erro de parâmetro; qualquer outra falha sobe como antes.
+ */
+async function createVisionCompletion(params: any): Promise<any> {
+  try {
+    return await getClient().chat.completions.create(params);
+  } catch (e: any) {
+    const msg = String(e?.message || "").toLowerCase();
+    const status = e?.status ?? e?.response?.status;
+    const isParamErr = status === 400 && /max_tokens|max_completion_tokens|temperature|unsupported/.test(msg);
+    if (!isParamErr) throw e;
+    const retry: any = { ...params };
+    if (retry.max_tokens != null) { retry.max_completion_tokens = retry.max_tokens; delete retry.max_tokens; }
+    if (/temperature/.test(msg)) delete retry.temperature; // modelo só aceita o default
+    return await getClient().chat.completions.create(retry);
+  }
+}
+
 export async function extractClosingFromImage(base64: string, mimetype = "image/jpeg", sellerNames: Array<string | null | undefined> = []): Promise<string> {
   const system = `Você é um assistente de leitura de FOLHAS DE FECHAMENTO DE CAIXA de loja no varejo brasileiro. A folha do dia costuma ter: valores por forma de pagamento (dinheiro, PIX), CRÉDITO e DÉBITO abertos POR BANDEIRA (ex.: Amex/Master/Visa/Elo no crédito; Redshop/Eletron/Elo no débito), despesas do dia, um RANKING por vendedor (nome, valor vendido, atendimentos "A/P" e peças "P/A"), cadastros de clientes, boleta inicial/final, malote e às vezes um comprovante de POS (Clover etc.) grampeado com "vendas por forma de pagamento". Extraia o que estiver legível e devolva SOMENTE um JSON:
 {"dinheiro": <número ou null>, "pix": <número ou null>, "credito": <número, TOTAL do crédito, ou null>, "debito": <número, TOTAL do débito, ou null>, "voucher": <número ou null>, "troca": <número ou null>, "outros": <número ou null>, "total": <número, o total escrito na folha, ou null>,
@@ -579,7 +602,7 @@ export async function extractClosingFromImage(base64: string, mimetype = "image/
 "pos": {"creditoValor": <número>, "creditoQtd": <inteiro ou null>, "debitoValor": <número>, "debitoQtd": <inteiro ou null>} ou null,
 "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
 Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use separador de milhar (escreva 1250.50, nunca 1.250,50). NUNCA invente um valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. Não some nem calcule o total por conta própria: só devolva "total" se houver linha de total escrita; senão null. FORMAS DE PAGAMENTO SÃO DISTINTAS — nunca misture PIX com DÉBITO: PIX é transferência instantânea e vai SEMPRE no campo "pix"; DÉBITO é cartão de débito, aberto por bandeira (ex.: Redshop/Eletron/Elo) e vai em "debito"/"debitoBandeiras". Se a folha tem uma linha "PIX" e outra "DÉBITO", cada valor entra no SEU campo; nunca copie o valor de uma para a outra nem some as duas. Idem: dinheiro, crédito, voucher e troca são campos separados. Na coluna A/P do ranking, o valor é o número de ATENDIMENTOS do vendedor; P/A é o número de PEÇAS. Ignore a linha "LOJA" do ranking (é o total). BOLETAS: cada boleta (talão de venda) tem no máximo 5 linhas, e cada linha é um produto DISTINTO (um código de barras) — várias unidades do mesmo código contam como 1 linha só; passou de 5 produtos distintos, abre-se nova boleta. Apenas LEIA os números de boleta inicial/final escritos na folha; não recalcule nem invente. LETRA MANUSCRITA: as colunas podem desalinhar — associe cada valor à linha do NOME mais próximo; leia dígito por dígito e não confunda 0/6/8/9 nem 1/7. O comprovante impresso (Clover) grampeado é o "vendas por forma de pagamento" do POS — use-o SÓ para o campo "pos". NUNCA copie bandeiras do Clover para "creditoBandeiras"/"debitoBandeiras": essas bandeiras vêm APENAS da folha manuscrita. Atenção: no Clover a linha "Débito (N) R$X" é o TOTAL do débito e a linha "Visa (N) R$X" logo abaixo é o DETALHE do mesmo dinheiro — são a MESMA venda, nunca some as duas. Em "creditoBandeiras"/"debitoBandeiras" cada chave é uma BANDEIRA (Master, Visa, Elo, Redshop, Eletron…), nunca um rótulo de total ("Crédito", "Débito", "Total", "Cartão"): o valor de "credito"/"debito" é o total, e a soma das bandeiras tem que fechar com ele — se não fechar, prefira omitir a bandeira duvidosa a inventar uma. COTA: se a folha tiver a cota da loja escrita (ex.: "cota = 3.800", "meta 3800"), devolva o número em "cota" (3800); é a cota da LOJA no dia, não a do vendedor — ignore o "÷ 3" ou "V=1.267" que é a cota individual.${sellerRosterHint(sellerNames)} Responda SOMENTE o JSON, sem texto ao redor.`;
-  const res = await getClient().chat.completions.create({
+  const res = await createVisionCompletion({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [
       { role: "system", content: system },
@@ -624,7 +647,7 @@ export async function extractSellerSalesFromImage(base64: string, mimetype = "im
   const system = `Você é um assistente de leitura de FOLHAS DE VENDAS POR VENDEDOR de loja no varejo brasileiro. Na folha, cada linha traz o NOME de um vendedor e o total vendido por ele (em reais), a quantidade de peças e, às vezes, o número de ATENDIMENTOS (coluna "AT" ou "A/P"). Extraia todas as linhas legíveis e devolva SOMENTE um JSON:
 {"vendedores": [{"nome": <string, nome do vendedor>, "valor": <número em reais ou null>, "pecas": <número inteiro de peças ou null>, "atendimentos": <número inteiro de atendimentos ou null>}], "confidence": <número inteiro de 0 a 100, confiança geral na leitura>}
 Regras rígidas: use PONTO como separador decimal (ex.: 1250.50) e NÃO use separador de milhar (1250.50, nunca 1.250,50). NUNCA invente um nome ou valor que não esteja legível — use null no campo que não conseguir ler e reflita isso num confidence mais baixo. LETRA MANUSCRITA: leia o nome com cuidado (pode ser só o primeiro nome ou apelido); as colunas podem desalinhar, então associe cada valor à linha do nome mais próximo; leia dígito por dígito. Ignore linhas de total geral, cabeçalhos e anotações que não sejam de um vendedor. Não some nem calcule nada por conta própria.${sellerRosterHint(sellerNames)} Responda SOMENTE o JSON, sem texto ao redor.`;
-  const res = await getClient().chat.completions.create({
+  const res = await createVisionCompletion({
     model: process.env.OPENAI_VISION_MODEL || CHAT_MODEL,
     messages: [
       { role: "system", content: system },

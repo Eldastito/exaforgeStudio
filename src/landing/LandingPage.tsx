@@ -7,7 +7,10 @@ import {
 import { marketingConfig, primaryCtaHref } from '@/src/config/marketing';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 
-const CTA_PRIMARY = 'Agendar diagnóstico operacional';
+// PRD 03 — comunicação comercial parte de DOR → dependência, não de funcionalidades.
+// A CTA nomeia o diagnóstico de dependência (IDO, PRD 04); o DESTINO segue o fluxo de
+// contato (primaryCtaHref) — não há IDO público/anônimo e não se inventa um aqui.
+const CTA_PRIMARY = 'Descubra sua dependência operacional';
 const teal = 'var(--color-zf-teal)';
 const amber = 'var(--color-zf-amber)';
 
@@ -25,6 +28,15 @@ const NAV = [
   { id: 'solucoes', label: 'Soluções' },
   { id: 'seguranca', label: 'Segurança' },
   { id: 'faq', label: 'FAQ' },
+];
+
+// Bloco-problema (PRD 03): perguntas de PERTENCIMENTO que expõem a dependência do dono.
+const PERGUNTAS_PROBLEMA = [
+  'Quem percebe que uma venda parou?',
+  'Quem lembra que um cliente precisa receber retorno?',
+  'Quem identifica uma cobrança vencida?',
+  'Quem percebe que um processo não aconteceu?',
+  'Quem sabe o que está preso na cabeça de um funcionário-chave?',
 ];
 
 const DORES = [
@@ -106,7 +118,7 @@ export function LandingPage() {
           <nav className="hidden md:flex items-center gap-6" aria-label="Navegação principal">
             {NAV.map(n => <a key={n.id} href={`#${n.id}`} className="text-sm text-zinc-400 hover:text-zinc-100 transition-colors">{n.label}</a>)}
           </nav>
-          <Cta primary className="h-9 text-xs">Agendar diagnóstico <ArrowRight className="w-3.5 h-3.5" /></Cta>
+          <Cta primary className="h-9 text-xs">Descobrir dependência <ArrowRight className="w-3.5 h-3.5" /></Cta>
         </div>
       </header>
 
@@ -115,13 +127,13 @@ export function LandingPage() {
         <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(900px 480px at 100% -10%, rgba(99,149,255,0.12), transparent 62%), radial-gradient(820px 460px at -10% 105%, rgba(34,211,182,0.10), transparent 65%)' }} />
         <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24 grid lg:grid-cols-2 gap-12 items-center">
           <div>
-            <p className="zf-kicker">Central de Execução e Inteligência Operacional</p>
-            <h1 className="zf-display text-4xl sm:text-5xl mt-3 leading-[1.1]">Da conversa <span style={{ color: teal }}>à execução.</span></h1>
+            <p className="zf-kicker">Independência operacional</p>
+            <h1 className="zf-display text-4xl sm:text-5xl mt-3 leading-[1.1]">Quanto da sua empresa ainda <span style={{ color: teal }}>depende de você?</span></h1>
             <p className="text-zinc-300 mt-5 text-base sm:text-lg max-w-xl">
-              O ZappFlow conecta atendimento, vendas, tarefas, agenda, estoque e compras para garantir que cada demanda avance para a próxima ação — com IA, controle humano e dados reais da sua operação.
+              O ZappFlow ajuda sua empresa a observar, organizar e executar o que hoje depende do dono, da memória e de processos manuais.
             </p>
             <div className="flex flex-wrap items-center gap-3 mt-7">
-              <Cta primary>Agendar diagnóstico operacional <ArrowRight className="w-4 h-4" /></Cta>
+              <Cta primary>{CTA_PRIMARY} <ArrowRight className="w-4 h-4" /></Cta>
               <a href="#produto" className="zf-button zf-button-secondary">Ver como funciona</a>
             </div>
             <p className="text-[12px] text-zinc-500 mt-3">Sem promessa genérica. Olhamos seu fluxo atual e mostramos onde há demanda perdida, demora ou retrabalho.</p>
@@ -152,8 +164,22 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* Bloco-problema (PRD 03): expõe a dependência ANTES de qualquer funcionalidade. */}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t border-[#243B58]/50">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {PERGUNTAS_PROBLEMA.map((q) => (
+            <div key={q} className="zf-panel-subtle p-5">
+              <p className="text-base text-zinc-100">{q}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-center text-zinc-300 mt-8 text-lg">
+          Se a resposta geralmente é <span style={{ color: teal }}>"eu"</span>, sua operação ainda depende demais de você.
+        </p>
+      </section>
+
       {/* Dor */}
-      <section id="produto" className="max-w-6xl mx-auto px-4 sm:px-6 py-16">
+      <section id="produto" className="max-w-6xl mx-auto px-4 sm:px-6 py-16 border-t border-[#243B58]/50">
         <h2 className="zf-display text-2xl sm:text-3xl">A mensagem chegou. Mas quem garantiu que ela virou resultado?</h2>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-8">
           {DORES.map(c => (
@@ -266,7 +292,7 @@ export function LandingPage() {
         <div className="zf-panel p-8 sm:p-12 text-center">
           <h2 className="zf-display text-2xl sm:text-3xl">Antes de automatizar, encontre onde a operação está vazando resultado.</h2>
           <p className="text-zinc-300 mt-3 max-w-2xl mx-auto">Veja, em uma conversa objetiva, onde o ZappFlow pode reduzir perda de demanda, retrabalho e improviso no seu negócio.</p>
-          <div className="mt-6 flex justify-center"><Cta primary>Agendar diagnóstico operacional <ArrowRight className="w-4 h-4" /></Cta></div>
+          <div className="mt-6 flex justify-center"><Cta primary>{CTA_PRIMARY} <ArrowRight className="w-4 h-4" /></Cta></div>
           {(marketingConfig.whatsappUrl || marketingConfig.email) && (
             <p className="text-xs text-zinc-500 mt-3">
               {marketingConfig.whatsappUrl && <a className="hover:text-zinc-300" href={marketingConfig.whatsappUrl} target="_blank" rel="noreferrer">WhatsApp</a>}

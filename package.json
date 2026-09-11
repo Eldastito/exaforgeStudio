@@ -963,6 +963,7 @@
     "test:executive-constraint": "tsx scripts/test-executive-constraint.ts",
     "test:executive-mission-bridge": "tsx scripts/test-executive-mission-bridge.ts",
     "test:executive-finance": "tsx scripts/test-executive-finance.ts",
+    "test:financial-recovery": "tsx scripts/test-financial-recovery.ts",
     "test:executive-briefing-block": "tsx scripts/test-executive-briefing-block.ts",
     "test:executive-money-projection": "tsx scripts/test-executive-money-projection.ts",
     "test:executive-today-block": "tsx scripts/test-executive-today-block.ts",

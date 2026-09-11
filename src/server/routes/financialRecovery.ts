@@ -1,0 +1,84 @@
+/**
+ * FINANCIAL RECOVERY — API do Financial Recovery OS (PRD-ZF-UNIFIED-GAP-CLOSURE-03 F3, PR-5).
+ * Montada em /api/financial-recovery. owner/admin (recuperação é decisão do dono).
+ * GATE SERVER-SIDE pela flag `financial_recovery_enabled` (esconder botão não é segurança):
+ * desligada → 404. A rota valida FORMA; o invariante vive nos services.
+ * Dinheiro role-gated (§73): o assessment redige BRL para quem não pode ver dinheiro.
+ */
+import { Router } from "express";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
+import { RecoveryAssessmentService } from "../RecoveryAssessmentService.js";
+import { RecoveryDebtService } from "../RecoveryDebtService.js";
+import { FalaTuAskService } from "../FalaTuAskService.js";
+
+const router = Router();
+const actor = (req: any) => req.user?.userId || req.user?.id;
+function fail(res: any, e: any) { res.status(400).json({ error: e?.message || "erro" }); }
+
+/** Gate: módulo precisa estar ligado pra org (opt-in). */
+function requireRecovery(req: AuthRequest, res: any, next: any): any {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!RecoveryAssessmentService.isEnabled(orgId)) return res.status(404).json({ error: "Financial Recovery indisponível para esta organização." });
+  next();
+}
+
+// ── HABILITAÇÃO — antes do gate (senão o dono nunca ligaria a flag). owner/admin. ──
+router.get("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(RecoveryAssessmentService.settings(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+router.put("/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(RecoveryAssessmentService.setEnabled(req.organizationId!, req.body?.enabled === true || req.body?.enabled === 1)); }
+  catch (e: any) { fail(res, e); }
+});
+
+router.use(requireRole("owner", "admin"), requireRecovery);
+
+// GET /assessment — quadro consolidado (financeiro + Mapa da Dívida). Dinheiro role-gated.
+router.get("/assessment", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    const period = typeof req.query?.period === "string" ? req.query.period : undefined;
+    res.json(RecoveryAssessmentService.assess(orgId, { includeMoney, period }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// ── Mapa da Dívida (F3.3) ──
+// GET /debts — lista (?status= ?category= ?includeCanceled=1).
+router.get("/debts", (req: AuthRequest, res): any => {
+  try {
+    res.json({
+      items: RecoveryDebtService.list(req.organizationId!, {
+        status: req.query?.status as any,
+        category: req.query?.category as any,
+        includeCanceled: req.query?.includeCanceled === "1" || req.query?.includeCanceled === "true",
+      }),
+    });
+  } catch (e: any) { fail(res, e); }
+});
+
+// GET /debts/summary — resumo agregado (só valores conhecidos; não prioriza — RN-FR-4).
+router.get("/debts/summary", (req: AuthRequest, res): any => {
+  try { res.json(RecoveryDebtService.summary(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+
+// POST /debts — cadastra obrigação.
+router.post("/debts", (req: AuthRequest, res): any => {
+  try { res.status(201).json(RecoveryDebtService.create(req.organizationId!, req.body || {}, actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+
+// PATCH /debts/:id — atualiza campos parciais / status.
+router.patch("/debts/:id", (req: AuthRequest, res): any => {
+  try { res.json(RecoveryDebtService.update(req.organizationId!, req.params.id, req.body || {}, actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+
+// DELETE /debts/:id — cancela (retenção: UPDATE status, nunca DELETE — RN-FR-9).
+router.delete("/debts/:id", (req: AuthRequest, res): any => {
+  try { res.json(RecoveryDebtService.cancel(req.organizationId!, req.params.id, actor(req))); }
+  catch (e: any) { fail(res, e); }
+});
+
+export default router;

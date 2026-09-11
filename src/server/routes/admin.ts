@@ -1019,4 +1019,22 @@ router.get("/help-metrics", (_req: AuthRequest, res): any => {
   res.json(HelpKnowledgeService.globalMetrics());
 });
 
+// ── F1.1 B1 (SHADOW) — prontidão de migração do choke-point de efeito externo ──
+// Read-only, Master Admin. Não muda envio, não liga flag, não semeia política.
+router.get("/external-effect-shadow", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { ExternalEffectShadowService } = await import("../ExternalEffectShadowService.js");
+    const orgId = typeof req.query?.orgId === "string" ? req.query.orgId : req.organizationId;
+    if (!orgId) return res.status(400).json({ error: "orgId requerido" });
+    res.json(ExternalEffectShadowService.analyze(orgId));
+  } catch (e: any) { res.status(500).json({ error: e?.message || "erro" }); }
+});
+router.get("/external-effect-shadow/all", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { ExternalEffectShadowService } = await import("../ExternalEffectShadowService.js");
+    const limit = Number(req.query?.limit) || undefined;
+    res.json(ExternalEffectShadowService.analyzeAll({ limit }));
+  } catch (e: any) { res.status(500).json({ error: e?.message || "erro" }); }
+});
+
 export default router;

@@ -105,6 +105,21 @@ async function main() {
   check("Leitura ilegível marca readError 'unreadable'", bad?.extraction?.readError === "unreadable", bad?.extraction?.readError || "null");
   check("Leitura ilegível vira 'needs_review'", bad?.closing?.status === "needs_review");
 
+  // ---- 2e. A CHAMADA de visão FALHA (cota/timeout/modelo/chave) → NÃO explode ----
+  // Antes: a exceção subia e o route devolvia 500 opaco ("Falha ao ler a folha…")
+  // que o gestor lê como app quebrado. Agora vira o MESMO caminho gracioso de foto
+  // ilegível: readError 'unreadable' + needs_review, com saída manual sempre.
+  __setClosingExtractorForTests(async () => { throw new Error("429 insufficient_quota: You exceeded your current quota"); });
+  let threw = false;
+  let visionFail: any = null;
+  try {
+    visionFail = await RetailClosingService.submitFromImage(A, store.id, "2026-08-09", "b64", "image/jpeg", { source: "test" });
+  } catch { threw = true; }
+  check("Falha da IA NÃO propaga exceção (sem 500 opaco)", threw === false);
+  check("Falha da IA vira readError 'unreadable'", visionFail?.extraction?.readError === "unreadable", visionFail?.extraction?.readError || "null");
+  check("Falha da IA vira 'needs_review' (saída manual)", visionFail?.closing?.status === "needs_review", visionFail?.closing?.status);
+  check("Falha da IA NUNCA inventa total", (visionFail?.extraction?.informedTotal || 0) === 0);
+
   __setClosingExtractorForTests(null);
 
   console.log("\n=== Retail Ops — Robustez da leitura por foto (ADR-083 Fase C) ===");

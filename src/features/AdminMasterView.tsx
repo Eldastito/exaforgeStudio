@@ -465,6 +465,7 @@ export function AdminMasterView() {
       <TaxRateCurationPanel />
       <HelpCurationPanel />
       <BrandCorePanel />
+      <VerticalProfilesPanel />
 
       <AuditLogsPanel />
     </div>
@@ -2177,6 +2178,138 @@ function BrandCorePanel() {
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// PRD 07b — UI da comunicação por VERTICAL. Overlay por nicho (dor/linguagem/exemplo/benefício)
+// que ADAPTA a marca institucional sem redefinir a essência: essência/promessa/mecanismo são
+// SEMPRE herdados do Brand Core publicado (mostrados read-only aqui, nunca editáveis por vertical
+// — a regra dura do BrandVerticalProfileService.resolve). GLOBAL / master-only.
+function VerticalProfilesPanel() {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<any[] | null>(null);
+  const [selected, setSelected] = useState<string>('');
+  const [resolved, setResolved] = useState<any>(null); // { inherited, overlay, brandConfigured, verticalConfigured }
+  const [form, setForm] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+
+  const arrToLines = (a: any) => (Array.isArray(a) ? a.join('\n') : '');
+  const linesToArr = (v: any) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
+
+  const initForm = (ov: any) => ({
+    pains: arrToLines(ov?.pains),
+    desiredOutcomes: arrToLines(ov?.desiredOutcomes),
+    terminology: arrToLines(ov?.terminology),
+    relevantCapabilities: arrToLines(ov?.relevantCapabilities),
+    proofPoints: arrToLines(ov?.proofPoints),
+    messagingExamples: arrToLines(ov?.messagingExamples),
+    objections: (ov?.commonObjections || []).map((o: any) => `${o.objection} :: ${o.response}`).join('\n'),
+  });
+
+  const loadList = async () => {
+    try { const r = await apiFetch('/api/admin/brand-core/vertical-profiles'); setList(r.ok ? (await r.json()).verticals || [] : []); }
+    catch { setList([]); }
+  };
+  useEffect(() => { if (open && list === null) loadList(); }, [open]);
+
+  const selectVertical = async (vertical: string) => {
+    setSelected(vertical); setResolved(null); setForm(null);
+    if (!vertical) return;
+    try {
+      const r = await apiFetch(`/api/admin/brand-core/vertical-profiles/${vertical}/resolve`);
+      const data = r.ok ? await r.json() : null;
+      setResolved(data); setForm(initForm(data?.overlay));
+    } catch { toast.error('Erro ao carregar vertical'); }
+  };
+
+  const setField = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    if (!selected || !form) return;
+    setBusy(true);
+    try {
+      const patch = {
+        pains: linesToArr(form.pains), desiredOutcomes: linesToArr(form.desiredOutcomes),
+        terminology: linesToArr(form.terminology), relevantCapabilities: linesToArr(form.relevantCapabilities),
+        proofPoints: linesToArr(form.proofPoints), messagingExamples: linesToArr(form.messagingExamples),
+        commonObjections: linesToArr(form.objections).map((line: string) => {
+          const idx = line.indexOf('::'); const objection = (idx >= 0 ? line.slice(0, idx) : line).trim(); const response = idx >= 0 ? line.slice(idx + 2).trim() : '';
+          return { objection, response };
+        }).filter((o: any) => o.objection || o.response),
+      };
+      const r = await apiFetch(`/api/admin/brand-core/vertical-profiles/${selected}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao salvar');
+      toast.success('Overlay da vertical salvo.'); await selectVertical(selected); await loadList();
+    } catch (e: any) { toast.error(e.message || 'Erro'); }
+    finally { setBusy(false); }
+  };
+
+  const listField = (key: string, label: string, hint = 'um item por linha') => (
+    <div key={key}>
+      <label className="text-[11px] text-zinc-400">{label} <span className="text-zinc-600">({hint})</span></label>
+      <textarea rows={3} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[12px] text-zinc-100" value={form[key] || ''} onChange={(e) => setField(key, e.target.value)} />
+    </div>
+  );
+
+  const inh = resolved?.inherited;
+
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+      <div className="flex items-center gap-2">
+        <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Layers className="w-5 h-5 text-indigo-400" /> Comunicação por vertical</h3>
+        <button onClick={() => setOpen((o) => !o)} className="ml-auto text-[11px] rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1">{open ? 'Fechar' : 'Abrir'}</button>
+      </div>
+      <p className="text-xs text-zinc-500 mt-1">
+        Adapta a marca do ZapFlow à língua de cada nicho (dor, linguagem, exemplo, benefício). A <strong className="text-zinc-300">essência, a promessa e o mecanismo</strong> são sempre herdados do Brand Core — uma vertical nunca redefine a marca.
+      </p>
+
+      {open && list === null && <div className="mt-4 text-sm text-zinc-500">Carregando…</div>}
+
+      {open && list && (
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="text-[11px] text-zinc-400">Vertical</label>
+            <select value={selected} onChange={(e) => selectVertical(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-[13px] text-zinc-100">
+              <option value="">Selecione uma vertical…</option>
+              {list.map((v) => <option key={v.vertical} value={v.vertical}>{v.label}{v.configured ? ' ✓' : ''}</option>)}
+            </select>
+          </div>
+
+          {selected && form && (
+            <>
+              {/* Herança do Brand Core (read-only — a regra dura) */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 text-[12px]">
+                <div className="text-[11px] font-medium text-zinc-300 mb-1">Herdado do Brand Core (não editável aqui)</div>
+                {inh ? (
+                  <div className="space-y-1 text-zinc-400">
+                    <div><span className="text-zinc-500">Essência:</span> {inh.essence || <span className="text-zinc-600">—</span>}</div>
+                    <div><span className="text-zinc-500">Promessa:</span> {inh.promise || <span className="text-zinc-600">—</span>}</div>
+                    <div><span className="text-zinc-500">Mecanismo:</span> {(inh.mechanism?.steps || []).map((s: any) => s.label).join(' → ') || <span className="text-zinc-600">—</span>}</div>
+                  </div>
+                ) : <div className="text-amber-300">Nenhum Brand Core publicado ainda — publique-o acima para a herança valer.</div>}
+              </div>
+
+              {/* Overlay editável da vertical */}
+              <div className="rounded-xl border border-indigo-900/50 bg-indigo-950/10 p-3">
+                <div className="text-[11px] font-medium text-indigo-300 mb-2">Overlay da vertical{resolved?.verticalConfigured ? '' : ' (rascunho — ainda não salvo)'}</div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {listField('pains', 'Dores do nicho')}
+                  {listField('desiredOutcomes', 'Resultados desejados')}
+                  {listField('terminology', 'Terminologia do nicho')}
+                  {listField('relevantCapabilities', 'Capacidades relevantes')}
+                  {listField('proofPoints', 'Provas / evidências')}
+                  {listField('messagingExamples', 'Exemplos de mensagem')}
+                  {listField('objections', 'Objeções comuns', 'um por linha: objeção :: resposta')}
+                </div>
+                <div className="mt-3">
+                  <button onClick={save} disabled={busy} className="text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 disabled:opacity-50">Salvar overlay</button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

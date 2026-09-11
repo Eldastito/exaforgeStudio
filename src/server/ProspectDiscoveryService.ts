@@ -5,6 +5,7 @@ import { logAuthEvent } from "./auditLog.js";
 import { ProspectService } from "./ProspectService.js";
 import { DEFAULT_CATS, resolveCategories, resolveGoogleTypes } from "./prospectCategories.js";
 import { GooglePlacesService, type DiscoveryResult } from "./GooglePlacesService.js";
+import { provenanceForProvider } from "./prospectProvenance.js";
 
 /**
  * Prospect AI — DESCOBERTA AUTOMÁTICA por região (Fase 2).
@@ -333,8 +334,9 @@ export class ProspectDiscoveryService {
         results = await this.searchOSM(lat, lon, camp.discovery_radius_km || 1, this.categoriesForCampaign(camp));
       }
       const srcId = randomUUID();
-      db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, ?, ?, ?, 'tenant_policy', ?)")
-        .run(srcId, orgId, provider, area, useGoogle ? "licensed" : "public", useGoogle ? 0.85 : 0.6);
+      const prov = provenanceForProvider(provider); // osm/google places → live/tier B (recuperação viva verificável)
+      db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence, evidence_mode, source_tier) VALUES (?, ?, ?, ?, ?, 'tenant_policy', ?, ?, ?)")
+        .run(srcId, orgId, provider, area, useGoogle ? "licensed" : "public", useGoogle ? 0.85 : 0.6, prov.evidenceMode, prov.tier);
       const { created, skipped, accountIds } = this.createFromResults(orgId, camp, results, srcId, provider);
       await this.orchestrate(orgId, accountIds, { autodraft: !!camp.discovery_autodraft });
       const summary = await this.summarize(area, created, results);

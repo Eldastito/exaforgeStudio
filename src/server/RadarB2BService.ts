@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ProspectService } from "./ProspectService.js";
+import { provenanceForProvider } from "./prospectProvenance.js";
 
 /**
  * Radar B2B (PRD Radar B2B) — busca empresas REAIS da base pública da Receita
@@ -213,10 +214,11 @@ export class RadarB2BService {
 
     // Fonte de dados (uma por importação) — provider rfb_open_data, termos públicos.
     const sourceId = uuidv4();
+    const rfbProv = provenanceForProvider("rfb_open_data"); // registro público oficial → live/tier A
     db.prepare(
-      `INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence)
-       VALUES (?, ?, 'rfb_open_data', ?, 'public', 'public_data', 0.9)`
-    ).run(sourceId, orgId, `RFB dados abertos — Rio (${list.length} empresas)`);
+      `INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence, evidence_mode, source_tier)
+       VALUES (?, ?, 'rfb_open_data', ?, 'public', 'public_data', 0.9, ?, ?)`
+    ).run(sourceId, orgId, `RFB dados abertos — Rio (${list.length} empresas)`, rfbProv.evidenceMode, rfbProv.tier);
 
     const insAcc = db.prepare(
       `INSERT INTO prospect_accounts (id, organization_id, campaign_id, display_name, domain, website_url, industry, city, state, cnpj, source_id, source, account_status, dedupe_key, external_ref)

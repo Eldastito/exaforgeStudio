@@ -11696,6 +11696,12 @@ const initDb = () => {
   } catch (e) { console.error('[DB] Falha ao criar recovery_debt_items', e); }
   // Flag opt-in do módulo Financial Recovery (default 0 — 0-regressão).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN financial_recovery_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // F4 (GAP-CLOSURE-03) — procedência canônica da fonte de dados de prospecção
+  // ALINHADA ao vocabulário do PRD 9 (evidenceMode/tier). Aditivo/nulo em legado; o
+  // mapa provider→procedência vive em `prospectProvenance.ts` (fonte única). null =
+  // origem declarada/primeira-parte ou desconhecida (honesto, nunca `live` fabricado).
+  try { db.exec(`ALTER TABLE prospect_data_sources ADD COLUMN evidence_mode TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE prospect_data_sources ADD COLUMN source_tier TEXT`); } catch(e){}
 };
 
 initDb();

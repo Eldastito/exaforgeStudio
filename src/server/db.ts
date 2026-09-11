@@ -11589,6 +11589,44 @@ const initDb = () => {
       console.error('[DB][ADR-199] users email-constraint rebuild ABORTADO (users intacta):', e);
     }
   }
+
+  // PRD-ZF-UNIFIED-GAP-CLOSURE-03 F3.3 (PR-5) — Mapa da Dívida (Financial Recovery OS).
+  // Cadastro de obrigações externas de recuperação (banco/tributo/fornecedor/folha/
+  // judicial/cartão/aluguel…) que o Motor de Caixa (ADR-125) não representa — `payables`
+  // são contas a pagar operacionais; dívida de recuperação carrega juros/risco jurídico/
+  // negociabilidade e é cadastrada explicitamente pelo dono. Aditiva, isolada por org,
+  // opt-in pela flag `financial_recovery_enabled`. Campo desconhecido fica NULL (nunca 0).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS recovery_debt_items (
+        id                      TEXT PRIMARY KEY,
+        organization_id         TEXT NOT NULL,
+        creditor                TEXT NOT NULL,
+        category                TEXT NOT NULL,          -- payroll|tax|supplier|service_provider|loan|rent|utility|judicial|credit_card|other
+        amount_total            REAL NOT NULL DEFAULT 0,
+        amount_overdue          REAL DEFAULT 0,
+        monthly_payment         REAL,                    -- NULL = desconhecido
+        due_date                TEXT,                    -- YYYY-MM-DD (NULL = desconhecido)
+        interest_rate           REAL,                    -- % a.m., só se conhecido
+        secured                 INTEGER,                 -- 1/0/NULL(desconhecido) — garantia real
+        operational_criticality TEXT,                    -- low|medium|high|NULL
+        legal_risk              TEXT,                    -- low|medium|high|NULL (rótulo, NUNCA parecer)
+        negotiability           TEXT,                    -- low|medium|high|NULL
+        source                  TEXT DEFAULT 'manual',   -- manual|payable|derived
+        source_id               TEXT,
+        confidence              TEXT DEFAULT 'estimated',-- confirmed|likely|estimated
+        status                  TEXT DEFAULT 'open',     -- open|renegotiating|settled|canceled
+        note                    TEXT,
+        created_by              TEXT,
+        updated_by              TEXT,
+        created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at              DATETIME
+      );
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_recovery_debt_org ON recovery_debt_items(organization_id, status)`);
+  } catch (e) { console.error('[DB] Falha ao criar recovery_debt_items', e); }
+  // Flag opt-in do módulo Financial Recovery (default 0 — 0-regressão).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN financial_recovery_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

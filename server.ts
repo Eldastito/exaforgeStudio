@@ -80,6 +80,7 @@ import connectorPublicRoutes from "./src/server/routes/connectorPublic.js";
 import mfaRoutes from "./src/server/routes/mfa.js";
 import lgpdRoutes from "./src/server/routes/lgpd.js";
 import executiveRoutes from "./src/server/routes/executive.js";
+import financialRecoveryRoutes from "./src/server/routes/financialRecovery.js";
 import businessRoutes from "./src/server/routes/business.js";
 import goalsRoutes from "./src/server/routes/goals.js";
 import constraintsRoutes from "./src/server/routes/constraints.js";
@@ -727,6 +728,7 @@ async function startServer() {
   protectedApi.use("/mfa", mfaRoutes);
   protectedApi.use("/lgpd", lgpdRoutes);
   protectedApi.use("/executive", executiveRoutes);
+  protectedApi.use("/financial-recovery", financialRecoveryRoutes);
   protectedApi.use("/business", businessRoutes);
   protectedApi.use("/goals", goalsRoutes);
   protectedApi.use("/constraints", constraintsRoutes);

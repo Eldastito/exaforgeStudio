@@ -141,6 +141,32 @@ export class RetailFloorService {
   }
 
   /**
+   * Vendedores DA LOJA pra fila (Atendimento de Loja por loja). Usa a LOTAÇÃO
+   * (`retail_seller_store_assignments`): quem está lotado naquela loja. Antes a
+   * tela usava o roster da ORG inteira (todo mundo aparecia em toda loja) — esta é
+   * a base pra filtrar por loja. Se a loja ainda NÃO tem ninguém lotado (a lotação
+   * nasce vazia — migração), cai pro roster da org com `scoped:false`, pra UI
+   * mostrar "associe os vendedores desta loja" sem quebrar (0-regressão até o
+   * gestor organizar a equipe).
+   */
+  static storeSellers(orgId: string, storeId: string): { sellers: any[]; scoped: boolean } {
+    if (!db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId)) {
+      throw new Error("Loja não encontrada.");
+    }
+    const assigned = db.prepare(
+      `SELECT s.id, s.matricula, s.name, s.photo_url
+         FROM retail_seller_store_assignments a
+         JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+        WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1
+        ORDER BY s.name`
+    ).all(orgId, storeId) as any[];
+    const shape = (rows: any[]) => rows.map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null, photoUrl: s.photo_url || null }));
+    if (assigned.length) return { sellers: shape(assigned), scoped: true };
+    const all = db.prepare(`SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    return { sellers: shape(all), scoped: false };
+  }
+
+  /**
    * Guarda de escopo por loja para as próximas fatias (fila/turno/conciliação):
    * gestor da loja = owner/admin OU manager_user_id daquela loja. Lança erro
    * padronizado — a rota converte em 403 (RN-150-005: override é só de gestor).

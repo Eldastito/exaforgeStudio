@@ -128,6 +128,45 @@ async function main() {
   try { RetailFloorService.assertAnyManager(B, { userId: uManager, role: "agent" }); } catch { crossMgr = true; }
   check("Isolamento: gestor de A não gerencia em B", crossMgr);
 
+  // ---- 8. Roster POR LOJA (lotação) — Atendimento de Loja filtra por loja ----
+  const { RetailSellerDirectoryService } = await import("../src/server/RetailSellerDirectoryService.js");
+  const store2 = randomUUID();
+  db.prepare(`INSERT INTO retail_stores (id, organization_id, name, code, manager_user_id) VALUES (?, ?, 'Loja 2010', '2010', ?)`).run(store2, A, uManager);
+
+  // Sem lotação → cai pro roster da org inteira, scoped:false (a UI avisa pra associar).
+  const s0 = RetailFloorService.storeSellers(A, store1);
+  check("StoreSellers: sem lotação cai pro roster da org (scoped:false)", s0.scoped === false && s0.sellers.length >= 2, `scoped=${s0.scoped} n=${s0.sellers.length}`);
+
+  // Associa SÓ a Ana à loja 1.
+  RetailSellerDirectoryService.setStoreSellers(A, store1, [ana.id], uOwner);
+  const s1 = RetailFloorService.storeSellers(A, store1);
+  check("StoreSellers: com lotação, scoped:true e só os da loja", s1.scoped === true && s1.sellers.length === 1 && s1.sellers[0].id === ana.id, `n=${s1.sellers.length}`);
+  check("StoreSellers: entry traz photoUrl (card do Kanban)", s1.sellers[0]?.photoUrl === "/media/ana2.jpg");
+
+  // Bia na loja 2 — não vaza pra loja 1.
+  RetailSellerDirectoryService.setStoreSellers(A, store2, [bia.id], uOwner);
+  check("StoreSellers: loja 2 só tem a Bia (não vaza entre lojas)", (() => { const s = RetailFloorService.storeSellers(A, store2); return s.sellers.length === 1 && s.sellers[0].id === bia.id; })());
+  check("StoreSellers: loja 1 continua só com a Ana", (() => { const s = RetailFloorService.storeSellers(A, store1); return s.sellers.length === 1 && s.sellers[0].id === ana.id; })());
+
+  // Reconcilia: +Bia na loja 1, depois -Ana (desativa, nunca DELETE), depois volta.
+  RetailSellerDirectoryService.setStoreSellers(A, store1, [ana.id, bia.id], uOwner);
+  check("StoreSellers: adicionar 2º vendedor à loja", RetailFloorService.storeSellers(A, store1).sellers.length === 2);
+  RetailSellerDirectoryService.setStoreSellers(A, store1, [bia.id], uOwner);
+  const s1c = RetailFloorService.storeSellers(A, store1);
+  check("StoreSellers: remover da equipe tira da loja (sem apagar identidade)", s1c.sellers.length === 1 && s1c.sellers[0].id === bia.id);
+  check("StoreSellers: Ana continua existindo como vendedora (soft)", !!db.prepare(`SELECT 1 FROM retail_sellers WHERE organization_id=? AND id=? AND active=1`).get(A, ana.id));
+  // Reativa a Ana (reaproveita o vínculo inativo — não duplica a linha).
+  RetailSellerDirectoryService.setStoreSellers(A, store1, [ana.id, bia.id], uOwner);
+  const assignRows = db.prepare(`SELECT COUNT(*) AS n FROM retail_seller_store_assignments WHERE organization_id=? AND store_id=? AND seller_id=?`).get(A, store1, ana.id) as any;
+  check("StoreSellers: reativar não duplica o vínculo (reaproveita a linha)", Number(assignRows.n) === 1, `linhas=${assignRows.n}`);
+
+  let badStore = false; try { RetailSellerDirectoryService.setStoreSellers(A, randomUUID(), [ana.id], uOwner); } catch { badStore = true; }
+  check("StoreSellers: loja inválida rejeitada", badStore);
+  let badSeller = false; try { RetailSellerDirectoryService.setStoreSellers(A, store1, [randomUUID()], uOwner); } catch { badSeller = true; }
+  check("StoreSellers: vendedor inválido rejeitado", badSeller);
+  let crossTeam = false; try { RetailSellerDirectoryService.setStoreSellers(B, store1, [ana.id], uOwner); } catch { crossTeam = true; }
+  check("StoreSellers: cross-tenant negado (loja de A não existe em B)", crossTeam);
+
   console.log("\n=== ADR-150 Fatia 11: equipe da loja (cadastro + foto) ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);

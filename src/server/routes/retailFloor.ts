@@ -16,6 +16,7 @@ import { RetailFloorReconciliationService } from "../RetailFloorReconciliationSe
 import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
 import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics, RetailFloorOpsMetricsService } from "../RetailFloorAnalyticsService.js";
 import { RetailFloorDigestService } from "../RetailFloorDigestService.js";
+import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -72,6 +73,28 @@ router.put("/sellers/:id", (req: AuthRequest, res) => {
     res.json(RetailFloorService.updateSeller(req.organizationId!, req.params.id, {
       name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl, active: req.body?.active,
     }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Vendedores DA LOJA (lotação) pra a fila — o Atendimento de Loja passa a mostrar
+// só quem é da loja selecionada. `scoped:false` = a loja ainda não tem ninguém
+// lotado (migração): cai pro roster da org e a UI avisa pra associar a equipe.
+router.get("/store-sellers", (req: AuthRequest, res) => {
+  try {
+    const storeId = String(req.query.storeId || "");
+    if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    res.json(RetailFloorService.storeSellers(req.organizationId!, storeId));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Define quais vendedores pertencem à loja (equipe/lotação store-cêntrica).
+// Gestor daquela loja ou owner/admin (assertStoreManager). POST (o cliente do
+// módulo usa POST pra mutações; o helper `api()` só faz GET/POST).
+router.post("/stores/:storeId/team", (req: AuthRequest, res) => {
+  try {
+    RetailFloorService.assertStoreManager(req.organizationId!, req.user, req.params.storeId);
+    const sellerIds = Array.isArray(req.body?.sellerIds) ? req.body.sellerIds.map(String) : [];
+    res.json({ sellers: RetailSellerDirectoryService.setStoreSellers(req.organizationId!, req.params.storeId, sellerIds, actor(req)) });
   } catch (e: any) { fail(res, e); }
 });
 

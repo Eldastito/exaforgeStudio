@@ -6,7 +6,7 @@ import {
   Loader2, RefreshCw, Play, Square, Coffee, UserX, LogIn, Barcode,
   Scale, Clock, Users, DoorOpen, DoorClosed, AlertTriangle, Check, X,
   ChevronDown, Timer, UserPlus, ArrowLeft, ScanLine, ShoppingBag, Camera,
-  Lock, LockOpen, Pencil, Store, ArrowLeftRight,
+  Lock, LockOpen, Store, ArrowLeftRight,
 } from 'lucide-react';
 import { BarcodeCameraScanner } from '@/src/components/BarcodeCameraScanner';
 import { apiFetch } from '@/src/lib/api';
@@ -115,6 +115,12 @@ export function RetailFloorView() {
   const [scanFor, setScanFor] = useState<any>(null);
   const [teamOpen, setTeamOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  // Roster POR LOJA: o Atendimento de Loja passa a mostrar só os vendedores
+  // lotados na loja selecionada. `scoped:false` = a loja ainda não tem equipe
+  // definida (mostra todos + aviso). `showAllSellers` = cobertura (adicionar de
+  // outra loja num dia sem lotar de forma fixa).
+  const [storeSellers, setStoreSellers] = useState<{ sellers: any[]; scoped: boolean }>({ sellers: [], scoped: true });
+  const [showAllSellers, setShowAllSellers] = useState(false);
   // Fatia 12 — modo quiosque: funções de gerência começam TRAVADAS; o PIN da
   // loja (verificado no servidor) destrava por UNLOCK_TTL_MS.
   const [unlocked, setUnlocked] = useState(false);
@@ -168,6 +174,14 @@ export function RetailFloorView() {
     } catch { /* silencioso no poll */ }
   }, []);
 
+  // Vendedores DA LOJA selecionada (lotação). Recarrega quando troca a loja ou
+  // quando a equipe muda (onChanged da TeamModal).
+  const loadStoreSellers = useCallback(async (sid: string) => {
+    if (!sid) { setStoreSellers({ sellers: [], scoped: true }); return; }
+    try { const r = await api(`/store-sellers?storeId=${encodeURIComponent(sid)}`); setStoreSellers({ sellers: r.sellers || [], scoped: r.scoped !== false }); }
+    catch { setStoreSellers({ sellers: [], scoped: true }); }
+  }, []);
+
   useEffect(() => { loadCtx(); }, [loadCtx]);
   useEffect(() => {
     if (!storeId) return;
@@ -175,6 +189,7 @@ export function RetailFloorView() {
     pollRef.current = setInterval(() => loadSnap(storeId), POLL_MS);
     return () => clearInterval(pollRef.current);
   }, [storeId, loadSnap]);
+  useEffect(() => { loadStoreSellers(storeId); setShowAllSellers(false); }, [storeId, loadStoreSellers]);
   useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t); }, []);
 
   const act = async (fn: () => Promise<any>, okMsg?: string) => {
@@ -225,6 +240,13 @@ export function RetailFloorView() {
   const totalServedToday = queue.reduce((s, q) => s + (q.served || 0), 0);
   const storeName = (ctx.stores || []).find((s: any) => s.id === storeId)?.name || '';
 
+  // Vendedores oferecidos na loja: os lotados (ou todos, se a loja ainda não tem
+  // equipe definida). "Ver todos" (cobertura) mostra o roster da rede inteira.
+  const teamSellers: any[] = storeSellers.sellers;
+  const allSellers: any[] = ctx.sellers || [];
+  const addSellers: any[] = showAllSellers ? allSellers : teamSellers;
+  const teamIds: string[] = storeSellers.scoped ? teamSellers.map((s) => s.id) : [];
+
   // Vendedor vê SÓ a Lista da Vez. Conciliação/Indicadores/Rede são funções
   // de gestão — aparecem apenas com o modo gerência destravado (PIN).
   const tabs = [
@@ -270,19 +292,31 @@ export function RetailFloorView() {
 
       {/* Header — nome da loja FIXO (modo quiosque); trocar exige PIN. */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 md:px-6">
+        {/* Seletor de loja: com >1 loja, um dropdown claro pra trocar (trocar exige
+            PIN da gerência — modo quiosque). Com 1 loja, só o nome fixo. */}
         <div className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5">
           <Store className="h-4 w-4 text-[var(--color-flow)]" />
-          <span className="text-sm font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
-            {storeName}{(ctx.stores || []).find((s: any) => s.id === storeId)?.code ? ` (${(ctx.stores || []).find((s: any) => s.id === storeId).code})` : ''}
-          </span>
-          {(ctx.stores || []).length > 1 && (
-            <button title="Trocar de loja (exige PIN da gerência)"
-              onClick={() => withManagerAuth(() => { localStorage.removeItem(STORE_KEY); setStoreId(''); setSnap(null); })}
-              className="ml-1 text-zinc-600 transition-colors hover:text-[var(--color-flow)]">
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
+          {(ctx.stores || []).length > 1 ? (
+            <select value={storeId} title="Trocar de loja (exige PIN da gerência)"
+              onChange={(e) => { const id = e.target.value; if (id && id !== storeId) withManagerAuth(() => { localStorage.setItem(STORE_KEY, id); setStoreId(id); setSnap(null); }); }}
+              className="cursor-pointer bg-transparent text-sm font-semibold text-[var(--color-text-strong)] focus:outline-none" style={{ fontFamily: 'var(--font-display)' }}>
+              {(ctx.stores || []).map((s: any) => (
+                <option key={s.id} value={s.id} className="bg-[var(--color-surface-1)] text-[var(--color-text-strong)]">{s.name}{s.code ? ` (${s.code})` : ''}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-sm font-semibold text-[var(--color-text-strong)]" style={{ fontFamily: 'var(--font-display)' }}>
+              {storeName}{(ctx.stores || []).find((s: any) => s.id === storeId)?.code ? ` (${(ctx.stores || []).find((s: any) => s.id === storeId).code})` : ''}
+            </span>
           )}
         </div>
+        {/* Aviso: loja sem equipe definida → mostra todos até o gestor associar. */}
+        {isManager && !storeSellers.scoped && (
+          <button onClick={() => setTeamOpen(true)} title="Definir a equipe desta loja"
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-400 transition-colors hover:bg-amber-500/20">
+            <Users className="h-3.5 w-3.5" /> Equipe não definida — todos aparecem. Definir
+          </button>
+        )}
 
         {shift ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-400">
@@ -317,7 +351,8 @@ export function RetailFloorView() {
             </button>
           )}
           {shift && isManager && (ctx.sellers || []).length > 0 && (
-            <AddSeller sellers={ctx.sellers} inQueue={new Set(queue.map((q) => q.sellerId))} busy={busy}
+            <AddSeller sellers={addSellers} inQueue={new Set(queue.map((q) => q.sellerId))} busy={busy}
+              scoped={storeSellers.scoped} showAll={showAllSellers} onToggleAll={setShowAllSellers}
               onAdd={(sid: string) => act(() => api('/queue/join', { storeId, sellerId: sid }), 'Vendedor adicionado.')} />
           )}
           {shift && mySellerId && !queue.some((q) => q.sellerId === mySellerId && q.status !== 'offline') && (
@@ -432,7 +467,10 @@ export function RetailFloorView() {
       )}
       {scanFor && <ScanPanel attendance={scanFor} onClose={() => setScanFor(null)} />}
       {teamOpen && (
-        <TeamModal sellers={ctx.sellers || []} onClose={() => setTeamOpen(false)} onChanged={loadCtx} />
+        <TeamModal allSellers={ctx.sellers || []} teamIds={teamIds} scoped={storeSellers.scoped}
+          storeId={storeId} storeName={storeName}
+          onClose={() => setTeamOpen(false)}
+          onChanged={async () => { await loadCtx(); await loadStoreSellers(storeId); }} />
       )}
       {pinPrompt && (
         <ManagerPinModal storeId={storeId} storeName={storeName} isManager={isManager}
@@ -447,7 +485,7 @@ export function RetailFloorView() {
           }} />
       )}
       {rosterOpen && (
-        <RosterModal sellers={ctx.sellers || []} storeName={storeName} busy={busy}
+        <RosterModal sellers={teamSellers} storeName={storeName} busy={busy}
           onClose={() => setRosterOpen(false)}
           onTeam={() => { setRosterOpen(false); setTeamOpen(true); }}
           onConfirm={(ids: string[]) => act(async () => {
@@ -895,21 +933,29 @@ function PhotoInput({ value, onChange, name }: { value: string | null; onChange:
   );
 }
 
-function TeamModal({ sellers, onClose, onChanged }: { sellers: any[]; onClose: () => void; onChanged: () => void }) {
-  const [adding, setAdding] = useState(sellers.length === 0);
+function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, onChanged }: { allSellers: any[]; teamIds: string[]; scoped: boolean; storeId: string; storeName: string; onClose: () => void; onChanged: () => void }) {
+  // A "Equipe da loja" agora é a LOTAÇÃO: quais vendedores atendem NESTA loja.
+  // Marcar/desmarcar + Salvar grava o vínculo vendedor↔loja (não apaga a
+  // identidade). "Cadastrar novo vendedor" cria a identidade e já a marca aqui.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(teamIds || []));
+  const [adding, setAdding] = useState(allSellers.length === 0);
   const [name, setName] = useState('');
   const [matricula, setMatricula] = useState('');
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingTeam, setSavingTeam] = useState(false);
 
-  const save = async () => {
+  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const createSeller = async () => {
     if (!name.trim()) return toast.error('Informe o nome do vendedor.');
     setSaving(true);
     try {
-      await api('/sellers', { name: name.trim(), matricula: matricula.trim() || undefined, photoUrl: photoUrl || undefined });
-      toast.success(`${name.trim()} adicionado à equipe.`);
+      const created = await api('/sellers', { name: name.trim(), matricula: matricula.trim() || undefined, photoUrl: photoUrl || undefined });
+      if (created?.id) setSelected((prev) => new Set(prev).add(created.id)); // já entra na equipe desta loja
+      toast.success(`${name.trim()} cadastrado.`);
       setName(''); setMatricula(''); setPhotoUrl(null); setAdding(false);
-      onChanged();
+      onChanged(); // recarrega o roster da org (allSellers)
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
   };
@@ -919,28 +965,40 @@ function TeamModal({ sellers, onClose, onChanged }: { sellers: any[]; onClose: (
     catch (e: any) { toast.error(e.message); }
   };
 
-  const deactivate = async (s: any) => {
-    try { await api(`/sellers/${s.id}`, { active: false }); toast.success(`${s.name || s.matricula} removido da equipe.`); onChanged(); }
-    catch (e: any) { toast.error(e.message); }
+  const saveTeam = async () => {
+    setSavingTeam(true);
+    try {
+      await api(`/stores/${storeId}/team`, { sellerIds: [...selected] });
+      toast.success('Equipe da loja salva.');
+      onChanged();
+      onClose();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setSavingTeam(false); }
   };
 
   return (
-    <Modal title="Equipe da loja" subtitle="Vendedores que entram na lista da vez" onClose={onClose}>
-      {sellers.length > 0 && (
-        <div className="max-h-[40vh] space-y-2 overflow-y-auto">
-          {sellers.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
-              <TeamPhotoCell seller={s} onPhoto={(url) => setPhoto(s.id, url)} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name || s.matricula}</p>
-                <p className="text-xs text-[var(--color-text-muted)]">{String(s.matricula).startsWith('LV-') ? 'Sem código do PDV' : `Matrícula ${s.matricula}`}</p>
+    <Modal title={`Equipe — ${storeName}`} subtitle="Marque os vendedores que atendem nesta loja" onClose={onClose}>
+      {!scoped && (
+        <p className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-300">
+          Esta loja ainda não tem equipe definida — por isso <strong>todos</strong> os vendedores aparecem na fila. Marque quem é desta loja e salve.
+        </p>
+      )}
+      {allSellers.length > 0 && (
+        <div className="max-h-[42vh] space-y-2 overflow-y-auto">
+          {allSellers.map((s) => {
+            const on = selected.has(s.id);
+            return (
+              <div key={s.id} className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${on ? 'border-[var(--color-flow)]/50 bg-[var(--color-flow)]/5' : 'border-[var(--color-border)] bg-[var(--color-surface-1)]'}`}>
+                <input type="checkbox" checked={on} onChange={() => toggle(s.id)} title="Pertence a esta loja"
+                  className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--color-flow)]" />
+                <TeamPhotoCell seller={s} onPhoto={(url) => setPhoto(s.id, url)} />
+                <button type="button" onClick={() => toggle(s.id)} className="min-w-0 flex-1 text-left">
+                  <p className="truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name || s.matricula}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{String(s.matricula).startsWith('LV-') ? 'Sem código do PDV' : `Matrícula ${s.matricula}`}</p>
+                </button>
               </div>
-              <button title="Remover da equipe" onClick={() => deactivate(s)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-400">
-                <UserX className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -952,11 +1010,11 @@ function TeamModal({ sellers, onClose, onChanged }: { sellers: any[]; onClose: (
           <input value={matricula} onChange={(e) => setMatricula(e.target.value)} placeholder="Matrícula no PDV (opcional)"
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
           <div className="flex gap-2">
-            <button disabled={saving} onClick={save}
+            <button disabled={saving} onClick={createSeller}
               className="flex-1 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
-              {saving ? <Loader2 className="mr-1.5 inline h-4 w-4 animate-spin" /> : <Check className="mr-1.5 inline h-4 w-4" />}Salvar
+              {saving ? <Loader2 className="mr-1.5 inline h-4 w-4 animate-spin" /> : <Check className="mr-1.5 inline h-4 w-4" />}Cadastrar
             </button>
-            {sellers.length > 0 && (
+            {allSellers.length > 0 && (
               <button onClick={() => setAdding(false)}
                 className="rounded-xl border border-[var(--color-border)] px-4 py-3 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]">
                 Cancelar
@@ -967,9 +1025,17 @@ function TeamModal({ sellers, onClose, onChanged }: { sellers: any[]; onClose: (
       ) : (
         <button onClick={() => setAdding(true)}
           className="mt-4 w-full rounded-xl border border-dashed border-[var(--color-border)] px-4 py-3 text-sm font-semibold text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-flow)]/50 hover:text-[var(--color-flow)]">
-          <UserPlus className="mr-1.5 inline h-4 w-4" />Adicionar vendedor
+          <UserPlus className="mr-1.5 inline h-4 w-4" />Cadastrar novo vendedor
         </button>
       )}
+
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <span className="text-xs text-[var(--color-text-muted)]">{selected.size} vendedor(es) nesta loja</span>
+        <button disabled={savingTeam} onClick={saveTeam}
+          className="rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
+          {savingTeam ? <Loader2 className="mr-1.5 inline h-4 w-4 animate-spin" /> : <Check className="mr-1.5 inline h-4 w-4" />}Salvar equipe
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -1065,24 +1131,38 @@ function RosterModal({ sellers, storeName, busy, onClose, onTeam, onConfirm }: {
 // Add Seller dropdown (manager)
 // ============================================================================
 
-function AddSeller({ sellers, inQueue, onAdd, busy }: any) {
+function AddSeller({ sellers, inQueue, onAdd, busy, scoped, showAll, onToggleAll }: any) {
   const [sel, setSel] = useState('');
   const options = sellers.filter((s: any) => !inQueue.has(s.id));
-  if (!options.length) return null;
+  // Loja com equipe definida (scoped) → pode puxar um vendedor de OUTRA loja pra
+  // cobrir o dia (cobertura), sem lotá-lo de forma fixa. Mantém o controle visível
+  // mesmo quando toda a equipe da loja já está na fila.
+  const canCover = !!scoped && typeof onToggleAll === 'function';
+  if (!options.length && !canCover) return null;
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <select value={sel} onChange={(e) => setSel(e.target.value)}
-        className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2.5 text-sm text-[var(--color-text-muted)] focus:border-[var(--color-flow)] focus:outline-none">
-        <option value="">
-          <UserPlus className="h-4 w-4" /> Adicionar…
-        </option>
-        {options.map((s: any) => <option key={s.id} value={s.id}>{s.name || s.matricula}</option>)}
-      </select>
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {options.length > 0 ? (
+        <select value={sel} onChange={(e) => setSel(e.target.value)}
+          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2.5 text-sm text-[var(--color-text-muted)] focus:border-[var(--color-flow)] focus:outline-none">
+          <option value="">
+            <UserPlus className="h-4 w-4" /> Adicionar…
+          </option>
+          {options.map((s: any) => <option key={s.id} value={s.id}>{s.name || s.matricula}</option>)}
+        </select>
+      ) : (
+        <span className="text-xs text-[var(--color-text-muted)]">Todos os vendedores da loja já estão na fila.</span>
+      )}
       {sel && (
         <button disabled={busy} onClick={() => { onAdd(sel); setSel(''); }}
           className="rounded-xl bg-[var(--color-flow)] px-3 py-2.5 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110">
           OK
         </button>
+      )}
+      {canCover && (
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-text-muted)]" title="Adicionar um vendedor de outra loja pra cobrir o dia">
+          <input type="checkbox" checked={!!showAll} onChange={(e) => { onToggleAll(e.target.checked); setSel(''); }} className="accent-[var(--color-flow)]" />
+          de outra loja
+        </label>
       )}
     </span>
   );

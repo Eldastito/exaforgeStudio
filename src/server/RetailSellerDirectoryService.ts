@@ -41,12 +41,54 @@ export class RetailSellerDirectoryService {
   /** Vendedores lotados numa loja (identidade + se é principal). */
   static sellersForStore(orgId: string, storeId: string): any[] {
     return db.prepare(
-      `SELECT s.id AS seller_id, s.matricula, s.name, s.identity_status, a.is_primary
+      `SELECT s.id AS seller_id, s.matricula, s.name, s.photo_url, s.identity_status, a.is_primary
          FROM retail_seller_store_assignments a
          JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
         WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1
         ORDER BY s.name`
     ).all(orgId, storeId) as any[];
+  }
+
+  /**
+   * Define, de forma STORE-CÊNTRICA, quais vendedores pertencem a uma loja
+   * (lotação). Reconcilia SÓ os vínculos DESTA loja — não toca nas outras lojas de
+   * cada vendedor (um vendedor pode atuar em N lojas). Ativa/reativa os desejados e
+   * desativa (efetiva o fim, nunca DELETE — RN-SELL-2) os que saíram. É o que a tela
+   * "Atendimento de Loja" usa pra o gestor montar a equipe daquela loja.
+   */
+  static setStoreSellers(orgId: string, storeId: string, sellerIds: string[], actorId?: string): any[] {
+    if (!db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId)) {
+      throw new Error("Loja não encontrada.");
+    }
+    const wanted = new Set((sellerIds || []).map(String));
+    for (const sid of wanted) {
+      if (!db.prepare(`SELECT 1 FROM retail_sellers WHERE organization_id = ? AND id = ?`).get(orgId, sid)) throw new Error("Vendedor inválido na equipe.");
+    }
+    const current = db.prepare(`SELECT id, seller_id FROM retail_seller_store_assignments WHERE organization_id = ? AND store_id = ? AND active = 1`).all(orgId, storeId) as any[];
+    const activeSellers = new Set(current.map((c) => c.seller_id));
+    const tx = db.transaction(() => {
+      for (const c of current) {
+        if (!wanted.has(c.seller_id)) {
+          db.prepare(`UPDATE retail_seller_store_assignments SET active = 0, effective_to = CURRENT_TIMESTAMP WHERE id = ?`).run(c.id);
+        }
+      }
+      for (const sid of wanted) {
+        if (activeSellers.has(sid)) continue; // já lotado nesta loja
+        // Reaproveita um vínculo inativo desta loja (voltou pra equipe) em vez de duplicar.
+        const inactive = db.prepare(`SELECT id FROM retail_seller_store_assignments WHERE organization_id = ? AND store_id = ? AND seller_id = ? AND active = 0 ORDER BY effective_to DESC LIMIT 1`).get(orgId, storeId, sid) as any;
+        if (inactive) {
+          db.prepare(`UPDATE retail_seller_store_assignments SET active = 1, effective_to = NULL WHERE id = ?`).run(inactive.id);
+        } else {
+          db.prepare(
+            `INSERT INTO retail_seller_store_assignments (id, organization_id, seller_id, store_id, is_primary, active, source, confirmed_by, confirmed_at)
+             VALUES (?, ?, ?, ?, 0, 1, 'manual', ?, CURRENT_TIMESTAMP)`
+          ).run(randomUUID(), orgId, sid, storeId, actorId || null);
+        }
+      }
+    });
+    tx();
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_STORE_SELLERS_SET", { sellerIds: [...wanted] }); } catch { /* noop */ }
+    return this.sellersForStore(orgId, storeId);
   }
 
   /**

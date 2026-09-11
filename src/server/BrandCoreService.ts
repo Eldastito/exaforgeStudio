@@ -32,6 +32,26 @@ import { logAuthEvent } from "./auditLog.js";
 export type BrandCoreStatus = "draft" | "published" | "archived";
 
 export interface MechanismStep { key: string; label: string; order: number }
+
+// PRD 02 — Identidade Verbal / Message House. ESTENDE o Brand Core (mesmo snapshot/versão,
+// sem store novo). NÃO duplica os claims proibidos: eles seguem em `restrictedClaims` (o
+// resolver `getBrandMessaging` os expõe como `prohibitedClaims`). A hierarquia
+// transformação→mecanismo→benefícios já vive nos campos do Brand Core (PRD 01).
+export interface BrandMessaging {
+  masterMessage: string | null;       // mensagem-mãe (transformação, não funcionalidade)
+  tagline: string | null;
+  elevatorPitch: string | null;
+  shortDescription: string | null;
+  mediumDescription: string | null;
+  longDescription: string | null;
+  functionalMessages: string[];       // como DIZER os benefícios funcionais
+  emotionalMessages: string[];
+  objectionResponses: { objection: string; response: string }[];
+  vocabulary: string[];               // termos recomendados
+  discouragedTerms: string[];         // termos a evitar (não são claims proibidos)
+  toneOfVoice: string | null;
+}
+
 export interface BrandCoreSnapshot {
   essence: string | null;
   purpose: string | null;
@@ -51,6 +71,7 @@ export interface BrandCoreSnapshot {
   proofPoints: any[];
   approvedClaims: string[];
   restrictedClaims: string[];
+  messaging: BrandMessaging;
 }
 
 const PLATFORM = "platform"; // escopo de auditoria (Brand Core é global, sem org de tenant)
@@ -61,6 +82,17 @@ const REQUIRED_TEXT: (keyof BrandCoreSnapshot)[] = ["essence", "purpose", "categ
 function str(v: any): string | null { const s = v == null ? "" : String(v).trim(); return s ? s : null; }
 function arr(v: any): any[] { return Array.isArray(v) ? v : []; }
 function strArr(v: any): string[] { return arr(v).map((x) => String(x).trim()).filter(Boolean); }
+
+// Message house vazia — usada quando um snapshot antigo (pré-PRD 02) não tem `messaging`
+// (0-regressão: versões publicadas antes da message house normalizam para vazio).
+function emptyMessaging(): BrandMessaging {
+  return {
+    masterMessage: null, tagline: null, elevatorPitch: null,
+    shortDescription: null, mediumDescription: null, longDescription: null,
+    functionalMessages: [], emotionalMessages: [], objectionResponses: [],
+    vocabulary: [], discouragedTerms: [], toneOfVoice: null,
+  };
+}
 
 /** Draft estratégico inicial (§9-§24). Nasce DRAFT, jamais publicado automaticamente. */
 export function brandCoreDefaults(): BrandCoreSnapshot {
@@ -109,6 +141,30 @@ export function brandCoreDefaults(): BrandCoreSnapshot {
       "Elimina todos os erros.", "Substitui completamente funcionários.", "Funciona sozinho em qualquer empresa.",
       "Garante aumento de faturamento.", "Garante redução de X%.", "É o melhor sistema do Brasil.",
     ],
+    messaging: {
+      masterMessage: "Sua empresa menos dependente de você e mais inteligente no dia a dia.",
+      tagline: "Sua empresa funcionando, mesmo quando você não está olhando.",
+      elevatorPitch: "O ZapFlow observa, entende, organiza, age, acompanha e aprende — para a empresa funcionar sem depender do dono, da memória e de processos manuais.",
+      shortDescription: "Sistema operacional inteligente que reduz a dependência da sua empresa em relação ao dono e a pessoas-chave.",
+      mediumDescription: "O ZapFlow conecta inteligência, operação e execução para a empresa funcionar de forma mais organizada, previsível e menos dependente do proprietário — observando o que acontece, organizando o que precisa ser feito e acionando a execução.",
+      longDescription: null,
+      functionalMessages: [
+        "O ZapFlow identifica oportunidades que pararam e ajuda sua equipe a agir.",
+        "Cobranças, retornos e follow-ups deixam de depender de alguém lembrar.",
+        "Você enxerga o que está acontecendo na operação sem precisar perguntar.",
+      ],
+      emotionalMessages: [
+        "Menos sensação de apagar incêndios.",
+        "Confiança para delegar e se afastar sem a empresa parar.",
+      ],
+      objectionResponses: [
+        { objection: "É só mais um CRM/chatbot?", response: "Não. O ZapFlow não só responde — transforma contexto em ação dentro da operação." },
+        { objection: "Vai substituir meus funcionários?", response: "Não substitui pessoas; reduz a dependência de que tudo passe por elas ou pela memória delas." },
+      ],
+      vocabulary: ["dependência operacional", "execução", "acompanhamento", "previsibilidade", "organização"],
+      discouragedTerms: ["apenas um chatbot", "robô que faz tudo sozinho", "substitui a equipe"],
+      toneOfVoice: "Conselheiro de confiança: direto, honesto, sem jargão. Clareza operacional antes de personalidade.",
+    },
   };
 }
 
@@ -134,6 +190,28 @@ function mergeSnapshot(base: BrandCoreSnapshot, patch: any): BrandCoreSnapshot {
     proofPoints: "proofPoints" in p ? arr(p.proofPoints) : base.proofPoints,
     approvedClaims: "approvedClaims" in p ? strArr(p.approvedClaims) : base.approvedClaims,
     restrictedClaims: "restrictedClaims" in p ? strArr(p.restrictedClaims) : base.restrictedClaims,
+    messaging: "messaging" in p ? mergeMessaging(base.messaging || emptyMessaging(), p.messaging) : (base.messaging || emptyMessaging()),
+  };
+}
+
+// Merge parcial da message house (PRD 02) sobre a base, com shapes seguros.
+function mergeMessaging(base: BrandMessaging, patch: any): BrandMessaging {
+  const p = patch || {};
+  return {
+    masterMessage: "masterMessage" in p ? str(p.masterMessage) : base.masterMessage,
+    tagline: "tagline" in p ? str(p.tagline) : base.tagline,
+    elevatorPitch: "elevatorPitch" in p ? str(p.elevatorPitch) : base.elevatorPitch,
+    shortDescription: "shortDescription" in p ? str(p.shortDescription) : base.shortDescription,
+    mediumDescription: "mediumDescription" in p ? str(p.mediumDescription) : base.mediumDescription,
+    longDescription: "longDescription" in p ? str(p.longDescription) : base.longDescription,
+    functionalMessages: "functionalMessages" in p ? strArr(p.functionalMessages) : base.functionalMessages,
+    emotionalMessages: "emotionalMessages" in p ? strArr(p.emotionalMessages) : base.emotionalMessages,
+    objectionResponses: "objectionResponses" in p
+      ? arr(p.objectionResponses).map((o: any) => ({ objection: String(o?.objection || "").trim(), response: String(o?.response || "").trim() })).filter((o) => o.objection || o.response)
+      : base.objectionResponses,
+    vocabulary: "vocabulary" in p ? strArr(p.vocabulary) : base.vocabulary,
+    discouragedTerms: "discouragedTerms" in p ? strArr(p.discouragedTerms) : base.discouragedTerms,
+    toneOfVoice: "toneOfVoice" in p ? str(p.toneOfVoice) : base.toneOfVoice,
   };
 }
 
@@ -142,6 +220,7 @@ export class BrandCoreService {
     if (!row) return null;
     let snapshot: BrandCoreSnapshot;
     try { snapshot = JSON.parse(row.snapshot_json); } catch { snapshot = brandCoreDefaults(); }
+    if (snapshot && !snapshot.messaging) snapshot.messaging = emptyMessaging(); // versão pré-PRD 02
     return {
       version: row.version, status: row.status as BrandCoreStatus, revision: row.revision,
       sourceVersion: row.source_version ?? null,
@@ -179,6 +258,21 @@ export class BrandCoreService {
     if (!row) return { configured: false, version: null, brand: null };
     const parsed = this.parse(row);
     return { configured: true, version: parsed.version, brand: parsed.snapshot };
+  }
+
+  /**
+   * Resolver da MESSAGE HOUSE (PRD 02) — `getBrandMessaging()`. Consumidores de conteúdo
+   * (site, Estúdio, propostas…) pedem isto em vez de hardcodar posicionamento. Expõe os
+   * claims PROIBIDOS reusando `restrictedClaims` do Brand Core (não duplica). Sem versão
+   * publicada → not_configured (nunca inventa). Nenhum consumidor migrado neste PRD (§ só
+   * disponibiliza o resolver).
+   */
+  static getBrandMessaging(): { configured: boolean; version: number | null; messaging: (BrandMessaging & { prohibitedClaims: string[] }) | null } {
+    const row = this.rowByStatus("published");
+    if (!row) return { configured: false, version: null, messaging: null };
+    const parsed = this.parse(row);
+    const m: BrandMessaging = parsed.snapshot.messaging || emptyMessaging();
+    return { configured: true, version: parsed.version, messaging: { ...m, prohibitedClaims: parsed.snapshot.restrictedClaims || [] } };
   }
 
   /** Draft corrente (único) ou null. */

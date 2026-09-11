@@ -22,6 +22,7 @@ import { CapacityForecastService } from "../CapacityForecastService.js";
 import { VpsSpecProfileService } from "../VpsSpecProfileService.js";
 import { SloDefinitionService } from "../SloDefinitionService.js";
 import { BrandCoreService } from "../BrandCoreService.js";
+import { BrandVerticalProfileService } from "../BrandVerticalProfileService.js";
 import { PlatformRootCauseService } from "../PlatformRootCauseService.js";
 import { CapacityRecommendationService } from "../CapacityRecommendationService.js";
 import { PlatformProtectionModeService } from "../PlatformProtectionModeService.js";
@@ -321,6 +322,25 @@ router.post("/brand-core/publish", (req: AuthRequest, res): any => {
 });
 router.post("/brand-core/restore/:version", (req: AuthRequest, res): any => {
   try { return res.json(BrandCoreService.restoreToDraft(Number(req.params.version), req.user?.email || "master")); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+
+// PRD 07 — comunicação por vertical (overlay que HERDA a essência do Brand Core). Master-only.
+router.get("/brand-core/vertical-profiles", (_req: AuthRequest, res): any => {
+  try { return res.json({ verticals: BrandVerticalProfileService.list() }); }
+  catch (error: any) { return res.status(500).json({ error: error.message }); }
+});
+router.get("/brand-core/vertical-profiles/:vertical", (req: AuthRequest, res): any => {
+  try { return res.json(BrandVerticalProfileService.get(req.params.vertical)); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+// Resolver: overlay + herança do Brand Core (essência/promessa/mecanismo INTOCÁVEIS).
+router.get("/brand-core/vertical-profiles/:vertical/resolve", (req: AuthRequest, res): any => {
+  try { return res.json(BrandVerticalProfileService.resolve(req.params.vertical)); }
+  catch (error: any) { return res.status(400).json({ error: error.message }); }
+});
+router.put("/brand-core/vertical-profiles/:vertical", (req: AuthRequest, res): any => {
+  try { return res.json(BrandVerticalProfileService.set(req.params.vertical, req.body || {}, req.user?.email || "master")); }
   catch (error: any) { return res.status(400).json({ error: error.message }); }
 });
 

@@ -1930,6 +1930,23 @@ const BRAND_CORE_LIST_FIELDS: { key: string; label: string }[] = [
   { key: 'restrictedClaims', label: 'Claims restritos / proibidos' },
 ];
 const BRAND_CORE_REQUIRED = ['essence', 'purpose', 'category', 'positioning', 'promise', 'coreProblem'];
+// PRD 02 — Message House. Chaves `msg_*` no form; o sufixo (sem `msg_`) é o campo real em
+// snapshot.messaging. Nenhum é obrigatório para publicar (não entram em BRAND_CORE_REQUIRED).
+const BRAND_MSG_TEXT_FIELDS: { key: string; label: string; long?: boolean }[] = [
+  { key: 'msg_masterMessage', label: 'Mensagem-mãe (transformação)', long: true },
+  { key: 'msg_tagline', label: 'Tagline' },
+  { key: 'msg_elevatorPitch', label: 'Elevator pitch', long: true },
+  { key: 'msg_shortDescription', label: 'Descrição curta', long: true },
+  { key: 'msg_mediumDescription', label: 'Descrição média', long: true },
+  { key: 'msg_longDescription', label: 'Descrição longa', long: true },
+  { key: 'msg_toneOfVoice', label: 'Tom de voz', long: true },
+];
+const BRAND_MSG_LIST_FIELDS: { key: string; label: string }[] = [
+  { key: 'msg_functionalMessages', label: 'Mensagens funcionais (como dizer)' },
+  { key: 'msg_emotionalMessages', label: 'Mensagens emocionais' },
+  { key: 'msg_vocabulary', label: 'Vocabulário recomendado' },
+  { key: 'msg_discouragedTerms', label: 'Termos a evitar' },
+];
 
 function BrandCorePanel() {
   const [state, setState] = useState<any>(null);
@@ -1950,6 +1967,10 @@ function BrandCorePanel() {
     transformAfter: arrToLines(snap?.transformation?.after),
     mechanism: (snap?.mechanism?.steps || []).map((s: any) => s.label).join('\n'),
     differentiators: (snap?.differentiators || []).map((d: any) => `${d.title} :: ${d.description}`).join('\n'),
+    // Message house (PRD 02) — `msg_*`; sufixo = campo em snapshot.messaging.
+    ...Object.fromEntries(BRAND_MSG_TEXT_FIELDS.map((f) => [f.key, snap?.messaging?.[f.key.slice(4)] || ''])),
+    ...Object.fromEntries(BRAND_MSG_LIST_FIELDS.map((f) => [f.key, arrToLines(snap?.messaging?.[f.key.slice(4)])])),
+    msg_objections: (snap?.messaging?.objectionResponses || []).map((o: any) => `${o.objection} :: ${o.response}`).join('\n'),
   });
 
   const load = async () => {
@@ -1977,6 +1998,15 @@ function BrandCorePanel() {
       const idx = line.indexOf('::'); const title = (idx >= 0 ? line.slice(0, idx) : line).trim(); const description = idx >= 0 ? line.slice(idx + 2).trim() : '';
       return { title, description };
     }).filter((d: any) => d.title || d.description);
+    // Message house (PRD 02).
+    patch.messaging = {
+      ...Object.fromEntries(BRAND_MSG_TEXT_FIELDS.map((t) => [t.key.slice(4), String(f[t.key] || '').trim() || null])),
+      ...Object.fromEntries(BRAND_MSG_LIST_FIELDS.map((l) => [l.key.slice(4), linesToArr(f[l.key])])),
+      objectionResponses: linesToArr(f.msg_objections).map((line: string) => {
+        const idx = line.indexOf('::'); const objection = (idx >= 0 ? line.slice(0, idx) : line).trim(); const response = idx >= 0 ? line.slice(idx + 2).trim() : '';
+        return { objection, response };
+      }).filter((o: any) => o.objection || o.response),
+    };
     return patch; // proofPoints OMITIDO de propósito → preservado pelo mergeSnapshot do service
   };
 
@@ -2109,6 +2139,18 @@ function BrandCorePanel() {
                 {listField('brandAttributes', 'Atributos da marca')}
                 {listField('approvedClaims', 'Claims aprovados')}
                 {listField('restrictedClaims', 'Claims restritos / proibidos')}
+              </div>
+              {/* PRD 02 — Message House (identidade verbal). Mesmo draft/versão do Brand Core. */}
+              <div className="mt-4 border-t border-zinc-800 pt-3">
+                <div className="text-[11px] font-medium text-indigo-300 mb-2">Identidade verbal (Message House)</div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {BRAND_MSG_TEXT_FIELDS.map(textField)}
+                </div>
+                <div className="mt-3 grid sm:grid-cols-2 gap-3">
+                  {BRAND_MSG_LIST_FIELDS.map((l) => listField(l.key, l.label))}
+                  {listField('msg_objections', 'Respostas a objeções', 'um por linha: objeção :: resposta')}
+                </div>
+                <div className="mt-1 text-[10px] text-zinc-600">Claims proibidos ficam em "Claims restritos" acima (fonte única) — o resolver os expõe como prohibitedClaims.</div>
               </div>
               {missing.length > 0 && <div className="mt-3 text-[11px] text-amber-300">Pendente para publicar: {missing.join(', ')}</div>}
               <div className="mt-3 flex items-center gap-2">

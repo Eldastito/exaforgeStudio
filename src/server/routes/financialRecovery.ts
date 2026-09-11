@@ -13,6 +13,7 @@ import { RecoveryViabilityService } from "../RecoveryViabilityService.js";
 import { DebtPriorityService } from "../DebtPriorityService.js";
 import { SurvivalBudgetService } from "../SurvivalBudgetService.js";
 import { RecoveryScenarioService } from "../RecoveryScenarioService.js";
+import { RecoveryPlanService } from "../RecoveryPlanService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
 
 const router = Router();
@@ -72,6 +73,22 @@ router.get("/survival-budget", (req: AuthRequest, res): any => {
     const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
     res.json(SurvivalBudgetService.suggest(orgId, { includeMoney }));
   } catch (e: any) { fail(res, e); }
+});
+
+// GET /plan — Plano de Recuperação consolidado (compõe assessment/viability/priority/budget).
+// Dinheiro role-gated.
+router.get("/plan", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    const period = typeof req.query?.period === "string" ? req.query.period : undefined;
+    res.json(RecoveryPlanService.plan(orgId, { includeMoney, period }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// GET /plan/mission-suggestion — RASCUNHO de missão de recuperação (sugere, nunca cria).
+router.get("/plan/mission-suggestion", (req: AuthRequest, res): any => {
+  try { res.json(RecoveryPlanService.suggestMission(req.organizationId!)); } catch (e: any) { fail(res, e); }
 });
 
 // ── Simulador / Negociação (F3.9/F3.10/F3.11) — determinístico, dinheiro role-gated ──

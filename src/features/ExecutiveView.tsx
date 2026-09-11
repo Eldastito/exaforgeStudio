@@ -156,6 +156,100 @@ function FinRow({ label, value, muted }: { label: string; value: string; muted?:
   );
 }
 
+// Entry point do Financial Recovery OS no Diretor IA (PRD-ZF-UNIFIED-GAP-CLOSURE-03 F3.1 / PR-9b).
+// Self-gated e falha-fechada: só renderiza quando o módulo está ligado (financial_recovery_enabled)
+// E há dado; qualquer erro/off → null (0-regressão pra quem não usa). Só leitura; nunca cria/executa.
+const RECOVERY_FAIXA_UI: Record<string, { label: string; cls: string }> = {
+  recuperavel: { label: 'Recuperável', cls: 'text-emerald-300 border-emerald-800 bg-emerald-950/30' },
+  dificil: { label: 'Difícil', cls: 'text-amber-300 border-amber-800 bg-amber-950/30' },
+  critico: { label: 'Crítico', cls: 'text-red-300 border-red-800 bg-red-950/30' },
+  indefinido: { label: 'Indefinido', cls: 'text-zinc-400 border-zinc-700 bg-zinc-900' },
+};
+const RECOVERY_CRISIS_UI: Record<string, string> = {
+  operational: 'Crise operacional (a operação perde dinheiro antes da dívida)',
+  financial: 'Crise financeira (operação positiva, o serviço da dívida aperta o caixa)',
+  mixed: 'Crise mista (operação perde E a dívida agrava)',
+  stable: 'Sem crise afirmada',
+  undetermined: 'Diagnóstico indefinido (dado insuficiente)',
+};
+
+function RecoveryCard() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [via, setVia] = useState<any | null>(null);
+  const [assess, setAssess] = useState<any | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [plan, setPlan] = useState<any | null>(null);
+  const [mission, setMission] = useState<any | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/financial-recovery/enablement')
+      .then(r => (r.ok ? r.json() : null))
+      .then(e => {
+        if (!alive) return;
+        if (!e?.enabled) { setEnabled(false); return; }
+        setEnabled(true);
+        Promise.all([
+          apiFetch('/api/financial-recovery/viability').then(r => r.json()).catch(() => null),
+          apiFetch('/api/financial-recovery/assessment').then(r => r.json()).catch(() => null),
+        ]).then(([v, a]) => { if (alive) { setVia(v); setAssess(a); } });
+      })
+      .catch(() => { if (alive) setEnabled(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const openPlan = () => {
+    setExpanded(x => !x);
+    if (!plan) {
+      apiFetch('/api/financial-recovery/plan').then(r => r.json()).then(p => setPlan(p)).catch(() => {});
+      apiFetch('/api/financial-recovery/plan/mission-suggestion').then(r => r.json()).then(m => setMission(m)).catch(() => {});
+    }
+  };
+
+  // 0-regressão: nada aparece se o módulo está off, ainda carregando, ou sem viabilidade.
+  if (enabled !== true || !via) return null;
+  const faixa = RECOVERY_FAIXA_UI[via.faixa] || RECOVERY_FAIXA_UI.indefinido;
+  const rupture = assess?.finance?.firstRupture;
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1.5"><Activity className="h-4 w-4 text-sky-400" /> Recuperação financeira</div>
+        {via.irf != null && <span className={`text-[11px] px-2 py-0.5 rounded-full border ${faixa.cls}`}>IRF {via.irf} · {faixa.label}</span>}
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-0.5">Orientativo — não é parecer contábil/jurídico.</div>
+      <div className="mt-3 space-y-1.5 text-sm">
+        <div className="text-zinc-300">{RECOVERY_CRISIS_UI[via.crisis?.shape] || 'Diagnóstico indefinido'}</div>
+        {assess?.finance?.survivalDays != null && <FinRow label="Sobrevivência de caixa" value={`${assess.finance.survivalDays} dias`} />}
+        {rupture && <FinRow label="Ruptura projetada" value={`${rupture.weeksAhead} semana(s)`} muted />}
+      </div>
+      <div className="mt-3">
+        <Button variant="outline" size="sm" onClick={openPlan} className="border-zinc-700 text-zinc-300">
+          {expanded ? 'Ocultar plano' : 'Ver plano de recuperação'}
+        </Button>
+      </div>
+      {expanded && (
+        <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
+          {plan?.professionalReviewRecommended && (
+            <div className="text-[12px] text-amber-300 flex items-start gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" /> Recomenda-se validação de contador/advogado habilitado antes das próximas medidas.</div>
+          )}
+          {Array.isArray(plan?.sections) && plan.sections.map((s: any) => (
+            <div key={s.key} className="text-sm">
+              <span className="text-zinc-100 font-medium">{s.title}</span>
+              {typeof s.items?.length === 'number' && <span className="text-zinc-500"> · {s.items.length} item(ns)</span>}
+              <div className="text-[11px] text-zinc-500 leading-snug">{s.rationale}</div>
+            </div>
+          ))}
+          {mission?.draft && (
+            <div className="text-[12px] text-sky-300 mt-1">Missão sugerida (você confirma): <span className="text-zinc-200">{mission.draft.title}</span></div>
+          )}
+          {plan && !plan.sections?.length && <div className="text-xs text-zinc-500">Sem dados suficientes pro plano ainda.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MinhaEmpresaTab() {
   const [snap, setSnap] = useState<any | null>(null);
   const [con, setCon] = useState<any | null>(null);
@@ -264,6 +358,9 @@ function MinhaEmpresaTab() {
           </div>
         )}
       </div>
+
+      {/* Entry point do Financial Recovery OS (F3.1 / PR-9b) — self-gated, falha-fechada. */}
+      <RecoveryCard />
 
       <div className="flex justify-end">
         <Button variant="outline" size="sm" onClick={load} className="border-zinc-700 text-zinc-300"><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Atualizar</Button>

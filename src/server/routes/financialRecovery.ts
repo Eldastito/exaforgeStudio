@@ -10,6 +10,8 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { RecoveryAssessmentService } from "../RecoveryAssessmentService.js";
 import { RecoveryDebtService } from "../RecoveryDebtService.js";
 import { RecoveryViabilityService } from "../RecoveryViabilityService.js";
+import { DebtPriorityService } from "../DebtPriorityService.js";
+import { SurvivalBudgetService } from "../SurvivalBudgetService.js";
 import { FalaTuAskService } from "../FalaTuAskService.js";
 
 const router = Router();
@@ -51,6 +53,23 @@ router.get("/viability", (req: AuthRequest, res): any => {
   try {
     const period = typeof req.query?.period === "string" ? req.query.period : undefined;
     res.json(RecoveryViabilityService.viability(req.organizationId!, { period }));
+  } catch (e: any) { fail(res, e); }
+});
+
+// GET /debts/priority — matriz de priorização (4 eixos + composto explicável).
+// NÃO é ordem jurídica de pagamento; risco jurídico exige validação profissional.
+// Não expõe R$ (scores/bands/labels).
+router.get("/debts/priority", (req: AuthRequest, res): any => {
+  try { res.json(DebtPriorityService.prioritize(req.organizationId!)); } catch (e: any) { fail(res, e); }
+});
+
+// GET /survival-budget — sugestão A/B/C/D das contas a pagar. A IA sugere, humano confirma;
+// nada é cancelado aqui. Dinheiro role-gated.
+router.get("/survival-budget", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId!;
+  try {
+    const includeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
+    res.json(SurvivalBudgetService.suggest(orgId, { includeMoney }));
   } catch (e: any) { fail(res, e); }
 });
 

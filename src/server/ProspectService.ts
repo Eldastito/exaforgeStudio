@@ -4,6 +4,7 @@ import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
 import { expectedSegments, norm as normCat } from "./prospectCategories.js";
 import { AiGovernanceService } from "./AiGovernanceService.js";
+import { provenanceForProvider, describeSourceProvenance } from "./prospectProvenance.js";
 
 /**
  * Prospect AI — Inteligência de Prospecção B2B (Fase 0: fundação).
@@ -157,8 +158,9 @@ export class ProspectService {
     // default 'csv_import' preserva o comportamento de todo call site existente.
     const provider = String(input?.provider || "csv_import");
     const sourceId = randomUUID();
-    db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence) VALUES (?, ?, ?, ?, 'user_provided', 'tenant_policy', 1.0)")
-      .run(sourceId, orgId, provider, String(input?.sourceRef || "importação CSV"));
+    const prov = provenanceForProvider(provider); // csv/manual → null (declarado, não é recuperação viva)
+    db.prepare("INSERT INTO prospect_data_sources (id, organization_id, provider, source_reference, terms_profile, retention_policy, confidence, evidence_mode, source_tier) VALUES (?, ?, ?, ?, 'user_provided', 'tenant_policy', 1.0, ?, ?)")
+      .run(sourceId, orgId, provider, String(input?.sourceRef || "importação CSV"), prov.evidenceMode, prov.tier);
 
     let accountsCreated = 0, accountsMerged = 0, contactsCreated = 0, contactsSkipped = 0;
     const findAccount = db.prepare("SELECT id FROM prospect_accounts WHERE organization_id = ? AND dedupe_key = ?");
@@ -550,6 +552,27 @@ Responda em JSON: {"subject":"(vazio se não for e-mail)","body":"texto pronto p
     }
     logAuthEvent(orgId, actorId, null, "PROSPECT_OUTCOME_RECORDED", { accountId: id, outcome, wonValue: input?.wonValue || null, lostReason: input?.lostReason || null });
     return this.getAccount(orgId, id);
+  }
+
+  /**
+   * F4 (GAP-CLOSURE-03) — procedência canônica das fontes de dados de prospecção
+   * (org-scoped). Read-model derivado: expõe `evidenceMode`/`tier`/`retrievedAt` no
+   * vocabulário do PRD 9, deixando o consumidor distinguir recuperação viva de dado
+   * declarado. `retrievedAt` é derivado (só existe em `live`). Legado sem procedência
+   * → null (honesto). Nunca cruza tenant.
+   */
+  static listDataSources(orgId: string): any[] {
+    const rows = db.prepare("SELECT id, provider, source_reference, terms_profile, confidence, collected_at, evidence_mode, source_tier FROM prospect_data_sources WHERE organization_id = ? ORDER BY collected_at DESC LIMIT 500").all(orgId) as any[];
+    return rows.map((r) => ({
+      id: r.id, provider: r.provider, sourceReference: r.source_reference, termsProfile: r.terms_profile,
+      confidence: r.confidence, collectedAt: r.collected_at, provenance: describeSourceProvenance(r),
+    }));
+  }
+
+  static sourceProvenance(orgId: string, sourceId: string): { evidenceMode: string | null; tier: string | null; retrievedAt: string | null } | null {
+    const r = db.prepare("SELECT evidence_mode, source_tier, collected_at FROM prospect_data_sources WHERE id = ? AND organization_id = ?").get(sourceId, orgId) as any;
+    if (!r) return null;
+    return describeSourceProvenance(r);
   }
 
   /**

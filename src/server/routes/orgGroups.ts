@@ -12,6 +12,8 @@ import { OrgGroupProvisioningService } from "../OrgGroupProvisioningService.js";
 import { GroupConsolidationService } from "../GroupConsolidationService.js";
 import { GroupBillingService } from "../GroupBillingService.js";
 import { PlanService } from "../PlanService.js";
+import { OrgGroupStaffService } from "../OrgGroupStaffService.js";
+import { logAuthEvent } from "../auditLog.js";
 
 const router = Router();
 
@@ -151,6 +153,50 @@ router.post("/:groupId/payer", requireRole("owner", "admin"), (req: AuthRequest,
   const ok = OrgGroupService.setPayerRef(groupId, orgId, req.body?.payerRef ?? null);
   if (!ok) return res.status(404).json({ error: "operação não está no grupo" });
   res.json({ ok: true });
+});
+
+/**
+ * Equipe do grupo por loja (gerentes/staff), para o remanejamento. Só o dono do grupo.
+ * Omite o próprio dono. Isolamento: ownership do grupo validado.
+ */
+router.get("/:groupId/staff", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  res.json({ stores: OrgGroupStaffService.listStaff(groupId, identityId) });
+});
+
+/**
+ * Remaneja um gerente entre lojas do grupo (MOVE o mesmo usuário/login). Só o dono do
+ * grupo. Body: { userId, toOrgId }. O serviço valida origem/destino no grupo, nunca move
+ * o dono, reatribui o perfil equivalente na destino e revoga a sessão antiga (relogin).
+ */
+router.post("/:groupId/transfer-user", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  const userId = String(req.body?.userId || "");
+  const toOrgId = String(req.body?.toOrgId || "");
+  if (!userId || !toOrgId) return res.status(400).json({ error: "userId e toOrgId obrigatórios" });
+
+  const r = OrgGroupStaffService.transferUser({ groupId, ownerIdentityId: identityId, userId, toOrgId, actorUserId: req.user!.userId });
+  if (!r.ok) {
+    const map: Record<string, number> = {
+      not_group_owner: 404, user_not_found: 404, user_not_in_group: 404, target_not_in_group: 404,
+      cannot_move_owner: 403, same_org: 400, email_exists_in_target: 409,
+    };
+    return res.status(map[r.code || ""] || 400).json({ error: r.code || "transfer_failed" });
+  }
+  logAuthEvent(r.fromOrgId || null, req.user!.userId, userId, 'GROUP_TRANSFER_USER', { fromOrg: r.fromOrgId, toOrg: toOrgId, groupId });
+  res.json({ ok: true, fromOrgId: r.fromOrgId, toOrgId });
 });
 
 export default router;

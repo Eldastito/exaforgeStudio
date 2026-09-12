@@ -278,7 +278,58 @@ export class SalesCoachService {
 
     return { seller: g.seller, hasData: g.hasData, gapTypes, targeted, general };
   }
+
+  /**
+   * F5 — roleplay: roteiros de TREINO determinísticos (RN-SC-4, roda em CI) derivados
+   * dos gaps (F2). SIMULAÇÃO INTERNA (RN-SC-1): a fala do "cliente" é para o vendedor
+   * TREINAR resposta — NUNCA é enviada a ninguém. Grounded (RN-SC-3 — cada cenário é
+   * disparado por um gap real e cita o contexto); sem gap → sem cenário (não inventa).
+   * Advisório (RN-SC-2). Isolado por org (RN-SC-6).
+   */
+  static roleplay(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): {
+    seller: GapsResult["seller"]; hasData: boolean; disclaimer: string;
+    scenarios: { gapKey: string; severity: GapSeverity; title: string; situation: string; customerLine: string; suggestedResponse: string; practice: string }[];
+  } {
+    const disclaimer = "Simulação interna de treino do vendedor — nada aqui é enviado ao cliente.";
+    const g = this.gaps(orgId, sellerId, opts);
+    if (!g.seller) return { seller: null, hasData: false, disclaimer, scenarios: [] };
+
+    const scenarios = g.gaps
+      .filter((gap) => ROLEPLAY_TEMPLATES[gap.key])
+      .map((gap) => {
+        const t = ROLEPLAY_TEMPLATES[gap.key];
+        return { gapKey: gap.key, severity: gap.severity, title: t.title,
+          situation: `Treino motivado por: ${gap.detail}`,
+          customerLine: t.customerLine, suggestedResponse: t.suggestedResponse, practice: t.practice };
+      });
+
+    return { seller: g.seller, hasData: g.hasData, disclaimer, scenarios };
+  }
 }
+
+// Roteiros de TREINO determinísticos por gap (RN-SC-4). São SIMULAÇÕES INTERNAS
+// (RN-SC-1): `customerLine` é a fala que o vendedor TREINA responder — nunca é enviada
+// a cliente; `suggestedResponse` é o que o vendedor pode dizer no treino, não um envio.
+const ROLEPLAY_TEMPLATES: Record<string, { title: string; customerLine: string; suggestedResponse: string; practice: string }> = {
+  declining_trend: {
+    title: "Reengajar e retomar o ritmo",
+    customerLine: '"Ah, depois eu volto / vou pensar."',
+    suggestedResponse: 'Combine um próximo passo concreto: "Posso te avisar quando chegar a peça que você procura? Qual o melhor dia pra falar?" — nunca deixe a conversa sem próximo contato.',
+    practice: "Follow-up ativo: fechar todo atendimento com um próximo passo marcado.",
+  },
+  below_team_valor: {
+    title: "Converter mais atendimentos em venda",
+    customerLine: '"Só estou dando uma olhada."',
+    suggestedResponse: 'Acolha e qualifique: "Fique à vontade! Posso te mostrar as novidades que combinam com o que você costuma usar?" — transforme a navegação em conversa.',
+    practice: "Abordagem que qualifica sem pressionar e leva à experimentação.",
+  },
+  below_team_ticket: {
+    title: "Aumentar o ticket com mix e venda adicional",
+    customerLine: '"Quero o mais barato."',
+    suggestedResponse: 'Mostre valor antes do preço: "Esse dura mais e sai por pouco a mais — quer comparar?" e ofereça um complemento pertinente no fechamento.',
+    practice: "Venda adicional pertinente e apresentação de valor antes do preço.",
+  },
+};
 
 // Mapeia gap do coach → tipo de padrão que uma solução de gerente endereçaria.
 // Só o que dá para justificar 1:1 (queda do vendedor ↔ vendedor_queda_recorrente,

@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ManagerSolutionRetrievalService } from "./ManagerSolutionRetrievalService.js";
 
 /**
  * SalesCoachService — Sales Coach (ADR-202, F5 do GAP-CLOSURE-03). TREINA O VENDEDOR,
@@ -232,7 +233,58 @@ export class SalesCoachService {
       return { seller: fb.seller, hasData: fb.hasData, headline: fb.headline, points: fb.points, narrative: base, aiUsed: false };
     }
   }
+
+  /** Loja mais frequente do vendedor (para o caveat de contexto da solução). null = rede. */
+  private static primaryStore(orgId: string, matricula: string): string | null {
+    const r = db.prepare(
+      `SELECT store_id, COUNT(*) c FROM (
+         SELECT store_id FROM retail_seller_sales WHERE organization_id = ? AND matricula = ? AND store_id IS NOT NULL
+         UNION ALL
+         SELECT store_id FROM retail_erp_seller_sales WHERE organization_id = ? AND matricula = ? AND store_id IS NOT NULL
+       ) GROUP BY store_id ORDER BY c DESC LIMIT 1`
+    ).get(orgId, matricula, orgId, matricula) as any;
+    return r?.store_id || null;
+  }
+
+  /**
+   * F4 — soluções de gerente VALIDADAS aplicáveis ao vendedor (ADR-174). REUSA o
+   * `ManagerSolutionRetrievalService` (RN-SC-8 — sem motor novo), que já rotula ORIGEM
+   * HUMANA + onde funcionou + evidência + caveat + claim condicional (RN-SC-5: nunca
+   * "verdade da IA", nunca afirma eficácia geral). Read-only, isolado por org (RN-SC-6).
+   *
+   * `targeted`: soluções que endereçam o TIPO de padrão do gap do vendedor (hoje só a
+   * queda recorrente ↔ vendedor_queda_recorrente). `general`: demais soluções validadas
+   * do org (conhecimento disponível para o gestor), deduplicadas. Sem solução → vazio
+   * (não inventa). O caveat/loja usa a loja mais frequente do vendedor.
+   */
+  static solutionsForSeller(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): {
+    seller: GapsResult["seller"]; hasData: boolean; gapTypes: string[]; targeted: any[]; general: any[];
+  } {
+    const g = this.gaps(orgId, sellerId, opts);
+    if (!g.seller) return { seller: null, hasData: false, gapTypes: [], targeted: [], general: [] };
+    const storeId = this.primaryStore(orgId, g.seller.matricula);
+
+    const gapTypes = [...new Set(g.gaps.map((x) => GAP_TO_PATTERN_TYPE[x.key]).filter(Boolean))];
+    const seen = new Set<string>();
+    const targeted: any[] = [];
+    for (const pt of gapTypes) {
+      for (const s of ManagerSolutionRetrievalService.retrieve(orgId, { patternType: pt, storeId })) {
+        if (s.proposalId) { if (seen.has(s.proposalId)) continue; seen.add(s.proposalId); }
+        targeted.push(s);
+      }
+    }
+    const general = ManagerSolutionRetrievalService.retrieve(orgId, { storeId })
+      .filter((s: any) => !(s.proposalId && seen.has(s.proposalId)));
+
+    return { seller: g.seller, hasData: g.hasData, gapTypes, targeted, general };
+  }
 }
+
+// Mapeia gap do coach → tipo de padrão que uma solução de gerente endereçaria.
+// Só o que dá para justificar 1:1 (queda do vendedor ↔ vendedor_queda_recorrente,
+// o mesmo tipo que o PeoplePatternMemory publica). Gaps sem tipo canônico não
+// mapeiam — não inventa correspondência (RN-SC-3).
+const GAP_TO_PATTERN_TYPE: Record<string, string> = { declining_trend: "vendedor_queda_recorrente" };
 
 /** Linha de treino determinística e grounded para um gap. Advisória (sugere, não pune). */
 function coachLine(gap: CoachGap, baseline: GapsResult["teamBaseline"]): string {

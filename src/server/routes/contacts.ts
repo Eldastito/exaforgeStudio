@@ -3,8 +3,30 @@ import db from "../db.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { CustomerProfileService } from "../CustomerProfileService.js";
 import { CustomerMemoryService } from "../CustomerMemoryService.js";
+import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
 
 const router = Router();
+
+/**
+ * Escopo de loja no CRM (ADR-173). O contato do WhatsApp NÃO tem loja própria —
+ * a loja é DERIVADA da loja de compra (`orders.store_id`). Política INCLUSIVA
+ * (decisão do dono): um gerente restrito vê os contatos que compraram na SUA
+ * loja MAIS os contatos SEM loja atribuída (leads que nunca compraram / pedidos
+ * sem loja) — só esconde quem comprou em OUTRA loja. Assim o gerente não perde
+ * os leads frios/novos (o objetivo do CRM é convertê-los).
+ *
+ * Devolve o trecho SQL (correlacionado com a tabela `contacts`) + args. Vazio
+ * quando o usuário é irrestrito (dono/admin sem lotação) — 0-regressão.
+ */
+export function contactsStoreScope(orgId: string, user: any): { clause: string; args: any[] } {
+  const scope = RetailStoreScopeService.allowed(orgId, user?.userId, user?.role);
+  if (scope.unrestricted || !scope.storeIds.length) return { clause: "", args: [] };
+  const ph = scope.storeIds.map(() => "?").join(",");
+  const clause =
+    ` AND (NOT EXISTS (SELECT 1 FROM orders o WHERE o.organization_id = contacts.organization_id AND o.contact_id = contacts.id AND o.store_id IS NOT NULL)` +
+    ` OR EXISTS (SELECT 1 FROM orders o WHERE o.organization_id = contacts.organization_id AND o.contact_id = contacts.id AND o.store_id IN (${ph})))`;
+  return { clause, args: scope.storeIds };
+}
 
 // GET /api/contacts — lista contatos com dados de CRM (filtros: temperature, tag, inactiveDays)
 router.get("/", (req: AuthRequest, res): any => {
@@ -18,6 +40,8 @@ router.get("/", (req: AuthRequest, res): any => {
                       memory_facts, memory_summary, memory_updated_at
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
+    const scope = contactsStoreScope(orgId, req.user);
+    sql += scope.clause; params.push(...scope.args);
     if (temperature) { sql += ` AND lead_temperature = ?`; params.push(temperature); }
     if (tag) { sql += ` AND tags LIKE ?`; params.push(`%${tag}%`); }
     if (minScore) { sql += ` AND COALESCE(lead_score,0) >= ?`; params.push(parseInt(String(minScore), 10) || 0); }
@@ -40,18 +64,19 @@ router.get("/segments", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const byTemp = db.prepare(`SELECT lead_temperature as t, count(*) as c FROM contacts WHERE organization_id = ? GROUP BY lead_temperature`).all(orgId) as any[];
-    const inactive60 = db.prepare(`SELECT count(*) as c FROM contacts WHERE organization_id = ? AND purchase_count > 0 AND (last_purchase_at IS NULL OR last_purchase_at < datetime('now','-60 days'))`).get(orgId) as any;
-    const topBuyers = db.prepare(`SELECT id, name, identifier, purchase_count, total_spent FROM contacts WHERE organization_id = ? AND purchase_count > 0 ORDER BY total_spent DESC LIMIT 10`).all(orgId);
+    const s = contactsStoreScope(orgId, req.user); const sc = s.clause; const sa = s.args;
+    const byTemp = db.prepare(`SELECT lead_temperature as t, count(*) as c FROM contacts WHERE organization_id = ?${sc} GROUP BY lead_temperature`).all(orgId, ...sa) as any[];
+    const inactive60 = db.prepare(`SELECT count(*) as c FROM contacts WHERE organization_id = ?${sc} AND purchase_count > 0 AND (last_purchase_at IS NULL OR last_purchase_at < datetime('now','-60 days'))`).get(orgId, ...sa) as any;
+    const topBuyers = db.prepare(`SELECT id, name, identifier, purchase_count, total_spent FROM contacts WHERE organization_id = ?${sc} AND purchase_count > 0 ORDER BY total_spent DESC LIMIT 10`).all(orgId, ...sa);
     // Lead Scoring: contagem por faixa + os leads mais quentes para priorizar.
     const score = db.prepare(`
       SELECT
         SUM(CASE WHEN COALESCE(lead_score,0) >= 70 THEN 1 ELSE 0 END) as alto,
         SUM(CASE WHEN COALESCE(lead_score,0) >= 40 AND COALESCE(lead_score,0) < 70 THEN 1 ELSE 0 END) as medio,
         SUM(CASE WHEN COALESCE(lead_score,0) < 40 THEN 1 ELSE 0 END) as baixo
-      FROM contacts WHERE organization_id = ?
-    `).get(orgId) as any;
-    const hotLeads = db.prepare(`SELECT id, name, identifier, lead_score, lead_temperature FROM contacts WHERE organization_id = ? ORDER BY COALESCE(lead_score,0) DESC LIMIT 10`).all(orgId);
+      FROM contacts WHERE organization_id = ?${sc}
+    `).get(orgId, ...sa) as any;
+    const hotLeads = db.prepare(`SELECT id, name, identifier, lead_score, lead_temperature FROM contacts WHERE organization_id = ?${sc} ORDER BY COALESCE(lead_score,0) DESC LIMIT 10`).all(orgId, ...sa);
     res.json({
       byTemperature: byTemp.reduce((acc: any, r) => { acc[r.t || 'frio'] = r.c; return acc; }, {}),
       inactive60Days: inactive60?.c || 0,
@@ -124,6 +149,8 @@ router.get("/export.csv", (req: AuthRequest, res): any => {
                       total_spent, avg_ticket, last_purchase_at, last_contact_at, tags
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
+    const scope = contactsStoreScope(orgId, req.user);
+    sql += scope.clause; params.push(...scope.args);
     if (temperature) { sql += ` AND lead_temperature = ?`; params.push(temperature); }
     if (tag) { sql += ` AND tags LIKE ?`; params.push(`%${tag}%`); }
     if (minScore) { sql += ` AND COALESCE(lead_score,0) >= ?`; params.push(parseInt(String(minScore), 10) || 0); }

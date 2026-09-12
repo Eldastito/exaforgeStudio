@@ -754,6 +754,7 @@
     "test:brand-vertical-profile": "tsx scripts/test-brand-vertical-profile.ts",
     "test:prospect-provenance": "tsx scripts/test-prospect-provenance.ts",
     "test:prospect-vertical-packs": "tsx scripts/test-prospect-vertical-packs.ts",
+    "test:sales-coach-snapshot": "tsx scripts/test-sales-coach-snapshot.ts",
     "test:operational-dependency": "tsx scripts/test-operational-dependency.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
     "test:falatu-ask-recovery": "tsx scripts/test-falatu-ask-recovery.ts",

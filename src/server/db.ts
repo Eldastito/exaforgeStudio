@@ -11702,6 +11702,8 @@ const initDb = () => {
   // origem declarada/primeira-parte ou desconhecida (honesto, nunca `live` fabricado).
   try { db.exec(`ALTER TABLE prospect_data_sources ADD COLUMN evidence_mode TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE prospect_data_sources ADD COLUMN source_tier TEXT`); } catch(e){}
+  // ADR-202 F6 — flag opt-in do Sales Coach (default 0 → superfície some/404; 0-regressão).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN sales_coach_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

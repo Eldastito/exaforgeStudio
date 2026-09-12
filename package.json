@@ -759,6 +759,7 @@
     "test:sales-coach-feedback": "tsx scripts/test-sales-coach-feedback.ts",
     "test:sales-coach-solutions": "tsx scripts/test-sales-coach-solutions.ts",
     "test:sales-coach-roleplay": "tsx scripts/test-sales-coach-roleplay.ts",
+    "test:sales-coach-surface": "tsx scripts/test-sales-coach-surface.ts",
     "test:operational-dependency": "tsx scripts/test-operational-dependency.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
     "test:falatu-ask-recovery": "tsx scripts/test-falatu-ask-recovery.ts",

@@ -313,6 +313,13 @@ export class SalesCoachService {
     return !!(r && Number(r.sales_coach_enabled) === 1);
   }
 
+  /** Liga/desliga a flag opt-in de uma org (porta de administração do rollout,
+   *  RN-SC-7). Reversível; espelha `FalaTuService.setOrgEnabled`. */
+  static setOrgEnabled(orgId: string, enabled: boolean): { enabled: boolean } {
+    db.prepare("UPDATE organization_settings SET sales_coach_enabled = ? WHERE organization_id = ?").run(enabled ? 1 : 0, orgId);
+    return { enabled };
+  }
+
   /** Vendedores ATIVOS do org (mínimo, para o gestor escolher). Isolado por org. */
   static listSellers(orgId: string): { id: string; matricula: string; name: string | null }[] {
     return (db.prepare("SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name").all(orgId) as any[])

@@ -21,7 +21,7 @@ const CSP_DIRECTIVES = [
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
   "style-src 'self' 'unsafe-inline'",
-  "script-src 'self'",
+  "script-src 'self' https://plausible.io",
   "font-src 'self' data:",
   "connect-src 'self' https: wss:",
 ].join("; ");

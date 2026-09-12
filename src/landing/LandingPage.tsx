@@ -94,9 +94,11 @@ const FAQ = [
 function Cta({ children, primary = false, className = '' }: { children: React.ReactNode; primary?: boolean; className?: string }) {
   const href = primary ? primaryCtaHref() : '#diagnostico';
   const external = primary && /^https?:\/\//.test(href);
+  // CTA primário dispara o evento de conversão "Diagnostico" no Plausible (tagged-events).
+  const evt = primary ? 'plausible-event-name=Diagnostico' : '';
   return (
     <a href={href} {...(external ? { target: '_blank', rel: 'noreferrer' } : {})}
-      className={`zf-button ${primary ? 'zf-button-primary' : 'zf-button-secondary'} ${className}`}>
+      className={`zf-button ${primary ? 'zf-button-primary' : 'zf-button-secondary'} ${evt} ${className}`}>
       {children}
     </a>
   );
@@ -107,6 +109,18 @@ export function LandingPage() {
   // Título da aba específico da landing (o index.html compartilhado fica "ZappFlow";
   // aqui enriquecemos em runtime, sem quebrar a separação por subdomínio).
   useEffect(() => { document.title = 'ZappFlow — Inteligência e execução operacional'; }, []);
+
+  // Analytics da landing (Plausible, cookieless/LGPD-limpo) — carregado SÓ na landing
+  // (não no app autenticado), e só se houver domínio configurado. Idempotente. A
+  // variante tagged-events lê a classe `plausible-event-name=...` do CTA primário.
+  useEffect(() => {
+    const domain = marketingConfig.plausibleDomain;
+    if (!domain || document.querySelector('script[data-plausible]')) return;
+    const s = document.createElement('script');
+    s.defer = true; s.src = 'https://plausible.io/js/script.tagged-events.js';
+    s.setAttribute('data-domain', domain); s.setAttribute('data-plausible', '1');
+    document.head.appendChild(s);
+  }, []);
 
   return (
     <div className="min-h-screen text-zinc-100" style={{ background: 'var(--color-zf-midnight)' }}>

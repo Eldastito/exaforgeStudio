@@ -5,6 +5,7 @@ import { logAuthEvent } from "./auditLog.js";
 import { expectedSegments, norm as normCat } from "./prospectCategories.js";
 import { AiGovernanceService } from "./AiGovernanceService.js";
 import { provenanceForProvider, describeSourceProvenance } from "./prospectProvenance.js";
+import { listProspectVerticalPacks, getProspectVerticalPack } from "./prospectVerticalPacks.js";
 
 /**
  * Prospect AI — Inteligência de Prospecção B2B (Fase 0: fundação).
@@ -67,6 +68,22 @@ export class ProspectService {
   static getIcp(orgId: string, id: string): any {
     const r = db.prepare("SELECT * FROM prospect_icp_profiles WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     return r ? { ...r, criteria: parseCriteria(r.criteria_json) } : null;
+  }
+
+  // ── Vertical packs (F4/GAP-CLOSURE-03): templates curados de ICP por nicho ──
+  /** Packs disponíveis (conteúdo global curado). Não cria nada; só oferece o ponto de partida. */
+  static listVerticalPacks(): any[] { return listProspectVerticalPacks(); }
+
+  /**
+   * Adota um vertical pack: cria um ICP NOVO e editável a partir do template curado,
+   * via o `createIcp` existente (não duplica armazenamento). Não sobrescreve ICPs — o
+   * tenant fica com um ponto de partida e edita livremente. Vertical sem pack → erro
+   * (não inventa template).
+   */
+  static adoptVerticalPack(orgId: string, vertical: string, actorId?: string): any {
+    const pack = getProspectVerticalPack(String(vertical || ""));
+    if (!pack) throw new Error("Não há pack curado para esta vertical.");
+    return this.createIcp(orgId, { name: pack.icpName, vertical: pack.vertical, criteria: pack.criteria }, actorId);
   }
 
   static updateIcp(orgId: string, id: string, patch: any): any {

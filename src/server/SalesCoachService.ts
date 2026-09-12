@@ -179,6 +179,73 @@ export class SalesCoachService {
 
     return { seller: snap.seller, hasData: true, gaps, teamBaseline };
   }
+
+  /**
+   * F3 — feedback DETERMINÍSTICO (RN-SC-4, roda em CI sem IA): transforma os gaps (F2)
+   * em pontos de treino GROUNDED (RN-SC-3 — só os números dos gaps, nunca inventa),
+   * em tom advisório (RN-SC-2 — sugere, nunca pune). É a base garantida; o rephrase por
+   * LLM (feedbackAsync) é opcional e cai NESTE resultado se a IA falhar/ausente.
+   */
+  static feedback(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): {
+    seller: GapsResult["seller"]; hasData: boolean; headline: string;
+    points: { key: string; severity: GapSeverity; text: string }[]; gaps: CoachGap[];
+  } {
+    const g = this.gaps(orgId, sellerId, opts);
+    if (!g.seller) return { seller: null, hasData: false, headline: "", points: [], gaps: [] };
+    const name = g.seller.name || "o vendedor";
+
+    if (!g.hasData) {
+      return { seller: g.seller, hasData: false, headline: "Sem base para avaliar ainda",
+        points: [{ key: "insufficient_data", severity: "low", text: "Ainda não há vendas registradas na janela — registre as vendas para o coach conseguir orientar." }], gaps: g.gaps };
+    }
+
+    const points = g.gaps.map((gap) => ({ key: gap.key, severity: gap.severity, text: coachLine(gap, g.teamBaseline) }));
+    let headline: string;
+    if (!g.gaps.length) headline = `Desempenho saudável — mantenha o ritmo.`;
+    else if (g.gaps.some((x) => x.severity === "high")) headline = `Pontos importantes para trabalhar com ${name}.`;
+    else headline = `Alguns pontos para melhorar com ${name}.`;
+    if (!g.gaps.length) points.push({ key: "healthy", severity: "low", text: "Sem gaps detectados na janela. Reforce o que está funcionando e mantenha a constância." });
+
+    return { seller: g.seller, hasData: true, headline, points, gaps: g.gaps };
+  }
+
+  /**
+   * F3 — feedbackAsync: reescreve o feedback determinístico em tom de treino via o
+   * primitivo de IA da casa (`chat`, tier economy — determinístico ANTES de LLM,
+   * RN-SC-4/8, NÃO é motor novo). GROUNDED por prompt (só os pontos, não inventa).
+   * Best-effort: sem chave/erro → cai no texto determinístico (aiUsed=false). NUNCA
+   * gera nada para o cliente (RN-SC-1) — é feedback para o vendedor.
+   */
+  static async feedbackAsync(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): Promise<{
+    seller: GapsResult["seller"]; hasData: boolean; headline: string;
+    points: { key: string; severity: GapSeverity; text: string }[]; narrative: string; aiUsed: boolean;
+  }> {
+    const fb = this.feedback(orgId, sellerId, opts);
+    const base = [fb.headline, ...fb.points.map((p) => `- ${p.text}`)].filter(Boolean).join("\n");
+    if (!fb.seller || !fb.hasData || !fb.points.length) return { ...fb, narrative: base, aiUsed: false };
+    try {
+      const { chat } = await import("./llm.js");
+      const prompt = `Você é um COACH DE VENDAS INTERNO do ZappFlow. Reescreva o feedback abaixo para o VENDEDOR (nunca para o cliente), em português do Brasil, tom direto, respeitoso e de treino, em no máximo 5 frases. Use SOMENTE os pontos abaixo — NÃO invente números nem fatos.\n\n${base}`;
+      const out = (await chat(prompt, { temperature: 0.3, tier: "economy" })).trim();
+      return { seller: fb.seller, hasData: fb.hasData, headline: fb.headline, points: fb.points, narrative: out || base, aiUsed: !!out };
+    } catch {
+      return { seller: fb.seller, hasData: fb.hasData, headline: fb.headline, points: fb.points, narrative: base, aiUsed: false };
+    }
+  }
+}
+
+/** Linha de treino determinística e grounded para um gap. Advisória (sugere, não pune). */
+function coachLine(gap: CoachGap, baseline: GapsResult["teamBaseline"]): string {
+  switch (gap.key) {
+    case "declining_trend":
+      return `Vendas em queda ${gap.basis?.declines ?? ""} meses seguidos${gap.basis?.deltaPct != null ? ` (${gap.basis.deltaPct}%)` : ""} — vale entender a causa (meta, atrito no atendimento, mix) e retomar o ritmo.`;
+    case "below_team_valor":
+      return `Venda mensal (${gap.basis?.myAvgMonthly}) abaixo da mediana do time (${gap.basis?.teamMedian}) — foco em volume e constância na abordagem.`;
+    case "below_team_ticket":
+      return `Ticket médio (${gap.basis?.myTicket}) abaixo do time (${gap.basis?.teamMedian}) — trabalhe venda adicional e mix de maior valor.`;
+    default:
+      return gap.detail || gap.label;
+  }
 }
 
 export default SalesCoachService;

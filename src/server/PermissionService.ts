@@ -46,6 +46,17 @@ export const RBAC_MODULES = [
   // acesso — dono/gerente entram por default full. Aditivo, não altera perfis
   // do parque legado até o dono editar.
   "runtime",
+  // Módulos add-on / verticais trazidos ao catálogo de perfis. Antes ficavam de
+  // FORA do RBAC granular (self-gated por requireRole owner/admin nas rotas), o
+  // que tinha um efeito colateral: um usuário COM perfil não tinha linha em
+  // role_permissions para eles → levelFor caía em 'none' → o EntitlementService
+  // os ESCONDIA do menu (só o Dono, sempre full, os via). Ao entrarem aqui, o
+  // backfill idempotente semeia o nível do template (Gerente default 'full' →
+  // volta a ver; vendedor/atendente default 'none' → seguem escondidos, sem
+  // regressão) E eles passam a ser configuráveis no editor de perfis. NÃO
+  // altera ROUTE_MODULE — as rotas seguem self-gated (0-regressão de acesso).
+  "retail", "retail_floor", "clinica", "escola", "advocacia", "copiloto",
+  "prospect", "vms", "radar",
 ] as const;
 export type RbacModule = (typeof RBAC_MODULES)[number];
 
@@ -120,6 +131,11 @@ export const RBAC_MODULE_LABELS: Record<string, string> = {
   empresa_proprietario: "Empresa × Proprietário", people: "RH / Pessoas",
   production: "Produção", falatu: "FalaTu (Captura Multimodal)",
   runtime: "Execution Runtime (Processos)",
+  // Add-on / verticais (rótulos alinhados ao menu que o cliente vê).
+  retail: "Operação da Rede", retail_floor: "Atendimento de Loja",
+  clinica: "Agenda Clínica", escola: "Escola", advocacia: "Advocacia",
+  copiloto: "Comigo", prospect: "Prospect AI", vms: "Vision VMS",
+  radar: "Radar de Execução IA",
 };
 
 type ProfileSpec = { key: string; name: string; default: Level; overrides: Partial<Record<string, Level>> };

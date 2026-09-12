@@ -7,14 +7,14 @@
  * é role-gated na rota (owner/admin); 402/403 vira aviso, nunca inventa número.
  */
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, Receipt, LayoutGrid, LogIn } from 'lucide-react';
+import { Building2, Plus, RefreshCw, Receipt, LayoutGrid, LogIn, Users, ArrowRightLeft } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useAuth } from '@/src/contexts/AuthContext';
 
 const brl = (n: number | null | undefined) =>
   n == null ? '—' : Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-type Tab = 'ops' | 'consolidated' | 'billing';
+type Tab = 'ops' | 'consolidated' | 'billing' | 'staff';
 
 export function OrgGroupView() {
   const [groupId, setGroupId] = useState<string | null>(null);
@@ -46,10 +46,12 @@ export function OrgGroupView() {
       <div className="flex gap-1 border-b border-zinc-800 mb-5">
         <TabBtn active={tab === 'ops'} onClick={() => setTab('ops')} icon={<LayoutGrid className="w-4 h-4" />}>Operações</TabBtn>
         <TabBtn active={tab === 'consolidated'} onClick={() => setTab('consolidated')} icon={<RefreshCw className="w-4 h-4" />}>Consolidado</TabBtn>
+        <TabBtn active={tab === 'staff'} onClick={() => setTab('staff')} icon={<Users className="w-4 h-4" />}>Equipe</TabBtn>
         <TabBtn active={tab === 'billing'} onClick={() => setTab('billing')} icon={<Receipt className="w-4 h-4" />}>Fatura</TabBtn>
       </div>
       {tab === 'ops' && <OpsTab groupId={groupId} onGroupCreated={setGroupId} />}
       {tab === 'consolidated' && <ConsolidatedTab groupId={groupId} />}
+      {tab === 'staff' && <StaffTab groupId={groupId} />}
       {tab === 'billing' && <BillingTab groupId={groupId} />}
     </Wrap>
   );
@@ -263,6 +265,106 @@ function ConsolidatedTab({ groupId }: { groupId: string | null }) {
     </div>
   );
 }
+
+// ---------- Equipe: gerentes por loja + remanejamento ----------
+function StaffTab({ groupId }: { groupId: string | null }) {
+  const [stores, setStores] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [moving, setMoving] = useState<string | null>(null); // userId em transferência
+  const [target, setTarget] = useState<Record<string, string>>({}); // userId → toOrgId escolhido
+
+  async function load() {
+    if (!groupId) { setStores([]); return; }
+    setLoading(true);
+    try {
+      const r = await apiFetch(`/api/groups/${groupId}/staff`);
+      setStores(r.ok ? (await r.json()).stores || [] : []);
+    } catch { setStores([]); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupId]);
+
+  async function transfer(userId: string) {
+    const toOrgId = target[userId];
+    if (!groupId || !toOrgId || moving) return;
+    setMoving(userId); setMsg(null);
+    try {
+      const r = await apiFetch(`/api/groups/${groupId}/transfer-user`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toOrgId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { setMsg('Gerente remanejado. Ele precisará entrar de novo, já na nova loja.'); await load(); }
+      else setMsg(TRANSFER_ERR[d?.error] || `Falha ao remanejar (HTTP ${r.status}).`);
+    } catch { setMsg('Falha de rede ao remanejar.'); }
+    setMoving(null);
+  }
+
+  if (!groupId) return <Empty title="Sem grupo" msg="Adicione operações na aba Operações." />;
+
+  const allStores = stores.map((s) => ({ organizationId: s.organizationId, businessName: s.businessName }));
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-500">
+        Remaneje um gerente de uma loja para outra do grupo. Ele mantém o mesmo login e passa a
+        enxergar somente a nova loja. Só o dono do grupo vê e usa esta aba.
+      </p>
+      {msg && <p className="text-xs text-indigo-300">{msg}</p>}
+      {loading ? <p className="text-sm text-zinc-500">Carregando…</p>
+        : stores.length === 0 ? <Empty title="Sem equipe" msg="Nenhuma loja/gerente no grupo ainda." />
+        : stores.map((store) => (
+          <div key={store.organizationId} className="rounded-xl border border-zinc-800 overflow-hidden">
+            <div className="px-4 py-2 bg-zinc-900/60 text-sm text-zinc-200">{store.businessName || store.organizationId}</div>
+            {store.users.length === 0 ? (
+              <p className="px-4 py-3 text-xs text-zinc-500">Sem gerentes nesta loja.</p>
+            ) : (
+              <div className="divide-y divide-zinc-800">
+                {store.users.map((u: any) => (
+                  <div key={u.userId} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-zinc-100 truncate">{u.name || u.email || u.userId}</p>
+                      <p className="text-xs text-zinc-500">{u.role}{u.profileName ? ` · ${u.profileName}` : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <select
+                        value={target[u.userId] || ''}
+                        onChange={(e) => setTarget((p) => ({ ...p, [u.userId]: e.target.value }))}
+                        disabled={moving === u.userId}
+                        className="rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                        title="Loja destino"
+                      >
+                        <option value="">Transferir para…</option>
+                        {allStores.filter((s) => s.organizationId !== store.organizationId).map((s) => (
+                          <option key={s.organizationId} value={s.organizationId}>{s.businessName || s.organizationId}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => transfer(u.userId)}
+                        disabled={!target[u.userId] || moving === u.userId}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 px-2.5 py-1.5 text-xs font-medium text-zinc-100"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        {moving === u.userId ? 'Movendo…' : 'Transferir'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+const TRANSFER_ERR: Record<string, string> = {
+  cannot_move_owner: 'Não é possível transferir o dono da conta.',
+  email_exists_in_target: 'Já existe um usuário com esse e-mail na loja destino.',
+  target_not_in_group: 'A loja destino não pertence a este grupo.',
+  user_not_in_group: 'Este usuário não pertence a uma loja deste grupo.',
+  same_org: 'O gerente já está nesta loja.',
+};
 
 // ---------- Fatura (prévia) ----------
 function BillingTab({ groupId }: { groupId: string | null }) {

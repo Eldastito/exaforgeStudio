@@ -8,12 +8,17 @@ import { apiFetch } from '@/src/lib/api';
 export function Sidebar() {
   const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, missionLayerEnabled, vertical } = useStore();
   const { user, logout } = useAuth();
-  // ADR-199 (UI): a entrada "Grupo" só aparece quando FEATURE_ORG_GROUPS está ligada —
-  // detectado por /api/groups responder (404 = feature off). 0-regressão pro single-org.
+  // ADR-199 (UI): a entrada "Grupo" só aparece pro DONO de um grupo — /api/groups devolve
+  // os grupos que a IDENTIDADE da sessão POSSUI. Gerente (não é dono de grupo) recebe
+  // lista vazia → o menu some (regra de negócio: só o dono gerencia o grupo). Feature off
+  // (404) ou single-org (sem grupo) → também some. 0-regressão pro single-org.
   const [groupAvailable, setGroupAvailable] = React.useState(false);
   React.useEffect(() => {
     let alive = true;
-    apiFetch('/api/groups').then((r) => { if (alive) setGroupAvailable(r.ok); }).catch(() => {});
+    apiFetch('/api/groups')
+      .then((r) => (r.ok ? r.json() : { groups: [] }))
+      .then((d) => { if (alive) setGroupAvailable(Array.isArray(d?.groups) && d.groups.length > 0); })
+      .catch(() => {});
     return () => { alive = false; };
   }, []);
   // ADR-202 F6b: entrada "Coach de Vendas" só quando a flag `sales_coach_enabled` está ON.

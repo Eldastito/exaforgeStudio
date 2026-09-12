@@ -52,6 +52,7 @@ import { ProductionReadinessView } from '@/src/features/ProductionReadinessView'
 import { RadarHealthView } from '@/src/features/RadarHealthView';
 import { RetailOpsView } from '@/src/features/RetailOpsView';
 import { RetailFloorView } from '@/src/features/RetailFloorView';
+import { SalesCoachView } from '@/src/features/SalesCoachView';
 import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
 import { CashView } from '@/src/features/CashView';
 import { HealthCenterView } from '@/src/features/HealthCenterView';
@@ -470,6 +471,7 @@ export default function App() {
              {viewMode === 'radar_health' && 'Saúde do Radar'}
              {viewMode === 'retailops' && 'Operação da Rede'}
              {viewMode === 'retailfloor' && 'Atendimento de Loja'}
+             {viewMode === 'sales_coach' && 'Coach de Vendas'}
              {viewMode === 'channels' && 'Canais e IA'}
              {viewMode === 'areas' && 'Áreas de Atendimento'}
              {viewMode === 'dashboard' && 'Dashboard'}
@@ -600,6 +602,7 @@ export default function App() {
           {viewMode === 'radar_health' && <RadarHealthView />}
           {viewMode === 'retailops' && <RetailOpsView />}
           {viewMode === 'retailfloor' && <RetailFloorView />}
+          {viewMode === 'sales_coach' && <SalesCoachView />}
           {viewMode === 'comigo' && <ComigoView />}
           {viewMode === 'grupo' && <OrgGroupView />}
           {viewMode === 'channels' && <ChannelsPanel />}

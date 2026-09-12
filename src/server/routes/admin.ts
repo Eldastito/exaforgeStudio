@@ -459,6 +459,22 @@ router.post("/organizations/:id/falatu", async (req: AuthRequest, res): Promise<
   }
 });
 
+// Master Admin - Liga/desliga o Sales Coach de uma organização (rollout opt-in,
+// ADR-202 RN-SC-7). O gate real é a flag lida pelo router /api/sales-coach
+// (404 com a flag off); aqui é só a porta de administração do rollout.
+router.post("/organizations/:id/sales-coach", async (req: AuthRequest, res): Promise<any> => {
+  const enabled = !!req.body?.enabled;
+  const orgId = req.params.id;
+  try {
+    const { SalesCoachService } = await import("../SalesCoachService.js");
+    SalesCoachService.setOrgEnabled(orgId, enabled);
+    logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_SALES_COACH_TOGGLE', { enabled });
+    res.json({ success: true, enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Master Admin - Atribui/troca o plano de uma organização (libera o teto de
 // módulos do plano). Preenche o gap de "liberar a conta": até aqui o admin
 // mudava status/billing, mas não conseguia dar um plano a uma org existente.

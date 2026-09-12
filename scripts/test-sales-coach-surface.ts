@@ -32,6 +32,11 @@ async function main() {
   check("1.1 org com flag=1 → habilitado", SalesCoachService.isEnabled(ORG) === true);
   check("1.2 org com flag=0 → desabilitado", SalesCoachService.isEnabled("org-off") === false);
   check("1.3 org sem settings → desabilitado (0-regressão)", SalesCoachService.isEnabled("org-sem") === false);
+  // setOrgEnabled: porta de administração do rollout (reversível).
+  SalesCoachService.setOrgEnabled("org-off", true);
+  check("1.4 setOrgEnabled liga a flag", SalesCoachService.isEnabled("org-off") === true);
+  SalesCoachService.setOrgEnabled("org-off", false);
+  check("1.5 setOrgEnabled desliga a flag", SalesCoachService.isEnabled("org-off") === false);
 
   // ── 2. listSellers ──
   const list = SalesCoachService.listSellers(ORG);

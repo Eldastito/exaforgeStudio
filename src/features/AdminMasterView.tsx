@@ -151,6 +151,23 @@ export function AdminMasterView() {
     }
   };
 
+  const handleToggleSalesCoach = async (id: string, enabled: boolean) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/sales-coach`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) { toast.success(enabled ? 'Coach de Vendas liberado para a empresa.' : 'Coach de Vendas desligado para a empresa.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao alterar o Coach de Vendas.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
   const handleSoftDelete = async (id: string) => {
     if (!(await confirmDialog('Tem certeza que deseja remover esta empresa (Soft Delete)?', { danger: true, confirmText: 'Remover' }))) return;
     setLoadingId(id);
@@ -226,6 +243,7 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">Plano</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">FalaTu</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Coach de Vendas</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Vertical</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
@@ -318,6 +336,29 @@ export function AdminMasterView() {
                           <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.falatu_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
                         </span>
                         {Number(org.falatu_enabled) ? 'Ligado' : 'Ligar'}
+                      </button>
+                  </td>
+                  <td className="px-6 py-4">
+                      {/* Rollout opt-in do Sales Coach (ADR-202 RN-SC-7): flag por org.
+                          Mesmo switch do FalaTu, cor teal pra distinguir. */}
+                      <button
+                        onClick={() => handleToggleSalesCoach(org.organization_id, !Number(org.sales_coach_enabled))}
+                        disabled={loadingId === org.organization_id}
+                        role="switch"
+                        aria-checked={!!Number(org.sales_coach_enabled)}
+                        title={Number(org.sales_coach_enabled)
+                          ? 'Coach de Vendas liberado para esta empresa — clique para desligar'
+                          : 'Clique para liberar o Coach de Vendas para esta empresa'}
+                        className={`inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                          Number(org.sales_coach_enabled)
+                            ? 'bg-teal-500/15 text-teal-200 border-teal-500/40 hover:bg-teal-500/25'
+                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:border-teal-500/50 hover:text-teal-200'
+                        }`}
+                      >
+                        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${Number(org.sales_coach_enabled) ? 'bg-teal-500' : 'bg-zinc-500'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.sales_coach_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
+                        </span>
+                        {Number(org.sales_coach_enabled) ? 'Ligado' : 'Ligar'}
                       </button>
                   </td>
                   <td className="px-6 py-4">

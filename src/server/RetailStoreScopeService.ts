@@ -5,18 +5,23 @@
  * NO SERVIDOR (RN nº 4/10 do PRD) — não basta esconder na tela.
  *
  * Regra de resolução (`allowed`):
- *   - owner/admin (ou master) → SEM restrição (vê todas as lojas da org);
+ *   - DONO (owner) → SEM restrição SEMPRE (nunca se tranca fora da própria conta);
  *   - usuário SEM atribuição → SEM restrição (opt-in, retrocompatível — ninguém
- *     perde acesso num deploy; a trava só passa a valer quando o admin atribui);
- *   - usuário COM atribuição → restrito ao conjunto atribuído.
+ *     perde acesso num deploy; a trava só passa a valer quando o dono ATRIBUI);
+ *   - usuário COM atribuição → restrito ao conjunto atribuído, INCLUSIVE admin.
+ *
+ * Por que admin COM atribuição fica restrito: o gerente de loja é modelado como
+ * "admin" da sua loja (papel canônico após a normalização manager→admin). Se o
+ * admin furasse a trava, seria impossível prender um gerente a uma loja — o
+ * cliente pediu exatamente "cada gerente só a sua loja". A atribuição é uma ação
+ * DELIBERADA do dono (UI de usuários), então restringir quem foi atribuído casa
+ * com a intenção; quem NÃO foi atribuído (co-dono/admin geral) segue vendo tudo.
  *
  * Isolado por organização.
  */
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
-
-const BYPASS_ROLES = new Set(["owner", "admin"]);
 
 export type StoreScope = {
   unrestricted: boolean;   // true = vê tudo (owner/admin ou sem atribuição)
@@ -49,7 +54,12 @@ export class RetailStoreScopeService {
 
   /** Resolve o escopo efetivo do usuário (papel + atribuições). */
   static allowed(orgId: string, userId: string, role?: string): StoreScope {
-    if (role && BYPASS_ROLES.has(role)) return { unrestricted: true, storeIds: [], storeCodes: [] };
+    // O DONO nunca é restrito (não se tranca fora da própria conta).
+    if (role === "owner") return { unrestricted: true, storeIds: [], storeCodes: [] };
+    // Sem atribuição → irrestrito (retrocompatível: admin/gerente sem lotação
+    // seguem vendo tudo; a trava só vale quando o dono ATRIBUI a(s) loja(s)).
+    // COM atribuição → restrito, INCLUSIVE admin (é assim que o gerente-admin
+    // fica preso à sua loja; antes o admin furava a trava — ADR-173 revisado).
     const ids = this.forUser(orgId, userId);
     if (!ids.length) return { unrestricted: true, storeIds: [], storeCodes: [] };
     const codes = (db.prepare(`SELECT code FROM retail_stores WHERE organization_id = ? AND id IN (${ids.map(() => "?").join(",")}) AND code IS NOT NULL AND TRIM(code) <> ''`).all(orgId, ...ids) as any[]).map(r => String(r.code));

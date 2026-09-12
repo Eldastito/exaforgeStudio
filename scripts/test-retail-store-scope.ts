@@ -49,8 +49,19 @@ async function main() {
 
   // ===== 1. Resolução do escopo =====
   check("owner sem restrição", RetailStoreScopeService.allowed(A, owner, "owner").unrestricted === true);
-  check("admin sem restrição", RetailStoreScopeService.allowed(A, owner, "admin").unrestricted === true);
+  check("admin SEM atribuição → sem restrição", RetailStoreScopeService.allowed(A, owner, "admin").unrestricted === true);
   check("agent SEM atribuição → sem restrição", RetailStoreScopeService.allowed(A, gerente, "agent").unrestricted === true);
+
+  // NOVO (ADR-173 revisado): admin COM atribuição fica RESTRITO — é assim que o
+  // gerente (papel canônico 'admin' após manager→admin) fica preso à sua loja.
+  const adminScoped = randomUUID();
+  RetailStoreScopeService.setForUser(A, adminScoped, [l1], owner);
+  const adminScope = RetailStoreScopeService.allowed(A, adminScoped, "admin");
+  check("admin COM atribuição → RESTRITO à loja", adminScope.unrestricted === false && adminScope.storeIds.length === 1 && adminScope.storeIds[0] === l1);
+  // O dono, mesmo que atribuído por engano, NUNCA se tranca fora.
+  RetailStoreScopeService.setForUser(A, owner, [l1], owner);
+  check("owner com atribuição continua irrestrito (nunca se tranca)", RetailStoreScopeService.allowed(A, owner, "owner").unrestricted === true);
+  RetailStoreScopeService.setForUser(A, owner, [], owner); // limpa p/ o resto do teste
 
   // Atribui o gerente à L1.
   const set = RetailStoreScopeService.setForUser(A, gerente, [l1], owner);

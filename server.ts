@@ -166,6 +166,7 @@ import { EntitlementService } from "./src/server/EntitlementService.js";
 import { StudioVisualRecipeService } from "./src/server/StudioVisualRecipeService.js";
 import { PermissionService } from "./src/server/PermissionService.js";
 import { EncryptionService } from "./src/server/EncryptionService.js";
+import { normalizeManagerRole } from "./src/server/migrations/normalizeManagerRole.js";
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
@@ -1650,6 +1651,8 @@ async function startServer() {
   } catch (e) { console.error('[Studio] Falha no rollout global do Estúdio', e); }
   // RBAC granular (ADR-095): garante os 6 perfis de sistema em cada org. Idempotente.
   try { PermissionService.backfillSystemProfiles(); } catch (e) { console.error('[RBAC] Falha no backfill de perfis', e); }
+  // Normaliza papel 'manager' (não-canônico) → 'admin'. Idempotente; bump de sv força relogin.
+  try { normalizeManagerRole(); } catch (e) { console.error('[RBAC] Falha ao normalizar role manager', e); }
   // Cifra segredos em repouso (token do gateway de pagamento, tokens Google) que
   // ainda estejam em texto. Idempotente — pula o que já está cifrado.
   try { EncryptionService.backfillExistingSecrets(); } catch (e) { console.error('[Encryption] Falha no backfill', e); }

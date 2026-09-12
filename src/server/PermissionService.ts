@@ -171,6 +171,9 @@ export const SYSTEM_PROFILES: ProfileSpec[] = [
 const LEGACY_TO_SYSTEM: Record<string, string> = {
   owner: "owner",
   admin: "gerente",
+  // "manager" é normalizado p/ "admin" na escrita + migração de boot; este mapa é
+  // rede de segurança p/ um token transitório com role='manager' antes do relogin.
+  manager: "gerente",
   agent: "atendente",
 };
 

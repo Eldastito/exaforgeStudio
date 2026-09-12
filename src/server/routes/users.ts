@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { requirePermission, bumpSecurityVersion } from "../middleware/auth.js";
+import { requirePermission, bumpSecurityVersion, normalizeUserRole } from "../middleware/auth.js";
 import { PermissionService } from "../PermissionService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
@@ -56,7 +56,7 @@ router.post("/invite", requirePermission("usuarios", "write"), (req: Request, re
     db.prepare(`
       INSERT INTO user_invitations (id, organization_id, email, role, token_hash, expires_at, created_by)
       VALUES (?, ?, ?, ?, ?, datetime('now', '+7 days'), ?)
-    `).run(uuidv4(), orgId, email, role, token, actor.userId);
+    `).run(uuidv4(), orgId, email, normalizeUserRole(role), token, actor.userId);
 
     // Envio de e-mail simulado. Por segurança, não logamos o token em produção.
     if (process.env.NODE_ENV !== 'production') {
@@ -121,6 +121,7 @@ router.put("/:id/role", requirePermission("usuarios", "write"), (req: Request, r
 
   try {
      if (!role || typeof role !== 'string') return res.status(400).json({ error: 'invalid_role' });
+     const normRole = normalizeUserRole(role); // "manager" → "admin" (papel canônico)
      const before = db.prepare('SELECT role FROM users WHERE id = ? AND organization_id = ?').get(id, orgId) as any;
      if (!before) return res.status(404).json({ error: 'user_not_found' });
      // Anti-escalonamento (auditoria 2026): conceder OU alterar o papel `owner`
@@ -128,11 +129,11 @@ router.put("/:id/role", requirePermission("usuarios", "write"), (req: Request, r
      // perfil com usuarios:write poderia se promover a owner.
      const actorRow = db.prepare('SELECT role FROM users WHERE id = ? AND organization_id = ?').get(actor.userId, orgId) as any;
      const actorIsOwner = actorRow?.role === 'owner';
-     if ((role === 'owner' || before.role === 'owner') && !actorIsOwner) {
+     if ((normRole === 'owner' || before.role === 'owner') && !actorIsOwner) {
        return res.status(403).json({ error: 'only_owner_can_manage_owner_role' });
      }
-     db.prepare('UPDATE users SET role = ? WHERE id = ? AND organization_id = ?').run(role, id, orgId);
-     logAuthEvent(orgId, actor.userId, id, 'USER_ROLE_CHANGED', { from: before?.role ?? null, to: role });
+     db.prepare('UPDATE users SET role = ? WHERE id = ? AND organization_id = ?').run(normRole, id, orgId);
+     logAuthEvent(orgId, actor.userId, id, 'USER_ROLE_CHANGED', { from: before?.role ?? null, to: normRole });
      res.json({ success: true });
   } catch(e) {
      res.status(500).json({ error: "Internal error" });

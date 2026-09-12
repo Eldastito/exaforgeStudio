@@ -14,7 +14,7 @@ import { AddonService } from "../AddonService.js";
 import { PLAN_BUNDLES } from "../plansGrade.js";
 import { logAuthEvent } from "../auditLog.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
-import { requireAuth, AuthRequest } from "../middleware/auth.js";
+import { requireAuth, AuthRequest, normalizeUserRole } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -174,7 +174,7 @@ router.post("/register", async (req: Request, res: Response): Promise<any> => {
     db.prepare(`
       INSERT INTO users (id, organization_id, name, email, phone, password_hash, role, global_status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-    `).run(userId, orgId, name, email, phone || null, passwordHash, role);
+    `).run(userId, orgId, name, email, phone || null, passwordHash, normalizeUserRole(role));
 
     logAuthEvent(orgId, userId, userId, inviteToken ? 'USER_REGISTERED_VIA_INVITE' : 'USER_REGISTERED', { email, inviteToken });
 

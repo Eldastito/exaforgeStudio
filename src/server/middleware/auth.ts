@@ -148,6 +148,18 @@ export const requireRole = (...roles: string[]) => (req: AuthRequest, res: Respo
   next();
 };
 
+/**
+ * Normaliza o papel de um usuário para os papéis CANÔNICOS que o sistema reconhece
+ * (owner/admin/agent). "manager" era gravado como rótulo de gerente de loja, mas
+ * NENHUM gate (requireRole, fallback RBAC, checagens de front) o reconhecia — um
+ * "manager" tomava 403 nas ~centenas de rotas requireRole("owner","admin"). Papel
+ * de gerente de loja É "admin" da sua loja (confinado por tenant); a distinção fina
+ * ("o que o gerente NÃO faz") vive no PERFIL RBAC "Gerente". Aplicado em toda escrita
+ * de papel + migração de dados no boot, para o "manager" nunca mais reaparecer. */
+export function normalizeUserRole<T extends string | null | undefined>(role: T): T | string {
+  return String(role || "").trim().toLowerCase() === "manager" ? "admin" : role;
+}
+
 // RBAC granular (ADR-095): autoriza por NÍVEL de acesso do perfil do usuário a um
 // módulo, substituindo o gating binário de requireRole. A ação, quando não
 // informada, é derivada do método HTTP (GET=read; POST/PUT/PATCH=write;

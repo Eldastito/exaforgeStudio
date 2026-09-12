@@ -21,6 +21,23 @@ router.get("/icps", (req: AuthRequest, res): any => {
   res.json(ProspectService.listIcps(orgId));
 });
 
+// F4 (GAP-CLOSURE-03) — vertical packs: templates curados de ICP por nicho.
+router.get("/icp-packs", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ProspectService.listVerticalPacks());
+});
+
+router.post("/icp-packs/:vertical/adopt", managerOnly, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const icp = ProspectService.adoptVerticalPack(orgId, req.params.vertical, actor(req));
+    logAuthEvent(orgId, actor(req), null, "PROSPECT_ICP_PACK_ADOPTED", { vertical: req.params.vertical, icpId: icp.id });
+    res.json(icp);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 router.post("/icps", managerOnly, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

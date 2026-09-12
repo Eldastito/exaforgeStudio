@@ -35,6 +35,22 @@ function monthsBefore(asOfISO: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+const MIN_DECLINES = 3; // mesma regra do PeoplePatternMemory (≥3 quedas mês-a-mês, precisa ≥4 meses)
+export type GapSeverity = "high" | "medium" | "low";
+export interface CoachGap { key: string; severity: GapSeverity; label: string; detail: string; basis: any }
+export interface GapsResult {
+  seller: { id: string; matricula: string; name: string | null; active: boolean } | null;
+  hasData: boolean;
+  gaps: CoachGap[];
+  teamBaseline: { avgMonthlyValor: number | null; avgTicket: number | null; sellers: number } | null;
+}
+function median(xs: number[]): number | null {
+  const a = xs.filter((n) => Number.isFinite(n)).sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : Math.round(((a[m - 1] + a[m]) / 2) * 100) / 100;
+}
+
 export class SalesCoachService {
   /**
    * Retrato de desempenho do vendedor na janela (default 6 meses). Determinístico e
@@ -98,6 +114,70 @@ export class SalesCoachService {
       trend: { firstMonthly, lastMonthly, deltaPct, direction },
       window: { from, asOf, months }, hasData: true,
     };
+  }
+
+  /**
+   * F2 — gaps: identificação DETERMINÍSTICA (RN-SC-4) dos gaps do vendedor, derivada do
+   * snapshot (F1) + comparação com o TIME. Advisória e qualitativa (RN-SC-2 — severidade
+   * high/medium/low, nunca "nota" que pune). Grounded: cada gap carrega os números que o
+   * sustentam; sem base → `insufficient_data` honesto (RN-SC-3). Isolado por org (RN-SC-6).
+   *
+   * A "queda recorrente" aplica a MESMA regra do PeoplePatternMemory (≥3 quedas mês-a-mês)
+   * à série já composta do snapshot — não é um motor paralelo (RN-SC-8): o detector
+   * canônico de APRENDIZADO segue sendo o PeoplePatternMemory; aqui é read-model.
+   */
+  static gaps(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): GapsResult {
+    const snap = this.performanceSnapshot(orgId, sellerId, opts);
+    if (!snap.seller) return { seller: null, hasData: false, gaps: [], teamBaseline: null };
+    if (!snap.hasData) {
+      return { seller: snap.seller, hasData: false, teamBaseline: null,
+        gaps: [{ key: "insufficient_data", severity: "low", label: "Sem base ainda", detail: "Não há vendas registradas na janela para avaliar o desempenho.", basis: { window: snap.window } }] };
+    }
+
+    const gaps: CoachGap[] = [];
+
+    // 1) Queda recorrente (mesma regra do PeoplePatternMemory, sobre a série do snapshot).
+    let declines = 0;
+    for (let i = 1; i < snap.monthly.length; i++) if (snap.monthly[i].valor < snap.monthly[i - 1].valor) declines++;
+    if (snap.monthly.length >= MIN_DECLINES + 1 && declines >= MIN_DECLINES) {
+      const d = snap.trend.deltaPct;
+      const severity: GapSeverity = d !== null && d <= -30 ? "high" : d !== null && d <= -15 ? "medium" : "low";
+      gaps.push({ key: "declining_trend", severity, label: "Vendas em queda recorrente",
+        detail: `${declines} meses de queda na janela (de ${snap.trend.firstMonthly} para ${snap.trend.lastMonthly}${d !== null ? `, ${d}%` : ""}).`,
+        basis: { declines, months: snap.monthly.length, deltaPct: d } });
+    }
+
+    // 2) Comparação com o TIME — baseline por mediana dos vendedores com dado na janela.
+    const team = db.prepare("SELECT id FROM retail_sellers WHERE organization_id = ? AND active = 1 LIMIT 500").all(orgId) as any[];
+    const valorsMensais: number[] = []; const tickets: number[] = [];
+    let myAvgMonthly: number | null = null; let myTicket: number | null = snap.totals.avgTicket;
+    for (const t of team) {
+      const ss = t.id === sellerId ? snap : this.performanceSnapshot(orgId, t.id, opts);
+      if (!ss.hasData || ss.totals.months === 0) continue;
+      const avgMonthly = Math.round((ss.totals.valor / ss.totals.months) * 100) / 100;
+      valorsMensais.push(avgMonthly);
+      if (ss.totals.avgTicket !== null) tickets.push(ss.totals.avgTicket);
+      if (t.id === sellerId) myAvgMonthly = avgMonthly;
+    }
+    const baseValor = median(valorsMensais);
+    const baseTicket = median(tickets);
+    const teamBaseline = { avgMonthlyValor: baseValor, avgTicket: baseTicket, sellers: valorsMensais.length };
+
+    // Só sinaliza "abaixo do time" com ≥2 vendedores comparáveis (baseline com significado).
+    if (valorsMensais.length >= 2 && baseValor !== null && myAvgMonthly !== null && myAvgMonthly < baseValor * 0.7) {
+      const ratio = baseValor > 0 ? myAvgMonthly / baseValor : 1;
+      const severity: GapSeverity = ratio <= 0.5 ? "high" : "medium";
+      gaps.push({ key: "below_team_valor", severity, label: "Venda mensal abaixo do time",
+        detail: `Média mensal de ${myAvgMonthly} vs mediana do time ${baseValor}.`,
+        basis: { myAvgMonthly, teamMedian: baseValor, sellers: valorsMensais.length } });
+    }
+    if (tickets.length >= 2 && baseTicket !== null && myTicket !== null && myTicket < baseTicket * 0.7) {
+      gaps.push({ key: "below_team_ticket", severity: "medium", label: "Ticket médio abaixo do time",
+        detail: `Ticket médio de ${myTicket} vs mediana do time ${baseTicket}.`,
+        basis: { myTicket, teamMedian: baseTicket, sellers: tickets.length } });
+    }
+
+    return { seller: snap.seller, hasData: true, gaps, teamBaseline };
   }
 }
 

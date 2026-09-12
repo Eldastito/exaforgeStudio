@@ -756,6 +756,7 @@
     "test:prospect-vertical-packs": "tsx scripts/test-prospect-vertical-packs.ts",
     "test:sales-coach-snapshot": "tsx scripts/test-sales-coach-snapshot.ts",
     "test:sales-coach-gaps": "tsx scripts/test-sales-coach-gaps.ts",
+    "test:sales-coach-feedback": "tsx scripts/test-sales-coach-feedback.ts",
     "test:operational-dependency": "tsx scripts/test-operational-dependency.ts",
     "test:falatu-ask": "tsx scripts/test-falatu-ask.ts",
     "test:falatu-ask-recovery": "tsx scripts/test-falatu-ask-recovery.ts",

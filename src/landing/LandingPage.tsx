@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MessageSquare, Target, CalendarClock, Package, BarChart3, ShieldCheck,
   ArrowRight, Check, Brain, ClipboardList, Workflow, ChevronDown,
@@ -104,6 +104,9 @@ function Cta({ children, primary = false, className = '' }: { children: React.Re
 
 export function LandingPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  // Título da aba específico da landing (o index.html compartilhado fica "ZappFlow";
+  // aqui enriquecemos em runtime, sem quebrar a separação por subdomínio).
+  useEffect(() => { document.title = 'ZappFlow — Inteligência e execução operacional'; }, []);
 
   return (
     <div className="min-h-screen text-zinc-100" style={{ background: 'var(--color-zf-midnight)' }}>

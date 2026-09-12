@@ -45,16 +45,16 @@ Estados: REUSE · EXTEND · COMPOSE · CREATE · ALREADY_DONE.
 8. **Sem motor paralelo** — reusa SkillOS (capacidade), PeoplePatternMemory (gatilho), PatternMemory (aprendizado), ManagerSolution (conhecimento). Não cria 2º de nada.
 9. **LGPD/RH** — dado de desempenho é sensível internamente; role-gated (gestor vê time; vendedor vê o próprio); nunca expõe um vendedor a outro.
 
-## 5. Plano de fatias (F0→Fn)
+## 5. Plano de fatias (F0→Fn) — **FECHADO (F0–F7)**
 
-- **F0** (este doc) — auditoria + ADR + fronteira + guardrails. Doc-only. **← você está aqui.**
-- **F1** — `SalesCoachService.performanceSnapshot(orgId, sellerId)`: read-model determinístico do desempenho (tendência de vendas, conversão, comissão, outreach), COMPONDO as fontes existentes. `test:sales-coach-snapshot`. Sem LLM, roda em CI.
-- **F2** — `gaps()`: identificação DETERMINÍSTICA de gaps (queda recorrente via PeoplePatternMemory, conversão abaixo do time, etc.) + faixa qualitativa. `test:sales-coach-gaps`.
-- **F3** — `feedback()`: feedback grounded via SkillOS (determinístico → LLM só redige), ancorado no snapshot+gaps; sem dado → honesto. `test:sales-coach-feedback`.
-- **F4** — recuperação de soluções de gerente validadas (ADR-174) aplicáveis ao gap, rotulando origem humana. `test:sales-coach-solutions`.
-- **F5** — roleplay/roteiro de treino (determinístico, grounded no gap; sem falar com cliente). `test:sales-coach-roleplay`.
-- **F6** — superfície: aba interna (gestor: time; vendedor: o próprio), role-gated. Rotas `/api/sales-coach/*`.
-- **F7** — hardening (`test:sales-coach-hardening` codifica RN-SC) + runbook.
+- **F0** ✅ — auditoria + ADR + fronteira + guardrails. Doc-only.
+- **F1** ✅ — `SalesCoachService.performanceSnapshot(orgId, sellerId)`: read-model determinístico do desempenho, COMPONDO as fontes existentes (precedência ERP > manual > PDV, nunca soma). `test:sales-coach-snapshot`. Sem LLM, roda em CI.
+- **F2** ✅ — `gaps()`: identificação DETERMINÍSTICA (queda recorrente via MESMA regra do PeoplePatternMemory + comparação com mediana do time) + faixa qualitativa. `test:sales-coach-gaps`.
+- **F3** ✅ — `feedback()` determinístico + `feedbackAsync()` (LLM só redige, cai no determinístico sem chave). `test:sales-coach-feedback`.
+- **F4** ✅ — `solutionsForSeller()` REUSA `ManagerSolutionRetrievalService` (ADR-174), rotulando origem humana. `test:sales-coach-solutions`.
+- **F5** ✅ — `roleplay()` determinístico, grounded no gap; disclaimer "nada é enviado ao cliente". `test:sales-coach-roleplay`.
+- **F6** ✅ — superfície: flag + RBAC + `bundle`. Rotas `/api/sales-coach/*`. `test:sales-coach-surface`. **F6b** ✅ — aba interna "Coach de Vendas" (`SalesCoachView`, `viewMode:'sales_coach'`), gated por probe runtime.
+- **F7** ✅ — hardening (`test:sales-coach-hardening`, 48 checks — codifica RN-SC-1..9 + fiação de produção) + runbook `docs/runbook/sales-coach-operacao.md`. **FECHA o ADR-202.**
 
 **Flag:** `sales_coach_enabled` (default 0) para toda a Onda.
 

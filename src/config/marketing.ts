@@ -7,6 +7,10 @@ export const marketingConfig = {
   whatsappUrl: "https://wa.me/5521999947477?text=" + encodeURIComponent("Olá! Quero agendar um diagnóstico operacional com o ZappFlow."),
   calendarUrl: "",                 // ex.: link do Calendly/Google Agenda
   email: "",                       // ex.: "contato@zappflow.ai"
+  // Analytics da landing (Plausible — cookieless, LGPD-limpo). Domínio registrado na
+  // conta Plausible. Vazio → analytics desligado (nenhum script carregado). Passa a
+  // MEDIR de fato só depois de criar a conta em plausible.io e adicionar este domínio.
+  plausibleDomain: "zapflowia.tesseractauto.com.br",
 };
 
 /** Resolve o destino do CTA principal a partir da config (com fallback). */

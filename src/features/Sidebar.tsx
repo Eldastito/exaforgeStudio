@@ -16,6 +16,15 @@ export function Sidebar() {
     apiFetch('/api/groups').then((r) => { if (alive) setGroupAvailable(r.ok); }).catch(() => {});
     return () => { alive = false; };
   }, []);
+  // ADR-202 F6b: entrada "Coach de Vendas" só quando a flag `sales_coach_enabled` está ON.
+  // O router inteiro dá 404 com a flag off (0-regressão); com ON, gestor→200 e vendedor→403
+  // (ambos existem), então "disponível" = status !== 404. Sem env/tabela extra.
+  const [coachAvailable, setCoachAvailable] = React.useState(false);
+  React.useEffect(() => {
+    let alive = true;
+    apiFetch('/api/sales-coach/sellers').then((r) => { if (alive) setCoachAvailable(r.status !== 404); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   // Item visível quando o módulo está habilitado na org (plano/vertical) E o
   // perfil do usuário tem acesso (RBAC granular, ADR-095). Sem perfil atribuído,
   // canAccessModule retorna sempre true — o menu fica idêntico ao de hoje.
@@ -78,6 +87,7 @@ export function Sidebar() {
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
              {mod('retail') && <NavItem icon={<Gauge />} label="Operação da Rede" active={viewMode === 'retailops'} onClick={() => setViewMode('retailops')} />}
              {mod('retail_floor') && <NavItem icon={<Users />} label="Atendimento de Loja" active={viewMode === 'retailfloor'} onClick={() => setViewMode('retailfloor')} />}
+             {coachAvailable && <NavItem icon={<GraduationCap />} label="Coach de Vendas" active={viewMode === 'sales_coach'} onClick={() => setViewMode('sales_coach')} />}
              {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} variant="supply" />}
              {mod('orcamentos') && <NavItem icon={<FileText />} label="Orçamentos" active={viewMode === 'orcamentos'} onClick={() => setViewMode('orcamentos')} />}
              {mod('eventos') && <NavItem icon={<CalendarRange />} label="Eventos & Grupos" active={viewMode === 'eventos'} onClick={() => setViewMode('eventos')} />}

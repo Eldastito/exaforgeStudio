@@ -84,6 +84,18 @@ async function main() {
   check("Gerente: lê cobrança", can(ger, "cobranca", "read"));
   check("Gerente: NÃO edita cobrança", !can(ger, "cobranca", "write"));
 
+  // ===== 6b. Módulos add-on/verticais no catálogo (fix: gerente enxerga; vendedor não) =====
+  const { RBAC_MODULES } = await import("../src/server/PermissionService.js");
+  const ADDONS = ["retail", "retail_floor", "clinica", "escola", "advocacia", "copiloto", "prospect", "vms", "radar"];
+  for (const m of ADDONS) check(`catálogo inclui '${m}'`, (RBAC_MODULES as readonly string[]).includes(m));
+  // Gerente (default full) passa a ter acesso — é o que some do menu hoje.
+  check("Gerente: vê Operação da Rede (retail)", can(ger, "retail", "read"));
+  check("Gerente: vê Atendimento de Loja (retail_floor)", can(ger, "retail_floor", "read"));
+  check("Gerente: vê Agenda Clínica (clinica full)", can(ger, "clinica", "delete"));
+  // Vendedor (default none) segue sem esses add-ons — sem regressão.
+  check("Vendedor: NÃO vê Operação da Rede (retail)", !can(vend, "retail", "read"));
+  check("Vendedor: NÃO vê Atendimento de Loja (retail_floor)", !can(vend, "retail_floor", "read"));
+
   // ===== 7. Fallback legado — usuário SEM perfil cai no papel (users.role/JWT) =====
   const legacyOwner = { userId: "legacy_owner", organizationId: orgId, role: "owner" };   // sem role_profile_id
   check("Legado owner: full em vendas", can(legacyOwner, "vendas", "delete"));

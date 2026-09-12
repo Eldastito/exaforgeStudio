@@ -305,6 +305,52 @@ export class SalesCoachService {
 
     return { seller: g.seller, hasData: g.hasData, disclaimer, scenarios };
   }
+
+  // ── F6: superfície (flag + RBAC + composição) ──────────────────────────────
+  /** Flag opt-in do módulo (RN-SC-7). Sem flag/linha → desligado (0-regressão). */
+  static isEnabled(orgId: string): boolean {
+    const r = db.prepare("SELECT sales_coach_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+    return !!(r && Number(r.sales_coach_enabled) === 1);
+  }
+
+  /** Vendedores ATIVOS do org (mínimo, para o gestor escolher). Isolado por org. */
+  static listSellers(orgId: string): { id: string; matricula: string; name: string | null }[] {
+    return (db.prepare("SELECT id, matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name").all(orgId) as any[])
+      .map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null }));
+  }
+
+  /** O vendedor (retail_sellers.id) ligado a um usuário do ZappFlow, ou null. */
+  static sellerForUser(orgId: string, userId?: string | null): string | null {
+    if (!userId) return null;
+    const r = db.prepare("SELECT id FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND active = 1 LIMIT 1").get(orgId, userId) as any;
+    return r?.id || null;
+  }
+
+  /**
+   * RBAC do coach (RN-SC-9): gestor (owner/admin) vê QUALQUER vendedor do org; o próprio
+   * vendedor vê SÓ a si mesmo (via user_id). Nunca expõe um vendedor a outro.
+   */
+  static canView(orgId: string, user: { userId?: string; role?: string } | undefined, sellerId: string): boolean {
+    if (!user) return false;
+    if (user.role === "owner" || user.role === "admin") {
+      return !!db.prepare("SELECT 1 FROM retail_sellers WHERE organization_id = ? AND id = ?").get(orgId, sellerId);
+    }
+    return this.sellerForUser(orgId, user.userId) === sellerId;
+  }
+
+  /** Pacote completo do coach para um vendedor (compõe F1–F5). Read-only. */
+  static bundle(orgId: string, sellerId: string, opts: { months?: number; asOf?: string } = {}): any {
+    const snapshot = this.performanceSnapshot(orgId, sellerId, opts);
+    if (!snapshot.seller) return null;
+    return {
+      seller: snapshot.seller,
+      snapshot,
+      gaps: this.gaps(orgId, sellerId, opts),
+      feedback: this.feedback(orgId, sellerId, opts),
+      solutions: this.solutionsForSeller(orgId, sellerId, opts),
+      roleplay: this.roleplay(orgId, sellerId, opts),
+    };
+  }
 }
 
 // Roteiros de TREINO determinísticos por gap (RN-SC-4). São SIMULAÇÕES INTERNAS

@@ -1,8 +1,11 @@
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
-import { AuthRequest } from "../middleware/auth.js";
+import fs from "fs";
+import path from "path";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { chat, isAIConfigured } from "../llm.js";
+import { StudioCatalogPhotoService } from "../StudioCatalogPhotoService.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 import { StorefrontLookService } from "../StorefrontLookService.js";
@@ -94,6 +97,37 @@ router.put("/settings", (req: AuthRequest, res): any => {
       .run(...Object.values(fields), orgId);
   }
   res.json(db.prepare("SELECT * FROM storefront_settings WHERE organization_id = ?").get(orgId));
+});
+
+// POST /api/storefront/catalog-photo { productId, sourceUrl, style? }
+// Gera SOB DEMANDA a foto de catálogo de um produto: aplica o estilo escolhido
+// numa foto REAL (já enviada via /api/uploads/image → /media/...) e salva como
+// foto do produto. Gasta IA → owner/admin. É o gerador que faltava pro "Estilo
+// das fotos de catálogo" servir a produto que já existe (não só cadastro WhatsApp).
+const CATALOG_MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+const CATALOG_STYLES = new Set(["marketplace", "premium", "lifestyle", "minimal"]);
+router.post("/catalog-photo", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = getOrgId(req);
+  const productId = String(req.body?.productId || "").trim();
+  const sourceUrl = String(req.body?.sourceUrl || "").trim();
+  const style = req.body?.style ? String(req.body.style) : undefined;
+  if (!productId || !sourceUrl) return res.status(400).json({ error: "Informe o produto e a foto." });
+  if (style && !CATALOG_STYLES.has(style)) return res.status(400).json({ error: "Estilo inválido." });
+  // Anti path-traversal: só o basename dentro de /media.
+  const base = path.basename(sourceUrl);
+  const filePath = path.join(CATALOG_MEDIA_DIR, base);
+  if (!filePath.startsWith(CATALOG_MEDIA_DIR) || !fs.existsSync(filePath)) {
+    return res.status(400).json({ error: "Foto não encontrada. Envie a imagem de novo." });
+  }
+  const ext = (base.split(".").pop() || "").toLowerCase();
+  const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  try {
+    const buf = fs.readFileSync(filePath);
+    const url = await StudioCatalogPhotoService.generateForProductOnDemand(orgId, productId, buf.toString("base64"), mime, style);
+    res.json({ success: true, url });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "Falha ao gerar a foto de catálogo." });
+  }
 });
 
 // POST /api/storefront/link  { contactId?, ticketId? } -> link público com token

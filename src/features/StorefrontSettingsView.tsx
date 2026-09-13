@@ -633,6 +633,8 @@ export function StorefrontSettingsView() {
                 </div>
               )}
 
+              <CategoryManager />
+
               <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-zinc-100">Ocultar automaticamente sem estoque</p>
@@ -1527,6 +1529,108 @@ function CatalogPhotoGenerator({ style }: { style: string }) {
         <div className="pt-1">
           <p className="text-[10px] text-emerald-400 mb-1">Pronto — já é a foto do produto na loja:</p>
           <img src={resultUrl} alt="" className="w-28 h-28 object-cover rounded-lg border border-zinc-800" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Cadastro gerenciado de categorias da vitrine (departamento → categoria).
+// Menu de 2 níveis na loja pública. O produto continua com o campo de categoria
+// (texto) = nome da categoria; aqui só se ORGANIZA a estrutura.
+type CatDept = { id: string; name: string; categories: { id: string; name: string }[] };
+function CategoryManager() {
+  const [tree, setTree] = useState<CatDept[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newDept, setNewDept] = useState('');
+  const [newCat, setNewCat] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const r = await apiFetch('/api/storefront/categories');
+      const d = await r.json();
+      setTree(Array.isArray(d?.tree) ? d.tree : []);
+    } catch { setTree([]); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const addDept = async () => {
+    const name = newDept.trim(); if (!name) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/storefront/categories/department', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha.');
+      setNewDept(''); await load();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const addCat = async (deptId: string) => {
+    const name = (newCat[deptId] || '').trim(); if (!name) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/storefront/categories/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ departmentId: deptId, name }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha.');
+      setNewCat((p) => ({ ...p, [deptId]: '' })); await load();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const rename = async (id: string, current: string, isCat: boolean) => {
+    const name = window.prompt(isCat ? 'Novo nome da categoria:' : 'Novo nome do departamento:', current);
+    if (name == null) return; const n = name.trim(); if (!n || n === current) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/storefront/categories/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n }) });
+      if (!r.ok) throw new Error((await r.json()).error || 'Falha.');
+      await load();
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const remove = async (id: string, isCat: boolean) => {
+    if (!window.confirm(isCat ? 'Remover esta categoria do cadastro? Os produtos não são apagados.' : 'Remover este departamento e suas categorias do cadastro? Os produtos não são apagados.')) return;
+    setBusy(true);
+    try { await apiFetch(`/api/storefront/categories/${id}`, { method: 'DELETE' }); await load(); }
+    catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
+      <p className="text-sm font-medium text-zinc-100 mb-1 flex items-center gap-1.5"><Layers className="w-4 h-4" /> Departamentos e categorias</p>
+      <p className="text-xs text-zinc-500 mb-3">Organize o menu da loja em 2 níveis (ex.: <span className="text-zinc-400">Roupas masculinas → Casaco</span>). No produto, escolha a categoria; a vitrine agrupa por departamento. Sem cadastro, o menu continua plano.</p>
+
+      {loading ? (
+        <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</div>
+      ) : (
+        <div className="space-y-3">
+          {tree.map((d) => (
+            <div key={d.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-zinc-100 flex-1">{d.name}</span>
+                <button type="button" title="Renomear" onClick={() => rename(d.id, d.name, false)} className="text-zinc-500 hover:text-indigo-300"><Pencil className="w-3.5 h-3.5" /></button>
+                <button type="button" title="Remover" onClick={() => remove(d.id, false)} className="text-zinc-500 hover:text-rose-400"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {d.categories.map((c) => (
+                  <span key={c.id} className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-300">
+                    {c.name}
+                    <button type="button" title="Renomear" onClick={() => rename(c.id, c.name, true)} className="text-zinc-500 hover:text-indigo-300"><Pencil className="w-3 h-3" /></button>
+                    <button type="button" title="Remover" onClick={() => remove(c.id, true)} className="text-zinc-500 hover:text-rose-400"><X className="w-3 h-3" /></button>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <input value={newCat[d.id] || ''} onChange={(e) => setNewCat((p) => ({ ...p, [d.id]: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCat(d.id); } }}
+                  placeholder="Nova categoria…" disabled={busy}
+                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:border-indigo-500 outline-none" />
+                <Button variant="ghost" onClick={() => addCat(d.id)} disabled={busy} className="text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Categoria</Button>
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <input value={newDept} onChange={(e) => setNewDept(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDept(); } }}
+              placeholder="Novo departamento (ex.: Roupas masculinas)…" disabled={busy}
+              className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" />
+            <Button onClick={addDept} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Departamento</Button>
+          </div>
         </div>
       )}
     </div>

@@ -11,6 +11,7 @@ import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { OrdersService } from "../OrdersService.js";
 import { StorefrontStockService } from "../StorefrontStockService.js";
+import { StorefrontCategoryService } from "../StorefrontCategoryService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -191,6 +192,14 @@ router.get("/store/:slug", (req, res): any => {
   const category = String(req.query.category || "").trim();
   if (category === "__sem_categoria__") { where.push("(category IS NULL OR TRIM(category) = '')"); }
   else if (category) { where.push("category = ?"); args.push(category); }
+  // Filtro por DEPARTAMENTO (menu de 2 níveis): filtra por TODAS as categorias
+  // do departamento (casando o texto `category` do produto com o registro).
+  const department = String(req.query.department || "").trim();
+  if (department && !category) {
+    const names = StorefrontCategoryService.categoryNames(orgId, department);
+    if (names.length) { where.push(`category IN (${names.map(() => "?").join(",")})`); args.push(...names); }
+    else { where.push("1 = 0"); } // departamento sem categorias → nada a listar
+  }
   // "Ocultar automaticamente sem estoque": esconde da vitrine quem tem controle
   // de estoque e está zerado (estoque próprio + de loja). Vale pra QUALQUER
   // origem de estoque, na contagem e na página (paginação correta).
@@ -230,9 +239,10 @@ router.get("/store/:slug", (req, res): any => {
   // clique de categoria era desperdício (várias consultas por requisição). Só
   // computa na carga inicial (offset 0, sem categoria); nas demais vem vazio e o
   // front mantém o que já tinha.
-  const isInitial = offset === 0 && !category;
+  const isInitial = offset === 0 && !category && !department;
   let catList: string[] = [];
   let hasUncategorized = false;
+  let categoryTree: any[] = [];
   if (isInitial) {
     // Categorias do MENU: distintas de todos os produtos visíveis (independe de
     // q/categoria/página), respeitando o ocultar-sem-estoque. Alimenta o filtro.
@@ -243,6 +253,13 @@ router.get("/store/:slug", (req, res): any => {
     const uncatWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "(category IS NULL OR TRIM(category) = '')"];
     if (store.auto_hide_out_of_stock) uncatWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
     hasUncategorized = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${uncatWhere.join(" AND ")}`).get(orgId) as any)?.c || 0) > 0;
+    // Árvore departamentos → categorias (cadastro gerenciado). Só entram as
+    // categorias COM produto visível; departamento vazio é omitido — o menu não
+    // mostra grupo que não leva a nada. Sem cadastro, árvore vazia = menu plano.
+    const visibleCats = new Set(catList);
+    categoryTree = StorefrontCategoryService.tree(orgId)
+      .map((d) => ({ id: d.id, name: d.name, categories: d.categories.filter((c) => visibleCats.has(c.name)) }))
+      .filter((d) => d.categories.length > 0);
   }
 
   // Pré-carrega imagens e saldo vendável da PÁGINA em lote (2 consultas), em vez
@@ -275,6 +292,7 @@ router.get("/store/:slug", (req, res): any => {
     products: products.map(p => productPayload(orgId, p, imagesByProduct, sellableByProduct)),
     productsTotal,
     categories: catList,
+    categoryTree,
     hasUncategorized,
     collections: isInitial ? resolveCollections(orgId) : [],
     resources: isInitial ? ReservationService.listResources(orgId) : [],

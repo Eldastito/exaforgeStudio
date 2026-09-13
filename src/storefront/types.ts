@@ -39,6 +39,12 @@ export interface Customer {
   name: string;
 }
 
+export interface StoreCategoryGroup {
+  id: string;
+  name: string;
+  categories: { id: string; name: string }[];
+}
+
 export interface StoreCollection {
   id: string;
   title: string;
@@ -62,6 +68,8 @@ export interface StoreResponse {
   productsTotal?: number;
   /** Categorias distintas de todos os produtos visíveis (menu de navegação). */
   categories?: string[];
+  /** Árvore departamento → categorias (cadastro gerenciado, menu de 2 níveis). */
+  categoryTree?: StoreCategoryGroup[];
   /** Existe produto visível sem categoria (alimenta o chip "Sem categoria"). */
   hasUncategorized?: boolean;
   collections?: StoreCollection[];

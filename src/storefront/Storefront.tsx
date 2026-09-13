@@ -67,7 +67,9 @@ export function Storefront() {
     if (!data || loadingMore) return;
     setLoadingMore(true);
     try {
-      const catQs = activeCategory ? `&category=${encodeURIComponent(activeCategory)}` : '';
+      const catQs = activeCategory
+        ? `&category=${encodeURIComponent(activeCategory)}`
+        : activeDepartment ? `&department=${encodeURIComponent(activeDepartment)}` : '';
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}?offset=${data.products.length}${catQs}`);
       if (res.ok) {
         const json = (await res.json()) as StoreResponse;
@@ -85,9 +87,25 @@ export function Storefront() {
   const selectCategory = async (cat: string | null) => {
     setActiveCategory(cat);
     setOnlyFavs(false);
+    if (cat === null) setActiveDepartment(null); // "Todos" limpa também o departamento
     try {
       const catQs = cat ? `?category=${encodeURIComponent(cat)}` : '';
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}${catQs}`);
+      if (res.ok) {
+        const json = (await res.json()) as StoreResponse;
+        setData((prev) => prev ? { ...prev, products: json.products, productsTotal: json.productsTotal } : json);
+      }
+    } catch { /* mantém o que já estava */ }
+  };
+  // Filtro por DEPARTAMENTO (menu de 2 níveis): lista todas as categorias do
+  // departamento e revela as subcategorias. Limpa a categoria específica.
+  const selectDepartment = async (deptId: string | null) => {
+    setActiveDepartment(deptId);
+    setActiveCategory(null);
+    setOnlyFavs(false);
+    try {
+      const qs = deptId ? `?department=${encodeURIComponent(deptId)}` : '';
+      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}${qs}`);
       if (res.ok) {
         const json = (await res.json()) as StoreResponse;
         setData((prev) => prev ? { ...prev, products: json.products, productsTotal: json.productsTotal } : json);
@@ -101,6 +119,7 @@ export function Storefront() {
   const [favorites, setFavorites] = useState<string[]>(() => lsGet<string[]>(`storefront_favs_${slug}`, []));
   const [onlyFavs, setOnlyFavs] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeDepartment, setActiveDepartment] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>(() => lsGet<CartItem[]>(`storefront_cart_${slug}`, []));
 
   // Provador Virtual (ADR-041): as peças "para provar" escolhidas na vitrine.
@@ -314,15 +333,15 @@ export function Storefront() {
   // Coleções (curadoria da IA): cada uma vira uma seção com seus produtos.
   // Ocultas quando o cliente filtra só favoritos.
   const collectionSections = useMemo(() => {
-    if (!data?.collections || onlyFavs || activeCategory) return [];
+    if (!data?.collections || onlyFavs || activeCategory || activeDepartment) return [];
     return data.collections
       .map((c) => ({ id: c.id, title: c.title, items: c.productIds.map((id) => productById[id]).filter(Boolean) as Product[] }))
       .filter((c) => c.items.length > 0);
-  }, [data, onlyFavs, activeCategory, productById]);
+  }, [data, onlyFavs, activeCategory, activeDepartment, productById]);
 
   // Categorias: agrupa produtos que possuem categoria definida.
   const categorySections = useMemo(() => {
-    if (onlyFavs || activeCategory || !products.length) return [];
+    if (onlyFavs || activeCategory || activeDepartment || !products.length) return [];
     const cats = new Map<string, Product[]>();
     for (const p of products) {
       if (p.category) {
@@ -332,7 +351,7 @@ export function Storefront() {
       }
     }
     return Array.from(cats.entries()).map(([cat, items]) => ({ category: cat, items }));
-  }, [products, onlyFavs, activeCategory]);
+  }, [products, onlyFavs, activeCategory, activeDepartment]);
 
   // Fundo conforme tema.
   const pageBg = night
@@ -392,28 +411,40 @@ export function Storefront() {
               </p>
             )}
 
-            {/* Menu de categorias — navegação do cliente (filtra no servidor). */}
-            {!onlyFavs && (data.categories?.length ?? 0) > 0 && (
-              <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-                {[
-                  { label: 'Todos', val: null as string | null },
-                  ...data.categories!.map((c) => ({ label: c, val: c as string | null })),
-                  // "Sem categoria" só aparece se houver produto visível sem categoria.
-                  ...(data.hasUncategorized ? [{ label: 'Sem categoria', val: '__sem_categoria__' as string | null }] : []),
-                ].map((opt) => {
-                  const on = activeCategory === opt.val;
-                  return (
-                    <button key={opt.label} type="button" onClick={() => selectCategory(opt.val)}
-                      className="shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors"
-                      style={on
-                        ? { backgroundColor: accent, borderColor: accent, color: '#fff' }
-                        : { borderColor: hexToRgba(accent, 0.35) }}>
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {/* Menu de categorias — navegação do cliente (filtra no servidor).
+                Com cadastro gerenciado, vira 2 níveis: departamentos e, ao abrir
+                um, suas categorias. Sem cadastro, cai no menu plano (0-regressão). */}
+            {!onlyFavs && ((data.categoryTree?.length ?? 0) > 0 || (data.categories?.length ?? 0) > 0) && (() => {
+              const tree = data.categoryTree || [];
+              const treeCatNames = new Set(tree.flatMap((d) => d.categories.map((c) => c.name)));
+              // Categorias com produto que não estão em nenhum departamento cadastrado.
+              const looseCats = (data.categories || []).filter((c) => !treeCatNames.has(c));
+              const chip = (label: string, on: boolean, onClick: () => void) => (
+                <button key={label} type="button" onClick={onClick}
+                  className="shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors"
+                  style={on ? { backgroundColor: accent, borderColor: accent, color: '#fff' } : { borderColor: hexToRgba(accent, 0.35) }}>
+                  {label}
+                </button>
+              );
+              const activeDept = tree.find((d) => d.id === activeDepartment);
+              return (
+                <>
+                  <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {chip('Todos', !activeCategory && !activeDepartment, () => selectCategory(null))}
+                    {tree.map((d) => chip(d.name, activeDepartment === d.id, () => selectDepartment(d.id)))}
+                    {looseCats.map((c) => chip(c, activeCategory === c && !activeDepartment, () => selectCategory(c)))}
+                    {data.hasUncategorized && chip('Sem categoria', activeCategory === '__sem_categoria__', () => selectCategory('__sem_categoria__'))}
+                  </div>
+                  {/* 2º nível: categorias do departamento aberto. */}
+                  {activeDept && activeDept.categories.length > 0 && (
+                    <div className="mt-2 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                      {chip(`Todos de ${activeDept.name}`, !activeCategory, () => selectDepartment(activeDept.id))}
+                      {activeDept.categories.map((c) => chip(c.name, activeCategory === c.name, () => selectCategory(c.name)))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Reservas (recursos por período: quartos, mesas, espaços) */}
             {!onlyFavs && (

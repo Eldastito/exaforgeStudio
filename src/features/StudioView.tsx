@@ -271,6 +271,27 @@ export function StudioView() {
   };
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // Baixa a mídia como ARQUIVO (força o download). O atributo <a download> só
+  // funciona same-origin e frequentemente ABRE o vídeo inline em vez de salvar;
+  // baixar via blob resolve pra imagem e vídeo. Fallback: abre em nova aba.
+  const downloadMedia = async (url: string, filename?: string) => {
+    if (!url) return;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const obj = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = obj;
+      a.download = filename || url.split('/').pop() || 'estudio';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(obj), 4000);
+    } catch {
+      window.open(url, '_blank');
+      toast.error('Não consegui baixar direto; abri em nova aba pra salvar manualmente.');
+    }
+  };
+
   const suggestRecipe = async () => {
     if (!suggestBriefing.trim()) { toast.error('Descreva o que você quer criar.'); return; }
     setSuggestBusy(true);
@@ -882,7 +903,7 @@ export function StudioView() {
         {vUrl && vStatus === 'done' && (
           <div className="mt-4">
             <video src={vUrl} controls className="w-full max-w-sm rounded-lg border border-zinc-800" />
-            <a href={vUrl} download className="mt-2 inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3.5 h-3.5" /> Baixar</a>
+            <button onClick={() => downloadMedia(vUrl)} className="mt-2 inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3.5 h-3.5" /> Baixar</button>
           </div>
         )}
       </div>
@@ -909,11 +930,14 @@ export function StudioView() {
                       : <img src={c.media_url} alt={c.prompt} className="w-full aspect-square object-cover rounded-lg border border-zinc-800 group-hover:border-fuchsia-500/50 transition-colors" />}
                   </a>
                   <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
-                  {ig.connected && (
-                    postedIds.has(c.id)
-                      ? <span className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-emerald-400"><Instagram className="w-3 h-3" /> publicado</span>
-                      : <button onClick={() => openPublish(c.id, c.prompt)} className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-pink-400 hover:text-pink-300"><Instagram className="w-3 h-3" /> Publicar no IG</button>
-                  )}
+                  <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                    <button onClick={() => downloadMedia(c.media_url)} className="inline-flex items-center gap-1 text-[10px] text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3 h-3" /> Baixar</button>
+                    {ig.connected && (
+                      postedIds.has(c.id)
+                        ? <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><Instagram className="w-3 h-3" /> publicado</span>
+                        : <button onClick={() => openPublish(c.id, c.prompt)} className="inline-flex items-center gap-1 text-[10px] text-pink-400 hover:text-pink-300"><Instagram className="w-3 h-3" /> Publicar no IG</button>
+                    )}
+                  </div>
                 </div>
               );
             })}

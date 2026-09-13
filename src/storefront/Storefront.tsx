@@ -416,9 +416,10 @@ export function Storefront() {
                 um, suas categorias. Sem cadastro, cai no menu plano (0-regressão). */}
             {!onlyFavs && ((data.categoryTree?.length ?? 0) > 0 || (data.categories?.length ?? 0) > 0) && (() => {
               const tree = data.categoryTree || [];
-              const treeCatNames = new Set(tree.flatMap((d) => d.categories.map((c) => c.name)));
+              // Valores (o que está no produto) já cobertos por algum departamento.
+              const treeValues = new Set(tree.flatMap((d) => d.categories.map((c) => c.value)));
               // Categorias com produto que não estão em nenhum departamento cadastrado.
-              const looseCats = (data.categories || []).filter((c) => !treeCatNames.has(c));
+              const looseCats = (data.categories || []).filter((c) => !treeValues.has(c));
               const chip = (label: string, on: boolean, onClick: () => void) => (
                 <button key={label} type="button" onClick={onClick}
                   className="shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors"
@@ -439,7 +440,7 @@ export function Storefront() {
                   {activeDept && activeDept.categories.length > 0 && (
                     <div className="mt-2 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                       {chip(`Todos de ${activeDept.name}`, !activeCategory, () => selectDepartment(activeDept.id))}
-                      {activeDept.categories.map((c) => chip(c.name, activeCategory === c.name, () => selectCategory(c.name)))}
+                      {activeDept.categories.map((c) => chip(c.name, activeCategory === c.value, () => selectCategory(c.value)))}
                     </div>
                   )}
                 </>

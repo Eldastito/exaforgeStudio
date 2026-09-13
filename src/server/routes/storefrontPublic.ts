@@ -196,8 +196,8 @@ router.get("/store/:slug", (req, res): any => {
   // do departamento (casando o texto `category` do produto com o registro).
   const department = String(req.query.department || "").trim();
   if (department && !category) {
-    const names = StorefrontCategoryService.categoryNames(orgId, department);
-    if (names.length) { where.push(`category IN (${names.map(() => "?").join(",")})`); args.push(...names); }
+    const values = StorefrontCategoryService.sourceValues(orgId, department);
+    if (values.length) { where.push(`category IN (${values.map(() => "?").join(",")})`); args.push(...values); }
     else { where.push("1 = 0"); } // departamento sem categorias → nada a listar
   }
   // "Ocultar automaticamente sem estoque": esconde da vitrine quem tem controle
@@ -256,9 +256,11 @@ router.get("/store/:slug", (req, res): any => {
     // Árvore departamentos → categorias (cadastro gerenciado). Só entram as
     // categorias COM produto visível; departamento vazio é omitido — o menu não
     // mostra grupo que não leva a nada. Sem cadastro, árvore vazia = menu plano.
+    // Filtra por VALOR mapeado (o que está no produto), não pelo nome exibido —
+    // é isso que faz o menu aparecer mesmo quando o produto usa código ("002").
     const visibleCats = new Set(catList);
     categoryTree = StorefrontCategoryService.tree(orgId)
-      .map((d) => ({ id: d.id, name: d.name, categories: d.categories.filter((c) => visibleCats.has(c.name)) }))
+      .map((d) => ({ id: d.id, name: d.name, categories: d.categories.filter((c) => visibleCats.has(c.value)) }))
       .filter((d) => d.categories.length > 0);
   }
 

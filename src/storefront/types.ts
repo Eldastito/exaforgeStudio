@@ -42,7 +42,8 @@ export interface Customer {
 export interface StoreCategoryGroup {
   id: string;
   name: string;
-  categories: { id: string; name: string }[];
+  // `value` = o que está no produto (ex.: código "002"); `name` = rótulo exibido.
+  categories: { id: string; name: string; value: string }[];
 }
 
 export interface StoreCollection {

@@ -38,7 +38,7 @@ export function CatalogView() {
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState<any>(emptyForm);
   // Categorias cadastradas (departamento → categoria) para o seletor do produto.
-  const [catTree, setCatTree] = useState<{ id: string; name: string; categories: { id: string; name: string }[] }[]>([]);
+  const [catTree, setCatTree] = useState<{ id: string; name: string; categories: { id: string; name: string; value: string }[] }[]>([]);
   useEffect(() => {
     apiFetch('/api/storefront/categories')
       .then((r) => (r.ok ? r.json() : { tree: [] }))
@@ -649,11 +649,11 @@ export function CatalogView() {
                       <option value="">— Sem categoria —</option>
                       {catTree.map((d) => (
                         <optgroup key={d.id} label={d.name}>
-                          {d.categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          {d.categories.map((c) => <option key={c.id} value={c.value}>{c.name}{c.value !== c.name ? ` (${c.value})` : ''}</option>)}
                         </optgroup>
                       ))}
-                      {/* Preserva uma categoria antiga que ainda não está no cadastro. */}
-                      {form.category && !catTree.some((d) => d.categories.some((c) => c.name === form.category)) && (
+                      {/* Preserva a categoria/código atual que ainda não está no cadastro. */}
+                      {form.category && !catTree.some((d) => d.categories.some((c) => c.value === form.category)) && (
                         <option value={form.category}>{form.category} (não cadastrada)</option>
                       )}
                     </select>

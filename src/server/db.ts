@@ -11726,6 +11726,11 @@ const initDb = () => {
     )`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_storefront_categories_org ON storefront_categories (organization_id, parent_id, position)`);
   } catch(e){}
+  // Mapeamento código→nome: a categoria APONTA para o valor real gravado em
+  // products_services.category (ex.: código "002"), exibindo o nome amigável
+  // (`name`). Assim organiza-se o menu sem re-marcar produto. `source_value` NULL
+  // em departamento; em categoria = o valor filtrado (fallback ao próprio nome).
+  try { db.exec(`ALTER TABLE storefront_categories ADD COLUMN source_value TEXT`); } catch(e){}
 };
 
 initDb();

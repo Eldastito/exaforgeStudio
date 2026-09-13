@@ -31,6 +31,28 @@ export class StorefrontStockService {
   }
 
   /**
+   * Saldo vendável de VÁRIOS produtos numa única consulta (evita N+1 na
+   * listagem pública: antes cada produto disparava 6 subconsultas — 60 produtos
+   * = 360 idas ao banco por página). Mesma expressão do `sellable()`, agora
+   * correlacionada por `ps.id` e resolvida em UMA prepared statement.
+   */
+  static sellableMany(ids: string[]): Map<string, number> {
+    const m = new Map<string, number>();
+    if (!ids.length) return m;
+    const ph = ids.map(() => "?").join(",");
+    const rows = db.prepare(`SELECT ps.id AS id, (
+      COALESCE((SELECT ii.quantity_available FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NULL),
+               (SELECT SUM(ii.quantity_available) FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NOT NULL),
+               (SELECT SUM(rsi.quantity_available) FROM retail_store_inventory rsi WHERE rsi.product_service_id = ps.id), 0)
+    - COALESCE((SELECT ii.quantity_reserved FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NULL),
+               (SELECT SUM(ii.quantity_reserved) FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NOT NULL),
+               (SELECT SUM(rsi.quantity_reserved) FROM retail_store_inventory rsi WHERE rsi.product_service_id = ps.id), 0)
+    ) AS sellable FROM products_services ps WHERE ps.id IN (${ph})`).all(...ids) as any[];
+    for (const r of rows) m.set(r.id, Number(r.sellable || 0));
+    return m;
+  }
+
+  /**
    * Cláusula SQL (sem parâmetros) que EXCLUI produtos esgotados da listagem
    * pública quando `auto_hide_out_of_stock` está ligado. Espelha `sellable()`,
    * mas correlacionada por `products_services.id` para rodar dentro do WHERE

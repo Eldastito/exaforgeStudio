@@ -53,16 +53,26 @@ function resolveStore(slug: string): any {
 }
 
 // Monta o payload de um produto para a vitrine (imagens + modo de venda + estoque).
-function productPayload(orgId: string, p: any): any {
-  const images = db.prepare(
-    `SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC`
-  ).all(p.id) as any[];
+// `imagesByProduct`/`sellableByProduct` são pré-carregados em LOTE pelo chamador
+// (uma consulta por página em vez de 2 por produto) — evita o N+1 que fazia a
+// vitrine recarregar lenta a cada página/filtro. Sem os mapas (chamador
+// pontual), cai no caminho antigo por produto.
+function productPayload(
+  orgId: string,
+  p: any,
+  imagesByProduct?: Map<string, string[]>,
+  sellableByProduct?: Map<string, number>,
+): any {
+  const images = imagesByProduct
+    ? (imagesByProduct.get(p.id) || [])
+    : (db.prepare(`SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC`).all(p.id) as any[]).map((i: any) => i.url);
 
   // Disponibilidade considera estoque próprio E de loja (rede/Alterdata) — sem
   // isso, produto com saldo só em retail_store_inventory aparecia "esgotado".
   let available = true;
   if (p.stock_control_enabled) {
-    available = StorefrontStockService.sellable(p.id) > 0;
+    const s = sellableByProduct ? (sellableByProduct.get(p.id) ?? 0) : StorefrontStockService.sellable(p.id);
+    available = s > 0;
   }
 
   return {
@@ -79,7 +89,7 @@ function productPayload(orgId: string, p: any): any {
     category: p.category || null,
     featured: !!p.featured,
     available,
-    images: images.map(i => i.url),
+    images,
     video: p.video_url || null,
   };
 }
@@ -215,15 +225,40 @@ router.get("/store/:slug", (req, res): any => {
     }
   }
 
-  // Categorias do MENU: distintas de todos os produtos visíveis (independe de q/
-  // categoria/página), respeitando o ocultar-sem-estoque. Alimenta o filtro.
-  const catWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "category IS NOT NULL", "TRIM(category) != ''"];
-  if (store.auto_hide_out_of_stock) catWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
-  const catList = (db.prepare(`SELECT DISTINCT category FROM products_services WHERE ${catWhere.join(" AND ")} ORDER BY category COLLATE NOCASE`).all(orgId) as any[]).map(r => r.category);
-  // Existe produto visível SEM categoria? Alimenta o chip "Sem categoria".
-  const uncatWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "(category IS NULL OR TRIM(category) = '')"];
-  if (store.auto_hide_out_of_stock) uncatWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
-  const hasUncategorized = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${uncatWhere.join(" AND ")}`).get(orgId) as any)?.c || 0) > 0;
+  // Menu/coleções/recursos só mudam com o catálogo, não com a página nem com o
+  // filtro — o front os guarda da 1ª carga. Recalcular a cada "Carregar mais" ou
+  // clique de categoria era desperdício (várias consultas por requisição). Só
+  // computa na carga inicial (offset 0, sem categoria); nas demais vem vazio e o
+  // front mantém o que já tinha.
+  const isInitial = offset === 0 && !category;
+  let catList: string[] = [];
+  let hasUncategorized = false;
+  if (isInitial) {
+    // Categorias do MENU: distintas de todos os produtos visíveis (independe de
+    // q/categoria/página), respeitando o ocultar-sem-estoque. Alimenta o filtro.
+    const catWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "category IS NOT NULL", "TRIM(category) != ''"];
+    if (store.auto_hide_out_of_stock) catWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
+    catList = (db.prepare(`SELECT DISTINCT category FROM products_services WHERE ${catWhere.join(" AND ")} ORDER BY category COLLATE NOCASE`).all(orgId) as any[]).map(r => r.category);
+    // Existe produto visível SEM categoria? Alimenta o chip "Sem categoria".
+    const uncatWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "(category IS NULL OR TRIM(category) = '')"];
+    if (store.auto_hide_out_of_stock) uncatWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
+    hasUncategorized = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${uncatWhere.join(" AND ")}`).get(orgId) as any)?.c || 0) > 0;
+  }
+
+  // Pré-carrega imagens e saldo vendável da PÁGINA em lote (2 consultas), em vez
+  // de 2 por produto — corta o N+1 que deixava cada carga/filtro lento.
+  const pageIds = products.map((p) => p.id);
+  const imagesByProduct = new Map<string, string[]>();
+  if (pageIds.length) {
+    const ph = pageIds.map(() => "?").join(",");
+    for (const row of db.prepare(`SELECT product_service_id, url FROM product_images WHERE product_service_id IN (${ph}) ORDER BY position ASC, created_at ASC`).all(...pageIds) as any[]) {
+      const list = imagesByProduct.get(row.product_service_id) || [];
+      list.push(row.url);
+      imagesByProduct.set(row.product_service_id, list);
+    }
+  }
+  const stockIds = products.filter((p) => p.stock_control_enabled).map((p) => p.id);
+  const sellableByProduct = StorefrontStockService.sellableMany(stockIds);
 
   res.json({
     store: {
@@ -237,12 +272,12 @@ router.get("/store/:slug", (req, res): any => {
       default_mode: store.default_mode === "day" ? "day" : "night",
     },
     customer: linkedContact,
-    products: products.map(p => productPayload(orgId, p)),
+    products: products.map(p => productPayload(orgId, p, imagesByProduct, sellableByProduct)),
     productsTotal,
     categories: catList,
     hasUncategorized,
-    collections: resolveCollections(orgId),
-    resources: ReservationService.listResources(orgId),
+    collections: isInitial ? resolveCollections(orgId) : [],
+    resources: isInitial ? ReservationService.listResources(orgId) : [],
   });
 });
 

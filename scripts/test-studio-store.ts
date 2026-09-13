@@ -76,7 +76,23 @@ async function main() {
   check("4.3 banner_url gravado", (db.prepare("SELECT banner_url FROM storefront_settings WHERE organization_id = ?").get(ORG) as any).banner_url === imgB.url);
   check("4.4 vídeo não vira banner", S.setStorefrontBanner(ORG, mkCreation(ORG, "video").id).ok === false);
 
-  console.log("\n=== Estúdio → loja virtual (Fatia 2) ===");
+  // ── 5. vídeo na loja (Fatia 3) — só VÍDEO ──
+  const prodV = mkProduct(ORG, "Look em Movimento");
+  const vid1 = mkCreation(ORG, "video");
+  const v1 = S.setProductVideo(ORG, vid1.id, prodV);
+  check("5.1 define vídeo do produto", v1.ok === true);
+  check("5.2 video_url gravado no produto", (db.prepare("SELECT video_url FROM products_services WHERE id = ?").get(prodV) as any).video_url === vid1.url);
+  check("5.3 imagem é recusada no vídeo do produto", S.setProductVideo(ORG, mkCreation(ORG, "image").id, prodV).ok === false);
+  check("5.4 produto inexistente é recusado", S.setProductVideo(ORG, mkCreation(ORG, "video").id, "nope").ok === false);
+
+  // banner de vídeo (ORG já tem storefront_settings da seção 4)
+  const vidB = mkCreation(ORG, "video");
+  check("5.5 define banner de vídeo", S.setStorefrontVideoBanner(ORG, vidB.id).ok === true);
+  check("5.6 banner_video_url gravado", (db.prepare("SELECT banner_video_url FROM storefront_settings WHERE organization_id = ?").get(ORG) as any).banner_video_url === vidB.url);
+  check("5.7 imagem é recusada no banner de vídeo", S.setStorefrontVideoBanner(ORG, mkCreation(ORG, "image").id).ok === false);
+  check("5.8 sem loja (outra org) → banner de vídeo recusado", S.setStorefrontVideoBanner(OTHER, mkCreation(OTHER, "video").id).ok === false);
+
+  console.log("\n=== Estúdio → loja virtual (Fatia 2+3) ===");
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} studio-store: ${results.length - failures}/${results.length} checks`);
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

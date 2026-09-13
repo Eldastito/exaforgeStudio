@@ -272,6 +272,30 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     return { ok: true };
   }
 
+  // ── Vídeo na loja virtual (Fatia 3) — só VÍDEO (autoplay mudo na vitrine) ───
+
+  /** Define o vídeo gerado como vídeo de um produto (aparece na página do produto). */
+  static setProductVideo(orgId: string, creationId: string, productId: string): { ok: boolean; error?: string } {
+    const c = this.getCreation(orgId, creationId);
+    if (!c || !c.media_url) return { ok: false, error: "Criação não encontrada." };
+    if (!this.isVideoCreation(c)) return { ok: false, error: "Aqui é vídeo. Pra imagem, use \"Foto de produto\"." };
+    const prod = db.prepare("SELECT id FROM products_services WHERE id = ? AND organization_id = ?").get(productId, orgId) as any;
+    if (!prod) return { ok: false, error: "Produto não encontrado." };
+    db.prepare("UPDATE products_services SET video_url = ? WHERE id = ? AND organization_id = ?").run(c.media_url, productId, orgId);
+    return { ok: true };
+  }
+
+  /** Define o vídeo gerado como banner de vídeo da home da vitrine. */
+  static setStorefrontVideoBanner(orgId: string, creationId: string): { ok: boolean; error?: string } {
+    const c = this.getCreation(orgId, creationId);
+    if (!c || !c.media_url) return { ok: false, error: "Criação não encontrada." };
+    if (!this.isVideoCreation(c)) return { ok: false, error: "Aqui é vídeo. Pra imagem, use \"Banner\"." };
+    const exists = db.prepare("SELECT 1 FROM storefront_settings WHERE organization_id = ?").get(orgId);
+    if (!exists) return { ok: false, error: "Configure sua loja virtual primeiro (abra a Loja Virtual uma vez)." };
+    db.prepare("UPDATE storefront_settings SET banner_video_url = ? WHERE organization_id = ?").run(c.media_url, orgId);
+    return { ok: true };
+  }
+
   /** Sugere uma legenda de Instagram com o Brand DNA + objetivo de campanha + CTA + hashtags. */
   static async suggestCaption(orgId: string, prompt: string, objectiveId?: string): Promise<string> {
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;

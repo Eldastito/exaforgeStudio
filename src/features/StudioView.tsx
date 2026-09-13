@@ -108,8 +108,9 @@ export function StudioView() {
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
 
-  // Enviar pra loja virtual (Fatia 2) — só imagem (vídeo na loja é F3).
+  // Enviar pra loja virtual (Fatia 2 imagem / Fatia 3 vídeo).
   const [storeId, setStoreId] = useState<string | null>(null);
+  const [storeIsVideo, setStoreIsVideo] = useState(false);
   const [storeTab, setStoreTab] = useState<'product' | 'new' | 'banner'>('product');
   const [storeQuery, setStoreQuery] = useState('');
   const [storeProducts, setStoreProducts] = useState<Array<{ id: string; name: string }>>([]);
@@ -381,8 +382,8 @@ export function StudioView() {
     } catch (e: any) { toast.error(e.message); } finally { setRecipeGenerating(false); }
   };
 
-  const openStore = (id: string, suggestedName?: string) => {
-    setStoreId(id); setStoreTab('product'); setStoreQuery(''); setStoreProducts([]);
+  const openStore = (id: string, suggestedName?: string, isVideo = false) => {
+    setStoreId(id); setStoreIsVideo(isVideo); setStoreTab('product'); setStoreQuery(''); setStoreProducts([]);
     setStoreNewName((suggestedName || '').slice(0, 60)); setStoreNewPrice('');
   };
   const loadStoreProducts = async (q: string) => {
@@ -396,10 +397,11 @@ export function StudioView() {
     if (!storeId) return;
     setStoreBusy(true);
     try {
-      const r = await apiFetch(`/api/studio/creations/${storeId}/to-product`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId }) });
+      const ep = storeIsVideo ? 'to-product-video' : 'to-product';
+      const r = await apiFetch(`/api/studio/creations/${storeId}/${ep}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Falha ao enviar pro produto.');
-      toast.success('Imagem enviada pro produto. 🛍️'); setStoreId(null);
+      toast.success(storeIsVideo ? 'Vídeo enviado pro produto. 🎬' : 'Imagem enviada pro produto. 🛍️'); setStoreId(null);
     } catch (e: any) { toast.error(e.message); } finally { setStoreBusy(false); }
   };
   const createStoreProduct = async () => {
@@ -417,7 +419,8 @@ export function StudioView() {
     if (!storeId) return;
     setStoreBusy(true);
     try {
-      const r = await apiFetch(`/api/studio/creations/${storeId}/to-banner`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const ep = storeIsVideo ? 'to-video-banner' : 'to-banner';
+      const r = await apiFetch(`/api/studio/creations/${storeId}/${ep}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Falha ao definir o banner.');
       toast.success('Banner da loja atualizado. 🖼️'); setStoreId(null);
@@ -992,7 +995,7 @@ export function StudioView() {
                   <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
                   <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                     <button onClick={() => downloadMedia(c.media_url)} className="inline-flex items-center gap-1 text-[10px] text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3 h-3" /> Baixar</button>
-                    {!isVideo && <button onClick={() => openStore(c.id, c.prompt)} className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:text-sky-300"><Store className="w-3 h-3" /> Loja</button>}
+                    <button onClick={() => openStore(c.id, c.prompt, isVideo)} className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:text-sky-300"><Store className="w-3 h-3" /> Loja</button>
                     {ig.connected && (
                       postedIds.has(c.id)
                         ? <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><Instagram className="w-3 h-3" /> publicado</span>
@@ -1105,10 +1108,13 @@ export function StudioView() {
       {storeId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6">
-            <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Store className="w-5 h-5 text-sky-400" /> Enviar pra loja virtual</h3>
+            <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Store className="w-5 h-5 text-sky-400" /> Enviar {storeIsVideo ? 'vídeo' : 'imagem'} pra loja virtual</h3>
 
             <div className="flex gap-2 mb-3">
-              {([['product', 'Foto de produto'], ['new', 'Novo produto'], ['banner', 'Banner']] as const).map(([id, label]) => (
+              {(storeIsVideo
+                ? ([['product', 'Vídeo do produto'], ['banner', 'Banner de vídeo']] as const)
+                : ([['product', 'Foto de produto'], ['new', 'Novo produto'], ['banner', 'Banner']] as const)
+              ).map(([id, label]) => (
                 <button key={id} type="button" onClick={() => setStoreTab(id)}
                   className={`flex-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${storeTab === id ? 'bg-sky-600 border-sky-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
               ))}
@@ -1131,7 +1137,7 @@ export function StudioView() {
                       </button>
                     ))}
                 </div>
-                <p className="mt-2 text-[10px] text-zinc-600">A imagem é adicionada às fotos do produto (não apaga as existentes).</p>
+                <p className="mt-2 text-[10px] text-zinc-600">{storeIsVideo ? 'O vídeo aparece na página do produto (autoplay mudo).' : 'A imagem é adicionada às fotos do produto (não apaga as existentes).'}</p>
               </div>
             )}
 
@@ -1155,7 +1161,7 @@ export function StudioView() {
 
             {storeTab === 'banner' && (
               <div>
-                <p className="text-xs text-zinc-400 mb-3">Usar esta imagem como banner de destaque na home da sua loja virtual.</p>
+                <p className="text-xs text-zinc-400 mb-3">{storeIsVideo ? 'Usar este vídeo como banner de destaque na home (autoplay mudo).' : 'Usar esta imagem como banner de destaque na home da sua loja virtual.'}</p>
                 <div className="flex justify-end gap-2">
                   <Button variant="ghost" onClick={() => setStoreId(null)} disabled={storeBusy}>Cancelar</Button>
                   <Button onClick={setStoreBanner} disabled={storeBusy} className="bg-sky-600 hover:bg-sky-700 text-white">

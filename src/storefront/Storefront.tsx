@@ -350,12 +350,21 @@ export function Storefront() {
               onReserve={() => document.getElementById('reservas')?.scrollIntoView({ behavior: 'smooth' })}
             />
 
-            {data.store.banner_url && (
+            {(data.store.banner_video_url || data.store.banner_url) && (
               <div
                 className="mt-4 overflow-hidden rounded-3xl border"
                 style={{ borderColor: hexToRgba(accent, 0.3) }}
               >
-                <img src={data.store.banner_url} alt="" className="h-40 w-full object-cover sm:h-56" />
+                {data.store.banner_video_url ? (
+                  <video
+                    src={data.store.banner_video_url}
+                    autoPlay muted loop playsInline
+                    poster={data.store.banner_url || undefined}
+                    className="h-40 w-full object-cover sm:h-56"
+                  />
+                ) : (
+                  <img src={data.store.banner_url!} alt="" className="h-40 w-full object-cover sm:h-56" />
+                )}
               </div>
             )}
 

@@ -81,6 +81,7 @@ function productPayload(orgId: string, p: any): any {
     featured: !!p.featured,
     available,
     images: images.map(i => i.url),
+    video: p.video_url || null,
   };
 }
 
@@ -211,6 +212,7 @@ router.get("/store/:slug", (req, res): any => {
       subtitle: store.subtitle || "",
       logo_url: store.logo_url || store.org_logo || "",
       banner_url: store.banner_url || "",
+      banner_video_url: store.banner_video_url || "",
       accent_color: store.accent_color || "#ec4899",
       default_mode: store.default_mode === "day" ? "day" : "night",
     },

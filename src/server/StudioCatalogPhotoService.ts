@@ -37,10 +37,10 @@ export class StudioCatalogPhotoService {
     return row?.catalog_photo_style || "marketplace";
   }
 
-  private static stylePromptFor(orgId: string): string {
+  private static stylePromptFor(orgId: string, styleOverride?: string): string {
     const brand = db.prepare(`SELECT palette, tone, style FROM brand_profiles WHERE organization_id = ?`).get(orgId) as any;
     const storefront = db.prepare(`SELECT accent_color, logo_url, catalog_photo_style FROM storefront_settings WHERE organization_id = ?`).get(orgId) as any;
-    const style = storefront?.catalog_photo_style || "marketplace";
+    const style = styleOverride || storefront?.catalog_photo_style || "marketplace";
 
     const styleDirectives: Record<string, string> = {
       marketplace:
@@ -117,6 +117,23 @@ export class StudioCatalogPhotoService {
       console.error("[StudioCatalogPhoto] Falha ao gerar foto de catálogo (reposição)", e);
       return { url: null, reused: false };
     }
+  }
+
+  /**
+   * Geração SOB DEMANDA (pedido explícito do dono, pela config da loja): aplica
+   * o estilo escolhido numa foto REAL enviada e salva como foto do produto.
+   * Diferente do fluxo automático: NÃO depende do flag `ai_catalog_photos_enabled`
+   * (o clique já é o opt-in) e NÃO reaproveita foto existente (regenera). Lança
+   * em qualquer falha pra a rota reportar (sem chave de IA, moderação, etc.).
+   */
+  static async generateForProductOnDemand(orgId: string, productId: string, rawBase64: string, rawMime: string, styleOverride?: string): Promise<string> {
+    const prod = db.prepare(`SELECT id FROM products_services WHERE id = ? AND organization_id = ?`).get(productId, orgId) as any;
+    if (!prod) throw new Error("Produto não encontrado.");
+    const b64 = await editProductImageB64(rawBase64, rawMime, this.stylePromptFor(orgId, styleOverride));
+    if (!b64) throw new Error("A IA não retornou a imagem. Tente novamente.");
+    const url = this.saveB64(b64);
+    this.persistForProduct(orgId, productId, url);
+    return url;
   }
 
   /** Grava a URL em products_services.studio_image_url e troca a capa em product_images. */

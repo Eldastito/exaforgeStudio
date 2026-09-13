@@ -629,6 +629,7 @@ export function StorefrontSettingsView() {
                       </button>
                     ))}
                   </div>
+                  <CatalogPhotoGenerator style={settings.catalog_photo_style || 'marketplace'} />
                 </div>
               )}
 
@@ -1434,6 +1435,92 @@ export async function uploadImageFile(file: File): Promise<string> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Falha no upload da imagem.');
   return data.url as string;
+}
+
+// Gerador SOB DEMANDA de foto de catálogo: envia a foto REAL do produto, a IA
+// aplica o estilo escolhido e salva como foto do produto na loja. É o que faltava
+// pro "Estilo das fotos de catálogo" servir a produto que já existe.
+function CatalogPhotoGenerator({ style }: { style: string }) {
+  const [query, setQuery] = useState('');
+  const [products, setProducts] = useState<Array<{ id: string; name: string }>>([]);
+  const [productId, setProductId] = useState('');
+  const [productName, setProductName] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [resultUrl, setResultUrl] = useState('');
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const search = async (q: string) => {
+    try {
+      const r = await apiFetch(`/api/products?limit=20${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`);
+      const d = await r.json();
+      setProducts(Array.isArray(d) ? d.map((p: any) => ({ id: p.id, name: p.name })) : []);
+    } catch { setProducts([]); }
+  };
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setBusy(true); setResultUrl('');
+    try { setSourceUrl(await uploadImageFile(f)); toast.success('Foto enviada. Agora clique em Gerar.'); }
+    catch (err: any) { toast.error(err.message || 'Falha ao enviar a foto.'); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
+  const generate = async () => {
+    if (!productId) { toast.error('Escolha o produto.'); return; }
+    if (!sourceUrl) { toast.error('Envie a foto do produto.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/storefront/catalog-photo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId, sourceUrl, style }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao gerar.');
+      setResultUrl(d.url); toast.success('Foto de catálogo gerada e salva no produto. 🛍️');
+    } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+      <p className="text-xs font-medium text-zinc-200">Gerar foto de um produto com este estilo</p>
+      <p className="text-[11px] text-zinc-500">As fotos que chegam pelo WhatsApp já usam este estilo automaticamente. Para um produto que já existe, envie a foto dele aqui e a IA aplica o estilo e salva como foto da loja.</p>
+      <input value={query} onChange={e => { setQuery(e.target.value); search(e.target.value); }}
+        onFocus={() => { if (!products.length) search(''); }}
+        placeholder="Buscar produto (nome, EAN)…"
+        className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-indigo-500 outline-none" />
+      {!productId && products.length > 0 && (
+        <div className="max-h-32 overflow-y-auto space-y-1">
+          {products.map(p => (
+            <button key={p.id} type="button" onClick={() => { setProductId(p.id); setProductName(p.name); setProducts([]); }}
+              className="w-full text-left px-3 py-1.5 rounded-lg text-sm text-zinc-200 bg-zinc-950 border border-zinc-800 hover:border-indigo-500/60">{p.name}</button>
+          ))}
+        </div>
+      )}
+      {productId && (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-zinc-400">Produto:</span>
+          <span className="text-indigo-300 font-medium">{productName}</span>
+          <button type="button" onClick={() => { setProductId(''); setProductName(''); }} className="text-zinc-500 hover:text-zinc-300 underline">trocar</button>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} disabled={busy} />
+        <Button variant="ghost" onClick={() => fileRef.current?.click()} disabled={busy} className="text-xs">
+          <ImageIcon className="w-3.5 h-3.5 mr-1.5" /> {sourceUrl ? 'Trocar foto' : 'Enviar foto do produto'}
+        </Button>
+        {sourceUrl && <img src={sourceUrl} alt="" className="w-10 h-10 object-cover rounded border border-zinc-800" />}
+      </div>
+      <Button onClick={generate} disabled={busy || !productId || !sourceUrl} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs">
+        {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1.5" />}
+        {busy ? 'Gerando…' : 'Gerar foto de catálogo'}
+      </Button>
+      {resultUrl && (
+        <div className="pt-1">
+          <p className="text-[10px] text-emerald-400 mb-1">Pronto — já é a foto do produto na loja:</p>
+          <img src={resultUrl} alt="" className="w-28 h-28 object-cover rounded-lg border border-zinc-800" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 const BODY_TYPE_LABELS: Record<string, string> = {

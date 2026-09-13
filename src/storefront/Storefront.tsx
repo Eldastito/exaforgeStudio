@@ -395,7 +395,12 @@ export function Storefront() {
             {/* Menu de categorias — navegação do cliente (filtra no servidor). */}
             {!onlyFavs && (data.categories?.length ?? 0) > 0 && (
               <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-                {[{ label: 'Todos', val: null as string | null }, ...data.categories!.map((c) => ({ label: c, val: c as string | null }))].map((opt) => {
+                {[
+                  { label: 'Todos', val: null as string | null },
+                  ...data.categories!.map((c) => ({ label: c, val: c as string | null })),
+                  // "Sem categoria" só aparece se houver produto visível sem categoria.
+                  ...(data.hasUncategorized ? [{ label: 'Sem categoria', val: '__sem_categoria__' as string | null }] : []),
+                ].map((opt) => {
                   const on = activeCategory === opt.val;
                   return (
                     <button key={opt.label} type="button" onClick={() => selectCategory(opt.val)}

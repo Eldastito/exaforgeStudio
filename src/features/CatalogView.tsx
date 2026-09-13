@@ -25,7 +25,7 @@ function textToSteps(text: string): number[] {
   return String(text || '').split(/[;,]/).map((s) => parseFloat(s.trim().replace(',', '.'))).filter((n) => n > 0).map((v) => Math.round(v * 1000));
 }
 
-const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '', sale_mode: 'unit', sale_steps: '' };
+const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '', sale_mode: 'unit', sale_steps: '', category: '' };
 const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1', ean: '' };
 
 export function CatalogView() {
@@ -37,6 +37,14 @@ export function CatalogView() {
   const [csv, setCsv] = useState('');
   const [importing, setImporting] = useState(false);
   const [form, setForm] = useState<any>(emptyForm);
+  // Categorias cadastradas (departamento → categoria) para o seletor do produto.
+  const [catTree, setCatTree] = useState<{ id: string; name: string; categories: { id: string; name: string }[] }[]>([]);
+  useEffect(() => {
+    apiFetch('/api/storefront/categories')
+      .then((r) => (r.ok ? r.json() : { tree: [] }))
+      .then((d) => setCatTree(Array.isArray(d?.tree) ? d.tree : []))
+      .catch(() => setCatTree([]));
+  }, []);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [suggestedTitle, setSuggestedTitle] = useState('');
@@ -119,6 +127,7 @@ export function CatalogView() {
       ean: (p as any).ean || '',
       sale_mode: p.sale_mode || 'unit',
       sale_steps: stepsToText(p.sale_options_json),
+      category: (p as any).category || '',
     });
     setShowModal(true);
   };
@@ -139,6 +148,7 @@ export function CatalogView() {
             min_price: form.min_price === '' ? null : parseFloat(form.min_price),
             fashion_wearable: form.fashion_wearable,
             ean: form.ean?.trim() || null,
+            category: form.category?.trim() || null,
             sale_mode: saleMode, sale_options: saleOptions,
           }),
         });
@@ -630,6 +640,30 @@ export function CatalogView() {
                   </button>
                 )}
               </div>
+              {form.type === 'product' && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Categoria</label>
+                  {catTree.some((d) => d.categories.length > 0) ? (
+                    <select className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                      value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                      <option value="">— Sem categoria —</option>
+                      {catTree.map((d) => (
+                        <optgroup key={d.id} label={d.name}>
+                          {d.categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                        </optgroup>
+                      ))}
+                      {/* Preserva uma categoria antiga que ainda não está no cadastro. */}
+                      {form.category && !catTree.some((d) => d.categories.some((c) => c.name === form.category)) && (
+                        <option value={form.category}>{form.category} (não cadastrada)</option>
+                      )}
+                    </select>
+                  ) : (
+                    <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100"
+                      placeholder="Ex.: Casaco (cadastre departamentos na Loja virtual p/ agrupar)"
+                      value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+                  )}
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" onClick={() => { setShowModal(false); setEditing(null); }}>Cancelar</Button>
                 <Button type="submit" variant="default" className="zf-button zf-button-primary">Salvar</Button>

@@ -6,6 +6,7 @@ import path from "path";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { chat, isAIConfigured } from "../llm.js";
 import { StudioCatalogPhotoService } from "../StudioCatalogPhotoService.js";
+import { StorefrontCategoryService } from "../StorefrontCategoryService.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 import { StorefrontLookService } from "../StorefrontLookService.js";
@@ -128,6 +129,34 @@ router.post("/catalog-photo", requireRole("owner", "admin"), async (req: AuthReq
   } catch (e: any) {
     res.status(500).json({ error: e?.message || "Falha ao gerar a foto de catálogo." });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Cadastro de categorias da vitrine (departamento → categoria) — owner/admin.
+// ---------------------------------------------------------------------------
+// GET /api/storefront/categories -> árvore departamentos/categorias
+router.get("/categories", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  res.json({ tree: StorefrontCategoryService.tree(getOrgId(req)) });
+});
+// POST /api/storefront/categories/department { name }
+router.post("/categories/department", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.status(201).json(StorefrontCategoryService.createDepartment(getOrgId(req), req.body?.name)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "Falha ao criar departamento." }); }
+});
+// POST /api/storefront/categories/category { departmentId, name }
+router.post("/categories/category", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.status(201).json(StorefrontCategoryService.createCategory(getOrgId(req), String(req.body?.departmentId || ""), req.body?.name)); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "Falha ao criar categoria." }); }
+});
+// PUT /api/storefront/categories/:id { name } -> renomeia (categoria cascateia p/ produtos)
+router.put("/categories/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { StorefrontCategoryService.rename(getOrgId(req), req.params.id, req.body?.name); res.json({ success: true }); }
+  catch (e: any) { res.status(400).json({ error: e?.message || "Falha ao renomear." }); }
+});
+// DELETE /api/storefront/categories/:id -> remove do registro (não apaga texto do produto)
+router.delete("/categories/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  StorefrontCategoryService.remove(getOrgId(req), req.params.id);
+  res.json({ success: true });
 });
 
 // POST /api/storefront/link  { contactId?, ticketId? } -> link público com token

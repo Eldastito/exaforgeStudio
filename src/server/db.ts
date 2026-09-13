@@ -11710,6 +11710,22 @@ const initDb = () => {
   // Lembrete por WhatsApp em tarefa AVULSA (opt-in por tarefa; recorrente usa a
   // política da regra). Default 0 → só in-app; sem regressão.
   try { db.exec(`ALTER TABLE tasks ADD COLUMN notify_whatsapp INTEGER DEFAULT 0`); } catch(e){}
+  // Cadastro gerenciado de categorias da vitrine (menu de 2 níveis):
+  // departamento = parent_id NULL; categoria = filho (parent_id → departamento).
+  // O produto continua com `products_services.category` (texto) = nome da
+  // categoria — o registro só ORGANIZA/agrupa; todo o filtro atual segue igual.
+  // Aditivo/opt-in: sem registro, a vitrine mantém o menu plano.
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS storefront_categories (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      parent_id TEXT,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_storefront_categories_org ON storefront_categories (organization_id, parent_id, position)`);
+  } catch(e){}
 };
 
 initDb();

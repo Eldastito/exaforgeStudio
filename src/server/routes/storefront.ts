@@ -134,18 +134,19 @@ router.post("/catalog-photo", requireRole("owner", "admin"), async (req: AuthReq
 // ---------------------------------------------------------------------------
 // Cadastro de categorias da vitrine (departamento → categoria) — owner/admin.
 // ---------------------------------------------------------------------------
-// GET /api/storefront/categories -> árvore departamentos/categorias
+// GET /api/storefront/categories -> árvore + valores de categoria usados nos produtos
 router.get("/categories", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
-  res.json({ tree: StorefrontCategoryService.tree(getOrgId(req)) });
+  const orgId = getOrgId(req);
+  res.json({ tree: StorefrontCategoryService.tree(orgId), availableValues: StorefrontCategoryService.availableValues(orgId) });
 });
 // POST /api/storefront/categories/department { name }
 router.post("/categories/department", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.status(201).json(StorefrontCategoryService.createDepartment(getOrgId(req), req.body?.name)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "Falha ao criar departamento." }); }
 });
-// POST /api/storefront/categories/category { departmentId, name }
+// POST /api/storefront/categories/category { departmentId, name, sourceValue? }
 router.post("/categories/category", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
-  try { res.status(201).json(StorefrontCategoryService.createCategory(getOrgId(req), String(req.body?.departmentId || ""), req.body?.name)); }
+  try { res.status(201).json(StorefrontCategoryService.createCategory(getOrgId(req), String(req.body?.departmentId || ""), req.body?.name, req.body?.sourceValue)); }
   catch (e: any) { res.status(400).json({ error: e?.message || "Falha ao criar categoria." }); }
 });
 // PUT /api/storefront/categories/:id { name } -> renomeia (categoria cascateia p/ produtos)

@@ -1536,14 +1536,18 @@ function CatalogPhotoGenerator({ style }: { style: string }) {
 }
 
 // Cadastro gerenciado de categorias da vitrine (departamento → categoria).
-// Menu de 2 níveis na loja pública. O produto continua com o campo de categoria
-// (texto) = nome da categoria; aqui só se ORGANIZA a estrutura.
-type CatDept = { id: string; name: string; categories: { id: string; name: string }[] };
+// Modelo código→nome: a categoria APONTA para o valor real do produto (ex.: o
+// código "002") e exibe um nome amigável (ex.: "Bermudas"). Assim organiza-se o
+// menu SEM re-marcar produto. Menu de 2 níveis na loja pública.
+type CatDept = { id: string; name: string; categories: { id: string; name: string; value: string }[] };
+type AvailValue = { value: string; count: number; sample: string; mapped: boolean };
 function CategoryManager() {
   const [tree, setTree] = useState<CatDept[]>([]);
+  const [avail, setAvail] = useState<AvailValue[]>([]);
   const [loading, setLoading] = useState(true);
   const [newDept, setNewDept] = useState('');
-  const [newCat, setNewCat] = useState<Record<string, string>>({});
+  // Por departamento: qual código escolher e que nome amigável dar.
+  const [newCat, setNewCat] = useState<Record<string, { value: string; name: string }>>({});
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -1551,9 +1555,13 @@ function CategoryManager() {
       const r = await apiFetch('/api/storefront/categories');
       const d = await r.json();
       setTree(Array.isArray(d?.tree) ? d.tree : []);
-    } catch { setTree([]); } finally { setLoading(false); }
+      setAvail(Array.isArray(d?.availableValues) ? d.availableValues : []);
+    } catch { setTree([]); setAvail([]); } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  // Códigos ainda não mapeados em nenhuma categoria.
+  const unmapped = avail.filter((a) => !a.mapped);
 
   const addDept = async () => {
     const name = newDept.trim(); if (!name) return;
@@ -1565,16 +1573,19 @@ function CategoryManager() {
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
   const addCat = async (deptId: string) => {
-    const name = (newCat[deptId] || '').trim(); if (!name) return;
+    const form = newCat[deptId] || { value: '', name: '' };
+    const value = form.value.trim();
+    const name = form.name.trim() || value; // sem nome → usa o próprio código
+    if (!value) { toast.error('Escolha o código/categoria de origem.'); return; }
     setBusy(true);
     try {
-      const r = await apiFetch('/api/storefront/categories/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ departmentId: deptId, name }) });
+      const r = await apiFetch('/api/storefront/categories/category', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ departmentId: deptId, name, sourceValue: value }) });
       if (!r.ok) throw new Error((await r.json()).error || 'Falha.');
-      setNewCat((p) => ({ ...p, [deptId]: '' })); await load();
+      setNewCat((p) => ({ ...p, [deptId]: { value: '', name: '' } })); await load();
     } catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
   const rename = async (id: string, current: string, isCat: boolean) => {
-    const name = window.prompt(isCat ? 'Novo nome da categoria:' : 'Novo nome do departamento:', current);
+    const name = window.prompt(isCat ? 'Novo nome exibido da categoria:' : 'Novo nome do departamento:', current);
     if (name == null) return; const n = name.trim(); if (!n || n === current) return;
     setBusy(true);
     try {
@@ -1589,11 +1600,12 @@ function CategoryManager() {
     try { await apiFetch(`/api/storefront/categories/${id}`, { method: 'DELETE' }); await load(); }
     catch (e: any) { toast.error(e.message); } finally { setBusy(false); }
   };
+  const optionLabel = (a: AvailValue) => `${a.value}${a.sample ? ` — ${a.sample}` : ''} (${a.count})`;
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-4 py-3">
       <p className="text-sm font-medium text-zinc-100 mb-1 flex items-center gap-1.5"><Layers className="w-4 h-4" /> Departamentos e categorias</p>
-      <p className="text-xs text-zinc-500 mb-3">Organize o menu da loja em 2 níveis (ex.: <span className="text-zinc-400">Roupas masculinas → Casaco</span>). No produto, escolha a categoria; a vitrine agrupa por departamento. Sem cadastro, o menu continua plano.</p>
+      <p className="text-xs text-zinc-500 mb-3">Organize o menu da loja em 2 níveis (ex.: <span className="text-zinc-400">Roupas masculinas → Bermudas</span>). Cada categoria aponta para a categoria/código que já está nos produtos (ex.: <span className="text-zinc-400">002</span>) e exibe o nome amigável — <span className="text-zinc-400">sem precisar re-marcar produto</span>. Sem cadastro, o menu continua plano.</p>
 
       {loading ? (
         <div className="text-xs text-zinc-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</div>
@@ -1609,17 +1621,23 @@ function CategoryManager() {
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {d.categories.map((c) => (
                   <span key={c.id} className="inline-flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-300">
-                    {c.name}
+                    {c.name}{c.value !== c.name && <span className="text-zinc-600">({c.value})</span>}
                     <button type="button" title="Renomear" onClick={() => rename(c.id, c.name, true)} className="text-zinc-500 hover:text-indigo-300"><Pencil className="w-3 h-3" /></button>
                     <button type="button" title="Remover" onClick={() => remove(c.id, true)} className="text-zinc-500 hover:text-rose-400"><X className="w-3 h-3" /></button>
                   </span>
                 ))}
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <input value={newCat[d.id] || ''} onChange={(e) => setNewCat((p) => ({ ...p, [d.id]: e.target.value }))}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <select value={(newCat[d.id]?.value) || ''} disabled={busy}
+                  onChange={(e) => setNewCat((p) => ({ ...p, [d.id]: { value: e.target.value, name: p[d.id]?.name || '' } }))}
+                  className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:border-indigo-500 outline-none max-w-[45%]">
+                  <option value="">Escolha o código/categoria…</option>
+                  {unmapped.map((a) => <option key={a.value} value={a.value}>{optionLabel(a)}</option>)}
+                </select>
+                <input value={newCat[d.id]?.name || ''} onChange={(e) => setNewCat((p) => ({ ...p, [d.id]: { value: p[d.id]?.value || '', name: e.target.value } }))}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCat(d.id); } }}
-                  placeholder="Nova categoria…" disabled={busy}
-                  className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:border-indigo-500 outline-none" />
+                  placeholder="Nome amigável (ex.: Bermudas)…" disabled={busy}
+                  className="flex-1 min-w-[120px] bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:border-indigo-500 outline-none" />
                 <Button variant="ghost" onClick={() => addCat(d.id)} disabled={busy} className="text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Categoria</Button>
               </div>
             </div>
@@ -1631,6 +1649,9 @@ function CategoryManager() {
               className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 focus:border-indigo-500 outline-none" />
             <Button onClick={addDept} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Departamento</Button>
           </div>
+          {unmapped.length > 0 && (
+            <p className="text-[11px] text-zinc-500">Ainda sem departamento: {unmapped.map((a) => a.value).join(', ')}.</p>
+          )}
         </div>
       )}
     </div>

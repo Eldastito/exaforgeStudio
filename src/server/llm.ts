@@ -182,10 +182,10 @@ const SIZE_TO_ASPECT: Record<string, string> = {
 /** Gera imagem via Google Imagen (Gemini API). Retorna base64 (ou "" se falhar). */
 async function generateImageGoogle(prompt: string, size: string, apiKey: string): Promise<string> {
   const model = process.env.GOOGLE_IMAGE_MODEL || "imagen-3.0-generate-002";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: googleAuthHeaders(apiKey, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       instances: [{ prompt }],
       parameters: { sampleCount: 1, aspectRatio: SIZE_TO_ASPECT[size] || "1:1" },
@@ -291,6 +291,17 @@ function googleAiKey(): string {
 }
 
 /**
+ * Header de autenticação da Gemini API. As chaves NOVAS do Google (formato
+ * "AQ.", que substituíram as "AIza" e passaram a ser exigidas a partir de
+ * set/2026) SÓ funcionam via header `x-goog-api-key` — passar a chave por
+ * `?key=` na URL retorna 404. O header também aceita as chaves antigas "AIza",
+ * então é retrocompatível: por isso toda chamada REST Google usa esta função.
+ */
+function googleAuthHeaders(key: string, extra?: Record<string, string>): Record<string, string> {
+  return { "x-goog-api-key": key, ...(extra || {}) };
+}
+
+/**
  * Provador Virtual via Google Gemini (ADR-042): envia a foto da pessoa + fotos
  * das peças como partes multimodais e pede ao Gemini que GERE uma imagem de
  * try-on. O Gemini com responseModalities=["IMAGE","TEXT"] trata as imagens de
@@ -305,7 +316,7 @@ export async function editImagesGoogleB64(
   const key = googleAiKey();
   if (!key) throw new Error("GOOGLE_AI_API_KEY não configurada para provador virtual.");
   const model = process.env.GOOGLE_TRYON_MODEL || "gemini-2.0-flash-exp";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   const parts: any[] = images.map((img) => ({
     inlineData: { mimeType: img.mime, data: img.buffer.toString("base64") },
@@ -314,7 +325,7 @@ export async function editImagesGoogleB64(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: googleAuthHeaders(key, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       contents: [{ parts }],
       generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
@@ -341,11 +352,11 @@ export async function editImagesGoogleB64(
 export async function startVideoGoogle(prompt: string, aspectRatio: "16:9" | "9:16" = "16:9"): Promise<string> {
   const key = googleAiKey();
   if (!key) throw new Error("GOOGLE_AI_API_KEY não configurada para gerar vídeo.");
-  const model = process.env.GOOGLE_VIDEO_MODEL || "veo-3.0-generate-001";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning?key=${key}`;
+  const model = process.env.GOOGLE_VIDEO_MODEL || "veo-3.1-generate-preview";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: googleAuthHeaders(key, { "Content-Type": "application/json" }),
     body: JSON.stringify({ instances: [{ prompt }], parameters: { aspectRatio } }),
   });
   if (!res.ok) throw new Error(`Veo ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
@@ -358,7 +369,7 @@ export async function startVideoGoogle(prompt: string, aspectRatio: "16:9" | "9:
 export async function pollVideoGoogle(operationName: string): Promise<{ done: boolean; b64?: string; uri?: string; error?: string }> {
   const key = googleAiKey();
   if (!key) return { done: false, error: "sem chave" };
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${key}`);
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}`, { headers: googleAuthHeaders(key) });
   if (!res.ok) return { done: false, error: `poll ${res.status}` };
   const data: any = await res.json();
   if (!data?.done) return { done: false };
@@ -367,15 +378,17 @@ export async function pollVideoGoogle(operationName: string): Promise<{ done: bo
   const sample = r?.generateVideoResponse?.generatedSamples?.[0] || r?.generatedSamples?.[0] || r?.predictions?.[0] || {};
   const uri = sample?.video?.uri || sample?.video?.fileUri || sample?.uri || sample?.videoUri;
   const b64 = sample?.video?.bytesBase64Encoded || sample?.bytesBase64Encoded;
-  recordUsage(process.env.GOOGLE_VIDEO_MODEL || "veo-3.0-generate-001", "video", 0, 0, Number(process.env.GOOGLE_VIDEO_COST_USD || 0.5));
+  recordUsage(process.env.GOOGLE_VIDEO_MODEL || "veo-3.1-generate-preview", "video", 0, 0, Number(process.env.GOOGLE_VIDEO_COST_USD || 0.5));
   return { done: true, b64, uri };
 }
 
 /** Baixa o arquivo de vídeo (anexa a chave para URIs de arquivo da Gemini API). */
 export async function downloadVideoBuffer(uri: string): Promise<Buffer> {
   const key = googleAiKey();
-  const u = /key=/.test(uri) ? uri : `${uri}${uri.includes("?") ? "&" : "?"}key=${key}`;
-  const res = await fetch(u);
+  // Chave via header (as chaves novas "AQ." não funcionam por ?key=). Se a URI
+  // já trouxer a chave embutida (compat antiga), não duplicamos no header.
+  const hasInlineKey = /[?&]key=/.test(uri);
+  const res = await fetch(uri, hasInlineKey ? undefined : { headers: googleAuthHeaders(key) });
   if (!res.ok) throw new Error(`download vídeo ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }

@@ -244,6 +244,31 @@ export class AlterdataConnectorService {
     this.setCursor(orgId, "_meta", "pdvCustomerImport", "", on ? "1" : "0");
   }
 
+  // Escopar a IMPORTAÇÃO de clientes do PDV às filiais configuradas na conta
+  // (ADR TOULON "PDV por loja", Caminho 2a). O stream `ClienteMalote` traz a REDE
+  // inteira; com esta flag ligada, só entram os clientes cuja `filial` está na
+  // lista de `filiais` desta conta. Opt-in (default OFF) → 0-regressão: a conta
+  // guarda-chuva (TOULON) segue importando TODOS. Uma conta de loja liga a flag +
+  // configura `filiais=[só a dela]` e passa a importar SÓ os seus clientes.
+  static isPdvFilialScoped(orgId: string): boolean {
+    return this.getCursor(orgId, "_meta", "pdvFilialScoped", "") === "1";
+  }
+  static setPdvFilialScoped(orgId: string, on: boolean): void {
+    this.setCursor(orgId, "_meta", "pdvFilialScoped", "", on ? "1" : "0");
+  }
+  /**
+   * Conjunto de filiais permitidas na importação de clientes desta conta, ou
+   * `null` (= sem filtro, importa a rede inteira). Retorna Set só quando a conta
+   * OPTOU pelo escopo (`isPdvFilialScoped`) E tem filiais configuradas. Códigos
+   * normalizados (trim + maiúsculas) para casar com o `filial` do cliente. Puro/
+   * testável; usado pelo sync de clientes (Caminho 2a "PDV por loja").
+   */
+  static pdvFilialAllowSet(orgId: string, filiais: any): Set<string> | null {
+    if (!this.isPdvFilialScoped(orgId)) return null;
+    const list = Array.isArray(filiais) ? filiais.map((f: any) => String(f).trim().toUpperCase()).filter(Boolean) : [];
+    return list.length ? new Set(list) : null;
+  }
+
   // ---- cursor do delta-sync (env-escopado via profile) ----
 
   static getCursor(orgId: string, module: string, resource: string, filial = ""): string {

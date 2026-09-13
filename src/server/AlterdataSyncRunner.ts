@@ -584,6 +584,10 @@ export class AlterdataSyncRunner {
     //    base SEPARADA (retail_pdv_customers), não para os contatos do WhatsApp.
     const clientes = { imported: 0 };
     if (AlterdataConnectorService.isPdvCustomerImport(orgId)) {
+      // PDV por loja (Caminho 2a): o stream `ClienteMalote` traz a REDE inteira;
+      // quando a conta opta por escopo (flag) E tem filiais, filtra pela filial.
+      // null → sem filtro (0-regressão; a TOULON segue com a base consolidada).
+      const filialAllow: Set<string> | null = AlterdataConnectorService.pdvFilialAllowSet(orgId, settings.filiais);
       try {
         const insCli = db.prepare(
           `INSERT INTO retail_pdv_customers (id, organization_id, codigo_n, nome, cpf, celular, email, nascimento, filial, cidade, bairro, primeira_compra, ultima_compra, inativo, updated_at)
@@ -603,6 +607,8 @@ export class AlterdataSyncRunner {
               const c = it?.cliente ?? it;
               const codigoN = str(c?.codigoN ?? c?.codigon);
               if (!codigoN) continue;
+              // PDV por loja: pula cliente de outra filial quando a conta é escopada.
+              if (filialAllow && !filialAllow.has(str(c?.filial).trim().toUpperCase())) continue;
               insCli.run(
                 randomUUID(), orgId, codigoN, str(c?.nome) || null, str(c?.cgc) || null,
                 str(c?.celular) || str(c?.telefone) || null, str(c?.email) || null,

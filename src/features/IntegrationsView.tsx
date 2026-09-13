@@ -1202,6 +1202,12 @@ function AlterdataConnectorPanel() {
           <input type="checkbox" checked={!!st?.pdvCustomerImport} onChange={e => save({ pdvCustomerImport: e.target.checked })} disabled={saving} />
           Importar clientes do PDV
         </label>
+        {st?.pdvCustomerImport && (
+          <label className="flex items-center gap-2 text-sm text-zinc-300" title="PDV por loja: importa SÓ os clientes das filiais configuradas nesta conta (o stream do Alterdata traz a rede inteira; esta opção filtra pela filial). Use nas contas de loja (filiais = só a da loja). Deixe DESLIGADO na conta consolidada (guarda-chuva), que importa todas as filiais.">
+            <input type="checkbox" checked={!!st?.pdvFilialScoped} onChange={e => save({ pdvFilialScoped: e.target.checked })} disabled={saving} />
+            Só clientes das filiais desta conta
+          </label>
+        )}
         {st?.tokenExpiresAt && <span className="text-[11px] text-zinc-500">token expira: {new Date(st.tokenExpiresAt).toLocaleString('pt-BR')}</span>}
       </div>
 

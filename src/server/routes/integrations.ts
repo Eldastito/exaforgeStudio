@@ -483,7 +483,7 @@ router.get("/alterdata/catalog-grade", (req: AuthRequest, res): any => {
 
 router.get("/alterdata/status", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId) });
+  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId), pdvFilialScoped: AlterdataConnectorService.isPdvFilialScoped(req.organizationId) });
 });
 
 router.put("/alterdata/settings", (req: AuthRequest, res): any => {
@@ -496,8 +496,9 @@ router.put("/alterdata/settings", (req: AuthRequest, res): any => {
   });
   if (b.pdvAutoClosing !== undefined) AlterdataConnectorService.setPdvAutoClosing(req.organizationId, !!b.pdvAutoClosing);
   if (b.pdvCustomerImport !== undefined) AlterdataConnectorService.setPdvCustomerImport(req.organizationId, !!b.pdvCustomerImport);
+  if (b.pdvFilialScoped !== undefined) AlterdataConnectorService.setPdvFilialScoped(req.organizationId, !!b.pdvFilialScoped);
   logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_SETTINGS_UPDATED', { enabled: !!b.enabled, environment: b.environment });
-  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId) });
+  res.json({ ...AlterdataConnectorService.publicSettings(req.organizationId), pdvAutoClosing: AlterdataConnectorService.isPdvAutoClosing(req.organizationId), pdvCustomerImport: AlterdataConnectorService.isPdvCustomerImport(req.organizationId), pdvFilialScoped: AlterdataConnectorService.isPdvFilialScoped(req.organizationId) });
 });
 
 // Dispara o sync (backfill + delta) da org sob demanda (ADR-105, Fase 1c).

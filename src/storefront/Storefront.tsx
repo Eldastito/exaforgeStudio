@@ -67,7 +67,8 @@ export function Storefront() {
     if (!data || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}?offset=${data.products.length}`);
+      const catQs = activeCategory ? `&category=${encodeURIComponent(activeCategory)}` : '';
+      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}?offset=${data.products.length}${catQs}`);
       if (res.ok) {
         const json = (await res.json()) as StoreResponse;
         setData((prev) => prev ? {
@@ -78,12 +79,28 @@ export function Storefront() {
       }
     } finally { setLoadingMore(false); }
   };
+
+  // Filtro por categoria (menu da vitrine): refaz a busca do servidor a partir do
+  // zero com ?category= (paginação correta dentro da categoria). "Todos" limpa.
+  const selectCategory = async (cat: string | null) => {
+    setActiveCategory(cat);
+    setOnlyFavs(false);
+    try {
+      const catQs = cat ? `?category=${encodeURIComponent(cat)}` : '';
+      const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}${catQs}`);
+      if (res.ok) {
+        const json = (await res.json()) as StoreResponse;
+        setData((prev) => prev ? { ...prev, products: json.products, productsTotal: json.productsTotal } : json);
+      }
+    } catch { /* mantém o que já estava */ }
+  };
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   const [mode, setMode] = useState<Mode>('night');
   const [favorites, setFavorites] = useState<string[]>(() => lsGet<string[]>(`storefront_favs_${slug}`, []));
   const [onlyFavs, setOnlyFavs] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>(() => lsGet<CartItem[]>(`storefront_cart_${slug}`, []));
 
   // Provador Virtual (ADR-041): as peças "para provar" escolhidas na vitrine.
@@ -297,15 +314,15 @@ export function Storefront() {
   // Coleções (curadoria da IA): cada uma vira uma seção com seus produtos.
   // Ocultas quando o cliente filtra só favoritos.
   const collectionSections = useMemo(() => {
-    if (!data?.collections || onlyFavs) return [];
+    if (!data?.collections || onlyFavs || activeCategory) return [];
     return data.collections
       .map((c) => ({ id: c.id, title: c.title, items: c.productIds.map((id) => productById[id]).filter(Boolean) as Product[] }))
       .filter((c) => c.items.length > 0);
-  }, [data, onlyFavs, productById]);
+  }, [data, onlyFavs, activeCategory, productById]);
 
   // Categorias: agrupa produtos que possuem categoria definida.
   const categorySections = useMemo(() => {
-    if (onlyFavs || !products.length) return [];
+    if (onlyFavs || activeCategory || !products.length) return [];
     const cats = new Map<string, Product[]>();
     for (const p of products) {
       if (p.category) {
@@ -315,7 +332,7 @@ export function Storefront() {
       }
     }
     return Array.from(cats.entries()).map(([cat, items]) => ({ category: cat, items }));
-  }, [products, onlyFavs]);
+  }, [products, onlyFavs, activeCategory]);
 
   // Fundo conforme tema.
   const pageBg = night
@@ -373,6 +390,24 @@ export function Storefront() {
                 <Sparkles className="h-4 w-4" style={{ color: accent }} />
                 Olá, <span className="font-semibold">{data.customer.name}</span>! Que bom te ver por aqui.
               </p>
+            )}
+
+            {/* Menu de categorias — navegação do cliente (filtra no servidor). */}
+            {!onlyFavs && (data.categories?.length ?? 0) > 0 && (
+              <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                {[{ label: 'Todos', val: null as string | null }, ...data.categories!.map((c) => ({ label: c, val: c as string | null }))].map((opt) => {
+                  const on = activeCategory === opt.val;
+                  return (
+                    <button key={opt.label} type="button" onClick={() => selectCategory(opt.val)}
+                      className="shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors"
+                      style={on
+                        ? { backgroundColor: accent, borderColor: accent, color: '#fff' }
+                        : { borderColor: hexToRgba(accent, 0.35) }}>
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             )}
 
             {/* Reservas (recursos por período: quartos, mesas, espaços) */}

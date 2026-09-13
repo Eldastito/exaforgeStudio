@@ -175,6 +175,10 @@ router.get("/store/:slug", (req, res): any => {
   const where: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'"];
   const args: any[] = [orgId];
   if (q) { where.push("(name LIKE ? OR category LIKE ?)"); const like = `%${q}%`; args.push(like, like); }
+  // Filtro por categoria (menu de navegação da vitrine). Exato — o menu envia a
+  // categoria como cadastrada; busca livre por texto continua no `q`.
+  const category = String(req.query.category || "").trim();
+  if (category) { where.push("category = ?"); args.push(category); }
   // "Ocultar automaticamente sem estoque": esconde da vitrine quem tem controle
   // de estoque e está zerado (estoque próprio + de loja). Vale pra QUALQUER
   // origem de estoque, na contagem e na página (paginação correta).
@@ -209,6 +213,12 @@ router.get("/store/:slug", (req, res): any => {
     }
   }
 
+  // Categorias do MENU: distintas de todos os produtos visíveis (independe de q/
+  // categoria/página), respeitando o ocultar-sem-estoque. Alimenta o filtro.
+  const catWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "category IS NOT NULL", "TRIM(category) != ''"];
+  if (store.auto_hide_out_of_stock) catWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
+  const catList = (db.prepare(`SELECT DISTINCT category FROM products_services WHERE ${catWhere.join(" AND ")} ORDER BY category COLLATE NOCASE`).all(orgId) as any[]).map(r => r.category);
+
   res.json({
     store: {
       slug: store.slug,
@@ -223,6 +233,7 @@ router.get("/store/:slug", (req, res): any => {
     customer: linkedContact,
     products: products.map(p => productPayload(orgId, p)),
     productsTotal,
+    categories: catList,
     collections: resolveCollections(orgId),
     resources: ReservationService.listResources(orgId),
   });

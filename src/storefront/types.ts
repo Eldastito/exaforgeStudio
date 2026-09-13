@@ -60,6 +60,8 @@ export interface StoreResponse {
   products: Product[];
   /** Total de produtos visíveis (o catálogo é paginado — products é uma página). */
   productsTotal?: number;
+  /** Categorias distintas de todos os produtos visíveis (menu de navegação). */
+  categories?: string[];
   collections?: StoreCollection[];
   resources?: ReservableResource[];
 }

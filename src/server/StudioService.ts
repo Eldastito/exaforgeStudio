@@ -212,6 +212,66 @@ ${analyses.map((a, i) => `(${i + 1}) ${a}`).join("\n")}`;
     try { db.prepare("UPDATE studio_creations SET ig_media_id = ?, ig_posted_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(igMediaId, id, orgId); } catch { /* noop */ }
   }
 
+  // ── Enviar mídia do Estúdio pra loja virtual (Fatia 2) ─────────────────────
+  // A vitrine/produto só têm IMAGEM hoje; vídeo na loja é fatia própria (F3).
+  // Por isso todo envio pra loja recusa vídeo com mensagem clara.
+  private static isVideoCreation(c: { kind?: string; media_url?: string } | null): boolean {
+    return !!c && (c.kind === "video" || (c.media_url || "").endsWith(".mp4"));
+  }
+
+  /** Slug único de produto por org (mesma regra da loja: sem acento, kebab-case). */
+  private static uniqueProductSlug(orgId: string, name: string): string {
+    const base = (name || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "produto";
+    let slug = base, n = 1;
+    while (db.prepare("SELECT 1 FROM products_services WHERE organization_id = ? AND slug = ?").get(orgId, slug)) slug = `${base}-${++n}`;
+    return slug;
+  }
+
+  /** Anexa a imagem gerada às fotos de um produto EXISTENTE. Não destrói a capa
+   *  (append no fim); se o produto ainda não tem foto de estúdio, esta vira a capa. */
+  static attachImageToProduct(orgId: string, creationId: string, productId: string): { ok: boolean; error?: string } {
+    const c = this.getCreation(orgId, creationId);
+    if (!c || !c.media_url) return { ok: false, error: "Criação não encontrada." };
+    if (this.isVideoCreation(c)) return { ok: false, error: "Vídeo ainda não vai pra loja virtual (em breve). Use uma imagem." };
+    const prod = db.prepare("SELECT id, studio_image_url FROM products_services WHERE id = ? AND organization_id = ?").get(productId, orgId) as any;
+    if (!prod) return { ok: false, error: "Produto não encontrado." };
+    const count = (db.prepare("SELECT COUNT(*) c FROM product_images WHERE product_service_id = ?").get(productId) as any)?.c || 0;
+    db.prepare("INSERT INTO product_images (id, organization_id, product_service_id, url, position) VALUES (?, ?, ?, ?, ?)")
+      .run(randomUUID(), orgId, productId, c.media_url, count);
+    if (!prod.studio_image_url) db.prepare("UPDATE products_services SET studio_image_url = ? WHERE id = ? AND organization_id = ?").run(c.media_url, productId, orgId);
+    return { ok: true };
+  }
+
+  /** Cria um produto NOVO já com a imagem gerada como foto (capa + studio_image_url). */
+  static createProductFromCreation(orgId: string, creationId: string, name: string, price?: number): { ok: boolean; id?: string; error?: string } {
+    const c = this.getCreation(orgId, creationId);
+    if (!c || !c.media_url) return { ok: false, error: "Criação não encontrada." };
+    if (this.isVideoCreation(c)) return { ok: false, error: "Vídeo ainda não pode virar produto (em breve). Use uma imagem." };
+    const nm = String(name || "").trim();
+    if (!nm) return { ok: false, error: "Dê um nome ao produto." };
+    const id = randomUUID();
+    const slug = this.uniqueProductSlug(orgId, nm);
+    const p = Number(price);
+    db.prepare("INSERT INTO products_services (id, organization_id, type, name, description, price, stock_control_enabled, slug, studio_image_url) VALUES (?, ?, 'product', ?, '', ?, 0, ?, ?)")
+      .run(id, orgId, nm, Number.isFinite(p) && p > 0 ? p : 0, slug, c.media_url);
+    db.prepare("INSERT INTO product_images (id, organization_id, product_service_id, url, position) VALUES (?, ?, ?, ?, 0)")
+      .run(randomUUID(), orgId, id, c.media_url);
+    return { ok: true, id };
+  }
+
+  /** Define a imagem gerada como banner da vitrine. Exige a loja já configurada
+   *  (não cria settings aqui pra não colidir slug — isso é do fluxo da loja). */
+  static setStorefrontBanner(orgId: string, creationId: string): { ok: boolean; error?: string } {
+    const c = this.getCreation(orgId, creationId);
+    if (!c || !c.media_url) return { ok: false, error: "Criação não encontrada." };
+    if (this.isVideoCreation(c)) return { ok: false, error: "Vídeo ainda não pode ser banner da loja (em breve). Use uma imagem." };
+    const exists = db.prepare("SELECT 1 FROM storefront_settings WHERE organization_id = ?").get(orgId);
+    if (!exists) return { ok: false, error: "Configure sua loja virtual primeiro (abra a Loja Virtual uma vez)." };
+    db.prepare("UPDATE storefront_settings SET banner_url = ? WHERE organization_id = ?").run(c.media_url, orgId);
+    return { ok: true };
+  }
+
   /** Sugere uma legenda de Instagram com o Brand DNA + objetivo de campanha + CTA + hashtags. */
   static async suggestCaption(orgId: string, prompt: string, objectiveId?: string): Promise<string> {
     const biz = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;

@@ -520,6 +520,35 @@ router.post("/instagram/publish", async (req: AuthRequest, res): Promise<any> =>
   }
 });
 
+// ── Enviar mídia do Estúdio pra loja virtual (Fatia 2) ─────────────────────
+
+// POST /api/studio/creations/:id/to-product { productId } — usa a imagem como foto do produto
+router.post("/creations/:id/to-product", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = StudioService.attachImageToProduct(orgId, String(req.params.id), String(req.body?.productId || ""));
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ success: true });
+});
+
+// POST /api/studio/creations/:id/new-product { name, price } — cria produto com a imagem
+router.post("/creations/:id/new-product", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = StudioService.createProductFromCreation(orgId, String(req.params.id), String(req.body?.name || ""), req.body?.price);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ success: true, id: out.id });
+});
+
+// POST /api/studio/creations/:id/to-banner — define a imagem como banner da vitrine
+router.post("/creations/:id/to-banner", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = StudioService.setStorefrontBanner(orgId, String(req.params.id));
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ success: true });
+});
+
 // GET /api/studio/limits — uso vs limite do plano (imagens/vídeos no mês)
 router.get("/limits", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

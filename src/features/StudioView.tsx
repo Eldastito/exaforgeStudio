@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X, Eye, TrendingUp } from 'lucide-react';
+import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X, Eye, TrendingUp, Store } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -107,6 +107,15 @@ export function StudioView() {
   const [pubWhen, setPubWhen] = useState('');
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [scheduled, setScheduled] = useState<Scheduled[]>([]);
+
+  // Enviar pra loja virtual (Fatia 2) — só imagem (vídeo na loja é F3).
+  const [storeId, setStoreId] = useState<string | null>(null);
+  const [storeTab, setStoreTab] = useState<'product' | 'new' | 'banner'>('product');
+  const [storeQuery, setStoreQuery] = useState('');
+  const [storeProducts, setStoreProducts] = useState<Array<{ id: string; name: string }>>([]);
+  const [storeNewName, setStoreNewName] = useState('');
+  const [storeNewPrice, setStoreNewPrice] = useState('');
+  const [storeBusy, setStoreBusy] = useState(false);
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const creationsPage = useVisibleLimit(creations);
@@ -372,6 +381,49 @@ export function StudioView() {
     } catch (e: any) { toast.error(e.message); } finally { setRecipeGenerating(false); }
   };
 
+  const openStore = (id: string, suggestedName?: string) => {
+    setStoreId(id); setStoreTab('product'); setStoreQuery(''); setStoreProducts([]);
+    setStoreNewName((suggestedName || '').slice(0, 60)); setStoreNewPrice('');
+  };
+  const loadStoreProducts = async (q: string) => {
+    try {
+      const r = await apiFetch(`/api/products?limit=20${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`);
+      const d = await r.json();
+      setStoreProducts(Array.isArray(d) ? d.map((p: any) => ({ id: p.id, name: p.name })) : []);
+    } catch { setStoreProducts([]); }
+  };
+  const sendToProduct = async (productId: string) => {
+    if (!storeId) return;
+    setStoreBusy(true);
+    try {
+      const r = await apiFetch(`/api/studio/creations/${storeId}/to-product`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao enviar pro produto.');
+      toast.success('Imagem enviada pro produto. 🛍️'); setStoreId(null);
+    } catch (e: any) { toast.error(e.message); } finally { setStoreBusy(false); }
+  };
+  const createStoreProduct = async () => {
+    if (!storeId) return;
+    if (!storeNewName.trim()) { toast.error('Dê um nome ao produto.'); return; }
+    setStoreBusy(true);
+    try {
+      const r = await apiFetch(`/api/studio/creations/${storeId}/new-product`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: storeNewName, price: storeNewPrice ? Number(storeNewPrice) : undefined }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao criar o produto.');
+      toast.success('Produto criado com a arte. 🛍️'); setStoreId(null);
+    } catch (e: any) { toast.error(e.message); } finally { setStoreBusy(false); }
+  };
+  const setStoreBanner = async () => {
+    if (!storeId) return;
+    setStoreBusy(true);
+    try {
+      const r = await apiFetch(`/api/studio/creations/${storeId}/to-banner`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha ao definir o banner.');
+      toast.success('Banner da loja atualizado. 🖼️'); setStoreId(null);
+    } catch (e: any) { toast.error(e.message); } finally { setStoreBusy(false); }
+  };
+
   const openPublish = (id: string, prompt: string) => {
     setPubId(id); setPubPrompt(prompt || ''); setPubCaption(prompt || '');
     setPubMode('now'); setPubObjective('vendas'); setPubWhen('');
@@ -527,6 +579,11 @@ export function StudioView() {
                 <a href={result} download className="inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300">
                   <Download className="w-3.5 h-3.5" /> Baixar
                 </a>
+                {resultId && (
+                  <button onClick={() => openStore(resultId, briefing)} className="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300">
+                    <Store className="w-3.5 h-3.5" /> Enviar pra loja
+                  </button>
+                )}
                 {ig.connected && resultId && (
                   <button onClick={() => openPublish(resultId, briefing)} className="inline-flex items-center gap-1 text-xs text-pink-400 hover:text-pink-300">
                     <Instagram className="w-3.5 h-3.5" /> Publicar no Instagram
@@ -696,6 +753,9 @@ export function StudioView() {
                     <a href={recipeResult.mediaUrl} download className="inline-flex items-center gap-1 text-xs text-fuchsia-400 hover:text-fuchsia-300">
                       <Download className="w-3.5 h-3.5" /> Baixar
                     </a>
+                    <button onClick={() => openStore(recipeResult.id, recipeResult.prompt)} className="inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300">
+                      <Store className="w-3.5 h-3.5" /> Enviar pra loja
+                    </button>
                     {ig.connected && (
                       <button onClick={() => openPublish(recipeResult.id, recipeResult.prompt)} className="inline-flex items-center gap-1 text-xs text-pink-400 hover:text-pink-300">
                         <Instagram className="w-3.5 h-3.5" /> Publicar no Instagram
@@ -932,6 +992,7 @@ export function StudioView() {
                   <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
                   <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                     <button onClick={() => downloadMedia(c.media_url)} className="inline-flex items-center gap-1 text-[10px] text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3 h-3" /> Baixar</button>
+                    {!isVideo && <button onClick={() => openStore(c.id, c.prompt)} className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:text-sky-300"><Store className="w-3 h-3" /> Loja</button>}
                     {ig.connected && (
                       postedIds.has(c.id)
                         ? <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><Instagram className="w-3 h-3" /> publicado</span>
@@ -1036,6 +1097,80 @@ export function StudioView() {
               )}
             </div>
             <p className="mt-2 text-[10px] text-zinc-600">Requer a permissão de publicação aprovada pela Meta (App Review).</p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: enviar imagem pra loja virtual (Fatia 2) */}
+      {storeId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-[440px] p-6">
+            <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2 mb-3"><Store className="w-5 h-5 text-sky-400" /> Enviar pra loja virtual</h3>
+
+            <div className="flex gap-2 mb-3">
+              {([['product', 'Foto de produto'], ['new', 'Novo produto'], ['banner', 'Banner']] as const).map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setStoreTab(id)}
+                  className={`flex-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${storeTab === id ? 'bg-sky-600 border-sky-500 text-white' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
+              ))}
+            </div>
+
+            {storeTab === 'product' && (
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Buscar produto</label>
+                <input value={storeQuery} onChange={e => { setStoreQuery(e.target.value); loadStoreProducts(e.target.value); }}
+                  onFocus={() => { if (!storeProducts.length) loadStoreProducts(''); }}
+                  placeholder="Nome, EAN…"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-sky-500 outline-none mb-2" />
+                <div className="max-h-52 overflow-y-auto space-y-1">
+                  {storeProducts.length === 0
+                    ? <p className="text-xs text-zinc-500 py-2">Nenhum produto. Digite pra buscar ou crie um em "Novo produto".</p>
+                    : storeProducts.map(p => (
+                      <button key={p.id} disabled={storeBusy} onClick={() => sendToProduct(p.id)}
+                        className="w-full text-left px-3 py-2 rounded-lg text-sm text-zinc-200 bg-zinc-950 border border-zinc-800 hover:border-sky-500/60 disabled:opacity-50">
+                        {p.name}
+                      </button>
+                    ))}
+                </div>
+                <p className="mt-2 text-[10px] text-zinc-600">A imagem é adicionada às fotos do produto (não apaga as existentes).</p>
+              </div>
+            )}
+
+            {storeTab === 'new' && (
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Nome do produto</label>
+                <input value={storeNewName} onChange={e => setStoreNewName(e.target.value)} maxLength={120}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-sky-500 outline-none mb-3" />
+                <label className="text-xs text-zinc-400 mb-1 block">Preço (opcional)</label>
+                <input value={storeNewPrice} onChange={e => setStoreNewPrice(e.target.value.replace(/[^0-9.,]/g, ''))} inputMode="decimal" placeholder="0,00"
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-100 focus:border-sky-500 outline-none" />
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setStoreId(null)} disabled={storeBusy}>Cancelar</Button>
+                  <Button onClick={createStoreProduct} disabled={storeBusy || !storeNewName.trim()} className="bg-sky-600 hover:bg-sky-700 text-white">
+                    {storeBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    {storeBusy ? 'Criando…' : 'Criar produto'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {storeTab === 'banner' && (
+              <div>
+                <p className="text-xs text-zinc-400 mb-3">Usar esta imagem como banner de destaque na home da sua loja virtual.</p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setStoreId(null)} disabled={storeBusy}>Cancelar</Button>
+                  <Button onClick={setStoreBanner} disabled={storeBusy} className="bg-sky-600 hover:bg-sky-700 text-white">
+                    {storeBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 mr-2" />}
+                    {storeBusy ? 'Definindo…' : 'Definir como banner'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {storeTab === 'product' && (
+              <div className="mt-4 flex justify-end">
+                <Button variant="ghost" onClick={() => setStoreId(null)} disabled={storeBusy}>Fechar</Button>
+              </div>
+            )}
           </div>
         </div>
       )}

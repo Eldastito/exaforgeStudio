@@ -43,6 +43,53 @@ const RECIPE_FORMAT_LABELS: Record<string, string> = {
   portrait_4_5: 'Retrato 4:5',
 };
 
+// Explicação LEIGA de cada receita (por recipe_key), ancorada no que ela de fato
+// gera. Fica no front (o catálogo no banco é curado/versionado); é só a camada
+// de ajuda pra quem não conhece os "comandos". `what` = o que a imagem vira em
+// linguagem simples; `bestFor` = quando usar / que produto rende mais.
+const RECIPE_GUIDE: Record<string, { what: string; bestFor: string }> = {
+  ADD_CREATIVE: {
+    what: 'Um anúncio pronto: seu produto + espaço pra um título e uma chamada (ex.: "Compre já").',
+    bestFor: 'Promoção e oferta com preço/texto — posts e anúncios pagos.',
+  },
+  BILLBOARD_3D: {
+    what: 'Seu produto num outdoor 3D estilo Times Square, cidade à noite — dá ar de marca grande.',
+    bestFor: 'Lançamento e campanha de impacto, quando quer causar "uau".',
+  },
+  MAGAZINE_COVER: {
+    what: 'Uma capa de revista com o produto (ou a pessoa) como estrela, luz de estúdio sofisticada.',
+    bestFor: 'Moda e beleza premium: roupa e make com ar editorial, destaca estilo e tecido.',
+  },
+  PRODUCT_EXPLOSION: {
+    what: 'O produto em destaque total com efeito 3D dramático (fumaça, partículas), sem gente e sem texto.',
+    bestFor: 'Foco no item — tênis, calçado, gadget, perfume — quando o produto é o herói.',
+  },
+  SOFT_3D: {
+    what: 'Render 3D delicado, cores pastéis, fundo limpo e suave.',
+    bestFor: 'Beleza, cosmético, acessório e calçado em fundo clean — visual leve e moderno.',
+  },
+  LIFESTYLE_SHORT: {
+    what: 'O produto sendo usado no dia a dia, por uma pessoa, luz natural.',
+    bestFor: 'Roupa no corpo (mostra o caimento) e produto em uso real.',
+  },
+  BRAND_ORGANISM: {
+    what: 'Imagem institucional da sua empresa (não de um produto) — visual futurista da marca conectada por IA.',
+    bestFor: 'Post sobre a empresa/marca, não pra vender um item específico.',
+  },
+};
+
+// Guia rápido POR FINALIDADE → receita recomendada (chaves reais do catálogo).
+// Cada linha vira um atalho clicável no "Qual usar?".
+const RECIPE_PICKER: Array<{ emoji: string; label: string; keys: string[] }> = [
+  { emoji: '👕', label: 'Roupa / caimento', keys: ['LIFESTYLE_SHORT', 'MAGAZINE_COVER'] },
+  { emoji: '👟', label: 'Sapato / tênis', keys: ['PRODUCT_EXPLOSION', 'SOFT_3D'] },
+  { emoji: '💄', label: 'Beleza / cosmético', keys: ['SOFT_3D', 'MAGAZINE_COVER'] },
+  { emoji: '💍', label: 'Joia / acessório', keys: ['SOFT_3D', 'PRODUCT_EXPLOSION'] },
+  { emoji: '🏷️', label: 'Anúncio com preço', keys: ['ADD_CREATIVE'] },
+  { emoji: '🚀', label: 'Lançamento / impacto', keys: ['BILLBOARD_3D', 'PRODUCT_EXPLOSION'] },
+  { emoji: '🏢', label: 'Post da empresa', keys: ['BRAND_ORGANISM'] },
+];
+
 // Reduz a imagem no navegador (máx. 768px, JPEG) para enviar payload pequeno.
 const fileToB64 = (file: File): Promise<{ base64: string; mime: string }> => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -135,6 +182,7 @@ export function StudioView() {
   // Receitas visuais (ADR-194 F3) — catálogo + geração via /api/studio/recipes/generate.
   const [recipes, setRecipes] = useState<RecipeSummary[]>([]);
   const [selectedRecipeKey, setSelectedRecipeKey] = useState<string>('');
+  const [showRecipeGuide, setShowRecipeGuide] = useState(false);
   const [recipeFormat, setRecipeFormat] = useState<string>('feed_1_1');
   const [recipeCtx, setRecipeCtx] = useState('');
   const [recipeBrandHint, setRecipeBrandHint] = useState('');
@@ -627,6 +675,33 @@ export function StudioView() {
                     <option key={r.key} value={r.key}>{r.name} — v{r.version}</option>
                   ))}
                 </select>
+                <button type="button" onClick={() => setShowRecipeGuide(v => !v)}
+                  className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-fuchsia-400 hover:text-fuchsia-300">
+                  <Eye className="w-3 h-3" /> {showRecipeGuide ? 'Esconder guia' : 'Qual usar? Guia rápido por tipo de produto'}
+                </button>
+                {showRecipeGuide && (
+                  <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2.5 space-y-1.5">
+                    <p className="text-[10px] text-zinc-500">Escolha pelo que você quer anunciar — clique pra já selecionar a receita:</p>
+                    {RECIPE_PICKER.map(row => {
+                      const keys = row.keys.filter(k => recipes.some(r => r.key === k));
+                      if (!keys.length) return null;
+                      return (
+                        <div key={row.label} className="flex items-start gap-2 text-[11px]">
+                          <span className="shrink-0">{row.emoji}</span>
+                          <span className="text-zinc-400 shrink-0 w-28">{row.label}</span>
+                          <span className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+                            {keys.map((k, i) => (
+                              <button key={k} type="button" onClick={() => setSelectedRecipeKey(k)}
+                                className={`underline underline-offset-2 ${i === 0 ? 'text-fuchsia-300 hover:text-fuchsia-200 font-medium' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                                {recipes.find(r => r.key === k)?.name || k}{i === 0 && keys.length > 1 ? ' (melhor)' : ''}
+                              </button>
+                            ))}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Sugestão automática (F3.5) */}
@@ -720,7 +795,13 @@ export function StudioView() {
             <div className="space-y-3">
               {selectedRecipe && (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 space-y-2">
-                  {selectedRecipe.description && <p className="text-xs text-zinc-300">{selectedRecipe.description}</p>}
+                  {RECIPE_GUIDE[selectedRecipe.key] && (
+                    <div className="rounded-lg border border-fuchsia-500/20 bg-fuchsia-500/5 p-2.5 space-y-1.5">
+                      <p className="text-xs text-zinc-200"><span className="text-fuchsia-300 font-medium">O que faz:</span> {RECIPE_GUIDE[selectedRecipe.key].what}</p>
+                      <p className="text-xs text-zinc-200"><span className="text-emerald-300 font-medium">Melhor para:</span> {RECIPE_GUIDE[selectedRecipe.key].bestFor}</p>
+                    </div>
+                  )}
+                  {selectedRecipe.description && <p className="text-[11px] text-zinc-500">{selectedRecipe.description}</p>}
                   {selectedRecipe.intent && (
                     <p className="text-[11px] text-zinc-500"><span className="text-zinc-400">Intenção:</span> {selectedRecipe.intent}</p>
                   )}

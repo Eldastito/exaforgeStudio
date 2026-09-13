@@ -88,7 +88,7 @@ export class TaskService {
   static create(orgId: string, input: {
     title: string; description?: string; assignedTo?: string | null; priority?: string;
     dueAt?: string | null; source?: string; contactId?: string | null; ticketId?: string | null; refLabel?: string | null; budget?: number;
-    resultLabel?: string | null; resultBaseline?: number | null;
+    resultLabel?: string | null; resultBaseline?: number | null; notifyWhatsapp?: boolean;
     // Materialização de recorrência (ADR-171): amarra a tarefa à regra e carrega
     // a chave de dedupe (idempotência via índice único parcial em `tasks`).
     recurrenceRuleId?: string | null; scheduledOccurrenceAt?: string | null; occurrenceDedupeKey?: string | null;
@@ -101,11 +101,11 @@ export class TaskService {
     const resultLabel = String(input.resultLabel || "").trim() || null;
     const resultBaseline = input.resultBaseline != null && input.resultBaseline !== undefined && String(input.resultBaseline) !== "" ? Number(input.resultBaseline) : null;
     db.prepare(`
-      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount, result_label, result_baseline, recurrence_rule_id, scheduled_occurrence_at, occurrence_dedupe_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, organization_id, title, description, assigned_to, created_by, priority, status, due_at, source, contact_id, ticket_id, ref_label, budget_amount, result_label, result_baseline, recurrence_rule_id, scheduled_occurrence_at, occurrence_dedupe_key, notify_whatsapp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'a_fazer', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, orgId, title, input.description || "", input.assignedTo || null, actorId || null, priority,
       input.dueAt || null, source, input.contactId || null, input.ticketId || null, input.refLabel || null, Math.max(0, Number(input.budget) || 0), resultLabel, resultBaseline,
-      input.recurrenceRuleId || null, input.scheduledOccurrenceAt || null, input.occurrenceDedupeKey || null);
+      input.recurrenceRuleId || null, input.scheduledOccurrenceAt || null, input.occurrenceDedupeKey || null, input.notifyWhatsapp ? 1 : 0);
     if (input.assignedTo) this.notifyAssignee(orgId, input.assignedTo, title);
     return this.get(orgId, id);
   }

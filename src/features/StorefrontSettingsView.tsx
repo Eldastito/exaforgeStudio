@@ -1457,6 +1457,9 @@ function CatalogPhotoGenerator({ style }: { style: string }) {
       setProducts(Array.isArray(d) ? d.map((p: any) => ({ id: p.id, name: p.name })) : []);
     } catch { setProducts([]); }
   };
+  // Carrega a lista já ao abrir — assim o usuário vê os produtos e seleciona,
+  // sem precisar adivinhar que tem que clicar na busca primeiro.
+  useEffect(() => { search(''); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]; if (!f) return;
     setBusy(true); setResultUrl('');
@@ -1509,7 +1512,14 @@ function CatalogPhotoGenerator({ style }: { style: string }) {
         </Button>
         {sourceUrl && <img src={sourceUrl} alt="" className="w-10 h-10 object-cover rounded border border-zinc-800" />}
       </div>
-      <Button onClick={generate} disabled={busy || !productId || !sourceUrl} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs">
+      {(!productId || !sourceUrl) && (
+        <p className="text-[10px] text-amber-400/80">
+          Falta: {[!productId ? 'escolher o produto' : null, !sourceUrl ? 'enviar a foto' : null].filter(Boolean).join(' e ')}.
+        </p>
+      )}
+      {/* Botão fica ATIVO (só trava em busy): se faltar produto/foto, o clique
+          avisa o que falta em vez de um botão morto sem explicação. */}
+      <Button onClick={generate} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs disabled:opacity-60">
         {busy ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1.5" />}
         {busy ? 'Gerando…' : 'Gerar foto de catálogo'}
       </Button>

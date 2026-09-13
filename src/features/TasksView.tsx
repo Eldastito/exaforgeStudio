@@ -458,7 +458,7 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
         const baselineNum = resultBaseline.trim() ? Number(resultBaseline.replace(/\./g, '').replace(',', '.')) : null;
         const r = await apiFetch('/api/tasks', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null, resultLabel: resultLabel.trim() || null, resultBaseline: baselineNum }),
+          body: JSON.stringify({ title, description, assignedTo: assignedTo || null, priority, dueAt: due ? new Date(due).toISOString() : null, refLabel: refLabel || null, resultLabel: resultLabel.trim() || null, resultBaseline: baselineNum, notifyWhatsapp }),
         });
         if (!r.ok) throw new Error((await r.json()).error || 'Falha ao criar.');
         toast.success('Tarefa criada! 📋');
@@ -517,6 +517,15 @@ function CreateModal({ users, onClose, onCreated }: { users: OrgUser[]; onClose:
                 <input value={resultBaseline} onChange={e => setResultBaseline(e.target.value)} inputMode="decimal" className={field} placeholder="Valor inicial (ex.: 3.200)" />
               </div>
             </div>
+            {/* Cobrança por WhatsApp em tarefa avulsa: a IA lembra o responsável
+                no prazo (ou logo, se sem data). Requer responsável com telefone. */}
+            <label className="flex items-start gap-2 mb-4 cursor-pointer select-none">
+              <input type="checkbox" checked={notifyWhatsapp} onChange={e => setNotifyWhatsapp(e.target.checked)} className="accent-indigo-500 mt-0.5" />
+              <span className="text-sm text-zinc-200">
+                Avisar o responsável no WhatsApp
+                <span className="block text-[11px] text-zinc-500">A IA lembra/cobra no prazo. Precisa de responsável com telefone cadastrado.</span>
+              </span>
+            </label>
           </>
         ) : (
           <div className="rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-3 mb-4 space-y-3">

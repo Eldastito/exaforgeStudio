@@ -30,6 +30,7 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { TaskRecurrenceService } = await import("../src/server/TaskRecurrenceService.js");
   const { TaskReminderService } = await import("../src/server/TaskReminderService.js");
+  const { TaskService } = await import("../src/server/TaskService.js");
   const { UxPreferencesService } = await import("../src/server/UxPreferencesService.js");
 
   const A = `org_${randomUUID().slice(0, 8)}`;
@@ -108,6 +109,35 @@ async function main() {
   const sentB: any[] = [];
   await TaskReminderService.remindForOrg(A, async () => { sentB.push(1); }, { hourSP: 12 });
   check("processar org A não toca candidatos da B", TaskReminderService.pendingCandidates(B).length === 1);
+
+  // ===== 6. Tarefa AVULSA (não-recorrente) com opt-in notify_whatsapp =====
+  const C = `org_${randomUUID().slice(0, 8)}`;
+  const cUser = mkUser(C, "31977776666");
+  const cUserNoPhone = mkUser(C, null);
+  // sem data → devida logo → candidato
+  TaskService.create(C, { title: "Avulsa sem prazo", assignedTo: cUser, notifyWhatsapp: true });
+  // prazo no passado → candidato
+  TaskService.create(C, { title: "Avulsa vencida", assignedTo: cUser, dueAt: "2020-01-01T00:00:00.000Z", notifyWhatsapp: true });
+  // prazo no futuro → NÃO candidato ainda
+  TaskService.create(C, { title: "Avulsa futura", assignedTo: cUser, dueAt: "2099-01-01T00:00:00.000Z", notifyWhatsapp: true });
+  // opt-in off → NÃO candidato
+  TaskService.create(C, { title: "Avulsa sem aviso", assignedTo: cUser, notifyWhatsapp: false });
+  // sem telefone → NÃO candidato
+  TaskService.create(C, { title: "Avulsa sem telefone", assignedTo: cUserNoPhone, notifyWhatsapp: true });
+
+  const avuls = TaskReminderService.pendingAvulsaCandidates(C);
+  const titles = avuls.map((a: any) => a.title).sort();
+  check("6.1 avulsas candidatas: só devida-sem-prazo + vencida", titles.join("|") === "Avulsa sem prazo|Avulsa vencida", titles.join("|"));
+  check("6.2 futura não é candidata", !titles.includes("Avulsa futura"));
+  check("6.3 sem opt-in não é candidata", !titles.includes("Avulsa sem aviso"));
+  check("6.4 sem telefone não é candidata", !titles.includes("Avulsa sem telefone"));
+
+  const sentC: any[] = [];
+  const rc = await TaskReminderService.remindForOrg(C, async (to, m) => { sentC.push({ to, m }); }, { hourSP: 12 });
+  check("6.5 envia as 2 avulsas devidas", rc.sent === 2 && sentC.length === 2, JSON.stringify(rc));
+  check("6.6 para o telefone certo", sentC.every((s) => s.to === "31977776666"));
+  const rc2 = await TaskReminderService.remindForOrg(C, async () => { sentC.push(1); }, { hourSP: 12 });
+  check("6.7 dedupe: não reenvia avulsa", rc2.sent === 0);
 
   console.log("\n=== TEST: Lembrete de tarefa por WhatsApp (TASK-007) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

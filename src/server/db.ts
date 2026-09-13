@@ -11707,6 +11707,9 @@ const initDb = () => {
   // Vídeo na loja virtual (Estúdio F3): vídeo do produto + banner de vídeo da home.
   try { db.exec(`ALTER TABLE products_services ADD COLUMN video_url TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE storefront_settings ADD COLUMN banner_video_url TEXT`); } catch(e){}
+  // Lembrete por WhatsApp em tarefa AVULSA (opt-in por tarefa; recorrente usa a
+  // política da regra). Default 0 → só in-app; sem regressão.
+  try { db.exec(`ALTER TABLE tasks ADD COLUMN notify_whatsapp INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

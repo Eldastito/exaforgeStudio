@@ -50,6 +50,33 @@ export class TaskReminderService {
     });
   }
 
+  /**
+   * Tarefas AVULSAS (não-recorrentes) com opt-in `notify_whatsapp=1` que já
+   * estão DEVIDAS (sem prazo → lembra logo; com prazo → só quando vence) e ainda
+   * abertas. Mesma dedupe do log (1 lembrete por tarefa). É a cobrança que o
+   * dono pediu pra tarefa delegada sem recorrência.
+   */
+  static pendingAvulsaCandidates(orgId: string): any[] {
+    const rows = db.prepare(`
+      SELECT t.id, t.assigned_to, t.title, t.due_at, 'America/Sao_Paulo' AS timezone, u.phone
+        FROM tasks t
+        LEFT JOIN users u ON u.id = t.assigned_to AND u.organization_id = t.organization_id
+       WHERE t.organization_id = ? AND t.notify_whatsapp = 1 AND t.recurrence_rule_id IS NULL
+         AND t.status IN ('a_fazer','fazendo')
+         AND (t.due_at IS NULL OR t.due_at <= datetime('now'))
+         AND NOT EXISTS (
+           SELECT 1 FROM task_reminder_log l
+            WHERE l.organization_id = t.organization_id AND l.task_id = t.id
+              AND l.channel = 'whatsapp' AND l.reminder_type = 'materialized' AND l.status = 'sent')
+    `).all(orgId) as any[];
+    return rows.filter((r) => String(r.phone || "").replace(/\D/g, "").length >= 8);
+  }
+
+  /** Todos os candidatos (recorrente + avulso) de uma org. */
+  static allPendingCandidates(orgId: string): any[] {
+    return [...this.pendingCandidates(orgId), ...this.pendingAvulsaCandidates(orgId)];
+  }
+
   private static logRow(orgId: string, taskId: string): any {
     return db.prepare(`SELECT * FROM task_reminder_log WHERE organization_id = ? AND task_id = ? AND channel = 'whatsapp' AND reminder_type = 'materialized'`).get(orgId, taskId);
   }
@@ -70,7 +97,7 @@ export class TaskReminderService {
   private static message(task: any): string {
     let when = "";
     if (task.due_at) { try { when = ` (${new Date(String(task.due_at).includes("T") ? task.due_at : task.due_at + "Z").toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" })})`; } catch { /* noop */ } }
-    return `🔁 Lembrete de tarefa: *${task.title}*${when}. Abra o ZappFlow para concluir.`;
+    return `📌 Lembrete de tarefa: *${task.title}*${when}. Abra o ZappFlow para concluir.`;
   }
 
   /**
@@ -106,7 +133,7 @@ export class TaskReminderService {
   /** Processa todos os candidatos de UMA org com um `send` injetado. */
   static async remindForOrg(orgId: string, send: ReminderSend, opts: { hourSP?: number } = {}): Promise<{ sent: number; skipped: number; failed: number }> {
     const out = { sent: 0, skipped: 0, failed: 0 };
-    for (const task of this.pendingCandidates(orgId)) {
+    for (const task of this.allPendingCandidates(orgId)) {
       const r = await this.remindTask(orgId, task, send, opts);
       out[r.status]++;
     }
@@ -119,13 +146,19 @@ export class TaskReminderService {
    */
   static async runPass(now: Date = new Date()): Promise<number> {
     let orgs: any[] = [];
-    try { orgs = db.prepare(`SELECT DISTINCT organization_id FROM task_recurrence_rules WHERE status IN ('active','paused')`).all() as any[]; } catch { return 0; }
+    try {
+      orgs = db.prepare(`
+        SELECT DISTINCT organization_id FROM task_recurrence_rules WHERE status IN ('active','paused')
+        UNION
+        SELECT DISTINCT organization_id FROM tasks WHERE notify_whatsapp = 1 AND recurrence_rule_id IS NULL AND status IN ('a_fazer','fazendo')
+      `).all() as any[];
+    } catch { return 0; }
     let total = 0;
     const { MessageProviderService } = await import("./MessageProviderService.js");
     for (const o of orgs) {
       const orgId = o.organization_id;
       try {
-        if (!this.pendingCandidates(orgId).length) continue;
+        if (!this.allPendingCandidates(orgId).length) continue;
         const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
         if (!channel) continue; // sem canal WhatsApp → só in-app
         const res = await this.remindForOrg(orgId, (to: string, msg: string) => MessageProviderService.sendMessage(channel.id, to, msg, { feature: "gestao" }), { hourSP: hourInTz(now) });

@@ -10,6 +10,7 @@ import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { OrdersService } from "../OrdersService.js";
+import { StorefrontStockService } from "../StorefrontStockService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas PÚBLICAS (sem autenticação).
@@ -57,13 +58,11 @@ function productPayload(orgId: string, p: any): any {
     `SELECT url FROM product_images WHERE product_service_id = ? ORDER BY position ASC, created_at ASC`
   ).all(p.id) as any[];
 
+  // Disponibilidade considera estoque próprio E de loja (rede/Alterdata) — sem
+  // isso, produto com saldo só em retail_store_inventory aparecia "esgotado".
   let available = true;
   if (p.stock_control_enabled) {
-    const inv = db.prepare(
-      `SELECT COALESCE(SUM(quantity_available - quantity_reserved), 0) AS sellable
-         FROM inventory_items WHERE product_service_id = ?`
-    ).get(p.id) as any;
-    available = (inv?.sellable ?? 0) > 0;
+    available = StorefrontStockService.sellable(p.id) > 0;
   }
 
   return {
@@ -176,6 +175,10 @@ router.get("/store/:slug", (req, res): any => {
   const where: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'"];
   const args: any[] = [orgId];
   if (q) { where.push("(name LIKE ? OR category LIKE ?)"); const like = `%${q}%`; args.push(like, like); }
+  // "Ocultar automaticamente sem estoque": esconde da vitrine quem tem controle
+  // de estoque e está zerado (estoque próprio + de loja). Vale pra QUALQUER
+  // origem de estoque, na contagem e na página (paginação correta).
+  if (store.auto_hide_out_of_stock) where.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
   const productsTotal = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
   const products = db.prepare(
     `SELECT * FROM products_services
@@ -187,7 +190,8 @@ router.get("/store/:slug", (req, res): any => {
   const pslug = String(req.query.pslug || "").trim();
   if (pslug && !products.some((p) => p.slug === pslug)) {
     const linked = db.prepare(
-      `SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible,1) = 1 AND type='product' AND slug = ? LIMIT 1`
+      `SELECT * FROM products_services WHERE organization_id = ? AND active = 1 AND COALESCE(storefront_visible,1) = 1 AND type='product' AND slug = ?
+        ${store.auto_hide_out_of_stock ? `AND ${StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL}` : ""} LIMIT 1`
     ).get(orgId, pslug) as any;
     if (linked) products.push(linked);
   }

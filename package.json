@@ -126,6 +126,7 @@
     "test:alterdata-catalog-grade": "tsx scripts/test-alterdata-catalog-grade.ts",
     "test:pdv-filial-scope": "tsx scripts/test-pdv-filial-scope.ts",
     "test:studio-store": "tsx scripts/test-studio-store.ts",
+    "test:storefront-stock": "tsx scripts/test-storefront-stock.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",
     "test:visual-generation-kernel": "tsx scripts/test-visual-generation-kernel.ts",
     "test:visual-kernel-edit-routing": "tsx scripts/test-visual-kernel-edit-routing.ts",

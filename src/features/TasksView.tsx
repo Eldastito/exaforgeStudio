@@ -45,7 +45,9 @@ export function TasksView() {
     const q = filterUser ? `?assignedTo=${filterUser}` : '';
     apiFetch(`/api/tasks${q}`).then(r => r.json()).then(d => setTasks(Array.isArray(d) ? d : [])).catch(() => {}).finally(() => setLoading(false));
   }, [filterUser]);
-  const loadUsers = () => apiFetch('/api/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {});
+  // /api/users responde { users, invites } (não um array) — ler d.users. Sem
+  // isto o Array.isArray caía no [] e o dropdown de Responsável ficava vazio.
+  const loadUsers = () => apiFetch('/api/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : (d?.users || []))).catch(() => {});
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadUsers(); }, []);
 

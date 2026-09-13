@@ -1,83 +1,69 @@
 # Runbook — Rede de Lojas (TOULON): acesso do gerente por loja
 
-Decisão de arquitetura + operação para o caso TOULON (rede com guarda-chuva +
-lojas). Doc-of-record da decisão tomada em 2026-09 sobre como o gerente enxerga
-"só a sua loja".
+Doc-of-record (2026-09) de como o gerente enxerga "só a sua loja" no caso TOULON
+(rede com guarda-chuva + lojas). Atualizado após confirmação do dono sobre a
+topologia real de dados.
 
-## Modelo REAL hoje (verificado no código)
+## Topologia REAL (confirmada com o dono + verificada no código)
 
-- O import do PDV (Alterdata) grava numa **única conta** (a TOULON) com **todas as
-  filiais juntas** (`alterdata_integration_settings` por-org, com `filiais_json`),
-  cada cliente etiquetado por `filial`. Por isso os ~20 mil clientes do PDV vivem
-  **dentro da TOULON**, com filtro de loja — não espalhados por contas de loja.
-- A consolidação do grupo (`GroupConsolidationService`, fan-out) puxa hoje só
-  **vendas/fechamentos/comissão** — não puxa contatos/CRM.
+O dado NÃO é homogêneo — vive em lugares diferentes por tipo:
 
-Ou seja: o sistema opera no modelo **"uma conta TOULON com as lojas como etiqueta
-interna (`retail_stores` / `filial`)"**, e NÃO no modelo "cada loja é uma conta
-que alimenta a TOULON". (O modelo mental de contas-por-loja existe no seletor de
-operação do Grupo, mas não é por onde os dados de cliente entram.)
+| Dado | Onde vive hoje | Isolamento do gerente |
+| --- | --- | --- |
+| **WhatsApp / ATENDIMENTO** (conversas, tickets) | **Na conta da loja** (cada loja conecta o seu número na própria conta) | **Já isolado por conta** — o gerente loga na conta da loja e vê só o dela. Zero código. |
+| **Contatos & CRM** (contatos do WhatsApp) | **Na conta da loja** (derivam das conversas) | **Já isolado por conta.** Zero código. |
+| **Clientes do PDV** (Alterdata) | **Na TOULON** (uma conta só, todas as filiais, etiquetadas por `filial`) | **NÃO isolado** — não estão na conta da loja; o gerente na conta da loja vê a aba vazia. |
+| **Consolidado do grupo** (fan-out) | TOULON puxa **vendas/fechamentos** das lojas | Só puxa vendas — **não** puxa contatos/CRM/PDV. |
 
-## Decisão: **Caminho A** — gerente entra na TOULON, travado na sua loja
+O gerente loga na **conta separada da loja** (confirmado). Logo, tudo que ENTRA
+pela loja (WhatsApp/CRM) já fica isolado por conta; a exceção é o **PDV**, que é
+importado centralizado na TOULON.
 
-Motivo (o que funciona pro cliente, sem risco):
-- Entrega o resultado que o cliente quer (gerente vê só a sua loja; dono vê tudo)
-  **com o dado que já existe**, **sem migração** e **sem risco**.
-- O Caminho B (rotear import por conta de loja + migrar ~20 mil clientes +
-  histórico + WhatsApp por conta + estender a consolidação) é re-arquitetura de
-  semanas com risco alto de migração de dados de produção, para uma pureza que
-  **não muda a experiência do cliente**.
+## Conclusão
 
-## O que já está entregue (código merjado)
+- **WhatsApp/ATENDIMENTO + Contatos & CRM do gerente:** já funcionam isolados por
+  conta. Nada a construir. (Os PRs #1642/#1643, que escopam *dentro* de uma org
+  por loja, ficam **inertes** para este gerente — ele está numa conta de loja
+  única; não há o que filtrar. Eles só valem para um usuário logado NA TOULON.)
+- **Ainda úteis para o gerente na conta da loja:** #1638 (módulos add-on no editor
+  de perfis) e #1640 (`manager`→`admin`, para o gerente passar nos `requireRole`
+  da própria conta).
+- **Única lacuna real:** o gerente, na conta da loja, **não vê os Clientes do PDV**
+  (estão na TOULON). Fecha-la exige uma decisão do dono (abaixo).
 
-- **#1640** — papel `manager` normalizado para `admin` (o gerente passa a valer nos
-  gates `requireRole`; a "função de gerente" fina vive no perfil RBAC "Gerente").
-- **#1642** — `RetailStoreScopeService`: um **admin ATRIBUÍDO a uma loja fica
-  restrito** a ela (dono nunca; sem atribuição segue irrestrito). Escopa PDV,
-  estoque, reposição, seletor de lojas.
-- **#1643** — **Contatos & CRM** escopado por loja de compra (política inclusiva:
-  a loja do gerente + contatos sem loja atribuída; esconde só quem comprou em
-  outra loja).
-- **#1638** — módulos add-on/verticais no editor de Perfis de Acesso.
+## Decisão pendente: PDV na conta da loja?
 
-## Como ATIVAR (operacional — do dono, no app)
+O gerente precisa dos **Clientes do PDV da loja dele dentro da conta da loja**, ou
+o CRM do WhatsApp (já isolado) é o suficiente para o dia a dia dele?
 
-Para cada gerente ver **só a sua loja**, dentro da conta TOULON:
+- **Opção 1 — PDV consolidado fica só com o dono (TOULON).** O gerente trabalha o
+  CRM do WhatsApp (já funciona). Zero trabalho. O dono vê o PDV consolidado com
+  filtro de loja na TOULON.
+- **Opção 2 — Rotear o PDV por conta de loja.** Cada loja passa a receber/enxergar
+  os seus clientes do PDV na própria conta. Exige apontar o import do Alterdata por
+  conta (ou replicar por filial) + migrar/expor os ~20 mil clientes para as contas
+  certas. É projeto de dados (dias/semanas + risco de migração).
 
-1. O gerente é um **usuário da conta TOULON** (não de uma conta separada) com
-   papel `admin` + perfil "Gerente".
-2. **Settings → Usuários → atribuir a loja do gerente** (trava de loja,
-   `user_stores`). É a atribuição que ativa o escopo dos #1642/#1643.
-3. O `código` da loja (`retail_stores.code`) precisa bater com a `filial` dos
-   clientes do PDV (senão o filtro do PDV vem vazio).
+Recomendação: começar pela **Opção 1** (já funciona; sem risco) e só ir para a
+Opção 2 se o cliente exigir o gerente operando a base PDV dentro da conta da loja.
 
-Sem atribuição, o gerente (admin) vê tudo — default 0-regressão.
+## ATENDIMENTO por loja — NÃO é necessário
 
-## Item ABERTO: ATENDIMENTO (WhatsApp / Kanban) por loja
+Como o WhatsApp conecta na conta de cada loja, o ATENDIMENTO já está isolado por
+conta. Não é preciso binding canal→loja nem escopo de tickets. (Só seria preciso
+se os números fossem consolidados numa conta só — não é o caso.)
 
-O que o cliente pediu: "o cliente que chega pelo WhatsApp da loja pertence ao CRM
-da loja". Hoje isso **não é escopável de forma limpa**:
-- `channels` não tem `store_id`; `tickets` não têm loja; não existe binding
-  canal→loja. `retail_stores.whatsapp_identifier` é WhatsApp de SAÍDA (avisos),
-  não o canal de entrada do cliente.
+## Como ATIVAR hoje (operacional — do dono)
 
-Escopar o ATENDIMENTO por loja é uma **fatia própria** (mexe no inbox central —
-superfície crítica; fazer às cegas quebra o que funciona). Plano proposto quando
-priorizado (opt-in, 0-regressão por default):
-1. Binding **canal→loja** (coluna/tabela nova; o dono liga cada número de WhatsApp
-   a uma loja em Canais e IA).
-2. Escopo dos tickets por esse binding, espelhando o #1643 (inclusivo: a loja do
-   gerente + canais sem binding; no-op quando não há binding ou usuário
-   irrestrito).
-3. UI de binding + teste de regressão.
+1. O gerente é **usuário da conta da própria loja** (papel `admin` + perfil
+   "Gerente"). Nada de TOULON.
+2. Isolamento de WhatsApp/CRM é automático (conta separada).
+3. Consolidação (dono): a visão de rede fica na TOULON (Grupo → Consolidado);
+   hoje cobre vendas. Puxar contatos/PDV no consolidado é a fatia diferida abaixo.
 
-**Pré-condição a confirmar antes de construir:** os números de WhatsApp das lojas
-estão conectados NA conta TOULON (um número por loja) ou em contas separadas? Se
-em contas separadas, o ATENDIMENTO já está isolado por conta e nada é preciso.
+## Fatias diferidas (só se o cliente pedir)
 
-## Fatias diferidas (só se o cliente quiser o modelo por-conta-de-loja — Caminho B)
-
-- Rotear o import do PDV para cada conta de loja.
-- Conectar o WhatsApp por conta de loja.
-- Migrar os clientes/histórico da TOULON para as contas de loja.
-- Estender `GroupConsolidationService` para puxar contatos/CRM (fan-out).
+- **PDV por conta de loja** (Opção 2 acima): import do Alterdata por conta +
+  migração dos clientes.
+- **Consolidação de contatos/CRM na TOULON** (fan-out): estender
+  `GroupConsolidationService` para o dono ver a base de clientes somada da rede.

@@ -176,9 +176,11 @@ router.get("/store/:slug", (req, res): any => {
   const args: any[] = [orgId];
   if (q) { where.push("(name LIKE ? OR category LIKE ?)"); const like = `%${q}%`; args.push(like, like); }
   // Filtro por categoria (menu de navegação da vitrine). Exato — o menu envia a
-  // categoria como cadastrada; busca livre por texto continua no `q`.
+  // categoria como cadastrada; busca livre por texto continua no `q`. O sentinel
+  // `__sem_categoria__` filtra os produtos SEM categoria (chip "Sem categoria").
   const category = String(req.query.category || "").trim();
-  if (category) { where.push("category = ?"); args.push(category); }
+  if (category === "__sem_categoria__") { where.push("(category IS NULL OR TRIM(category) = '')"); }
+  else if (category) { where.push("category = ?"); args.push(category); }
   // "Ocultar automaticamente sem estoque": esconde da vitrine quem tem controle
   // de estoque e está zerado (estoque próprio + de loja). Vale pra QUALQUER
   // origem de estoque, na contagem e na página (paginação correta).
@@ -218,6 +220,10 @@ router.get("/store/:slug", (req, res): any => {
   const catWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "category IS NOT NULL", "TRIM(category) != ''"];
   if (store.auto_hide_out_of_stock) catWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
   const catList = (db.prepare(`SELECT DISTINCT category FROM products_services WHERE ${catWhere.join(" AND ")} ORDER BY category COLLATE NOCASE`).all(orgId) as any[]).map(r => r.category);
+  // Existe produto visível SEM categoria? Alimenta o chip "Sem categoria".
+  const uncatWhere: string[] = ["organization_id = ?", "active = 1", "COALESCE(storefront_visible, 1) = 1", "type = 'product'", "(category IS NULL OR TRIM(category) = '')"];
+  if (store.auto_hide_out_of_stock) uncatWhere.push(StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL);
+  const hasUncategorized = Number((db.prepare(`SELECT COUNT(*) c FROM products_services WHERE ${uncatWhere.join(" AND ")}`).get(orgId) as any)?.c || 0) > 0;
 
   res.json({
     store: {
@@ -234,6 +240,7 @@ router.get("/store/:slug", (req, res): any => {
     products: products.map(p => productPayload(orgId, p)),
     productsTotal,
     categories: catList,
+    hasUncategorized,
     collections: resolveCollections(orgId),
     resources: ReservationService.listResources(orgId),
   });

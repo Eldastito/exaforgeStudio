@@ -62,6 +62,8 @@ export interface StoreResponse {
   productsTotal?: number;
   /** Categorias distintas de todos os produtos visíveis (menu de navegação). */
   categories?: string[];
+  /** Existe produto visível sem categoria (alimenta o chip "Sem categoria"). */
+  hasUncategorized?: boolean;
   collections?: StoreCollection[];
   resources?: ReservableResource[];
 }

@@ -792,7 +792,11 @@ router.get("/", (req: AuthRequest, res): any => {
         COALESCE(prod.quantity_available, agg.qa, rsi.qa) AS quantity_available,
         COALESCE(prod.quantity_reserved, agg.qr, rsi.qr) AS quantity_reserved,
         prod.low_stock_threshold AS low_stock_threshold,
-        prod.avg_cost AS avg_cost
+        prod.avg_cost AS avg_cost,
+        -- Miniatura do card: capa do produto (mesma imagem que a vitrine usa) —
+        -- inclui a foto de catálogo gerada, que grava studio_image_url + capa.
+        COALESCE(ps.studio_image_url,
+          (SELECT url FROM product_images WHERE product_service_id = ps.id ORDER BY position ASC, created_at ASC LIMIT 1)) AS cover_image_url
       FROM products_services ps
       LEFT JOIN inventory_items prod ON prod.product_service_id = ps.id AND prod.variant_id IS NULL
       LEFT JOIN (

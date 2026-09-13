@@ -455,6 +455,14 @@ export function CatalogView() {
                   <Boxes className="w-4 h-4" />
                 </button>
               </div>
+              {p.cover_image_url ? (
+                <img src={p.cover_image_url} alt={p.name}
+                  className="mt-2 w-full h-36 object-cover rounded-lg border border-zinc-800 bg-zinc-950" />
+              ) : (
+                <div className="mt-2 w-full h-36 flex items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-950 text-zinc-700">
+                  <Package className="w-8 h-8" />
+                </div>
+              )}
               <h3 className="font-semibold text-zinc-100 mt-2">{p.name}</h3>
               <p className="text-zinc-500 text-sm mt-1 line-clamp-2">{p.description || 'Sem descrição'}</p>
               <div className="mt-4 flex items-center justify-between">

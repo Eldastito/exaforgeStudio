@@ -122,7 +122,14 @@ export function ProductModal({
 
           {/* Carrossel */}
           <div className="relative aspect-square w-full shrink-0 overflow-hidden md:w-1/2">
-            {images.length ? (
+            {product.video ? (
+              <video
+                src={product.video}
+                autoPlay muted loop playsInline
+                poster={images[0] || undefined}
+                className="h-full w-full object-cover"
+              />
+            ) : images.length ? (
               <img
                 src={images[imgIndex]}
                 alt={product.name}
@@ -139,7 +146,7 @@ export function ProductModal({
               </div>
             )}
 
-            {images.length > 1 && (
+            {!product.video && images.length > 1 && (
               <>
                 <button
                   type="button"

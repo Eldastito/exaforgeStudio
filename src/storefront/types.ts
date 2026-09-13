@@ -21,6 +21,7 @@ export interface Product {
   featured: boolean;
   available: boolean;
   images: string[];
+  video?: string | null;
 }
 
 export interface Store {
@@ -29,6 +30,7 @@ export interface Store {
   subtitle: string;
   logo_url: string | null;
   banner_url: string | null;
+  banner_video_url?: string | null;
   accent_color: string;
   default_mode: Mode;
 }

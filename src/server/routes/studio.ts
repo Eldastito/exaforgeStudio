@@ -549,6 +549,24 @@ router.post("/creations/:id/to-banner", (req: AuthRequest, res): any => {
   res.json({ success: true });
 });
 
+// POST /api/studio/creations/:id/to-product-video { productId } — vídeo do produto (Fatia 3)
+router.post("/creations/:id/to-product-video", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = StudioService.setProductVideo(orgId, String(req.params.id), String(req.body?.productId || ""));
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ success: true });
+});
+
+// POST /api/studio/creations/:id/to-video-banner — banner de vídeo da home (Fatia 3)
+router.post("/creations/:id/to-video-banner", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = StudioService.setStorefrontVideoBanner(orgId, String(req.params.id));
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ success: true });
+});
+
 // GET /api/studio/limits — uso vs limite do plano (imagens/vídeos no mês)
 router.get("/limits", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

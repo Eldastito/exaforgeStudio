@@ -811,6 +811,42 @@ export class AlterdataSyncRunner {
     return out;
   }
 
+  /**
+   * FILIAIS ÓRFÃS (diagnóstico): cruza as filiais que VENDEM no ERP (VendaMalote
+   * resumo por filial) com as lojas cadastradas. As que têm venda e NÃO têm loja
+   * são órfãs — o PDV delas é descartado no sync. Pra cada órfã, busca a ÚLTIMA
+   * data de movimento (DataCaixa/UltimoMovimento): uma órfã com movimento
+   * RECENTE é candidata a "pra onde a operação migrou" (ex.: a Grande Rio 1006
+   * ficou muda em 10/08 e a loja pode ter seguido em outra filial). Read-only,
+   * não grava, não lança (best-effort por filial). Isolado por org.
+   */
+  static async orphanFiliaisReport(orgId: string): Promise<Array<{ filial: string; totalVenda: number; hasStore: boolean; storeName: string | null; lastMovement: string | null; lastFinalized: boolean | null }>> {
+    type Row = { filial: string; totalVenda: number; hasStore: boolean; storeName: string | null; lastMovement: string | null; lastFinalized: boolean | null };
+    const out: Row[] = [];
+    let items: any[] = [];
+    try { items = (await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/VendaMalote/relatorio/resumo/porfilial`)).items || []; } catch { items = []; }
+    for (const it of items) {
+      const filial = str(it?.filial);
+      const totalVenda = Number(it?.totalVenda || 0);
+      if (!filial || totalVenda <= 0) continue; // só filiais que efetivamente vendem
+      const store = db.prepare(`SELECT name FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, filial, filial) as any;
+      const row: Row = { filial, totalVenda, hasStore: !!store, storeName: store?.name || null, lastMovement: null, lastFinalized: null };
+      if (!store) {
+        // Órfã: descobre até quando movimentou (candidata a loja migrada).
+        try {
+          const { body } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(filial)}`);
+          const m = (body as any)?.data;
+          const mv = Array.isArray(m) ? m[0] : m;
+          row.lastMovement = str(mv?.data).slice(0, 10) || null;
+          row.lastFinalized = mv?.finalizado2 != null ? Number(mv.finalizado2) === 1 : null;
+        } catch { /* segue sem a data */ }
+      }
+      out.push(row);
+    }
+    out.sort((a, b) => b.totalVenda - a.totalVenda);
+    return out;
+  }
+
   /** Passa nas orgs ativas e enfileira o sync das que venceram o intervalo. */
   static alterdataSyncPass(): void {
     const orgs = enabledOrgs();

@@ -572,6 +572,19 @@ router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
   res.json({ ok: true, summary, lastError, backfill, running: AlterdataSyncRunner.isRunning(req.organizationId) });
 });
 
+// DIAGNÓSTICO: filiais que VENDEM no ERP mas NÃO têm loja cadastrada (órfãs) —
+// com a última data de movimento de cada uma. Uma órfã com movimento recente é
+// candidata a "pra onde uma loja migrou de código". Read-only. owner/admin.
+router.post("/alterdata/orphan-filiais", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const rows = await AlterdataSyncRunner.orphanFiliaisReport(req.organizationId);
+    res.json({ ok: true, rows });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao levantar as filiais órfãs." });
+  }
+});
+
 // DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/
 // Saldo/Preco) separadamente e devolve o HTTP status de cada um, para isolar por
 // eliminação qual está devolvendo 500 na homologação. Não grava nada.

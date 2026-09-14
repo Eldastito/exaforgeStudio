@@ -910,6 +910,30 @@ function AlterdataConnectorPanel() {
     }
   };
 
+  // Filiais órfãs: vendem no ERP mas não têm loja cadastrada — com a última data
+  // de movimento. Uma órfã com movimento recente = candidata a loja migrada.
+  const [orphansBusy, setOrphansBusy] = useState(false);
+  const [orphans, setOrphans] = useState<Array<{ filial: string; totalVenda: number; hasStore: boolean; storeName: string | null; lastMovement: string | null; lastFinalized: boolean | null }> | null>(null);
+  const runOrphans = async () => {
+    setOrphansBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/orphan-filiais', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok && Array.isArray(d.rows)) {
+        setOrphans(d.rows);
+        const orf = d.rows.filter((r: any) => !r.hasStore);
+        if (!orf.length) toast.success('Todas as filiais que vendem têm loja cadastrada.');
+        else toast.info(`${orf.length} filial(is) vendem no ERP sem loja no ZapFlow.`);
+      } else {
+        toast.error(d.error || 'Falha ao levantar as filiais órfãs.');
+      }
+    } catch {
+      toast.error('Falha ao levantar as filiais órfãs.');
+    } finally {
+      setOrphansBusy(false);
+    }
+  };
+
   const [probing, setProbing] = useState(false);
   const [probes, setProbes] = useState<Array<{ resource: string; status: number; ok: boolean; snippet: string; path: string }> | null>(null);
   const runProbe = async () => {
@@ -1234,6 +1258,12 @@ function AlterdataConnectorPanel() {
           {probing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
           Testar módulos
         </Button>
+        {/* Filiais órfãs: acha filial que vende no ERP sem loja no ZapFlow — e até
+            quando ela movimentou (pra localizar loja que migrou de código). */}
+        <Button onClick={runOrphans} disabled={orphansBusy || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Lista as filiais que vendem no ERP mas não têm loja cadastrada, com a última data de movimento — pra achar pra onde uma loja migrou de código'}>
+          {orphansBusy ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
+          Filiais órfãs
+        </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
           Integração ativa
@@ -1289,6 +1319,25 @@ function AlterdataConnectorPanel() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Filiais órfãs: vendem no ERP sem loja cadastrada, com a última data de
+          movimento — a que tiver movimento recente é candidata a loja migrada. */}
+      {orphans && (
+        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+          <div className="font-semibold text-amber-200 mb-2">Filiais que vendem no ERP × loja cadastrada</div>
+          <div className="space-y-1">
+            {orphans.map((r, i) => (
+              <div key={i} className={r.hasStore ? 'text-zinc-300' : 'text-amber-200'}>
+                <span className="font-medium">filial {r.filial}</span> · venda ERP {Number(r.totalVenda).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                {r.hasStore
+                  ? <> · loja "{r.storeName}" ✓</>
+                  : <> · <span className="font-semibold">SEM loja cadastrada</span>{r.lastMovement ? ` · últ. movimento ${new Date(r.lastMovement + 'T12:00:00Z').toLocaleDateString('pt-BR')}${r.lastFinalized === false ? ' (caixa aberto)' : ''}` : ' · sem movimento recente'}</>}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[11px] text-zinc-500">Uma filial SEM loja com movimento recente é candidata a "pra onde a loja migrou de código" — cadastre uma loja com esse código.</div>
         </div>
       )}
 

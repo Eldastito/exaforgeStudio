@@ -745,6 +745,7 @@ function AlterdataConnectorPanel() {
   const [resyncing, setResyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<any>(null);
   // Diagnóstico "a grade (tamanho/cor) está chegando da Alterdata?" — resposta
   // em português claro pro dono, em vez de ler "890 variantes" no resumo técnico.
   const [grade, setGrade] = useState<any>(null);
@@ -805,6 +806,7 @@ function AlterdataConnectorPanel() {
       try {
         const r = await apiFetch('/api/integrations/alterdata/last-sync');
         const j = await r.json().catch(() => ({}));
+        if (j?.backfill) setBackfillResult(j.backfill);
         const startedAt = Number(localStorage.getItem(RESYNC_LS_KEY) || 0);
         const ranAt = j?.summary?.ranAt ? new Date(j.summary.ranAt).getTime() : 0;
         const pending = startedAt > 0 && Date.now() - startedAt < 60 * 60_000 && ranAt < startedAt;
@@ -886,6 +888,18 @@ function AlterdataConnectorPanel() {
       if (res.ok && d.ok && d.queued) {
         toast.success(`Recuperação de fechamentos iniciada (${(d.filiais || []).length} filial(is), ${d.days} dias) — em segundo plano.`);
         setLastSync({ at: new Date().toISOString(), ok: true, text: 'Recuperando fechamentos do PDV… (pode levar alguns minutos; pode sair desta tela)' });
+        // Poll do resultado: o job grava em _meta/lastBackfillClosings; busca por
+        // ~3 min até o `at` mudar (job terminou), pra a tela mostrar o que fez.
+        const startedAt = Date.now();
+        for (let i = 0; i < 36; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            const rr = await apiFetch('/api/integrations/alterdata/last-sync');
+            const jj = await rr.json().catch(() => ({}));
+            const at = jj?.backfill?.at ? new Date(jj.backfill.at).getTime() : 0;
+            if (jj?.backfill && at >= startedAt) { setBackfillResult(jj.backfill); break; }
+          } catch { /* segue tentando */ }
+        }
       } else {
         toast.error(d.error || 'Falha ao recuperar fechamentos.');
       }
@@ -1247,6 +1261,27 @@ function AlterdataConnectorPanel() {
           <span className="font-semibold">{lastSync.ok ? 'Última sincronização: ' : 'Falha na sincronização: '}</span>
           {lastSync.text}
           <span className="text-zinc-500"> · {new Date(lastSync.at).toLocaleString('pt-BR')}</span>
+        </div>
+      )}
+
+      {/* Resultado do "Recuperar fechamentos" — antes ficava invisível. Mostra o
+          que o backfill fez por filial (aplicados / sem loja / erros) pra dar pra
+          diagnosticar quando a loja segue zerada. */}
+      {backfillResult && (
+        <div className="mt-2 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-sky-200">
+          <span className="font-semibold">Recuperar fechamentos (última): </span>
+          {Number(backfillResult.applied || 0)} dia(s) aplicado(s)
+          {Number(backfillResult.skippedNoStore || 0) ? ` · ${backfillResult.skippedNoStore} sem loja cadastrada` : ''}
+          {backfillResult.at ? <span className="text-zinc-500"> · {new Date(backfillResult.at).toLocaleString('pt-BR')}</span> : null}
+          {Array.isArray(backfillResult.results) && backfillResult.results.length > 0 && (
+            <div className="mt-1 text-[11px] text-sky-300/80">
+              {backfillResult.results.map((r: any, i: number) => (
+                <span key={i} className="mr-3 inline-block">
+                  filial {r.filial}: {Number(r.applied || 0)} aplicado(s){Number(r.skippedNoStore || 0) ? ', sem loja' : ''}{Number(r.errors || 0) ? `, ${r.errors} erro(s)` : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

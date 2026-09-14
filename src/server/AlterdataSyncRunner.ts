@@ -798,6 +798,15 @@ export class AlterdataSyncRunner {
       await run(`DataCaixa (últ. movimento filial ${f0})`, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(f0)}`);
       await run(`DataCaixa (dia ${hoje} filial ${f0})`, "sales", `/api/v1/DataCaixa/${hoje}/${encodeURIComponent(f0)}`);
       await run(`ResumoFecharMovimento (filial ${f0})`, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f0)}/${hoje}/1`);
+      // DIAGNÓSTICO do backfill de fechamento: o "Recuperar fechamentos" busca o
+      // ResumoFecharMovimento em DIAS PASSADOS. Se o endpoint só servir o dia
+      // ATUAL (devolvendo 0/erro pra datas antigas), o backfill aplica 0 e a loja
+      // segue zerada. Estes probes em datas passadas respondem, com prova, se o
+      // endpoint serve histórico — "Total de Vendas" > 0 num dia passado = serve.
+      for (const back of [7, 21, 45]) {
+        const d = new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+        await run(`ResumoFecharMovimento HISTÓRICO (filial ${f0}, ${back}d atrás = ${d})`, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f0)}/${d}/1`);
+      }
     }
     return out;
   }

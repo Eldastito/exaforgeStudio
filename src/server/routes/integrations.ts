@@ -566,7 +566,10 @@ router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
   const parse = (raw: string) => { try { return raw && raw !== "0" ? JSON.parse(raw) : null; } catch { return null; } };
   const summary = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastSummary", ""));
   const lastError = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastError", ""));
-  res.json({ ok: true, summary, lastError, running: AlterdataSyncRunner.isRunning(req.organizationId) });
+  // Resultado do último "Recuperar fechamentos" — antes ficava só num log interno,
+  // então não dava pra ver o que o backfill fez (aplicou / pulou / erros por filial).
+  const backfill = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastBackfillClosings", ""));
+  res.json({ ok: true, summary, lastError, backfill, running: AlterdataSyncRunner.isRunning(req.organizationId) });
 });
 
 // DIAGNÓSTICO ("Testar módulos"): probe cada endpoint (Referencia/CodigoDeBarras/

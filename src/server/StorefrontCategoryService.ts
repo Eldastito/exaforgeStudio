@@ -48,9 +48,9 @@ export class StorefrontCategoryService {
    * Traz contagem e um nome de produto de exemplo por valor — assim o dono
    * reconhece o código ("002" → "BERMUDA...") na hora de dar o nome amigável.
    */
-  static availableValues(orgId: string): Array<{ value: string; count: number; sample: string; mapped: boolean }> {
+  static availableValues(orgId: string): Array<{ value: string; count: number; sample: string; samples: string[]; mapped: boolean }> {
     const rows = db.prepare(
-      `SELECT category AS value, COUNT(*) AS count, MIN(name) AS sample
+      `SELECT category AS value, COUNT(*) AS count
          FROM products_services
         WHERE organization_id = ? AND type = 'product' AND active = 1
           AND category IS NOT NULL AND TRIM(category) != ''
@@ -59,7 +59,15 @@ export class StorefrontCategoryService {
     const mapped = new Set(
       (db.prepare(`SELECT COALESCE(source_value, name) AS value FROM storefront_categories WHERE organization_id = ? AND parent_id IS NOT NULL`).all(orgId) as any[]).map((r) => r.value)
     );
-    return rows.map((r) => ({ value: r.value, count: Number(r.count || 0), sample: r.sample || "", mapped: mapped.has(r.value) }));
+    const sampleStmt = db.prepare(
+      `SELECT name FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1 AND category = ? ORDER BY name COLLATE NOCASE LIMIT 5`
+    );
+    // Exemplos de produtos por código — o dono reconhece o que é cada código
+    // ("003" → "SHORT ESTAMPA...") antes de dar o nome amigável, evitando mapear errado.
+    return rows.map((r) => {
+      const samples = (sampleStmt.all(orgId, r.value) as any[]).map((s) => s.name);
+      return { value: r.value, count: Number(r.count || 0), sample: samples[0] || "", samples, mapped: mapped.has(r.value) };
+    });
   }
 
   private static nextPosition(orgId: string, parentId: string | null): number {

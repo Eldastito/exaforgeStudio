@@ -515,6 +515,7 @@
     "test:alterdata-sync-runner": "tsx scripts/test-alterdata-sync-runner.ts",
     "test:alterdata-backfill-closings": "tsx scripts/test-alterdata-backfill-closings.ts",
     "test:alterdata-price-delta-probe": "tsx scripts/test-alterdata-price-delta-probe.ts",
+    "test:alterdata-price-cursor-key": "tsx scripts/test-alterdata-price-cursor-key.ts",
     "test:alterdata-price-mapper": "tsx scripts/test-alterdata-price-mapper.ts",
     "test:module-addon-selfservice": "tsx scripts/test-module-addon-selfservice.ts",
     "test:security-hardening": "tsx scripts/test-security-hardening.ts",

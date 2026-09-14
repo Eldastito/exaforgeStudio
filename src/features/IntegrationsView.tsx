@@ -1274,11 +1274,18 @@ function AlterdataConnectorPanel() {
           {Number(backfillResult.skippedNoStore || 0) ? ` · ${backfillResult.skippedNoStore} sem loja cadastrada` : ''}
           {backfillResult.at ? <span className="text-zinc-500"> · {new Date(backfillResult.at).toLocaleString('pt-BR')}</span> : null}
           {Array.isArray(backfillResult.results) && backfillResult.results.length > 0 && (
-            <div className="mt-1 text-[11px] text-sky-300/80">
+            <div className="mt-1 space-y-0.5 text-[11px] text-sky-300/80">
               {backfillResult.results.map((r: any, i: number) => (
-                <span key={i} className="mr-3 inline-block">
-                  filial {r.filial}: {Number(r.applied || 0)} aplicado(s){Number(r.skippedNoStore || 0) ? ', sem loja' : ''}{Number(r.errors || 0) ? `, ${r.errors} erro(s)` : ''}
-                </span>
+                <div key={i}>
+                  <span className="font-medium">filial {r.filial}</span>
+                  {r.storeName ? ` → loja "${r.storeName}"` : (Number(r.skippedNoStore || 0) ? ' → sem loja cadastrada' : '')}
+                  {': '}{Number(r.applied || 0)} aplicado(s)
+                  {r.persisted != null ? ` · ${Number(r.persisted || 0)} no banco c/ sistema>0` : ''}
+                  {Number(r.errors || 0) ? ` · ${r.errors} erro(s)` : ''}
+                  {Array.isArray(r.sample) && r.sample.length > 0 && (
+                    <span className="text-zinc-500"> · ex.: {r.sample.slice(0, 3).map((s: any) => `${s.date}=${Number(s.total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`).join(', ')}</span>
+                  )}
+                </div>
               ))}
             </div>
           )}

@@ -844,14 +844,19 @@ export class AlterdataSyncRunner {
    * ao delta, então não atrapalha nem é atrapalhada pela sincronização normal.
    * Isolado por org (a loja é resolvida por `organization_id` + código da filial).
    */
-  static async backfillFilialClosings(orgId: string, filial: string, days = 90): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; errors: number }> {
+  static async backfillFilialClosings(orgId: string, filial: string, days = 90): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; errors: number; storeId: string | null; storeName: string | null; persisted: number; sample: Array<{ date: string; total: number }> }> {
     const f = str(filial);
-    const out = { filial: f, days, applied: 0, skippedNoStore: 0, errors: 0 };
+    const out = { filial: f, days, applied: 0, skippedNoStore: 0, errors: 0, storeId: null as string | null, storeName: null as string | null, persisted: 0, sample: [] as Array<{ date: string; total: number }> };
     if (!f) return out;
     // Casamento filial→loja: mesma regra do sync (código OU id, loja ativa).
-    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, f, f) as any;
+    // Guarda o NOME e o id resolvidos no resultado — é a verdade-de-campo pra
+    // cruzar com a grade (se a grade mostra 0 mas aqui a loja é a certa e há
+    // registros persistidos, o problema é de exibição, não de gravação).
+    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, f, f) as any;
     const storeId = store?.id || null;
     if (!storeId) { out.skippedNoStore = 1; return out; } // filial sem loja → nada a recuperar
+    out.storeId = storeId;
+    out.storeName = store?.name || null;
     const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
     const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "outros": "outros" };
     for (let i = 0; i < days; i++) {
@@ -892,8 +897,18 @@ export class AlterdataSyncRunner {
         } catch { /* folga geral etc — system_total ainda é aplicado abaixo */ }
       }
       RetailReconciliationService.applyPdvTotal(orgId, storeId, date, totalR);
+      if (out.sample.length < 5) out.sample.push({ date, total: totalR }); // amostra p/ cruzar com a grade
       out.applied++;
     }
+    // Verdade-de-campo: RE-LÊ do banco quantos fechamentos DESTA loja ficaram com
+    // system_total>0 na janela. Se `persisted` bater com `applied` mas a grade
+    // mostrar 0, a gravação está certa e o problema é de exibição/loja errada.
+    try {
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+      out.persisted = Number((db.prepare(
+        `SELECT COUNT(*) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date >= ? AND COALESCE(system_total, 0) > 0`
+      ).get(orgId, storeId, cutoff) as any)?.n || 0);
+    } catch { /* noop */ }
     try { logAuthEvent(orgId, "system", "backfillFilialClosings", "ALTERDATA_BACKFILL_CLOSINGS", out as any); } catch { /* noop */ }
     return out;
   }

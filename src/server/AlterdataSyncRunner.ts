@@ -251,8 +251,16 @@ export class AlterdataSyncRunner {
       let winnerKey: string | null = null;
       for (let i = 0; i < candidates.length; i++) {
         try {
+          // BUG-CURSOR-PRECO: a chave do cursor tem de ser o NOME do formato, não
+          // a POSIÇÃO `i`. Quando o formato vencedor é cacheado, a ordem muda e o
+          // mesmo formato passava a ler/gravar uma chave de posição diferente —
+          // ressuscitando um cursor VELHO de outra posição (ex.: 141994718) que a
+          // ModaUp responde 500 em `/versao/{valor}`, wedgeando o módulo (required)
+          // em server_error. Chaveando por formato, cada formato tem UM cursor
+          // estável que só avança; migração indolor (a chave nova nasce em "0" e
+          // re-puxa o preço uma vez, depois os deltas são pequenos).
           await AlterdataSyncService.syncResource(orgId, {
-            moduleKey: "price", resource: "Preco", filial: `${table}~${i}`,
+            moduleKey: "price", resource: "Preco", filial: `${table}~${candidates[i].key}`,
             buildPath: candidates[i].build,
             onItems: (items) => {
               const r = AlterdataPriceMapper.upsertPrecos(orgId, items, table);

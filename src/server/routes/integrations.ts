@@ -533,6 +533,31 @@ router.post("/alterdata/resync", async (req: AuthRequest, res): Promise<any> => 
   }
 });
 
+// RECUPERAÇÃO de FECHAMENTO por filial (últimos N dias). O delta do DataCaixa é
+// um stream global desde 2017 — uma loja cadastrada DEPOIS não tem como voltar
+// aos fechamentos recentes por sync comum (cursor só avança) nem por resync (o
+// cursor volta pra 2017 e não alcança). Aqui busca DIRETO os últimos `days` dias
+// da(s) filial(is) pelos endpoints por-data. Roda em SEGUNDO PLANO (dezenas de
+// chamadas por filial). Sem `filial` no corpo → recupera todas as filiais
+// configuradas. owner/admin (mesma superfície do resync).
+router.post("/alterdata/backfill-closings", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const settings = AlterdataConnectorService.publicSettings(req.organizationId);
+    const bodyFilial = String(req.body?.filial || "").trim();
+    const filiais = bodyFilial
+      ? [bodyFilial]
+      : (Array.isArray(settings.filiais) ? settings.filiais.map((x: any) => String(x || "").trim()).filter(Boolean) : []);
+    if (!filiais.length) return res.status(400).json({ ok: false, error: "Nenhuma filial configurada para recuperar. Preencha o campo Filiais ou informe uma filial." });
+    const days = Math.max(1, Math.min(370, Number(req.body?.days) || 90));
+    JobQueueService.enqueue("alterdata_backfill_closings", { orgId: req.organizationId, filiais, days }, { organizationId: req.organizationId });
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_BACKFILL_CLOSINGS', { filiais, days, queued: true });
+    res.json({ ok: true, queued: true, filiais, days });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao recuperar fechamentos da Alterdata." });
+  }
+});
+
 // Resultado da última sincronização (para a tela acompanhar o resync em fila,
 // inclusive depois de navegar para outra tela e voltar): resumo persistido,
 // se há execução EM ANDAMENTO agora e o último erro de job (se houver).

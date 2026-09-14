@@ -743,6 +743,7 @@ function AlterdataConnectorPanel() {
 
   const [syncing, setSyncing] = useState(false);
   const [resyncing, setResyncing] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [lastSync, setLastSync] = useState<{ at: string; ok: boolean; text: string } | null>(null);
   // Diagnóstico "a grade (tamanho/cor) está chegando da Alterdata?" — resposta
   // em português claro pro dono, em vez de ler "890 variantes" no resumo técnico.
@@ -870,6 +871,28 @@ function AlterdataConnectorPanel() {
       toast.error('Falha ao sincronizar.');
       setLastSync({ at: new Date().toISOString(), ok: false, text: 'Falha de conexão.' });
       full ? setResyncing(false) : setSyncing(false);
+    }
+  };
+
+  // Recuperação de FECHAMENTO por filial: para lojas cadastradas DEPOIS do 1º
+  // sync, cujos fechamentos recentes o delta global não alcança. Roda em
+  // segundo plano; o resultado aparece no histórico "Última sincronização".
+  const runBackfillClosings = async () => {
+    if (!window.confirm('Recupera os fechamentos dos últimos 90 dias de todas as filiais configuradas, buscando direto no PDV (em SEGUNDO PLANO). Use quando cadastrou uma loja depois de já ter sincronizado e o fechamento dela não aparece. Continuar?')) return;
+    setBackfilling(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/backfill-closings', { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok && d.queued) {
+        toast.success(`Recuperação de fechamentos iniciada (${(d.filiais || []).length} filial(is), ${d.days} dias) — em segundo plano.`);
+        setLastSync({ at: new Date().toISOString(), ok: true, text: 'Recuperando fechamentos do PDV… (pode levar alguns minutos; pode sair desta tela)' });
+      } else {
+        toast.error(d.error || 'Falha ao recuperar fechamentos.');
+      }
+    } catch {
+      toast.error('Falha ao recuperar fechamentos.');
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -1183,6 +1206,13 @@ function AlterdataConnectorPanel() {
         <Button onClick={() => runSync({ full: true })} disabled={syncing || resyncing || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Limpa o controle de versão e reprocessa TODOS os produtos, saldos e preços do zero — use depois de corrigir a configuração (ex.: cadastrar as lojas)'}>
           {resyncing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
           Ressincronizar do zero
+        </Button>
+        {/* Recuperar fechamentos: busca DIRETO no PDV os últimos 90 dias de cada
+            filial — resolve a loja cadastrada DEPOIS do 1º sync (o delta global
+            do fechamento não volta ao passado recente dela). */}
+        <Button onClick={runBackfillClosings} disabled={syncing || resyncing || backfilling || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Recupera os fechamentos dos últimos 90 dias de cada filial buscando direto no PDV — use quando cadastrou uma loja depois do 1º sync e o fechamento dela não aparece'}>
+          {backfilling ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          Recuperar fechamentos
         </Button>
         {/* Diagnóstico: probe cada endpoint separadamente para isolar qual está
             devolvendo 500 na homologação (por eliminação). */}

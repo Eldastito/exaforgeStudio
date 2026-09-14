@@ -786,6 +786,76 @@ export class AlterdataSyncRunner {
       } catch (e) { console.error("[Alterdata] pass falhou p/ org", orgId, e); }
     }
   }
+
+  /**
+   * BACKFILL de FECHAMENTO por filial (RECUPERAÇÃO). O delta do DataCaixa é UM
+   * stream global que começa em 2017 — uma loja cadastrada DEPOIS tem os caixas
+   * recentes ATRÁS do cursor (nunca voltam num sync comum) e longe demais na
+   * frente (o resync do zero volta pra 2017 e não alcança o passado recente numa
+   * passada). Aqui, em vez de caminhar o stream, busca DIRETO os últimos `days`
+   * dias da filial pelos endpoints por-data (ResumoFecharMovimento/{filial}/
+   * {data}/{turno}) — os mesmos que a conciliação diária já usa. Grava o
+   * system_total do dia (e, com o modo automático ligado, preenche o fechamento
+   * pendente com o total e as formas de pagamento do PDV).
+   *
+   * Idempotente: `applyPdvTotal`/`setInformed` não duplicam; rodar de novo só
+   * reescreve o mesmo valor. NÃO mexe em cursor — é uma leitura pontual paralela
+   * ao delta, então não atrapalha nem é atrapalhada pela sincronização normal.
+   * Isolado por org (a loja é resolvida por `organization_id` + código da filial).
+   */
+  static async backfillFilialClosings(orgId: string, filial: string, days = 90): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; errors: number }> {
+    const f = str(filial);
+    const out = { filial: f, days, applied: 0, skippedNoStore: 0, errors: 0 };
+    if (!f) return out;
+    // Casamento filial→loja: mesma regra do sync (código OU id, loja ativa).
+    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, f, f) as any;
+    const storeId = store?.id || null;
+    if (!storeId) { out.skippedNoStore = 1; return out; } // filial sem loja → nada a recuperar
+    const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
+    const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "outros": "outros" };
+    for (let i = 0; i < days; i++) {
+      const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+      let total = 0;
+      let got = false;
+      const pay = new Map<string, number>();
+      // Soma os TURNOS (raro ter 2º, mas existe). Turno inexistente devolve 0 /
+      // erro → tratado como sem dado, sem derrubar a varredura.
+      for (const turno of [1, 2]) {
+        try {
+          const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${date}/${turno}`);
+          for (const r of items as any[]) {
+            const titulo = String(r?.titulo || "").trim().toLowerCase();
+            const valor = Number(r?.valor || 0);
+            if (titulo === "total de vendas") { total += valor; if (valor > 0) got = true; }
+            else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
+          }
+        } catch { out.errors++; }
+      }
+      if (!got) continue; // dia sem caixa fechado (total 0) → não inventa fechamento
+      const totalR = Math.round(total * 100) / 100;
+      if (totalR <= 0) continue;
+      if (autoClosing) {
+        // Preenche o fechamento pendente com o PDV (loja não digita). Quem já
+        // informou à mão continua valendo. Try/catch: dia de FOLGA GERAL faz o
+        // setInformed lançar (CLOSE-002) — nesse caso só o system_total abaixo é
+        // gravado, sem abortar o backfill.
+        try {
+          const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
+          if (closing?.status === "pending" && Number(closing.informed_total || 0) === 0) {
+            RetailClosingService.setInformed(orgId, closing.id, {
+              informedTotal: totalR,
+              items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),
+              source: "pdv",
+            });
+          }
+        } catch { /* folga geral etc — system_total ainda é aplicado abaixo */ }
+      }
+      RetailReconciliationService.applyPdvTotal(orgId, storeId, date, totalR);
+      out.applied++;
+    }
+    try { logAuthEvent(orgId, "system", "backfillFilialClosings", "ALTERDATA_BACKFILL_CLOSINGS", out as any); } catch { /* noop */ }
+    return out;
+  }
 }
 
 /** Janelas [1º dia, último dia] (YYYY-MM-DD) dos últimos N meses, mês atual incluído.
@@ -819,4 +889,25 @@ JobQueueService.registerHandler("alterdata_sync", async (p: any) => {
     try { AlterdataConnectorService.setCursor(p.orgId, "_meta", "lastError", "", JSON.stringify({ message: String(e?.message || e), at: new Date().toISOString() })); } catch { /* noop */ }
     throw e;
   }
+});
+
+// Handler da fila: backfill de FECHAMENTO por filial (recuperação). Roda em
+// background (dezenas/centenas de chamadas ResumoFecharMovimento) e persiste o
+// resultado em _meta/lastBackfillClosings para a tela ler depois.
+JobQueueService.registerHandler("alterdata_backfill_closings", async (p: any) => {
+  const filiais: string[] = Array.isArray(p.filiais) ? p.filiais.map((x: any) => String(x || "").trim()).filter(Boolean) : [];
+  const days = Math.max(1, Math.min(370, Number(p.days) || 90));
+  const results: any[] = [];
+  for (const f of filiais) {
+    try { results.push(await AlterdataSyncRunner.backfillFilialClosings(p.orgId, f, days)); }
+    catch (e: any) { results.push({ filial: f, days, applied: 0, skippedNoStore: 0, errors: 1, error: String(e?.message || e) }); }
+  }
+  const summary = {
+    done: true, days, results,
+    applied: results.reduce((a, r: any) => a + (Number(r?.applied) || 0), 0),
+    skippedNoStore: results.reduce((a, r: any) => a + (Number(r?.skippedNoStore) || 0), 0),
+    at: new Date().toISOString(),
+  };
+  try { AlterdataConnectorService.setCursor(p.orgId, "_meta", "lastBackfillClosings", "", JSON.stringify(summary)); } catch { /* noop */ }
+  return summary;
 });

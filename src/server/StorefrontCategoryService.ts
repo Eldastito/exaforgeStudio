@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
+import { StorefrontStockService } from "./StorefrontStockService.js";
 
 /**
  * Cadastro GERENCIADO das categorias da vitrine (menu de 2 níveis):
@@ -49,18 +50,24 @@ export class StorefrontCategoryService {
    * reconhece o código ("002" → "BERMUDA...") na hora de dar o nome amigável.
    */
   static availableValues(orgId: string): Array<{ value: string; count: number; sample: string; samples: string[]; mapped: boolean }> {
+    // SÓ códigos com estoque POSITIVO entram no cadastro: o dono mapeia apenas o
+    // que dá pra vender, então tudo que ele cadastra aparece na loja (código
+    // esgotado nem é oferecido). `OUT_OF_STOCK_EXCLUDE_SQL` mantém serviços/itens
+    // sem controle de estoque (não têm "esgotado") e exclui os zerados.
+    const inStock = StorefrontStockService.OUT_OF_STOCK_EXCLUDE_SQL;
     const rows = db.prepare(
       `SELECT category AS value, COUNT(*) AS count
          FROM products_services
         WHERE organization_id = ? AND type = 'product' AND active = 1
           AND category IS NOT NULL AND TRIM(category) != ''
+          AND ${inStock}
         GROUP BY category ORDER BY category COLLATE NOCASE`
     ).all(orgId) as any[];
     const mapped = new Set(
       (db.prepare(`SELECT COALESCE(source_value, name) AS value FROM storefront_categories WHERE organization_id = ? AND parent_id IS NOT NULL`).all(orgId) as any[]).map((r) => r.value)
     );
     const sampleStmt = db.prepare(
-      `SELECT name FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1 AND category = ? ORDER BY name COLLATE NOCASE LIMIT 5`
+      `SELECT name FROM products_services WHERE organization_id = ? AND type = 'product' AND active = 1 AND category = ? AND ${inStock} ORDER BY name COLLATE NOCASE LIMIT 5`
     );
     // Exemplos de produtos por código — o dono reconhece o que é cada código
     // ("003" → "SHORT ESTAMPA...") antes de dar o nome amigável, evitando mapear errado.

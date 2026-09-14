@@ -256,8 +256,10 @@ router.get("/store/:slug", (req, res): any => {
     // Árvore departamentos → categorias (cadastro gerenciado). Só entram as
     // categorias COM produto visível; departamento vazio é omitido — o menu não
     // mostra grupo que não leva a nada. Sem cadastro, árvore vazia = menu plano.
-    // Filtra por VALOR mapeado (o que está no produto), não pelo nome exibido —
-    // é isso que faz o menu aparecer mesmo quando o produto usa código ("002").
+    // Mostra a categoria no menu só quando tem produto VISÍVEL (mesma regra da
+    // vitrine: em estoque + visível). O cadastro (availableValues) só oferece
+    // códigos com estoque positivo, então na prática toda categoria mapeada
+    // aparece; se depois esgotar tudo, ela some junto com os produtos (esperado).
     const visibleCats = new Set(catList);
     categoryTree = StorefrontCategoryService.tree(orgId)
       .map((d) => ({ id: d.id, name: d.name, categories: d.categories.filter((c) => visibleCats.has(c.value)) }))

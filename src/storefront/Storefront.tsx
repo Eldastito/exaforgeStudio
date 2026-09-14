@@ -416,10 +416,10 @@ export function Storefront() {
                 um, suas categorias. Sem cadastro, cai no menu plano (0-regressão). */}
             {!onlyFavs && ((data.categoryTree?.length ?? 0) > 0 || (data.categories?.length ?? 0) > 0) && (() => {
               const tree = data.categoryTree || [];
-              // Valores (o que está no produto) já cobertos por algum departamento.
-              const treeValues = new Set(tree.flatMap((d) => d.categories.map((c) => c.value)));
-              // Categorias com produto que não estão em nenhum departamento cadastrado.
-              const looseCats = (data.categories || []).filter((c) => !treeValues.has(c));
+              // Com cadastro, o menu mostra só departamentos (os códigos crus ficam
+              // ocultos — não poluem a vitrine); sem cadastro, cai no menu plano
+              // com todas as categorias (0-regressão).
+              const looseCats = tree.length ? [] : (data.categories || []);
               const chip = (label: string, on: boolean, onClick: () => void) => (
                 <button key={label} type="button" onClick={onClick}
                   className="shrink-0 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors"
@@ -432,7 +432,8 @@ export function Storefront() {
                 <>
                   <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                     {chip('Todos', !activeCategory && !activeDepartment, () => selectCategory(null))}
-                    {tree.map((d) => chip(d.name, activeDepartment === d.id, () => selectDepartment(d.id)))}
+                    {/* Clique no departamento abre o sub-menu; clicar de novo recolhe (volta a "Todos"). */}
+                    {tree.map((d) => chip(d.name, activeDepartment === d.id, () => activeDepartment === d.id ? selectCategory(null) : selectDepartment(d.id)))}
                     {looseCats.map((c) => chip(c, activeCategory === c && !activeDepartment, () => selectCategory(c)))}
                     {data.hasUncategorized && chip('Sem categoria', activeCategory === '__sem_categoria__', () => selectCategory('__sem_categoria__'))}
                   </div>

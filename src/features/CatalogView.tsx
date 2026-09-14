@@ -97,9 +97,27 @@ export function CatalogView() {
   // itens sem controle de estoque continuam aparecendo). Marcar "Mostrar todos" traz
   // de volta os itens sem estoque.
   const [inStock, setInStock] = useState(true);
+  // "Coleção encerrada" (modelo Toulon): esconde estoque zerado em TODO o sistema
+  // (Vendas/PDV, Estúdio, orçamento…), não só no Catálogo. Opt-in por org.
+  const [hideOOS, setHideOOS] = useState(false);
+  useEffect(() => {
+    apiFetch('/api/products/settings').then((r) => (r.ok ? r.json() : null)).then((d) => { if (d) setHideOOS(!!d.hideOutOfStock); }).catch(() => {});
+  }, []);
+  const toggleHideOOS = async (val: boolean) => {
+    setHideOOS(val);
+    try {
+      const r = await apiFetch('/api/products/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hideOutOfStock: val }) });
+      if (!r.ok) throw new Error();
+      loadProducts();
+    } catch { setHideOOS(!val); toast.error('Falha ao salvar a preferência.'); }
+  };
   const [total, setTotal] = useState(0);
   const loadProducts = (q: string = search, offset = 0, onlyInStock: boolean = inStock) => {
-    apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}${onlyInStock ? '&inStock=1' : ''}`)
+    // Marcar "mostrar sem estoque" força includeOutOfStock=1 — assim o Catálogo
+    // enxerga os esgotados mesmo quando a org liga "coleção encerrada" (que por
+    // padrão os esconde em todo o sistema). É a saída para editar/receber.
+    const stockQs = onlyInStock ? '&inStock=1' : '&includeOutOfStock=1';
+    apiFetch(`/api/products?limit=${PAGE_SIZE}&offset=${offset}&q=${encodeURIComponent(q)}${stockQs}`)
       .then(async r => ({ rows: await r.json(), count: Number(r.headers.get('X-Total-Count') || 0) }))
       .then(({ rows, count }) => {
         setTotal(count);
@@ -436,6 +454,10 @@ export function CatalogView() {
           <input type="checkbox" checked={!inStock} onChange={e => setInStock(!e.target.checked)} /> Mostrar sem estoque
         </label>
         {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens{inStock ? ' com estoque' : ''}</span>}
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer ml-auto" title="Modelo coleção encerrada (Toulon): quando ligado, produtos com estoque zerado são desconsiderados em TODO o sistema — Vendas, Estúdio, orçamento e busca de produto — porque a peça não volta a ser vendida. O histórico e os relatórios são preservados; use 'Mostrar sem estoque' para editar/receber.">
+          <input type="checkbox" checked={hideOOS} onChange={e => toggleHideOOS(e.target.checked)} />
+          Coleção encerrada (ocultar esgotados no sistema)
+        </label>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

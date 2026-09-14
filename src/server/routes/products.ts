@@ -755,6 +755,21 @@ router.get("/sales-analytics/csv", requireRole("owner", "admin"), (req: AuthRequ
 // milhares de itens (ERP sincronizado), devolver tudo congela navegador e
 // servidor. Sem ?limit, mantém o comportamento antigo (compatibilidade).
 // O total (com o filtro aplicado) sai no header X-Total-Count.
+// GET/PUT /api/products/settings — flag "coleção encerrada" (ocultar esgotados).
+router.get("/settings", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const row = db.prepare(`SELECT hide_out_of_stock_products FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({ hideOutOfStock: !!row?.hide_out_of_stock_products });
+});
+router.put("/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const val = req.body?.hideOutOfStock ? 1 : 0;
+  db.prepare(`UPDATE organization_settings SET hide_out_of_stock_products = ? WHERE organization_id = ?`).run(val, orgId);
+  res.json({ hideOutOfStock: !!val });
+});
+
 router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -770,11 +785,19 @@ router.get("/", (req: AuthRequest, res): any => {
       const like = `%${q}%`;
       args.push(like, like, like);
     }
+    // "Coleção encerrada" (modelo Toulon): quando a org liga
+    // `hide_out_of_stock_products`, o estoque zerado é desconsiderado por PADRÃO
+    // em todas as telas de navegar/pesquisar/vender produto (a peça não volta a
+    // ser vendida). Telas que precisam ver tudo (recebimento/edição) mandam
+    // ?includeOutOfStock=1 para escapar. Nunca toca histórico/relatórios (outros
+    // endpoints) nem itens de pedidos já feitos.
+    const hideOOS = !!(db.prepare(`SELECT hide_out_of_stock_products FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.hide_out_of_stock_products;
+    const includeOOS = req.query.includeOutOfStock === "1" || req.query.includeOutOfStock === "true";
     // ?inStock=1: esconde só o que ESTÁ SEM ESTOQUE de verdade — produto com
     // controle de estoque cujo disponível (menos reservado) é ≤ 0. Serviços e
     // itens sem controle de estoque continuam aparecendo (não têm "estoque").
     // Expressão correlata em `ps` para valer na LISTA e no COUNT (mesma cláusula).
-    if (req.query.inStock === "1" || req.query.inStock === "true") {
+    if (req.query.inStock === "1" || req.query.inStock === "true" || (hideOOS && !includeOOS)) {
       where.push(`NOT (ps.stock_control_enabled = 1 AND (
         COALESCE((SELECT ii.quantity_available FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NULL),
                  (SELECT SUM(ii.quantity_available) FROM inventory_items ii WHERE ii.product_service_id = ps.id AND ii.variant_id IS NOT NULL),

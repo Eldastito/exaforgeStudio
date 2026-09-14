@@ -11739,6 +11739,13 @@ const initDb = () => {
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_retail_store_inv_product ON retail_store_inventory (product_service_id)`); } catch(e){}
   // Índice para o filtro/menu por categoria da vitrine (WHERE category = ?).
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_products_org_category ON products_services (organization_id, category)`); } catch(e){}
+  // "Coleção encerrada" (modelo Toulon): quando ligado, o estoque ZERADO é
+  // desconsiderado nas telas de navegar/pesquisar/vender produto (a peça não
+  // volta a ser vendida — a marca renova a coleção). Opt-in por organização,
+  // default 0 → 0-regressão nas demais verticais. NUNCA apaga produto nem toca
+  // histórico/relatórios/itens de pedidos; é só filtro de exibição, com escape
+  // (?includeOutOfStock=1) para telas que precisam ver tudo (recebimento/edição).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN hide_out_of_stock_products INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

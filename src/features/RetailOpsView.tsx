@@ -2195,6 +2195,103 @@ function DailyInformeCard({ date }: { date: string }) {
   );
 }
 
+// Conferência SEMANAL dos fechamentos: grade loja × 7 dias com informado ×
+// sistema × cota lado a lado, para bater os valores e achar onde não fecha.
+function WeeklyClosingsCard() {
+  const [anchor, setAnchor] = useState(todayStr());
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [metric, setMetric] = useState<'informed' | 'system' | 'variance'>('informed');
+  const WD = ['seg', 'ter', 'qua', 'qui', 'sex', 'sáb', 'dom'];
+
+  const load = async () => {
+    setLoading(true);
+    try { setData(await apiFetch(`/api/retailops/closings/week?date=${anchor}`).then(r => r.json()).catch(() => null)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [anchor, open]);
+
+  const shiftWeek = (deltaDays: number) => {
+    const d = new Date(`${anchor}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + deltaDays); setAnchor(d.toISOString().slice(0, 10));
+  };
+  const ddmm = (iso: string) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+  const cellValue = (c: any): number | null => {
+    if (!c) return null;
+    if (metric === 'system') return Number(c.system_total || 0);
+    if (metric === 'variance') return Number(c.informed_total || 0) - Number(c.system_total || 0);
+    return Number(c.informed_total || 0);
+  };
+  const divergent = (c: any) => c && Number(c.system_total || 0) > 0 && Math.abs(Number(c.informed_total || 0) - Number(c.system_total || 0)) > 0.009;
+
+  return (
+    <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-950/40">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
+        <CalendarDays className="w-4 h-4 text-indigo-400" />
+        <span className="text-sm font-medium text-zinc-100">Conferência da semana (todas as lojas × dia)</span>
+        <span className="text-[11px] text-zinc-500">informado × sistema lado a lado</span>
+        <ChevronDown className={`ml-auto w-4 h-4 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-zinc-800 p-3">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <button onClick={() => shiftWeek(-7)} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">‹ semana</button>
+            <span className="text-xs text-zinc-400">{data ? `${ddmm(data.start)} a ${ddmm(data.end)}` : '…'}</span>
+            <button onClick={() => shiftWeek(7)} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">semana ›</button>
+            <button onClick={() => setAnchor(todayStr())} className="rounded-lg border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Hoje</button>
+            <div className="ml-auto flex items-center gap-1 text-[11px]">
+              {([['informed', 'Informado'], ['system', 'Sistema (PDV)'], ['variance', 'Informado − Sistema']] as const).map(([k, lbl]) => (
+                <button key={k} onClick={() => setMetric(k)} className={`rounded-lg border px-2 py-1 ${metric === k ? 'border-indigo-500 bg-indigo-600/15 text-indigo-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>{lbl}</button>
+              ))}
+              <button onClick={load} className="rounded-lg border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3 h-3" /></button>
+            </div>
+          </div>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
+          ) : !data || data.stores.length === 0 ? (
+            <p className="text-xs text-zinc-500">Nenhuma loja ativa na rede.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-zinc-400">
+                  <tr>
+                    <th className="sticky left-0 bg-zinc-950/40 px-2 py-1.5 text-left font-medium">Loja</th>
+                    {data.days.map((d: string, i: number) => (
+                      <th key={d} className="px-2 py-1.5 text-right font-medium">{WD[i]}<br /><span className="text-zinc-600">{ddmm(d)}</span></th>
+                    ))}
+                    <th className="px-2 py-1.5 text-right font-medium">Semana</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.stores.map((s: any) => (
+                    <tr key={s.store_id} className="border-t border-zinc-800/60">
+                      <td className="sticky left-0 bg-zinc-950/40 px-2 py-1.5 text-left text-zinc-200 whitespace-nowrap">{s.store_name}</td>
+                      {data.days.map((d: string) => {
+                        const c = s.cells[d];
+                        const v = cellValue(c);
+                        return (
+                          <td key={d} className={`px-2 py-1.5 text-right font-mono ${divergent(c) ? 'text-amber-400' : 'text-zinc-200'}`}
+                            title={c ? `Informado ${brl(c.informed_total)} · Sistema ${brl(c.system_total)} · Cota ${brl(c.quota_amount)} · ${c.status}${divergent(c) ? ' · DIVERGE' : ''}` : 'Sem fechamento'}>
+                            {v === null ? <span className="text-zinc-700">—</span> : brl(v)}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 text-right font-mono font-medium text-zinc-100">
+                        {brl(metric === 'system' ? s.weekSystem : metric === 'variance' ? (s.weekInformed - s.weekSystem) : s.weekInformed)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[11px] text-zinc-500">Em <span className="text-amber-400">âmbar</span>: informado ≠ sistema (PDV) — é onde não bate. Passe o mouse na célula para ver informado × sistema × cota.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClosingsTab() {
   const [date, setDate] = useState(todayStr());
   const [stores, setStores] = useState<any[]>([]);
@@ -2293,6 +2390,7 @@ function ClosingsTab() {
       </div>
 
       <WhoIsOffCard className="mb-3" />
+      <WeeklyClosingsCard />
       <DailyInformeCard date={date} />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 

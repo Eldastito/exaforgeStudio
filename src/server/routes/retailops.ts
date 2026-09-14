@@ -1394,6 +1394,15 @@ router.get("/closings", (req: AuthRequest, res): any => {
   res.json({ date: today(req), closings: RetailClosingService.listByDate(orgId, today(req)) });
 });
 
+// Conferência semanal: grade loja × 7 dias (segunda→domingo). ?date= = qualquer
+// dia da semana desejada (default hoje). DEVE vir antes de /closings/:id.
+router.get("/closings/week", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const anyDate = String(req.query.date || today(req));
+  res.json(RetailClosingService.listWeek(orgId, anyDate));
+});
+
 router.get("/closings/:id", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

@@ -266,6 +266,45 @@ export class RetailClosingService {
   }
 
   /**
+   * Conferência SEMANAL: grade loja × 7 dias (segunda→domingo da semana de
+   * `anyDate`) com o fechamento de cada loja em cada dia — informado, sistema,
+   * cota, desvio, status e divergência lado a lado. É a tela para bater os
+   * valores de cada loja por dia e achar onde não fecha. Read-only.
+   */
+  static listWeek(orgId: string, anyDate: string): any {
+    // Segunda-feira da semana da data informada (âncora UTC-meio-dia p/ não driftar).
+    const base = new Date(`${anyDate}T12:00:00Z`);
+    const dow = (base.getUTCDay() + 6) % 7; // 0 = segunda
+    const monday = new Date(base); monday.setUTCDate(base.getUTCDate() - dow);
+    const days: string[] = [];
+    for (let i = 0; i < 7; i++) { const d = new Date(monday); d.setUTCDate(monday.getUTCDate() + i); days.push(d.toISOString().slice(0, 10)); }
+    const start = days[0], end = days[6];
+
+    const stores = db.prepare(
+      `SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name COLLATE NOCASE`
+    ).all(orgId) as any[];
+    const rows = db.prepare(
+      `SELECT c.id, c.store_id, c.closing_date, c.status, c.divergence_status,
+              c.informed_total, c.system_total, c.quota_amount, c.variance_amount, c.variance_percent
+         FROM retail_daily_closings c
+        WHERE c.organization_id = ? AND c.closing_date >= ? AND c.closing_date <= ?`
+    ).all(orgId, start, end) as any[];
+
+    const byStore: Record<string, Record<string, any>> = {};
+    for (const r of rows) { (byStore[r.store_id] ||= {})[String(r.closing_date)] = r; }
+
+    return {
+      start, end, days,
+      stores: stores.map((s) => {
+        const cells = byStore[s.id] || {};
+        let wInformed = 0, wSystem = 0, wQuota = 0;
+        for (const d of days) { const c = cells[d]; if (c) { wInformed += Number(c.informed_total || 0); wSystem += Number(c.system_total || 0); wQuota += Number(c.quota_amount || 0); } }
+        return { store_id: s.id, store_name: s.name, cells, weekInformed: wInformed, weekSystem: wSystem, weekQuota: wQuota };
+      }),
+    };
+  }
+
+  /**
    * Registra o total INFORMADO (pela IA/WhatsApp na Fase C ou manual) e calcula
    * o desvio vs a cota. Não concilia com o sistema externo (Fase E). Grava itens
    * por forma de pagamento se vierem.

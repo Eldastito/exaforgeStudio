@@ -91,6 +91,19 @@ async function main() {
   const pUn = mkProduct(A, "Meia lisa", "007");
   check("3b.3 código não mapeado aparece como mapped=false", S.availableValues(A).some((a) => a.value === "007" && !a.mapped));
 
+  // ===== 3c. Seletor só oferece código com estoque POSITIVO =====
+  const mkStockProduct = (org: string, name: string, category: string, qty: number) => {
+    const id = randomUUID();
+    db.prepare(`INSERT INTO products_services (id, organization_id, name, type, active, price, category, stock_control_enabled) VALUES (?, ?, ?, 'product', 1, 10, ?, 1)`).run(id, org, name, category);
+    db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, variant_id, quantity_available, quantity_reserved) VALUES (?, ?, ?, NULL, ?, 0)`).run(randomUUID(), org, id, qty);
+    return id;
+  };
+  mkStockProduct(A, "Calça com estoque", "098", 5);
+  mkStockProduct(A, "Calça esgotada", "099", 0);
+  const availStock = S.availableValues(A);
+  check("3c.1 código com estoque positivo aparece", availStock.some((a) => a.value === "098"));
+  check("3c.2 código esgotado NÃO aparece", !availStock.some((a) => a.value === "099"));
+
   // ===== 4. Renomear DEPARTAMENTO não toca produto =====
   S.rename(A, roupas.id, "Moda masculina");
   const still = (db.prepare(`SELECT category FROM products_services WHERE id=?`).get(p1) as any)?.category;

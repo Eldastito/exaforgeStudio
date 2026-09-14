@@ -25,7 +25,7 @@ function textToSteps(text: string): number[] {
   return String(text || '').split(/[;,]/).map((s) => parseFloat(s.trim().replace(',', '.'))).filter((n) => n > 0).map((v) => Math.round(v * 1000));
 }
 
-const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '', sale_mode: 'unit', sale_steps: '', category: '' };
+const emptyForm = { type: 'product', name: '', description: '', price: '0', stock_control_enabled: true, initial_stock: '0', min_price: '', ean: '', sale_mode: 'unit', sale_steps: '', category: '', reference: '' };
 const emptyScanForm = { name: '', category: '', description: '', price: '', stock_control_enabled: true, initial_stock: '1', ean: '' };
 
 export function CatalogView() {
@@ -111,6 +111,20 @@ export function CatalogView() {
       loadProducts();
     } catch { setHideOOS(!val); toast.error('Falha ao salvar a preferência.'); }
   };
+  // Gera a referência (6 díg. do código de barras) dos produtos que ainda não
+  // têm, e liga a regra para os próximos vindos da Alterdata (modelo Toulon).
+  const [refBusy, setRefBusy] = useState(false);
+  const backfillReferences = async () => {
+    if (!window.confirm('Gerar a referência (6 primeiros dígitos do código de barras) para os produtos que ainda não têm? Não altera referências já preenchidas.')) return;
+    setRefBusy(true);
+    try {
+      const r = await apiFetch('/api/products/backfill-references', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Falha.');
+      toast.success(`Referências geradas: ${d.updated} de ${d.scanned} produtos.`);
+      loadProducts();
+    } catch (e: any) { toast.error(e.message || 'Falha ao gerar referências.'); } finally { setRefBusy(false); }
+  };
   const [total, setTotal] = useState(0);
   const loadProducts = (q: string = search, offset = 0, onlyInStock: boolean = inStock) => {
     // Marcar "mostrar sem estoque" força includeOutOfStock=1 — assim o Catálogo
@@ -146,6 +160,7 @@ export function CatalogView() {
       sale_mode: p.sale_mode || 'unit',
       sale_steps: stepsToText(p.sale_options_json),
       category: (p as any).category || '',
+      reference: (p as any).reference || '',
     });
     setShowModal(true);
   };
@@ -167,6 +182,7 @@ export function CatalogView() {
             fashion_wearable: form.fashion_wearable,
             ean: form.ean?.trim() || null,
             category: form.category?.trim() || null,
+            reference: form.reference?.trim() || null,
             sale_mode: saleMode, sale_options: saleOptions,
           }),
         });
@@ -454,7 +470,10 @@ export function CatalogView() {
           <input type="checkbox" checked={!inStock} onChange={e => setInStock(!e.target.checked)} /> Mostrar sem estoque
         </label>
         {total > 0 && <span className="text-xs text-zinc-500">{products.length} de {total} itens{inStock ? ' com estoque' : ''}</span>}
-        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer ml-auto" title="Modelo coleção encerrada (Toulon): quando ligado, produtos com estoque zerado são desconsiderados em TODO o sistema — Vendas, Estúdio, orçamento e busca de produto — porque a peça não volta a ser vendida. O histórico e os relatórios são preservados; use 'Mostrar sem estoque' para editar/receber.">
+        <Button variant="ghost" onClick={backfillReferences} disabled={refBusy} className="text-xs" title="Cria a referência da peça a partir dos 6 primeiros dígitos do código de barras (a Alterdata não envia a referência). Não altera referências já preenchidas; e passa a gerar automaticamente para os próximos produtos sincronizados.">
+          {refBusy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Receipt className="w-3.5 h-3.5 mr-1" />} Gerar referências (cód. barras)
+        </Button>
+        <label className="flex items-center gap-1.5 text-xs text-zinc-400 whitespace-nowrap cursor-pointer" title="Modelo coleção encerrada (Toulon): quando ligado, produtos com estoque zerado são desconsiderados em TODO o sistema — Vendas, Estúdio, orçamento e busca de produto — porque a peça não volta a ser vendida. O histórico e os relatórios são preservados; use 'Mostrar sem estoque' para editar/receber.">
           <input type="checkbox" checked={hideOOS} onChange={e => toggleHideOOS(e.target.checked)} />
           Coleção encerrada (ocultar esgotados no sistema)
         </label>
@@ -496,6 +515,7 @@ export function CatalogView() {
                 </div>
               )}
               <h3 className="font-semibold text-zinc-100 mt-2">{p.name}</h3>
+              {(p as any).reference && <p className="text-[11px] text-zinc-500 font-mono mt-0.5">Ref: {(p as any).reference}</p>}
               <p className="text-zinc-500 text-sm mt-1 line-clamp-2">{p.description || 'Sem descrição'}</p>
               <div className="mt-4 flex items-center justify-between">
                 <span className="font-mono text-zinc-300">{p.currency || 'BRL'} {Number(p.price ?? 0).toFixed(2)}</span>
@@ -684,6 +704,14 @@ export function CatalogView() {
                       placeholder="Ex.: Casaco (cadastre departamentos na Loja virtual p/ agrupar)"
                       value={form.category || ''} onChange={(e) => setForm({ ...form, category: e.target.value })} />
                   )}
+                </div>
+              )}
+              {form.type === 'product' && (
+                <div>
+                  <label className="text-sm text-zinc-400 mb-1 block">Referência</label>
+                  <input className="w-full bg-zinc-950 border border-zinc-800 rounded p-2 text-sm text-zinc-100 font-mono"
+                    placeholder="Ex.: 894512 (6 díg. do código de barras)"
+                    value={form.reference || ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-2">

@@ -19,7 +19,7 @@
 import { v4 as uuidv4 } from "uuid";
 import db from "./db.js";
 import { uniqueProductSlug } from "./productSlug.js";
-import { sanitizeGtin } from "./eanUtil.js";
+import { sanitizeGtin, referenceFromBarcode } from "./eanUtil.js";
 import { logAuthEvent } from "./auditLog.js";
 
 export class AlterdataSupplyMapper {
@@ -66,6 +66,9 @@ export class AlterdataSupplyMapper {
    */
   static upsertCodigosDeBarras(orgId: string, items: any[], referencia?: string): number {
     let n = 0;
+    // Toulon: referência da peça = 6 primeiros dígitos do código de barras
+    // (a Alterdata não manda a referência; manda o EAN). Só quando a org liga.
+    const refFromBarcode = !!(db.prepare(`SELECT reference_from_barcode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.reference_from_barcode;
     // Quando os itens vêm do endpoint por referência (ReferenciaRede/{ref}/{rede}),
     // a referência é o parâmetro da rota — usa-a para ligar ao produto. Caso
     // contrário, cai no campo do item (compatível com o formato antigo/testes).
@@ -105,8 +108,11 @@ export class AlterdataSupplyMapper {
         ).run(uuidv4(), orgId, product.id, vName, ean, tamanho || null, cor || null, inactive ? 0 : 1, extRef);
       }
       // Marca o produto como tendo grade e, se ainda sem EAN de capa, adota o 1º.
-      db.prepare(`UPDATE products_services SET has_variants = 1, stock_control_enabled = 1, ean = COALESCE(ean, ?) WHERE organization_id = ? AND id = ?`)
-        .run(ean, orgId, product.id);
+      // Referência (Toulon): deriva dos 6 díg. do código de barras se ligado e
+      // ainda vazia (COALESCE nunca sobrescreve uma referência já definida).
+      const refDerived = refFromBarcode ? referenceFromBarcode(ean) : null;
+      db.prepare(`UPDATE products_services SET has_variants = 1, stock_control_enabled = 1, ean = COALESCE(ean, ?), reference = COALESCE(reference, ?) WHERE organization_id = ? AND id = ?`)
+        .run(ean, refDerived, orgId, product.id);
       n++;
     }
     return n;

@@ -129,6 +129,7 @@
     "test:storefront-stock": "tsx scripts/test-storefront-stock.ts",
     "test:storefront-categories": "tsx scripts/test-storefront-categories.ts",
     "test:product-hide-oos": "tsx scripts/test-product-hide-oos.ts",
+    "test:product-reference": "tsx scripts/test-product-reference.ts",
     "test:studio-global-rollout": "tsx scripts/test-studio-global-rollout.ts",
     "test:visual-generation-kernel": "tsx scripts/test-visual-generation-kernel.ts",
     "test:visual-kernel-edit-routing": "tsx scripts/test-visual-kernel-edit-routing.ts",

@@ -40,3 +40,14 @@ export function sanitizeGtin(raw: string | null | undefined): string | null {
   if (!code) return null;
   return isValidGtin(code) ? code : null;
 }
+
+/**
+ * Referência do produto derivada do código de barras (modelo Toulon): os 6
+ * primeiros DÍGITOS do EAN identificam a peça (o fornecedor codifica a
+ * referência ali). Devolve os 6 dígitos ou null se não houver dígitos
+ * suficientes. Não valida checksum — a referência é um prefixo, não um GTIN.
+ */
+export function referenceFromBarcode(raw: string | null | undefined): string | null {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  return digits.length >= 6 ? digits.slice(0, 6) : null;
+}

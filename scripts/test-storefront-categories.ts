@@ -86,6 +86,7 @@ async function main() {
   const avail = S.availableValues(A);
   const a001 = avail.find((a) => a.value === "001");
   check("3b.1 availableValues conta produtos", !!a001 && a001!.count === 2, JSON.stringify(a001));
+  check("3b.1b availableValues traz exemplos de produto", !!a001 && Array.isArray(a001!.samples) && a001!.samples.length === 2 && a001!.samples.includes("Casaco TOULON"), JSON.stringify(a001?.samples));
   check("3b.2 availableValues marca mapeado", !!a001 && a001!.mapped === true);
   const pUn = mkProduct(A, "Meia lisa", "007");
   check("3b.3 código não mapeado aparece como mapped=false", S.availableValues(A).some((a) => a.value === "007" && !a.mapped));

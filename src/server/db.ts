@@ -11731,6 +11731,14 @@ const initDb = () => {
   // (`name`). Assim organiza-se o menu sem re-marcar produto. `source_value` NULL
   // em departamento; em categoria = o valor filtrado (fallback ao próprio nome).
   try { db.exec(`ALTER TABLE storefront_categories ADD COLUMN source_value TEXT`); } catch(e){}
+  // Índices para as subconsultas de estoque da vitrine (StorefrontStockService):
+  // elas filtram por product_service_id SEM organization_id, então os índices
+  // existentes (que começam por organization_id) não servem — sem estes, cada
+  // linha fazia varredura completa (a vitrine "pesada" ao paginar/filtrar).
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_inventory_items_product ON inventory_items (product_service_id, variant_id)`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_retail_store_inv_product ON retail_store_inventory (product_service_id)`); } catch(e){}
+  // Índice para o filtro/menu por categoria da vitrine (WHERE category = ?).
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_products_org_category ON products_services (organization_id, category)`); } catch(e){}
 };
 
 initDb();

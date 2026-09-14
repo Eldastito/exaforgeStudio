@@ -1540,7 +1540,7 @@ function CatalogPhotoGenerator({ style }: { style: string }) {
 // código "002") e exibe um nome amigável (ex.: "Bermudas"). Assim organiza-se o
 // menu SEM re-marcar produto. Menu de 2 níveis na loja pública.
 type CatDept = { id: string; name: string; categories: { id: string; name: string; value: string }[] };
-type AvailValue = { value: string; count: number; sample: string; mapped: boolean };
+type AvailValue = { value: string; count: number; sample: string; samples: string[]; mapped: boolean };
 function CategoryManager() {
   const [tree, setTree] = useState<CatDept[]>([]);
   const [avail, setAvail] = useState<AvailValue[]>([]);
@@ -1640,6 +1640,12 @@ function CategoryManager() {
                   className="flex-1 min-w-[120px] bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 focus:border-indigo-500 outline-none" />
                 <Button variant="ghost" onClick={() => addCat(d.id)} disabled={busy} className="text-xs"><Plus className="w-3.5 h-3.5 mr-1" /> Categoria</Button>
               </div>
+              {/* Produtos de exemplo do código selecionado — confirme antes de nomear. */}
+              {(() => {
+                const sel = avail.find((a) => a.value === (newCat[d.id]?.value || ''));
+                if (!sel) return null;
+                return <p className="mt-1 text-[10px] text-zinc-500">Produtos em <span className="text-zinc-400">{sel.value}</span>: {sel.samples.slice(0, 4).join(', ')}{sel.count > 4 ? `… (+${sel.count - 4})` : ''}</p>;
+              })()}
             </div>
           ))}
           <div className="flex items-center gap-2">

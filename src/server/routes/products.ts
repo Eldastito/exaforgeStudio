@@ -13,7 +13,7 @@ import { parseNFeXml } from "../nfeParser.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 import { uniqueProductSlug } from "../productSlug.js";
-import { sanitizeGtin } from "../eanUtil.js";
+import { sanitizeGtin, referenceFromBarcode } from "../eanUtil.js";
 import { verifyNFeSignature } from "../nfeSignature.js";
 import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
@@ -755,19 +755,47 @@ router.get("/sales-analytics/csv", requireRole("owner", "admin"), (req: AuthRequ
 // milhares de itens (ERP sincronizado), devolver tudo congela navegador e
 // servidor. Sem ?limit, mantém o comportamento antigo (compatibilidade).
 // O total (com o filtro aplicado) sai no header X-Total-Count.
-// GET/PUT /api/products/settings — flag "coleção encerrada" (ocultar esgotados).
+// GET/PUT /api/products/settings — flags de catálogo por organização.
 router.get("/settings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const row = db.prepare(`SELECT hide_out_of_stock_products FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
-  res.json({ hideOutOfStock: !!row?.hide_out_of_stock_products });
+  const row = db.prepare(`SELECT hide_out_of_stock_products, reference_from_barcode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({ hideOutOfStock: !!row?.hide_out_of_stock_products, referenceFromBarcode: !!row?.reference_from_barcode });
 });
 router.put("/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const val = req.body?.hideOutOfStock ? 1 : 0;
-  db.prepare(`UPDATE organization_settings SET hide_out_of_stock_products = ? WHERE organization_id = ?`).run(val, orgId);
-  res.json({ hideOutOfStock: !!val });
+  const sets: string[] = []; const vals: any[] = [];
+  if (req.body?.hideOutOfStock !== undefined) { sets.push("hide_out_of_stock_products = ?"); vals.push(req.body.hideOutOfStock ? 1 : 0); }
+  if (req.body?.referenceFromBarcode !== undefined) { sets.push("reference_from_barcode = ?"); vals.push(req.body.referenceFromBarcode ? 1 : 0); }
+  if (sets.length) db.prepare(`UPDATE organization_settings SET ${sets.join(", ")} WHERE organization_id = ?`).run(...vals, orgId);
+  const row = db.prepare(`SELECT hide_out_of_stock_products, reference_from_barcode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+  res.json({ hideOutOfStock: !!row?.hide_out_of_stock_products, referenceFromBarcode: !!row?.reference_from_barcode });
+});
+
+// POST /api/products/backfill-references — cria a referência (6 díg. do cód. de
+// barras) para os produtos que ainda não têm. Usa o EAN do produto ou, se vazio,
+// o de uma variante. Não sobrescreve referência já preenchida. Liga a flag para
+// os próximos produtos vindos da Alterdata também ganharem a referência.
+router.post("/backfill-references", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  db.prepare(`UPDATE organization_settings SET reference_from_barcode = 1 WHERE organization_id = ?`).run(orgId);
+  const rows = db.prepare(
+    `SELECT ps.id, COALESCE(NULLIF(ps.ean, ''), (SELECT v.sku FROM product_variants v WHERE v.product_service_id = ps.id AND v.sku IS NOT NULL AND v.sku != '' ORDER BY v.id LIMIT 1)) AS barcode
+       FROM products_services ps
+      WHERE ps.organization_id = ? AND ps.type = 'product' AND (ps.reference IS NULL OR ps.reference = '')`
+  ).all(orgId) as any[];
+  const upd = db.prepare(`UPDATE products_services SET reference = ? WHERE id = ? AND organization_id = ?`);
+  let updated = 0;
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      const ref = referenceFromBarcode(r.barcode);
+      if (ref) { upd.run(ref, r.id, orgId); updated++; }
+    }
+  });
+  tx();
+  res.json({ updated, scanned: rows.length });
 });
 
 router.get("/", (req: AuthRequest, res): any => {
@@ -781,9 +809,9 @@ router.get("/", (req: AuthRequest, res): any => {
     const where: string[] = ["ps.organization_id = ?"];
     const args: any[] = [orgId];
     if (q) {
-      where.push("(ps.name LIKE ? OR ps.ean LIKE ? OR ps.external_ref LIKE ?)");
+      where.push("(ps.name LIKE ? OR ps.ean LIKE ? OR ps.external_ref LIKE ? OR ps.reference LIKE ?)");
       const like = `%${q}%`;
-      args.push(like, like, like);
+      args.push(like, like, like, like);
     }
     // "Coleção encerrada" (modelo Toulon): quando a org liga
     // `hide_out_of_stock_products`, o estoque zerado é desconsiderado por PADRÃO
@@ -903,7 +931,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     const product = db.prepare('SELECT * FROM products_services WHERE id = ? AND organization_id = ?').get(req.params.id, orgId) as any;
     if (!product) return res.status(404).json({ error: "Produto não encontrado" });
 
-    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable, ean, sale_mode, sale_options } = req.body;
+    const { name, description, price, active, type, stock_control_enabled, quantity, low_stock_threshold, min_price, capacity, reservation_unit, category, fashion_wearable, ean, sale_mode, sale_options, reference } = req.body;
     const updates: string[] = [];
     const vals: any[] = [];
     // Modo de venda (por kg/fatia/etc.): quando muda para weight/volume grava as
@@ -928,6 +956,7 @@ router.patch("/:id", (req: AuthRequest, res): any => {
     if (type !== undefined) { updates.push("type = ?"); vals.push(type); }
     if (stock_control_enabled !== undefined) { updates.push("stock_control_enabled = ?"); vals.push(stock_control_enabled ? 1 : 0); }
     if (category !== undefined) { updates.push("category = ?"); vals.push(category ? String(category).trim().slice(0, 80) : null); }
+    if (reference !== undefined) { updates.push("reference = ?"); vals.push(reference ? String(reference).trim().slice(0, 40) : null); }
     if (ean !== undefined) { updates.push("ean = ?"); vals.push(ean ? String(ean).trim().slice(0, 14) : null); }
     if (min_price !== undefined) { updates.push("min_price = ?"); vals.push(min_price === '' || min_price === null ? null : Number(min_price)); }
     if (capacity !== undefined) { updates.push("capacity = ?"); vals.push(Number(capacity) > 0 ? Number(capacity) : 1); }

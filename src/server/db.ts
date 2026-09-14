@@ -11746,6 +11746,15 @@ const initDb = () => {
   // histórico/relatórios/itens de pedidos; é só filtro de exibição, com escape
   // (?includeOutOfStock=1) para telas que precisam ver tudo (recebimento/edição).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN hide_out_of_stock_products INTEGER DEFAULT 0`); } catch(e){}
+  // Referência da peça derivada do código de barras (modelo Toulon): a Alterdata
+  // não mandou a referência dos produtos, mas mandou o EAN. A Toulon identifica a
+  // peça pelos 6 primeiros dígitos do código de barras. `reference` é um campo
+  // NOVO (não é a chave `external_ref` da Alterdata → sem risco de duplicar na
+  // sincronização). Preenchido no sync/backfill quando `reference_from_barcode`
+  // está ligado (opt-in por org, default 0 → 0-regressão nas outras verticais).
+  try { db.exec(`ALTER TABLE products_services ADD COLUMN reference TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reference_from_barcode INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_products_org_reference ON products_services (organization_id, reference)`); } catch(e){}
 };
 
 initDb();

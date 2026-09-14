@@ -83,6 +83,10 @@ async function main() {
   const r1 = await AlterdataSyncRunner.backfillFilialClosings(A, "1006", 90);
   check("backfill aplica exatamente 2 dias (ontem e 3 dias atrás)", r1.applied === 2, JSON.stringify(r1));
   check("backfill sem loja pulada (código casou)", r1.skippedNoStore === 0, JSON.stringify(r1));
+  // Verdade-de-campo: nome da loja resolvida + registros persistidos + amostra.
+  check("resultado carrega o NOME da loja resolvida (Grande Rio)", r1.storeName === "Grande Rio" && r1.storeId === storeA.id, JSON.stringify({ storeName: r1.storeName, storeId: r1.storeId }));
+  check("persisted RE-LÊ do banco os fechamentos com sistema>0 (=2)", r1.persisted === 2, `persisted=${r1.persisted}`);
+  check("amostra traz (data,total) dos dias aplicados", Array.isArray(r1.sample) && r1.sample.length === 2 && r1.sample.some((s) => s.date === d1 && s.total === 1500.5), JSON.stringify(r1.sample));
 
   const c1 = db.prepare(`SELECT system_total, informed_total, status, divergence_status FROM retail_daily_closings WHERE organization_id=? AND store_id=? AND closing_date=?`).get(A, storeA.id, d1) as any;
   check("system_total do dia 1 gravado (1500.5)", Number(c1?.system_total) === 1500.5, JSON.stringify(c1));

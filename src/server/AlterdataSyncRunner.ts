@@ -735,6 +735,30 @@ export class AlterdataSyncRunner {
       await run(`Preco (formato tabela/versao)`, "price", `/api/v1/Preco/versao/${table}/0`);
       await run(`Preco (formato versao)`, "price", `/api/v1/Preco/versao/0`);
       if (rede) await run(`Preco (formato rede/tabela/versao)`, "price", `/api/v1/Preco/versao/${rede}/${table}/0`);
+      // DIAGNÓSTICO do 500 no DELTA: os probes acima usam cursor 0 e respondem
+      // 200, mas o sync usa o CURSOR ALTO guardado (o delta) e leva server_error.
+      // Reproduz a chamada EXATA que falha lendo o cursor real guardado — decide
+      // ModaUp (o endpoint quebra em cursor alto) vs. nosso (cursor mal montado).
+      const env: AlterdataEnvironment = settings.environment === "prod" ? "prod" : "homolog";
+      let priceCursors: any[] = [];
+      try {
+        priceCursors = db.prepare(
+          `SELECT filial, version FROM alterdata_sync_cursors
+            WHERE organization_id = ? AND environment = ? AND module = 'price' AND resource = 'Preco'
+              AND version IS NOT NULL AND version <> '' AND version <> '0'`
+        ).all(orgId, env) as any[];
+      } catch { priceCursors = []; }
+      const seenCursor = new Set<string>();
+      for (const pc of priceCursors) {
+        const c = String(pc.version || "").split("|")[0].trim(); // ignora sufixo de página
+        if (!c || c === "0" || seenCursor.has(c)) continue;
+        seenCursor.add(c);
+        if (rede) await run(`Preco DELTA cursor real ${c} (rede/tabela/versao)`, "price", `/api/v1/Preco/versao/${rede}/${table}/${encodeURIComponent(c)}`);
+        await run(`Preco DELTA cursor real ${c} (tabela/versao)`, "price", `/api/v1/Preco/versao/${table}/${encodeURIComponent(c)}`);
+      }
+      if (!seenCursor.size) {
+        out.push({ resource: "Preco DELTA", module: "price", path: "(sem cursor guardado)", url: null, status: 0, ok: false, snippet: "Nenhum cursor de preço guardado ainda para reproduzir o delta — rode um sync de preço antes." });
+      }
     } else {
       out.push({ resource: "Preco", module: "price", path: "(sem tabela)", url: null, status: 0, ok: false, snippet: "Preencha a Tabela de preço da rede para testar o módulo de preço." });
     }

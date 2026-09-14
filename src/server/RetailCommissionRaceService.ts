@@ -304,7 +304,10 @@ export class RetailCommissionRaceService {
    * `informed_total` preenchido (fechamento PENDENTE, nunca informado, não conta).
    */
   private static storeSalesInfo(orgId: string, storeId: string, start: string, end: string): { sales: number; hasData: boolean } {
-    const q = db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s, COUNT(CASE WHEN informed_total IS NOT NULL THEN 1 END) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
+    // Base = venda REAL do PDV quando existe (system_total), fallback ao informado
+    // — mesma regra da comissão e do faturamento do Diretor IA, para meta e
+    // realizado baterem. `hasData` continua = existe fechamento não-rejeitado.
+    const q = db.prepare(`SELECT COALESCE(SUM(COALESCE(NULLIF(system_total,0), informed_total)),0) AS s, COUNT(CASE WHEN informed_total IS NOT NULL THEN 1 END) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
     return { sales: Number(q?.s || 0), hasData: Number(q?.n || 0) > 0 };
   }
 

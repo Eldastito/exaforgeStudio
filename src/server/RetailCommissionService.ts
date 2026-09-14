@@ -95,9 +95,14 @@ export class RetailCommissionService {
 
   // ── Bases do período ────────────────────────────────────────────────────────
   private static periodSales(orgId: string, storeId: string | null, start: string, end: string): number {
+    // Base de cálculo = venda REAL do PDV quando existe (system_total, da
+    // Alterdata), com fallback ao informado pela loja — igual ao faturamento do
+    // Diretor IA (AlterdataRevenueBridge). Antes usava só o informado, então
+    // quando a loja lançava valor diferente do PDV, meta/comissão não batiam.
+    const VAL = "COALESCE(NULLIF(system_total,0), informed_total)";
     const q = storeId
-      ? db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end)
-      : db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, start, end);
+      ? db.prepare(`SELECT COALESCE(SUM(${VAL}),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end)
+      : db.prepare(`SELECT COALESCE(SUM(${VAL}),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, start, end);
     return Number((q as any)?.s || 0);
   }
   private static periodQuota(orgId: string, storeId: string | null, start: string, end: string): number {

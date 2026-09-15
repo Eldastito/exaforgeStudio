@@ -172,6 +172,28 @@ export function ChannelsPanel() {
     } catch { toast.error('Não foi possível remover.'); }
   };
 
+  // WZ — desconectar o WhatsApp pelo ZapFlow (logout no provedor + status
+  // 'disconnected' no banco; o card volta pro botão Conectar).
+  const disconnectEvolution = async () => {
+    if (!(await confirmDialog('Desconectar o WhatsApp do ZapFlow? O atendimento e os envios automáticos param até reconectar por QR Code.', { danger: true, confirmText: 'Desconectar' }))) return;
+    setEvoBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/whatsapp/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d?.ok) {
+        setEvolutionStatus('disconnected');
+        setEvolutionQr(null);
+        toast.success(d.providerLogout
+          ? 'WhatsApp desconectado.'
+          : 'Desconectado aqui no ZapFlow. Se o celular ainda mostrar o aparelho em "Aparelhos conectados", remova por lá também.');
+        loadRaw();
+        loadEvoStatus();
+      } else {
+        toast.error(d?.error || 'Não foi possível desconectar.');
+      }
+    } catch { toast.error('Não foi possível desconectar.'); } finally { setEvoBusy(false); }
+  };
+
   // W3 — modo misto (um número só pra tudo): estado + toggle (owner/admin).
   const loadMixedMode = () => {
     apiFetch('/api/channels/mixed-mode').then(r => r.json()).then((d: any) => {
@@ -587,11 +609,17 @@ export function ChannelsPanel() {
                   <p className="text-[11px] text-slate-500">
                     Desconectou pelo celular (WhatsApp → Aparelhos conectados)? Este painel percebe sozinho em alguns segundos e volta a mostrar o botão <strong>Conectar WhatsApp</strong>.
                   </p>
-                  <Button variant="outline" size="sm" disabled={evoBusy}
-                    onClick={() => connectEvolution(evoInstanceName ? { instanceName: evoInstanceName } : undefined)}
-                    className="border-slate-700 text-slate-300 hover:text-white shrink-0">
-                    <RefreshCw className="w-4 h-4 mr-2" /> Gerar novo QR (reconectar)
-                  </Button>
+                  <div className="flex gap-2 shrink-0">
+                    <Button variant="outline" size="sm" disabled={evoBusy}
+                      onClick={() => connectEvolution(evoInstanceName ? { instanceName: evoInstanceName } : undefined)}
+                      className="border-slate-700 text-slate-300 hover:text-white">
+                      <RefreshCw className="w-4 h-4 mr-2" /> Gerar novo QR (reconectar)
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={evoBusy} onClick={disconnectEvolution}
+                      className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10">
+                      Desconectar
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : evolutionStatus === 'connecting_evo' ? (

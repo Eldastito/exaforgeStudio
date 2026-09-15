@@ -987,6 +987,7 @@
     "test:channel-select-resolver": "tsx scripts/test-channel-select-resolver.ts",
     "test:mixed-mode-toggle": "tsx scripts/test-mixed-mode-toggle.ts",
     "test:studio-whatsapp-command": "tsx scripts/test-studio-whatsapp-command.ts",
+    "test:whatsapp-disconnect": "tsx scripts/test-whatsapp-disconnect.ts",
     "test:channel-binding-gate": "tsx scripts/test-channel-binding-gate.ts",
     "test:channel-binding-migration": "tsx scripts/test-channel-binding-migration.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",

@@ -10,6 +10,7 @@ import { SchoolCoordinationService } from "../SchoolCoordinationService.js";
 import { SchoolImportService } from "../SchoolImportService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import db from "../db.js";
+import { ChannelBindingService } from "../ChannelBindingService.js";
 
 /**
  * Módulo Escola (ADR-144, Fatia 1) — rotas sob /api/escola, gated pelo módulo
@@ -22,7 +23,7 @@ const actor = (req: any) => req.user?.userId || req.user?.id;
 // Resolve uma função de envio pelo canal conectado da org (evolution primeiro).
 // Retorna null se não houver canal — o chamador decide se o aviso é obrigatório.
 const channelSend = (orgId: string): ((target: string, message: string) => any) | null => {
-  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+  const channel = ChannelBindingService.selectOutboundChannel(orgId, "escola");
   if (!channel) return null;
   return (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
 };
@@ -106,7 +107,7 @@ router.get("/students/:studentId/digest/preview", (req: AuthRequest, res): any =
 router.post("/students/:studentId/digest/send-test", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+  const channel = ChannelBindingService.selectOutboundChannel(orgId, "escola");
   if (!channel) return res.status(400).json({ error: "Nenhum canal conectado para enviar." });
   const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
   try {
@@ -203,7 +204,7 @@ router.get("/teachers/:teacherId/agenda/preview", (req: AuthRequest, res): any =
 router.post("/teachers/:teacherId/agenda/send-test", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+  const channel = ChannelBindingService.selectOutboundChannel(orgId, "escola");
   if (!channel) return res.status(400).json({ error: "Nenhum canal conectado para enviar." });
   const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message, { feature: "escola" });
   try {

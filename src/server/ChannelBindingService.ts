@@ -253,6 +253,35 @@ export class ChannelBindingService {
     }
   }
 
+  /**
+   * W2 (pendência nº 1 da F7.4) — SELEÇÃO única de canal de SAÍDA por finalidade.
+   * Substitui as ~20 cópias do SQL "primeiro canal" (A5): com uso configurado
+   * (binding) pra finalidade, o binding decide; sem binding, cai no MESMO SQL
+   * legado byte-idêntico (0-regressão — mesma ordenação evolution-first).
+   * Finalidade DESLIGADA pra saída → undefined (CA-03: o produtor pula,
+   * coerente com o gate `assertOutboundAllowed` do sink). Binding apontando
+   * pra canal indisponível → seleção legada (mesma régua do gate: canal
+   * indisponível não é bloqueio de finalidade).
+   * Retorna `{ id }` pra ser drop-in nos call sites (`if (!channel) continue`).
+   */
+  static selectOutboundChannel(
+    orgId: string,
+    featureKey: FeatureKey | string,
+    opts?: { unitId?: string | null },
+  ): { id: string } | undefined {
+    if (!orgId) return undefined;
+    const d = this.resolve(orgId, String(featureKey), { unitId: opts?.unitId ?? null, direction: "outbound" });
+    if (d.ok && d.channelId) return { id: d.channelId };
+    if (d.code === "feature_disabled") return undefined;
+    // no_binding / channel_unavailable → seleção legada (byte-idêntica às cópias A5).
+    try {
+      const row = db.prepare(
+        `SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
+      ).get(orgId) as any;
+      return row?.id ? { id: row.id } : undefined;
+    } catch { return undefined; }
+  }
+
   /** Lista os bindings de uma finalidade (para UI/diagnóstico), sem segredos. */
   static list(orgId: string, featureKey?: string): any[] {
     if (!orgId) return [];

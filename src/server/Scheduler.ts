@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { CampaignService } from "./CampaignService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { CadenceService } from "./CadenceService.js";
 import { NotificationService } from "./NotificationService.js";
 import { SubscriptionService } from "./SubscriptionService.js";
@@ -180,7 +181,7 @@ export class Scheduler {
       const orgId = o.organization_id;
       try {
         if (!ModuleService.isEnabled(orgId, "retail_floor")) continue;
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
         if (!channel) continue; // sem canal conectado não há como enviar
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await RetailFloorDigestService.runDigestPass(orgId, { now, send });
@@ -248,7 +249,7 @@ export class Scheduler {
     for (const o of orgs) {
       const orgId = o.organization_id;
       try {
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "cobranca");
         if (!channel) continue; // sem canal não há como cobrar
         await RetailTaskService.runReminders(orgId, {
           now,
@@ -283,7 +284,7 @@ export class Scheduler {
     for (const o of orgs) {
       const orgId = o.organization_id;
       try {
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
         if (!channel) continue; // sem canal conectado não há como enviar
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await BusinessTutorService.runMorningPass(orgId, { now, send });
@@ -312,7 +313,7 @@ export class Scheduler {
       const orgId = o.organization_id;
       try {
         if (!ModuleService.isEnabled(orgId, "escola")) continue; // módulo desligado p/ a org
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "escola");
         if (!channel) continue; // sem canal conectado não há como enviar
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await SchoolDigestService.runDigestPass(orgId, { now, send });
@@ -664,7 +665,7 @@ export class Scheduler {
     for (const o of orgs) {
       const orgId = o.organization_id;
       try {
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
         if (!channel) continue;
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await FalaTuBriefingDigestService.runPass(orgId, { now, send });
@@ -743,7 +744,7 @@ export class Scheduler {
       const orgId = o.organization_id;
       try {
         if (!ModuleService.isEnabled(orgId, "escola")) continue; // módulo desligado p/ a org
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "escola");
         if (!channel) continue;
         const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
         await TeacherDigestService.runAgendaPass(orgId, { now, send });
@@ -1937,7 +1938,7 @@ export class Scheduler {
         if (!appts.length) continue;
 
         // Canal de envio (o do contato, ou o primeiro conectado).
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(org.organization_id) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(org.organization_id, "agenda");
 
         for (const a of appts) {
           try {
@@ -2006,7 +2007,7 @@ export class Scheduler {
     for (const inv of invs) {
       try {
         const orgId = inv.organization_id;
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "cobranca");
         const channelId = inv.contact_channel || fallbackChannel?.id;
         const first = (inv.contact_name || '').trim().split(/\s+/)[0] || '';
 
@@ -2072,7 +2073,7 @@ export class Scheduler {
         const max = Math.min(5, Math.max(1, parseInt(String(org.max || 3), 10) || 3));
         const tpl = org.pix_reminder_message
           || "Oi {nome}! Vi que seu pedido ainda está aguardando o pagamento via Pix 😊 Pra facilitar, aqui está o código de novo:";
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "cobranca");
 
         // O próximo lembrete (nº n, 0-based) só sai quando passou base*(n+1) do
         // último envio (ou da criação). Assim os intervalos vão crescendo.
@@ -2201,7 +2202,7 @@ export class Scheduler {
         // de conclusão — se não sabe quando terminou, não pergunta.
         const appts = SatisfactionService.dueAppointments(orgId, hours);
         if (!orders.length && !appts.length) continue;
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "satisfacao");
 
         for (const o of orders) {
           try {
@@ -2309,7 +2310,7 @@ export class Scheduler {
         }
 
         if (!tickets.length) continue;
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "recompra");
 
         for (const t of tickets) {
           try {
@@ -2372,7 +2373,7 @@ export class Scheduler {
         db.prepare(`UPDATE organization_settings SET repurchase_reminder_last_run = CURRENT_TIMESTAMP WHERE organization_id = ?`).run(orgId);
         if (!contacts.length) continue;
 
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "recompra");
 
         const tpl = org.repurchase_reminder_message
           || "Oi {nome}! Já faz um tempo desde sua última compra ({produtos}). Temos novidades que combinam com você! Posso te mostrar? 😊";

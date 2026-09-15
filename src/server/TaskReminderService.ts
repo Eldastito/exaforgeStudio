@@ -15,6 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { UxPreferencesService } from "./UxPreferencesService.js";
 
 const MAX_ATTEMPTS = 3;
@@ -159,7 +160,7 @@ export class TaskReminderService {
       const orgId = o.organization_id;
       try {
         if (!this.allPendingCandidates(orgId).length) continue;
-        const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
         if (!channel) continue; // sem canal WhatsApp → só in-app
         const res = await this.remindForOrg(orgId, (to: string, msg: string) => MessageProviderService.sendMessage(channel.id, to, msg, { feature: "gestao" }), { hourSP: hourInTz(now) });
         total += res.sent;

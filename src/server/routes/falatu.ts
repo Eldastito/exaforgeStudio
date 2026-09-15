@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from "express";
 import db from "../db.js";
+import { ChannelBindingService } from "../ChannelBindingService.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { FalaTuService } from "../FalaTuService.js";
@@ -584,7 +585,7 @@ router.post("/protocols/:id/activate", async (req: AuthRequest, res): Promise<an
 router.post("/briefing/whatsapp/send-now", async (req: AuthRequest, res): Promise<any> => {
   try {
     const orgId = req.organizationId!;
-    const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
     if (!channel) return res.status(400).json({ error: "Nenhum canal de WhatsApp ativo nesta conta." });
     const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
     res.json(await FalaTuBriefingDigestService.sendNow(orgId, actorId(req), { send }));

@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { v4 as uuidv4 } from "uuid";
 import { MessageProviderService } from "./MessageProviderService.js";
 
@@ -86,10 +87,12 @@ export class CampaignService {
     return { id, total: recipients.length };
   }
 
-  /** Resolve o canal de envio (o passado, ou o primeiro Evolution/WhatsApp conectado). */
+  /** Resolve o canal de envio (o passado, ou a seleção por finalidade W2 — binding de `campanhas` > legado). */
   private static resolveChannel(orgId: string, channelId?: string): any {
     if (channelId) return db.prepare('SELECT * FROM channels WHERE id = ? AND organization_id = ?').get(channelId, orgId);
-    return db.prepare(`SELECT * FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId);
+    const picked = ChannelBindingService.selectOutboundChannel(orgId, "campanhas");
+    if (!picked) return undefined;
+    return db.prepare('SELECT * FROM channels WHERE id = ? AND organization_id = ?').get(picked.id, orgId);
   }
 
   /**

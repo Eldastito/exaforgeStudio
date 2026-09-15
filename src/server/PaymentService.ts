@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { OrdersService } from "./OrdersService.js";
 import { NotificationService } from "./NotificationService.js";
 import { ReservationService } from "./ReservationService.js";
@@ -612,7 +613,7 @@ export class PaymentService {
         if (reward) {
           const ref = db.prepare('SELECT name, identifier, channel_id FROM contacts WHERE id = ?').get(reward.referrerContactId) as any;
           if (ref?.identifier) {
-            const channelId = ref.channel_id || (db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any)?.id;
+            const channelId = ref.channel_id || ChannelBindingService.selectOutboundChannel(orgId, "cobranca")?.id;
             const first = (ref.name || '').trim().split(/\s+/)[0] || '';
             const msg = `Oi${first ? `, ${first}` : ''}! 🎉 Sua indicação fez a primeira compra — muito obrigado! Você ganhou *${reward.rewardPercent}% de desconto* na sua próxima compra com a gente. É só pedir quando quiser! 🎁`;
             if (channelId) MessageProviderService.sendMessage(channelId, ref.identifier, msg).catch(() => {});

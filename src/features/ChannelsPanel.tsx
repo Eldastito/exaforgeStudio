@@ -138,6 +138,16 @@ export function ChannelsPanel() {
     return () => clearInterval(t);
   }, [evolutionStatus, evolutionQr]);
 
+  // WZ-1 (relato do dono): o número pode ser desconectado DIRETO no celular
+  // (WhatsApp → Aparelhos conectados → sair). O painel precisa perceber sozinho:
+  // fora do fluxo de QR, reconsulta o estado a cada 20s — o card vira
+  // "Desconectado" com o botão "Conectar WhatsApp" sem precisar recarregar.
+  useEffect(() => {
+    if (evolutionStatus === 'connecting_evo') return; // o poll do QR já cobre
+    const t = setInterval(() => loadEvoStatus(), 20000);
+    return () => clearInterval(t);
+  }, [evolutionStatus]);
+
   // W1 — Gestores do Zapp (mesma fonte de Configurações → Usuários: /api/managers).
   const loadZappManagers = () => {
     apiFetch('/api/managers').then(r => (r.ok ? r.json() : [])).then((d: any) => setZappManagers(Array.isArray(d) ? d : [])).catch(() => {});
@@ -573,10 +583,13 @@ export function ChannelsPanel() {
                     ))}
                   </div>
                 )}
-                <div className="flex justify-end">
-                  <Button variant="outline" size="sm" disabled={evoBusy || !evoInstanceName}
-                    onClick={() => connectEvolution({ instanceName: evoInstanceName || undefined })}
-                    className="border-slate-700 text-slate-300 hover:text-white">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <p className="text-[11px] text-slate-500">
+                    Desconectou pelo celular (WhatsApp → Aparelhos conectados)? Este painel percebe sozinho em alguns segundos e volta a mostrar o botão <strong>Conectar WhatsApp</strong>.
+                  </p>
+                  <Button variant="outline" size="sm" disabled={evoBusy}
+                    onClick={() => connectEvolution(evoInstanceName ? { instanceName: evoInstanceName } : undefined)}
+                    className="border-slate-700 text-slate-300 hover:text-white shrink-0">
                     <RefreshCw className="w-4 h-4 mr-2" /> Gerar novo QR (reconectar)
                   </Button>
                 </div>

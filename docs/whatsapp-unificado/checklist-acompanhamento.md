@@ -144,12 +144,20 @@ receba uma tarefa e execute". Dois comandos nomeados pelo dono. **Ainda NÃO
 implementados** — entram como fatias futuras (após W1–W3), aqui registrados
 honestamente como backlog:
 
-- [ ] **WZ-1 — Geração de imagem por WhatsApp**: gestor autorizado manda o pedido
-  ("gere uma imagem de ..."), a IA encaminha ao **Estúdio de Criação**
-  (`StudioService`, ADR-167) e devolve a imagem pronta **pelo próprio WhatsApp**
-  (reusa `MessageProviderService.sendDocument`/mídia + fila durável F6.1).
-  Pré-condições: modo misto ativo (W3) + identidade do gestor resolvida
-  (`SenderIdentityService`) + finalidade `gestao`.
+- [x] **WZ-1 — Geração de imagem por WhatsApp** — **IMPLEMENTADO** (modo misto
+  ligado na TOULON em 15/09/2026 destravou). `StudioWhatsAppCommandService`:
+  gatilho DETERMINÍSTICO (regex verbo+«imagem/arte/foto», RN-151 — pergunta
+  aberta segue pro Diretor IA intacta) no caminho INTERNO (`runInternalInbound`,
+  antes do Controller — só gestor autorizado chega lá); avisa "gerando" →
+  `StudioService.generate` (plan-gated, honesto nos limites) → arte volta como
+  IMAGEM NATIVA pelo próprio WhatsApp (`MessageProviderService.sendImage`, casca
+  sobre o sink único com `mediaKind:'image'`, finalidade `gestao`) com fallback
+  DECLARADO pro link; sem `APP_URL` → aponta pro Estúdio (nunca link quebrado).
+  Formato falado ("imagem story/banner de …") vira `StudioFormat`. Extra do
+  relato do dono: o card do WhatsApp agora RECONSULTA o estado a cada 20s (a
+  desconexão feita direto no celular vira "Desconectado" + botão Conectar sem
+  recarregar) e o "Gerar novo QR (reconectar)" não trava mais sem instanceName.
+  `test:studio-whatsapp-command` 19/19.
 - [ ] **WZ-2 — Registro de venda por comando**: "registre a venda da peça xpto do
   tamanho GG, da cor azul, com a referencia 123456, com o valor xx,xx pago com
   cartão de credito" → parser extrai peça/tamanho/cor/referência/valor/forma de

@@ -115,4 +115,46 @@ Ativação:
 Riscos e bloqueios restantes: acesso à Evolution real (Swagger + fixtures).
 Próxima entrega prioritária: Fase 1 (F1.3 reset destrutivo; F1.1/F1.2 credencial+identidade).
 ```
+
+## Piloto autorizado pelo dono — 2026-09-15
+
+Decisões do dono (registradas verbatim na sessão de 15/09/2026):
+
+- **"Autorizo o piloto, um número só pra tudo, pode começar pela W1"** — destrava o
+  Gate G7 no que depende de autorização: o piloto TOULON com **modo misto**
+  (`mixed_mode_enabled`) — UM número serve atendimento + gestão (gestores
+  autorizados falam com o Diretor IA/Maestro pelo mesmo número comercial).
+- A ativação real das flags em produção segue o runbook
+  `docs/runbook/whatsapp-unificado-piloto.md` (ordem §598, rollback §604,
+  interrupção §602) — a autorização NÃO pula o runbook.
+
+### Plano de fatias W1–W4 (executa o que o piloto destravou)
+
+| Fatia | Escopo | Estado |
+|---|---|---|
+| **W1** | UI de conexão pra leigo no `ChannelsPanel`: assistente em 3 estados (Desconectado → QR → **Conectado ✅** com luzes honestas Sessão/Recebimento/Operação vindas de `GET /api/channels/states` + `/whatsapp/status`); modo default vira **`new`** (instância automática `zapflow_<org>`, sem digitar nada); importar instância vira opção avançada; **remove** o bloco manual "Passo 4 webhook" (auto-configurado desde F1.4) e o aviso "Limitações da Evolution"/jargão ExaForge; seção "Falar com a IA do negócio" no próprio card (Gestores do Zapp via `/api/managers`) | **EM ANDAMENTO** |
+| **W2** | Migrar a SELEÇÃO de canal dos ~20 pontos A5 (`Scheduler.ts` etc.) para `ChannelBindingService.resolve()` — aditivo, 0-regressão via bindings de compatibilidade (pré-condição nº 1 da F7.4) | NÃO INICIADO |
+| **W3** | Ligar `mixed_mode_enabled` pra TOULON (piloto real): um número = atendimento + gestão; observação pelas superfícies F6.4/F1.2d/F7.3 | NÃO INICIADO — depende do runbook + janela do dono |
+| **W4** | Remoções físicas pilot-gated na ordem da `ANALISE-F7.4` (só após W2 + equivalência provada no piloto) | NÃO INICIADO — pilot-gated |
+
+### Backlog novo — comandos de TAREFA via WhatsApp (pedido do dono, 15/09/2026)
+
+Pedido verbatim: a conexão deve falar com o Diretor IA / IA MAESTRO "para que a IA
+receba uma tarefa e execute". Dois comandos nomeados pelo dono. **Ainda NÃO
+implementados** — entram como fatias futuras (após W1–W3), aqui registrados
+honestamente como backlog:
+
+- [ ] **WZ-1 — Geração de imagem por WhatsApp**: gestor autorizado manda o pedido
+  ("gere uma imagem de ..."), a IA encaminha ao **Estúdio de Criação**
+  (`StudioService`, ADR-167) e devolve a imagem pronta **pelo próprio WhatsApp**
+  (reusa `MessageProviderService.sendDocument`/mídia + fila durável F6.1).
+  Pré-condições: modo misto ativo (W3) + identidade do gestor resolvida
+  (`SenderIdentityService`) + finalidade `gestao`.
+- [ ] **WZ-2 — Registro de venda por comando**: "registre a venda da peça xpto do
+  tamanho GG, da cor azul, com a referencia 123456, com o valor xx,xx pago com
+  cartão de credito" → parser extrai peça/tamanho/cor/referência/valor/forma de
+  pagamento, **valida contra o catálogo real** (`products_services` — RN-151,
+  nunca inventa produto/valor) e registra a venda pelo serviço canônico do
+  domínio; ambiguidade → desambiguação ativa (padrão F3.4), nunca chute.
+  Dinheiro role-gated (§73); comando de gestor autorizado apenas.
 </content>

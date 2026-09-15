@@ -32,6 +32,9 @@ export function ChannelsPanel() {
   const [zappNumber, setZappNumber] = useState('');
   const [zappName, setZappName] = useState('');
   const [zappBusy, setZappBusy] = useState(false);
+  // W3 — modo misto (um número = atendimento + gestão), opt-in do piloto.
+  const [mixedMode, setMixedMode] = useState<{ enabled: boolean; managersCount: number } | null>(null);
+  const [mixedBusy, setMixedBusy] = useState(false);
   // F2.2 (UI) — usos por finalidade (channel_feature_bindings).
   const [bindingFeatures, setBindingFeatures] = useState<string[]>([]);
   const [bindings, setBindings] = useState<any[]>([]);
@@ -59,6 +62,7 @@ export function ChannelsPanel() {
     loadEvoStatus();
     loadBindings();
     loadZappManagers();
+    loadMixedMode();
   }, []);
 
   // F2.2 (UI) — usos por finalidade.
@@ -156,6 +160,35 @@ export function ChannelsPanel() {
       const r = await apiFetch(`/api/managers/${id}`, { method: 'DELETE' });
       if (r.ok) loadZappManagers(); else toast.error('Não foi possível remover.');
     } catch { toast.error('Não foi possível remover.'); }
+  };
+
+  // W3 — modo misto (um número só pra tudo): estado + toggle (owner/admin).
+  const loadMixedMode = () => {
+    apiFetch('/api/channels/mixed-mode').then(r => r.json()).then((d: any) => {
+      if (typeof d?.enabled === 'boolean') setMixedMode({ enabled: d.enabled, managersCount: Number(d.managersCount || 0) });
+    }).catch(() => {});
+  };
+  const toggleMixedMode = async (enabled: boolean) => {
+    if (enabled && zappManagers.length === 0) {
+      toast.error('Autorize ao menos um número de gestor antes de ligar — sem gestor cadastrado, ninguém é reconhecido pra falar com a IA.');
+      return;
+    }
+    if (enabled && !(await confirmDialog('Ligar o modo "um número só pra tudo"? Os gestores autorizados passam a falar com a IA pelo MESMO número do atendimento. Dá pra desligar a qualquer momento.', { confirmText: 'Ligar' }))) return;
+    setMixedBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/mixed-mode', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setMixedMode({ enabled: !!d.enabled, managersCount: Number(d.managersCount || 0) });
+        toast.success(enabled ? 'Modo misto ligado — um número serve atendimento e gestão.' : 'Modo misto desligado — o número volta a ser só atendimento.');
+      } else {
+        const d = await r.json().catch(() => ({}));
+        toast.error(d?.error || 'Não foi possível alterar o modo misto.');
+      }
+    } catch { toast.error('Não foi possível alterar o modo misto.'); } finally { setMixedBusy(false); }
   };
 
   // W1 — traduz as dimensões da F1.2d em 3 luzes honestas pro leigo. "Recebimento
@@ -632,6 +665,26 @@ export function ChannelsPanel() {
                     {zappBusy ? 'Salvando…' : 'Autorizar'}
                   </Button>
                 </div>
+
+                {/* W3 — um número só pra tudo (modo misto), opt-in do piloto. */}
+                {mixedMode && (
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-indigo-900/40 bg-slate-950/50 px-3 py-3 mt-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-200">Um número só pra tudo (modo misto)</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Ligado: os gestores autorizados acima falam com a IA pelo <strong>mesmo número do atendimento</strong> — não precisa de um segundo chip. Clientes seguem no atendimento normal; se um gestor estiver no meio de um atendimento como cliente, a conversa dele continua no atendimento. Desligar volta tudo ao comportamento de hoje, na hora.
+                      </p>
+                      {mixedMode.enabled && zappManagers.length === 0 && (
+                        <p className="text-[11px] text-amber-400 mt-1">⚠ Ligado, mas sem nenhum gestor autorizado — ninguém será reconhecido pra falar com a IA.</p>
+                      )}
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0 mt-1">
+                      <input type="checkbox" className="sr-only peer" checked={mixedMode.enabled} disabled={mixedBusy}
+                        onChange={e => toggleMixedMode(e.target.checked)} />
+                      <div className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-500"></div>
+                    </label>
+                  </div>
+                )}
               </div>
             </div>
           </div>

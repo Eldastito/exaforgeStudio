@@ -8,6 +8,7 @@ import { EncryptionService } from "../EncryptionService.js";
 import { ChannelStateService } from "../ChannelStateService.js";
 import { ChannelBindingService, KNOWN_FEATURES } from "../ChannelBindingService.js";
 import { ChannelBindingMigrationService } from "../ChannelBindingMigrationService.js";
+import { MixedModeInboundService } from "../MixedModeInboundService.js";
 
 const router = Router();
 
@@ -52,6 +53,26 @@ router.get("/whatsapp/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   return res.json(ChannelProvisioningService.status(orgId));
+});
+
+// W3 — modo misto (um número = atendimento + gestão), opt-in do PILOTO.
+// GET expõe o estado + contagem de gestores autorizados (a UI avisa quando
+// ligar sem gestor); POST liga/desliga (owner/admin, auditado). Desligar é o
+// rollback do runbook — o inbound volta ao caminho de hoje no próximo webhook.
+router.get("/mixed-mode", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  let managersCount = 0;
+  try { managersCount = Number((db.prepare(`SELECT COUNT(*) c FROM authorized_managers WHERE organization_id = ?`).get(orgId) as any)?.c || 0); } catch { /* noop */ }
+  return res.json({ enabled: MixedModeInboundService.isEnabled(orgId), managersCount });
+});
+
+router.post("/mixed-mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "Informe { enabled: true|false }." });
+  const r = MixedModeInboundService.setEnabled(orgId, req.body.enabled, req.user?.userId || null);
+  return res.json(r);
 });
 
 // F1.2d (RF-02/CA-02) — estados LÓGICOS da conexão (sessão/webhook/administração/

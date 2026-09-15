@@ -6282,6 +6282,27 @@ function SellerScoreboardTab() {
   };
   const fmtDM = (d: string) => d ? `${d.slice(8)}/${d.slice(5, 7)}` : '';
 
+  // Gestão de equipe (owner/admin/gerente): gerente da loja + vendedores inline.
+  const [manageOpen, setManageOpen] = useState(false);
+  const [orgUsers, setOrgUsers] = useState<any[]>([]);
+  const [managerUserId, setManagerUserId] = useState<string>('');
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiFetch('/api/users').then(r => r.json()).then(d => setOrgUsers(Array.isArray(d?.users) ? d.users : (Array.isArray(d) ? d : []))).catch(() => setOrgUsers([]));
+  }, [isAdmin]);
+  useEffect(() => {
+    if (!isAdmin || !storeId) { setManagerUserId(''); return; }
+    apiFetch(`/api/retailops/stores/${storeId}`).then(r => r.json()).then(s => setManagerUserId(s?.manager_user_id || '')).catch(() => setManagerUserId(''));
+  }, [isAdmin, storeId]);
+  const saveManager = async (uid: string) => {
+    setManagerUserId(uid);
+    try {
+      const r = await apiFetch(`/api/retailops/stores/${storeId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ managerUserId: uid || null }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      toast.success('Gerente da loja atualizado.');
+    } catch (e: any) { toast.error(e.message || 'Falha ao salvar o gerente.'); }
+  };
+
   // Célula de um período: realizado, cota e % de atingimento (cor por faixa).
   const Cell = ({ p }: { p: any }) => {
     const a = p?.attainment;
@@ -6312,6 +6333,28 @@ function SellerScoreboardTab() {
           </label>
         )}
       </div>
+      {isAdmin && (
+        <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40">
+          <button onClick={() => setManageOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800/40">
+            <Users className="w-4 h-4 text-indigo-300" /> Gerenciar equipe (vendedores + gerente)
+            <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${manageOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {manageOpen && (
+            <div className="border-t border-zinc-800 p-3 space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-xs text-zinc-400">Gerente da loja</label>
+                <select value={managerUserId} onChange={e => saveManager(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+                  <option value="">— sem gerente —</option>
+                  {orgUsers.map((u: any) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
+                </select>
+                <span className="text-[11px] text-zinc-500">Recebe o bloco de gerente na comissão desta loja.</span>
+              </div>
+              {/* Diretório embutido: cadastrar / editar / inativar vendedor da loja atual. */}
+              <SellersDirectoryTab embedStoreId={storeId} />
+            </div>
+          )}
+        </div>
+      )}
       <p className="mb-2 text-[11px] text-zinc-500">Quanto cada vendedor fez <strong>vs a cota dele</strong>. A cota vem da aba <strong>Escala &amp; cotas</strong> (semanal): o <strong>dia</strong> usa a cota da semana ÷ dias escalados; a <strong>quinzena</strong> são 2 semanas; o <strong>mês</strong> é a soma das semanas. Verde ≥ 100%, amarelo ≥ 60%, vermelho abaixo.</p>
       <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
         <span className="text-zinc-400">Situação (meses fechados abaixo da meta):</span>
@@ -6376,15 +6419,20 @@ function SellerScoreboardTab() {
   );
 }
 
-function SellersDirectoryTab() {
+// `embedStoreId`: quando presente, o diretório roda EMBUTIDO (ex.: dentro da aba
+// Metas) — segue a loja de fora e esconde o próprio seletor/título.
+function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
   const [stores, setStores] = useState<any[]>([]);
-  const [storeId, setStoreId] = useState('');
+  const [storeIdInternal, setStoreId] = useState('');
+  const storeId = embedStoreId || storeIdInternal;
   const [assignFor, setAssignFor] = useState<any>(null);
   const [deleteFor, setDeleteFor] = useState<any>(null);
   // Modal de cadastro/nome: { codigo, initialName, allowCodeEdit }. Sem window.prompt.
   const [nameModal, setNameModal] = useState<{ codigo: string; initialName?: string; allowCodeEdit?: boolean } | null>(null);
 
-  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!storeId && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
+  // Carrega as lojas SEMPRE (o modal de cadastro precisa da lista); só define a
+  // loja padrão pelo seletor interno quando NÃO está embutido.
+  useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => { const arr = (Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active); setStores(arr); if (!embedStoreId && !storeIdInternal && arr[0]) setStoreId(arr[0].id); }).catch(() => {}); /* eslint-disable-next-line */ }, []);
   const { data: cov, status, corr, isStale, loadedAt, reload: load } =
     useAnalytics(() => storeId ? `/api/retailops/seller-coverage?storeId=${storeId}` : '', [storeId]);
   const showData = status === 'ok' || isStale;
@@ -6393,10 +6441,12 @@ function SellersDirectoryTab() {
   return (
     <div>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
-        <span className="text-sm text-zinc-300">Vendedores da loja</span>
-        <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
-          {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        {!embedStoreId && <span className="text-sm text-zinc-300">Vendedores da loja</span>}
+        {!embedStoreId && (
+          <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+            {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        )}
         <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
         <button onClick={() => setNameModal({ codigo: '', allowCodeEdit: true })} disabled={!storeId} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"><Plus className="w-4 h-4" /> Cadastrar vendedor</button>
       </div>
@@ -6418,7 +6468,7 @@ function SellersDirectoryTab() {
                     {s.is_primary ? <Store className="w-3 h-3 text-emerald-400 mr-1" /> : null}
                     <span>{s.name || `Matrícula ${s.matricula}`}</span>
                     <button onClick={() => setAssignFor(s)} title="Editar vendedor / transferir de loja" className="ml-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-indigo-300"><Pencil className="w-3 h-3" /></button>
-                    <button onClick={() => setDeleteFor(s)} title="Excluir vendedor" className="rounded p-1 text-zinc-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="w-3 h-3" /></button>
+                    <button onClick={() => setDeleteFor(s)} title="Inativar vendedor (preserva histórico)" className="rounded p-1 text-zinc-500 hover:bg-amber-500/10 hover:text-amber-300"><Trash2 className="w-3 h-3" /></button>
                   </div>
                 ))}
               </div>
@@ -6556,18 +6606,18 @@ function SellerDeleteModal({ seller, onClose, onDeleted }: { seller: any; onClos
     try {
       const r = await apiFetch(`/api/retailops/sellers/${seller.seller_id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao excluir.');
-      toast.success('Vendedor excluído.'); onDeleted();
+      toast.success('Vendedor inativado.'); onDeleted();
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-5" onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-zinc-100 mb-1">Excluir vendedor</h3>
-        <p className="text-[13px] text-zinc-300 mb-2">Remover <strong>{label}</strong> da lista e encerrar as lotações dele nas lojas?</p>
-        <p className="text-[11px] text-zinc-500 mb-4">O histórico de comissão e vendas continua preservado pela matrícula. Se a matrícula voltar a vender no PDV, ela reaparece como pendência de nome.</p>
+        <h3 className="text-base font-semibold text-zinc-100 mb-1">Inativar vendedor</h3>
+        <p className="text-[13px] text-zinc-300 mb-2">Inativar <strong>{label}</strong>? Ele sai da lista de ativos e as lotações são encerradas.</p>
+        <p className="text-[11px] text-zinc-500 mb-4">O histórico de comissão e vendas <strong>é preservado</strong> pela matrícula (nada é apagado). Se a matrícula voltar a vender no PDV, ela reaparece como pendência de nome.</p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={del} disabled={saving} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50">{saving ? 'Excluindo…' : 'Excluir'}</button>
+          <button onClick={del} disabled={saving} className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">{saving ? 'Inativando…' : 'Inativar'}</button>
         </div>
       </div>
     </div>

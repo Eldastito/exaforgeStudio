@@ -945,7 +945,7 @@ function AlterdataConnectorPanel() {
     if (!filiais.length) { toast.error('Informe ao menos um código de filial.'); return; }
     setTimelineBusy(true);
     try {
-      const res = await apiFetch('/api/integrations/alterdata/filial-timeline', { method: 'POST', body: JSON.stringify({ filiais, days: 160 }) });
+      const res = await apiFetch('/api/integrations/alterdata/filial-timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filiais, days: 160 }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d.ok && d.queued) {
         toast.success(`Linha do tempo iniciada (${(d.filiais || []).length} filial(is)) — em segundo plano.`);

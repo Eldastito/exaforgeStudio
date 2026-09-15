@@ -6255,7 +6255,7 @@ function SellerScoreboardTab() {
   const hideFortnight = !!data?.hideFortnight;
   const toggleFortnight = async () => {
     try {
-      const r = await apiFetch('/api/retailops/seller-scoreboard/fortnight-visibility', { method: 'PUT', body: JSON.stringify({ hide: !hideFortnight }) });
+      const r = await apiFetch('/api/retailops/seller-scoreboard/fortnight-visibility', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hide: !hideFortnight }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
       load();
     } catch (e: any) { toast.error(e.message || 'Falha ao salvar a preferência.'); }

@@ -617,16 +617,23 @@ export class RetailClosingService {
     db.prepare(`UPDATE retail_daily_closings SET details_json = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`)
       .run(JSON.stringify(normalized), orgId, closing.id);
     try { logAuthEvent(orgId, actorId || "system", closing.id, "RETAIL_CLOSING_DETAILED", { storeId, date, informedTotal, sellers: ranking.length, rankingGap: normalized.derived.rankingGap }); } catch { /* noop */ }
+    // O ranking do gerente vira venda por vendedor JÁ NO SALVAMENTO (não espera
+    // aprovar) — a decisão do dono é que o lançamento do gerente é a verdade.
+    // Best-effort: uma falha aqui não derruba o salvamento do fechamento.
+    try { this.syncRankingToSellerSales(orgId, closing.id, actorId); } catch { /* noop */ }
     return this.get(orgId, closing.id);
   }
 
   /**
-   * Na APROVAÇÃO do fechamento, o ranking da folha vira lançamento de vendas
-   * por vendedor (retail_seller_sales, source='closing') — a MESMA base da
-   * comissão/corrida (Fase G/G2), sem digitar duas vezes. Idempotente:
-   * substitui só as linhas source='closing' daquela (loja, dia); lançamentos
-   * manuais/foto do gestor não são tocados. Matrícula resolvida pelo nome
-   * quando bate com UM único vendedor cadastrado (sem chute em ambiguidade).
+   * O ranking da folha (fornecido pelos GERENTES no fechamento) vira lançamento
+   * de vendas por vendedor (retail_seller_sales, source='closing') — a MESMA
+   * base da comissão/corrida e da aba Metas, sem digitar duas vezes. Roda no
+   * SALVAMENTO do fechamento (não só na aprovação): a decisão do dono é que o
+   * lançamento do gerente é a VERDADE, então precisa valer na hora — sem depender
+   * de aprovar (aprovar não pode ser pré-requisito pra o número aparecer).
+   * Idempotente: substitui só as linhas source='closing' daquela (loja, dia) —
+   * ranking vazio limpa as linhas; lançamentos manuais/foto não são tocados.
+   * Matrícula resolvida pelo nome quando bate com UM único vendedor cadastrado.
    */
   static syncRankingToSellerSales(orgId: string, closingId: string, actorId?: string): number {
     const c = this.get(orgId, closingId);
@@ -634,9 +641,10 @@ export class RetailClosingService {
     let details: any = null;
     try { details = JSON.parse(c.details_json || "null"); } catch { details = null; }
     const ranking: any[] = Array.isArray(details?.ranking) ? details.ranking : [];
-    if (!ranking.length) return 0;
     const sellers = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
     const tx = db.transaction(() => {
+      // Sempre limpa e regrava (mesmo ranking vazio) — assim editar/limpar o
+      // ranking reflete de imediato, sem linha fantasma sobrando.
       db.prepare(`DELETE FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ? AND source = 'closing'`)
         .run(orgId, c.store_id, c.closing_date);
       const ins = db.prepare(

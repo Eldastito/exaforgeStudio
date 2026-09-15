@@ -432,6 +432,9 @@ export class RetailCommissionService {
          LEFT JOIN retail_stores st ON st.id = es.store_id
          LEFT JOIN retail_sellers rs ON rs.organization_id = es.organization_id AND rs.matricula = es.matricula
         WHERE es.organization_id = ? AND es.sale_date BETWEEN ? AND ?
+          -- Loja em modo MANUAL: a verdade é o lançamento do gerente. O ERP é
+          -- re-contagem da mesma venda física → fica de fora (igual ao PDV).
+          AND COALESCE(st.seller_source, 'pdv') <> 'manual'
         GROUP BY es.store_id, COALESCE(NULLIF(es.matricula, ''), LOWER(TRIM(es.seller_name)))`
     ).all(orgId, start, end) as any[];
     for (const r of erp) {
@@ -462,7 +465,8 @@ export class RetailCommissionService {
         // RE-LANÇAMENTOS da MESMA venda física. Quando o mesmo vendedor tem PDV +
         // (manual OU ERP) no período, as duas somam e o valor infla (a venda física
         // entra duas vezes) — a menos que a loja esteja marcada `seller_source='manual'`
-        // (aí o PDV já é excluído acima). `zappflow` (pedido online) é canal DISTINTO,
+        // (aí PDV e ERP já ficam de fora acima — só o lançamento do gerente conta).
+        // `zappflow` (pedido online) é canal DISTINTO,
         // não conta como dupla. Sinaliza pro gestor reconciliar / marcar a fonte da loja.
         doubleSourced: (Number(v.bySource["pdv"]) || 0) > 0 && ((Number(v.bySource["manual"]) || 0) > 0 || (Number(v.bySource["erp"]) || 0) > 0),
       }))

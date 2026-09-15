@@ -160,4 +160,31 @@ export class ChannelProvisioningService {
       })),
     };
   }
+
+  /**
+   * WZ (pedido do dono, 15/09/2026) — DESCONECTAR o WhatsApp pelo ZapFlow.
+   * O card mostrava "conectado" (status legado no banco) sem ação de saída.
+   * Faz duas coisas, nesta ordem:
+   *  1. LOGOUT best-effort no provedor (`EvolutionService.logoutInstance` —
+   *     encerra a sessão pareada; NÃO apaga a instância, que fica pronta pra
+   *     reconectar por QR). Sem config/instância morta → segue honesto.
+   *  2. Marca os canais Evolution da org como `disconnected` no banco —
+   *     UPDATE, nunca DELETE (histórico/contatos referenciam o canal,
+   *     convenção nº 9). O card vira "Desconectado" com o botão Conectar.
+   * `providerLogout:false` no retorno = a sessão pode seguir viva no celular;
+   * a UI manda conferir Aparelhos conectados. Isolado por org; auditado.
+   */
+  static async disconnect(orgId: string, actorUserId: string | null): Promise<{ ok: boolean; disconnected: number; providerLogout: boolean }> {
+    if (!orgId) return { ok: false, disconnected: 0, providerLogout: false };
+    const rows = db.prepare(
+      `SELECT id, identifier, status FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
+    ).all(orgId) as any[];
+    let providerLogout = false;
+    for (const r of rows) {
+      try { if (await EvolutionService.logoutInstance(r.identifier)) providerLogout = true; } catch { /* best-effort */ }
+      db.prepare(`UPDATE channels SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
+      logAuthEvent(orgId, actorUserId, r.id, "CHANNEL_WHATSAPP_DISCONNECTED", { instanceName: r.identifier, providerLogout });
+    }
+    return { ok: true, disconnected: rows.length, providerLogout };
+  }
 }

@@ -48,6 +48,20 @@ router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: Au
   }
 });
 
+// WZ — desconectar o WhatsApp pelo ZapFlow (pedido do dono): logout best-effort
+// no provedor + canais Evolution da org marcados 'disconnected' (UPDATE, nunca
+// DELETE). `providerLogout:false` = a UI avisa pra conferir o celular.
+router.post("/whatsapp/disconnect", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = await ChannelProvisioningService.disconnect(orgId, req.user?.userId || null);
+    return res.json(r);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Falha ao desconectar" });
+  }
+});
+
 // Estado dos canais Evolution da org (sem segredos) — pra UI e retomada do QR.
 router.get("/whatsapp/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

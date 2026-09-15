@@ -79,6 +79,32 @@ export class EvolutionService {
   }
 
   /**
+   * WZ (pedido do dono, 15/09/2026) — LOGOUT da sessão no provedor, best-effort.
+   * Diferente do `resetInstance` (destrutivo: apaga + recria), o logout só
+   * encerra a sessão pareada — a instância continua existindo pra reconectar
+   * por QR. Forks divergem no endpoint, então tenta os mais comuns (1º 2xx
+   * vence). Nunca lança; retorna se ALGUM aceitou (o caller reporta honesto:
+   * false = "marcado desconectado aqui; confira Aparelhos conectados no
+   * celular"). Sem config → false (não finge logout).
+   */
+  static async logoutInstance(instanceName: string, config?: EvolutionConfig): Promise<boolean> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg || !instanceName) return false;
+    const attempts: { method: string; path: string }[] = [
+      { method: "DELETE", path: `/instance/logout/${encodeURIComponent(instanceName)}` },
+      { method: "POST", path: `/instance/logout/${encodeURIComponent(instanceName)}` },
+      { method: "POST", path: `/instance/disconnect/${encodeURIComponent(instanceName)}` },
+    ];
+    for (const a of attempts) {
+      try {
+        const resp = (await fetch(`${cfg.baseUrl}${a.path}`, { method: a.method, headers: { apikey: cfg.apiKey, instance: instanceName } })) as FetchResult;
+        if (resp.ok) return true;
+      } catch { /* tenta o próximo */ }
+    }
+    return false;
+  }
+
+  /**
    * Carrega config a partir de ENV. Retorna null se qualquer campo obrigatório
    * faltar — o caller decide se falha (rota /provision) ou pula (onboarding
    * best-effort). Extraído pra permitir override no teste.

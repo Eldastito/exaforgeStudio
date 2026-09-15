@@ -215,7 +215,16 @@ export class MessageProviderService {
    * - evolution/evolution_go: POST no endpoint de mídia (configurável por env).
    * - instagram: não suportado (lança, para o chamador usar o link).
    */
-  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string, opts?: { feature?: string; unitId?: string | null; mimeType?: string }) {
+  /**
+   * WZ-1 — envia uma IMAGEM nativa (aparece como foto, não como arquivo). Fina
+   * casca sobre sendDocument com `mediaKind:'image'` — mesmo sink, mesmo gate de
+   * finalidade, mesmos fallbacks de rota da Evolution (sem 2º caminho de envio).
+   */
+  static async sendImage(channelId: string, recipientIdentifier: string, imageUrl: string, caption?: string, opts?: { feature?: string; unitId?: string | null; mimeType?: string }) {
+    return this.sendDocument(channelId, recipientIdentifier, imageUrl, "imagem.png", caption, { ...opts, mimeType: opts?.mimeType || "image/png", mediaKind: "image" });
+  }
+
+  static async sendDocument(channelId: string, recipientIdentifier: string, fileUrl: string, fileName: string, caption?: string, opts?: { feature?: string; unitId?: string | null; mimeType?: string; mediaKind?: "document" | "image" }) {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
@@ -232,13 +241,21 @@ export class MessageProviderService {
       const token = EncryptionService.decrypt(channel.token_encrypted);
       if (!token) throw new Error("Token não configurado para este canal");
       const endpoint = `https://graph.facebook.com/v19.0/${channel.identifier}/messages`;
-      const body: any = {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: recipientIdentifier,
-        type: "document",
-        document: { link: fileUrl, filename: fileName, ...(caption ? { caption } : {}) },
-      };
+      const body: any = opts?.mediaKind === "image"
+        ? {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: recipientIdentifier,
+            type: "image",
+            image: { link: fileUrl, ...(caption ? { caption } : {}) },
+          }
+        : {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: recipientIdentifier,
+            type: "document",
+            document: { link: fileUrl, filename: fileName, ...(caption ? { caption } : {}) },
+          };
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -259,9 +276,10 @@ export class MessageProviderService {
       // Corpos candidatos (forks da Evolution divergem nos nomes de campo).
       // F5.3 (§13.4): MIME tipado — não fixa mais application/pdf (XLSX/DOCX
       // sairiam rotulados errado). Default PDF preserva os chamadores existentes.
-      const mimetype = opts?.mimeType || 'application/pdf';
-      const bodyA = { number: recipientIdentifier, mediatype: 'document', mimetype, media: fileUrl, fileName, caption, delay: 1200 };
-      const bodyB = { number: recipientIdentifier, type: 'document', url: fileUrl, fileName, caption, delay: 1200 };
+      const mediatype = opts?.mediaKind === 'image' ? 'image' : 'document';
+      const mimetype = opts?.mimeType || (mediatype === 'image' ? 'image/png' : 'application/pdf');
+      const bodyA = { number: recipientIdentifier, mediatype, mimetype, media: fileUrl, fileName, caption, delay: 1200 };
+      const bodyB = { number: recipientIdentifier, type: mediatype, url: fileUrl, fileName, caption, delay: 1200 };
       const bodyC = { number: recipientIdentifier, document: fileUrl, fileName, caption, delay: 1200 };
 
       // Se o caminho foi fixado por env, usa só ele. Senão, tenta os mais comuns

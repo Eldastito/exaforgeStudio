@@ -8,6 +8,7 @@ import { CustomerProfileService } from "./CustomerProfileService.js";
 import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { setUsageOrg } from "./usageContext.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { StudioWhatsAppCommandService } from "./StudioWhatsAppCommandService.js";
 import { deliverBotMessage } from "./botOutbound.js";
 import { CadenceService } from "./CadenceService.js";
 import { LgpdService } from "./LgpdService.js";
@@ -134,6 +135,17 @@ async function runInternalInbound(orgId: string, channel: any, payload: { sender
     const s = db.prepare(`SELECT whatsapp_instance_kind, falatu_reply_mode FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
     if (s?.whatsapp_instance_kind === 'dedicated' && s?.falatu_reply_mode === 'trigger_only') return;
   } catch { /* segue fluxo suíte (fail-open) */ }
+
+  // WZ-1 (piloto 15/09/2026): comando de TAREFA "gere uma imagem …" → Estúdio de
+  // Criação → arte entregue de volta pelo WhatsApp. Gatilho DETERMINÍSTICO (regex
+  // verbo+«imagem», RN-151 — nunca inferência de NL); vem ANTES do Controller pra
+  // 'pergunta_negocio' não engolir o comando. Só gestores chegam a este caminho.
+  try {
+    const sc = await StudioWhatsAppCommandService.handle(orgId, channel.id, payload.senderId, payload.text || '');
+    if (sc.handled) return;
+  } catch (e) {
+    console.error('[Estúdio] Falha no comando de imagem via WhatsApp:', e);
+  }
 
   // Controller Financeiro IA (ADR-139): comandos CLAROS de gestão (saldo, a
   // receber/pagar, prioridades, aprovar…) vão para o Controller — com RBAC.

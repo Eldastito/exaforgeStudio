@@ -6242,6 +6242,8 @@ function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => v
 // loja em DIA / SEMANA / QUINZENA / MÊS. Cota semanal é a base (Escala & cotas):
 // dia = semana ÷ dias escalados; quinzena = 2 semanas; mês = soma das semanas.
 function SellerScoreboardTab() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'owner' || user?.role === 'admin';
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [date, setDate] = useState(todayStr());
@@ -6249,6 +6251,15 @@ function SellerScoreboardTab() {
   const { data, status, corr, isStale, loadedAt, reload: load } =
     useAnalytics(() => storeId ? `/api/retailops/seller-scoreboard?storeId=${storeId}&date=${date}` : '', [storeId, date]);
   const showData = status === 'ok' || isStale;
+  // Empresa que não trabalha com quinzena esconde a coluna (preferência por-org).
+  const hideFortnight = !!data?.hideFortnight;
+  const toggleFortnight = async () => {
+    try {
+      const r = await apiFetch('/api/retailops/seller-scoreboard/fortnight-visibility', { method: 'PUT', body: JSON.stringify({ hide: !hideFortnight }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha');
+      load();
+    } catch (e: any) { toast.error(e.message || 'Falha ao salvar a preferência.'); }
+  };
   const fmtDM = (d: string) => d ? `${d.slice(8)}/${d.slice(5, 7)}` : '';
 
   // Célula de um período: realizado, cota e % de atingimento (cor por faixa).
@@ -6275,6 +6286,11 @@ function SellerScoreboardTab() {
         </select>
         <input type="date" value={date} onChange={e => setDate(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
         <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-4 h-4" /> Atualizar</button>
+        {isAdmin && showData && data && (
+          <label className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-zinc-400" title="Empresas que não trabalham com quinzena podem esconder essa coluna. Não muda cálculo, só a exibição.">
+            <input type="checkbox" checked={!hideFortnight} onChange={toggleFortnight} /> Mostrar quinzena
+          </label>
+        )}
       </div>
       <p className="mb-3 text-[11px] text-zinc-500">Quanto cada vendedor fez <strong>vs a cota dele</strong>. A cota vem da aba <strong>Escala &amp; cotas</strong> (semanal): o <strong>dia</strong> usa a cota da semana ÷ dias escalados; a <strong>quinzena</strong> são 2 semanas; o <strong>mês</strong> é a soma das semanas. Verde ≥ 100%, amarelo ≥ 60%, vermelho abaixo.</p>
 
@@ -6293,7 +6309,7 @@ function SellerScoreboardTab() {
                   <th className="px-3 py-2 text-left font-medium">Vendedor</th>
                   <th className="px-3 py-2 text-right font-medium">Dia<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.day?.start)}</span></th>
                   <th className="px-3 py-2 text-right font-medium">Semana<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.week?.start)}–{fmtDM(data.periods?.week?.end)}</span></th>
-                  <th className="px-3 py-2 text-right font-medium">Quinzena<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.fortnight?.start)}–{fmtDM(data.periods?.fortnight?.end)}</span></th>
+                  {!hideFortnight && <th className="px-3 py-2 text-right font-medium">Quinzena<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.fortnight?.start)}–{fmtDM(data.periods?.fortnight?.end)}</span></th>}
                   <th className="px-3 py-2 text-right font-medium">Mês<br /><span className="text-[10px] normal-case text-zinc-600">{data.month}</span></th>
                 </tr>
               </thead>
@@ -6303,7 +6319,7 @@ function SellerScoreboardTab() {
                     <td className="px-3 py-2 text-[13px] text-zinc-200">{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</td>
                     <td className="px-3 py-2"><Cell p={s.day} /></td>
                     <td className="px-3 py-2"><Cell p={s.week} /></td>
-                    <td className="px-3 py-2"><Cell p={s.fortnight} /></td>
+                    {!hideFortnight && <td className="px-3 py-2"><Cell p={s.fortnight} /></td>}
                     <td className="px-3 py-2"><Cell p={s.month} /></td>
                   </tr>
                 ))}

@@ -10029,6 +10029,11 @@ const initDb = () => {
   //     no caminho antigo provado.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_business_date_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_analytics_resolved_products_v1 INTEGER DEFAULT 1`); } catch (e) { /* noop */ }
+  // Metas do vendedor: esconder a coluna QUINZENA (empresa que não trabalha com
+  // quinzena). Por-org, opt-in — padrão 0 = mostrar (0-regressão; a quinzena
+  // segue calculada, só não é exibida). Outras empresas da vertical que usam
+  // quinzena mantêm a coluna.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_scoreboard_hide_fortnight INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
 
   // AJUDA — base de artigos de ajuda do USUÁRIO (ADR-179 F1). É o Fala Tu
   // (ZeroTrainingHelpService) respondendo dúvida ATERRADO em conteúdo CURADO —

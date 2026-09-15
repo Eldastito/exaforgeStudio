@@ -1927,8 +1927,24 @@ router.get("/seller-scoreboard", (req: AuthRequest, res): any => {
   const storeId = String(req.query.storeId || "");
   if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
-  try { res.json(RetailCommissionRaceService.sellerPeriodScoreboard(orgId, storeId, date)); }
+  try {
+    const board = RetailCommissionRaceService.sellerPeriodScoreboard(orgId, storeId, date);
+    // Preferência da empresa: esconder a coluna QUINZENA (a quinzena segue
+    // calculada; o flag só controla a EXIBIÇÃO — a decisão de mostrar é da UI).
+    const pref = db.prepare(`SELECT retail_scoreboard_hide_fortnight AS h FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    res.json({ ...board, hideFortnight: Number(pref?.h || 0) === 1 });
+  }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Preferência da empresa p/ a aba Metas: mostrar/ocultar a coluna QUINZENA.
+// owner/admin. Aditivo, opt-in — não altera cálculo, só a exibição.
+router.put("/seller-scoreboard/fortnight-visibility", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const hide = req.body?.hide ? 1 : 0;
+  db.prepare(`UPDATE organization_settings SET retail_scoreboard_hide_fortnight = ? WHERE organization_id = ?`).run(hide, orgId);
+  res.json({ ok: true, hideFortnight: hide === 1 });
 });
 
 // Materializa a corrida num RUN draft (aprovação segue humana — D7).

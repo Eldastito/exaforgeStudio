@@ -948,6 +948,58 @@ export class AlterdataSyncRunner {
     try { logAuthEvent(orgId, "system", "backfillFilialClosings", "ALTERDATA_BACKFILL_CLOSINGS", out as any); } catch { /* noop */ }
     return out;
   }
+
+  /**
+   * LINHA DO TEMPO de uma filial (DIAGNÓSTICO read-only). Varre os fechamentos
+   * (ResumoFecharMovimento) numa janela e descobre o PRIMEIRO e o ÚLTIMO dia com
+   * venda, mais a última movimentação (UltimoMovimento). Serve pra provar (ou
+   * derrubar) uma passagem de bastão entre códigos de filial: se o código velho
+   * PAROU num dia e o código novo COMEÇOU logo em seguida, é a mesma loja que
+   * migrou de código. NÃO grava nada (não mexe em fechamento, cursor nem loja);
+   * é uma leitura pontual isolada por org.
+   */
+  static async filialTimeline(orgId: string, filial: string, days = 150): Promise<{ filial: string; days: number; firstData: string | null; lastData: string | null; daysWithData: number; errors: number; lastMovement: string | null; lastFinalized: boolean | null; samples: Array<{ date: string; total: number }> }> {
+    const f = str(filial);
+    const out = { filial: f, days, firstData: null as string | null, lastData: null as string | null, daysWithData: 0, errors: 0, lastMovement: null as string | null, lastFinalized: null as boolean | null, samples: [] as Array<{ date: string; total: number }> };
+    if (!f) return out;
+    // Última movimentação (1 chamada barata): até quando a filial mexeu no caixa.
+    try {
+      const { body } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/UltimoMovimento/${encodeURIComponent(f)}`);
+      const m = (body as any)?.data;
+      const mv = Array.isArray(m) ? m[0] : m;
+      out.lastMovement = str(mv?.data).slice(0, 10) || null;
+      out.lastFinalized = mv?.finalizado2 != null ? Number(mv.finalizado2) === 1 : null;
+    } catch { /* segue sem a data */ }
+    const dated: Array<{ date: string; total: number }> = [];
+    for (let i = 0; i < days; i++) {
+      const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+      let total = 0;
+      let got = false;
+      for (const turno of [1, 2]) {
+        try {
+          const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${date}/${turno}`);
+          for (const r of items as any[]) {
+            if (String(r?.titulo || "").trim().toLowerCase() === "total de vendas") { const v = Number(r?.valor || 0); total += v; if (v > 0) got = true; }
+          }
+        } catch { out.errors++; }
+      }
+      if (!got) continue; // dia sem caixa fechado → não conta
+      const totalR = Math.round(total * 100) / 100;
+      if (totalR <= 0) continue;
+      dated.push({ date, total: totalR });
+    }
+    if (dated.length) {
+      dated.sort((a, b) => (a.date < b.date ? -1 : 1));
+      out.firstData = dated[0].date;               // primeiro dia com venda (começou)
+      out.lastData = dated[dated.length - 1].date;  // último dia com venda (parou)
+      out.daysWithData = dated.length;
+      // Amostra: 3 primeiros + 3 últimos dias com venda (sem duplicar quando <6).
+      const ends = [...dated.slice(0, 3), ...dated.slice(-3)];
+      out.samples = ends.filter((v, idx) => ends.findIndex((x) => x.date === v.date) === idx);
+    }
+    try { logAuthEvent(orgId, "system", "filialTimeline", "ALTERDATA_FILIAL_TIMELINE", out as any); } catch { /* noop */ }
+    return out;
+  }
 }
 
 /** Janelas [1º dia, último dia] (YYYY-MM-DD) dos últimos N meses, mês atual incluído.
@@ -1001,5 +1053,21 @@ JobQueueService.registerHandler("alterdata_backfill_closings", async (p: any) =>
     at: new Date().toISOString(),
   };
   try { AlterdataConnectorService.setCursor(p.orgId, "_meta", "lastBackfillClosings", "", JSON.stringify(summary)); } catch { /* noop */ }
+  return summary;
+});
+
+// Handler da fila: LINHA DO TEMPO de filiais (diagnóstico). Roda em background
+// (varre ResumoFecharMovimento por dia numa janela ampla) e persiste em
+// _meta/lastFilialTimeline para a tela ler depois. Read-only — não grava nada.
+JobQueueService.registerHandler("alterdata_filial_timeline", async (p: any) => {
+  const filiais: string[] = Array.isArray(p.filiais) ? p.filiais.map((x: any) => String(x || "").trim()).filter(Boolean) : [];
+  const days = Math.max(1, Math.min(370, Number(p.days) || 150));
+  const results: any[] = [];
+  for (const f of filiais) {
+    try { results.push(await AlterdataSyncRunner.filialTimeline(p.orgId, f, days)); }
+    catch (e: any) { results.push({ filial: f, days, firstData: null, lastData: null, daysWithData: 0, errors: 1, error: String(e?.message || e) }); }
+  }
+  const summary = { done: true, days, results, at: new Date().toISOString() };
+  try { AlterdataConnectorService.setCursor(p.orgId, "_meta", "lastFilialTimeline", "", JSON.stringify(summary)); } catch { /* noop */ }
   return summary;
 });

@@ -569,7 +569,9 @@ router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
   // Resultado do último "Recuperar fechamentos" — antes ficava só num log interno,
   // então não dava pra ver o que o backfill fez (aplicou / pulou / erros por filial).
   const backfill = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastBackfillClosings", ""));
-  res.json({ ok: true, summary, lastError, backfill, running: AlterdataSyncRunner.isRunning(req.organizationId) });
+  // Resultado da última "Linha do tempo da filial" (diagnóstico de migração de código).
+  const timeline = parse(AlterdataConnectorService.getCursor(req.organizationId, "_meta", "lastFilialTimeline", ""));
+  res.json({ ok: true, summary, lastError, backfill, timeline, running: AlterdataSyncRunner.isRunning(req.organizationId) });
 });
 
 // DIAGNÓSTICO: filiais que VENDEM no ERP mas NÃO têm loja cadastrada (órfãs) —
@@ -582,6 +584,28 @@ router.post("/alterdata/orphan-filiais", async (req: AuthRequest, res): Promise<
     res.json({ ok: true, rows });
   } catch (e: any) {
     res.status(502).json({ ok: false, error: e?.message || "Falha ao levantar as filiais órfãs." });
+  }
+});
+
+// DIAGNÓSTICO: LINHA DO TEMPO de filiais — descobre o primeiro/último dia com
+// venda de cada filial informada (varre ResumoFecharMovimento em background) pra
+// provar uma passagem de bastão entre códigos (o velho parou ↔ o novo começou).
+// Sem `filiais` no corpo → usa as filiais configuradas. Read-only. owner/admin.
+router.post("/alterdata/filial-timeline", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const settings = AlterdataConnectorService.publicSettings(req.organizationId);
+    const bodyFiliais = Array.isArray(req.body?.filiais) ? req.body.filiais.map((x: any) => String(x || "").trim()).filter(Boolean) : [];
+    const filiais = bodyFiliais.length
+      ? bodyFiliais
+      : (Array.isArray(settings.filiais) ? settings.filiais.map((x: any) => String(x || "").trim()).filter(Boolean) : []);
+    if (!filiais.length) return res.status(400).json({ ok: false, error: "Nenhuma filial informada nem configurada." });
+    const days = Math.max(1, Math.min(370, Number(req.body?.days) || 150));
+    JobQueueService.enqueue("alterdata_filial_timeline", { orgId: req.organizationId, filiais, days }, { organizationId: req.organizationId });
+    logAuthEvent(req.organizationId, (req as any).userId || null, null, 'ALTERDATA_FILIAL_TIMELINE', { filiais, days, queued: true });
+    res.json({ ok: true, queued: true, filiais, days });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha ao levantar a linha do tempo da filial." });
   }
 });
 

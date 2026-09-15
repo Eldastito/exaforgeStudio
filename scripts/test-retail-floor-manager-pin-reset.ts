@@ -15,6 +15,7 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "zf-floor-pin-reset-"));
 process.env.DATA_DIR = tmpDir;
@@ -29,6 +30,7 @@ function verifies(fn: () => void): boolean { try { fn(); return true; } catch { 
 async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { RetailFloorService: Floor } = await import("../src/server/RetailFloorService.js");
+  const { AccountIdentityService } = await import("../src/server/AccountIdentityService.js");
 
   const A = `org_A_${randomUUID().slice(0, 6)}`;
   const B = `org_B_${randomUUID().slice(0, 6)}`;
@@ -61,6 +63,15 @@ async function main() {
 
   // 6) Isolamento: reset numa org que não é dona da loja não acha a loja.
   check("6.1 org B não reseta a loja de A", !verifies(() => Floor.resetManagerPin(B, store, "9999", "ownerB")));
+
+  // 7) Reautenticação: a rota exige a SENHA da conta (verifyPasswordForUser).
+  const userId = randomUUID();
+  const hash = await bcrypt.hash("s3nhaCerta", 6);
+  db.prepare(`INSERT INTO users (id, organization_id, name, email, password_hash, role, global_status) VALUES (?, ?, 'Dono', 'dono@a.com', ?, 'owner', 'active')`).run(userId, A, hash);
+  check("7.1 senha certa reautentica", (await AccountIdentityService.verifyPasswordForUser(userId, "s3nhaCerta")) === true);
+  check("7.2 senha errada NÃO reautentica", (await AccountIdentityService.verifyPasswordForUser(userId, "errada")) === false);
+  check("7.3 senha vazia NÃO reautentica", (await AccountIdentityService.verifyPasswordForUser(userId, "")) === false);
+  check("7.4 usuário inexistente NÃO reautentica", (await AccountIdentityService.verifyPasswordForUser(randomUUID(), "s3nhaCerta")) === false);
 
   console.log("\n=== TEST: Reset do PIN da gerência ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

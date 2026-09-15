@@ -17,6 +17,7 @@ import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
 import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics, RetailFloorOpsMetricsService } from "../RetailFloorAnalyticsService.js";
 import { RetailFloorDigestService } from "../RetailFloorDigestService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
+import { AccountIdentityService } from "../AccountIdentityService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -135,10 +136,15 @@ router.post("/stores/:storeId/manager-pin/reset-lockout", requireRole("owner", "
   } catch (e: any) { fail(res, e); }
 });
 
-// REDEFINE o PIN esquecido SEM o PIN atual — só owner/admin (a conta-quiosque
-// não pode se auto-resetar). `pin` novo (4-8 dígitos) define; `pin` vazio remove.
-router.post("/stores/:storeId/manager-pin/reset", requireRole("owner", "admin"), (req: AuthRequest, res) => {
+// REDEFINE o PIN esquecido SEM o PIN antigo — só owner/admin E exige a SENHA da
+// conta logada. O tablet fica logado numa conta de gestão, então papel sozinho
+// não prova quem está na frente; a senha reautentica (só quem sabe a senha do
+// dono reseta, mesmo no aparelho compartilhado). `pin` novo define; vazio remove.
+router.post("/stores/:storeId/manager-pin/reset", requireRole("owner", "admin"), async (req: AuthRequest, res) => {
   try {
+    const userId = req.user?.userId || (req.user as any)?.id;
+    const ok = await AccountIdentityService.verifyPasswordForUser(String(userId || ""), req.body?.password);
+    if (!ok) return res.status(403).json({ error: "Senha da conta incorreta.", code: "PASSWORD_REQUIRED" });
     const raw = req.body?.pin;
     const pin = raw == null || String(raw).trim() === "" ? null : String(raw).trim();
     res.json(RetailFloorService.resetManagerPin(req.organizationId!, req.params.storeId, pin, actor(req)));

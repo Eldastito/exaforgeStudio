@@ -829,8 +829,10 @@ function ManagerPinModal({ storeId, storeName, isManager, canConfigure, hasPin, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Reset: owner/admin redefine um PIN esquecido SEM o PIN atual. Vira "creating"
-  // no formulário (pede novo PIN + confirmação), mas grava pela rota de reset.
+  // no formulário (pede novo PIN + confirmação) + a SENHA da conta (reautentica
+  // num tablet compartilhado), mas grava pela rota de reset.
   const [resetting, setResetting] = useState(false);
+  const [acctPwd, setAcctPwd] = useState('');
   const creating = !hasPin || resetting;
 
   const submit = async () => {
@@ -841,11 +843,12 @@ function ManagerPinModal({ storeId, storeName, isManager, canConfigure, hasPin, 
     } else if (!pin.trim()) {
       return setError('Informe o PIN.');
     }
+    if (resetting && !acctPwd.trim()) return setError('Digite a senha da sua conta para redefinir.');
     setBusy(true);
     try {
       if (resetting) {
         const res = await apiFetch(`/api/retail-floor/stores/${storeId}/manager-pin/reset`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin, password: acctPwd }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || `Erro ${res.status}`);
@@ -895,6 +898,12 @@ function ManagerPinModal({ storeId, storeName, isManager, canConfigure, hasPin, 
             type="password" inputMode="numeric" placeholder="Confirme o PIN"
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center text-lg tracking-[0.5em] text-[var(--color-text-strong)] placeholder:text-sm placeholder:tracking-normal placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
         )}
+        {resetting && (
+          <input value={acctPwd} onChange={(e) => setAcctPwd(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            type="password" autoComplete="current-password" placeholder="Senha da SUA conta (dono/admin)"
+            className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+        )}
         {error && (
           <p className="flex items-center gap-1.5 text-sm text-rose-400"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</p>
         )}
@@ -905,13 +914,13 @@ function ManagerPinModal({ storeId, storeName, isManager, canConfigure, hasPin, 
         </button>
         {/* Recuperação de PIN esquecido — só dono/admin, sem o PIN antigo. */}
         {!resetting && hasPin && canConfigure && (
-          <button type="button" onClick={() => { setResetting(true); setPin(''); setConfirm(''); setError(null); }}
+          <button type="button" onClick={() => { setResetting(true); setPin(''); setConfirm(''); setAcctPwd(''); setError(null); }}
             className="w-full text-center text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text-strong)]">
             Esqueci o PIN — redefinir (dono/admin)
           </button>
         )}
         {resetting && (
-          <button type="button" onClick={() => { setResetting(false); setPin(''); setConfirm(''); setError(null); }}
+          <button type="button" onClick={() => { setResetting(false); setPin(''); setConfirm(''); setAcctPwd(''); setError(null); }}
             className="w-full text-center text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-strong)]">
             Cancelar
           </button>

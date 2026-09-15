@@ -6251,6 +6251,26 @@ function SellerScoreboardTab() {
   const { data, status, corr, isStale, loadedAt, reload: load } =
     useAnalytics(() => storeId ? `/api/retailops/seller-scoreboard?storeId=${storeId}&date=${date}` : '', [storeId, date]);
   const showData = status === 'ok' || isStale;
+  // Sinalização de meta (sequência de meses fechados abaixo) — carrega à parte
+  // p/ não pesar/atrasar o placar. Casa por matrícula ou nome normalizado.
+  const [signals, setSignals] = useState<Record<string, any>>({});
+  const normName = (s: string) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+  const sigKey = (matricula: any, name: any) => matricula ? `mat:${String(matricula).trim()}` : `nom:${normName(name)}`;
+  useEffect(() => {
+    if (!storeId) { setSignals({}); return; }
+    apiFetch(`/api/retailops/seller-goal-signals?storeId=${storeId}&date=${date}`).then(r => r.json()).then(d => {
+      const map: Record<string, any> = {};
+      for (const s of (Array.isArray(d?.sellers) ? d.sellers : [])) map[s.key || sigKey(s.matricula, s.sellerName)] = s;
+      setSignals(map);
+    }).catch(() => setSignals({}));
+  }, [storeId, date]);
+  const GOAL_LEVEL: Record<string, { label: string; cls: string; title: string }> = {
+    ok: { label: 'Meta atingida', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', title: 'Bateu a meta no mês fechado mais recente com meta cadastrada.' },
+    attention: { label: 'Atenção · 1 mês', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30', title: '1 mês fechado abaixo da meta.' },
+    critical: { label: 'Crítico · 2 meses', cls: 'bg-orange-500/15 text-orange-300 border-orange-500/40', title: '2 meses fechados seguidos abaixo da meta.' },
+    action: { label: 'Acompanhamento · 3+ meses', cls: 'bg-red-500/15 text-red-300 border-red-500/40', title: '3 ou mais meses fechados seguidos abaixo da meta — sugerido acompanhamento/plano de ação.' },
+    none: { label: '—', cls: 'bg-zinc-800/60 text-zinc-500 border-zinc-700', title: 'Sem meta cadastrada no histórico — não sinalizado.' },
+  };
   // Empresa que não trabalha com quinzena esconde a coluna (preferência por-org).
   const hideFortnight = !!data?.hideFortnight;
   const toggleFortnight = async () => {
@@ -6292,7 +6312,15 @@ function SellerScoreboardTab() {
           </label>
         )}
       </div>
-      <p className="mb-3 text-[11px] text-zinc-500">Quanto cada vendedor fez <strong>vs a cota dele</strong>. A cota vem da aba <strong>Escala &amp; cotas</strong> (semanal): o <strong>dia</strong> usa a cota da semana ÷ dias escalados; a <strong>quinzena</strong> são 2 semanas; o <strong>mês</strong> é a soma das semanas. Verde ≥ 100%, amarelo ≥ 60%, vermelho abaixo.</p>
+      <p className="mb-2 text-[11px] text-zinc-500">Quanto cada vendedor fez <strong>vs a cota dele</strong>. A cota vem da aba <strong>Escala &amp; cotas</strong> (semanal): o <strong>dia</strong> usa a cota da semana ÷ dias escalados; a <strong>quinzena</strong> são 2 semanas; o <strong>mês</strong> é a soma das semanas. Verde ≥ 100%, amarelo ≥ 60%, vermelho abaixo.</p>
+      <p className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+        <span className="text-zinc-400">Situação (meses fechados abaixo da meta):</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Meta atingida</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-400" /> Atenção · 1 mês</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" /> Crítico · 2 meses</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-400" /> Acompanhamento · 3+ meses</span>
+        <span className="text-zinc-600">· mês atual não conta · só meses com meta cadastrada</span>
+      </p>
 
       {isStale && <StaleNotice status={status} onRetry={load} loadedAt={loadedAt} correlationId={corr} />}
       {!showData && status !== 'idle' && status !== 'loading' && <AnalyticsBanner status={status} onRetry={load} correlationId={corr} />}
@@ -6311,16 +6339,32 @@ function SellerScoreboardTab() {
                   <th className="px-3 py-2 text-right font-medium">Semana<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.week?.start)}–{fmtDM(data.periods?.week?.end)}</span></th>
                   {!hideFortnight && <th className="px-3 py-2 text-right font-medium">Quinzena<br /><span className="text-[10px] normal-case text-zinc-600">{fmtDM(data.periods?.fortnight?.start)}–{fmtDM(data.periods?.fortnight?.end)}</span></th>}
                   <th className="px-3 py-2 text-right font-medium">Mês<br /><span className="text-[10px] normal-case text-zinc-600">{data.month}</span></th>
+                  <th className="px-3 py-2 text-center font-medium">Situação<br /><span className="text-[10px] normal-case text-zinc-600">meses fechados</span></th>
                 </tr>
               </thead>
               <tbody>
                 {data.sellers.map((s: any) => (
                   <tr key={s.sellerKey} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-[13px] text-zinc-200">{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</td>
+                    <td className="px-3 py-2 text-[13px] text-zinc-200">
+                      <div>{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</div>
+                      {(() => {
+                        const src = s.month?.sources || {};
+                        const keys = Object.keys(src);
+                        if (!keys.length) return null;
+                        const LBL: Record<string, string> = { pdv: 'PDV', manual: 'Manual', erp: 'ERP', zappflow: 'Loja online' };
+                        const parts = keys.map(k => `${LBL[k] || k} ${brl(src[k])}`).join(' + ');
+                        return <div className={`mt-0.5 text-[10px] ${s.month?.doubled ? 'text-red-300' : 'text-zinc-500'}`} title="Origem das vendas do mês por fonte. Duas fontes na mesma venda = dobra (a mesma venda contada 2×).">fonte (mês): {parts}{s.month?.doubled ? ' ⚠ dobrado' : ''}</div>;
+                      })()}
+                    </td>
                     <td className="px-3 py-2"><Cell p={s.day} /></td>
                     <td className="px-3 py-2"><Cell p={s.week} /></td>
                     {!hideFortnight && <td className="px-3 py-2"><Cell p={s.fortnight} /></td>}
                     <td className="px-3 py-2"><Cell p={s.month} /></td>
+                    <td className="px-3 py-2 text-center">{(() => {
+                      const sg = signals[sigKey(s.matricula, s.sellerName)];
+                      const lvl = GOAL_LEVEL[sg?.level || 'none'] || GOAL_LEVEL.none;
+                      return <span title={sg?.evaluated ? `${lvl.title} (${sg.evaluated} mês/meses com meta avaliados)` : lvl.title} className={`inline-block rounded-full border px-2 py-0.5 text-[11px] ${lvl.cls}`}>{lvl.label}</span>;
+                    })()}</td>
                   </tr>
                 ))}
               </tbody>

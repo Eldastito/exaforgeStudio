@@ -878,11 +878,11 @@ export class RetailCommissionRaceService {
     for (const q of quotaRows) { const mat = q.seller_key.startsWith("mat:") ? q.seller_key.slice(4) : null; const uid = q.seller_key.startsWith("user:") ? q.seller_key.slice(5) : null; addRoster(uid, mat, q.seller_name || q.seller_key); }
     const rosterList = Array.from(new Set(roster.values()));
 
-    const salesOf = (rows: any[], r: Roster): number => {
+    const rowOf = (rows: any[], r: Roster): any => {
       const set = new Set(r.aliases);
-      const row = rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a)));
-      return round2(row?.sales || 0);
+      return rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a))) || null;
     };
+    const salesOf = (rows: any[], r: Roster): number => round2(rowOf(rows, r)?.sales || 0);
     const pct = (sales: number, quota: number): number | null => (quota > 0 ? round2((sales / quota) * 10000) / 100 : null);
     // curWeek / prevWeek já vêm das semanas fechadas no mês (acima).
 
@@ -911,14 +911,22 @@ export class RetailCommissionRaceService {
       let monthQuota = 0, anyExplicit = false, anyResolved = false;
       for (const w of monthWeeks) { const q = this.resolveWeeklyQuota(orgId, storeId, w, r.aliases, explicit, schedule, daily); monthQuota += q.amount; if (q.source === "explicit") anyExplicit = true; if (q.source !== "none") anyResolved = true; }
       monthQuota = round2(monthQuota);
-      const daySales = salesOf(dayRows, r), weekSales = salesOf(weekRows, r), fortSales = salesOf(fortRows, r), monthSales = salesOf(monthRows, r);
+      const daySales = salesOf(dayRows, r), weekSales = salesOf(weekRows, r), fortSales = salesOf(fortRows, r);
+      // MÊS: além do total, a COMPOSIÇÃO POR FONTE (pdv/manual/erp/zappflow) e o
+      // flag de dupla contagem — é a verdade-de-campo pra explicar "por que o
+      // valor não confere": mostra se a mesma venda entra por 2 fontes (dobra)
+      // ou se é atribuição do PDV (fonte única) que diverge do que a loja contou.
+      const monthRow = rowOf(monthRows, r);
+      const monthSales = round2(monthRow?.sales || 0);
+      const monthSources: Record<string, number> = {};
+      for (const [k, v] of Object.entries(monthRow?.salesBySource || {})) if (Number(v) > 0) monthSources[k] = round2(Number(v));
       return {
         sellerKey: primaryKeyOf(r.userId, r.matricula, r.name), sellerName: r.name, matricula: r.matricula,
         quotaSource: wq.source, monthQuotaSource: anyExplicit ? "explicit" : (anyResolved ? "schedule" : "none"), scheduledDaysThisWeek: scheduledDays,
         day: { sales: daySales, quota: dayQuota, attainment: pct(daySales, dayQuota), off: !worksRefDate },
         week: { sales: weekSales, quota: weekQuota, attainment: pct(weekSales, weekQuota) },
         fortnight: { sales: fortSales, quota: fortnightQuota, attainment: pct(fortSales, fortnightQuota) },
-        month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota) },
+        month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota), sources: monthSources, doubled: !!monthRow?.doubleSourced },
       };
     }).sort((a, b) => b.month.sales - a.month.sales);
 
@@ -927,6 +935,59 @@ export class RetailCommissionRaceService {
       periods: { day: { start: refDate, end: refDate }, week: { start: weekStart, end: weekEnd }, fortnight: { start: prevWeekStart, end: weekEnd }, month: { start: mStart, end: mEnd } },
       sellers,
     };
+  }
+
+  /**
+   * SINALIZAÇÃO DE META por vendedor (pedido do lojista). Olha os últimos
+   * `monthsBack` meses FECHADOS (o mês atual em andamento NÃO conta — RN: não
+   * pune por mês incompleto) e mede a SEQUÊNCIA de meses seguidos ABAIXO da
+   * meta. Só conta mês com meta cadastrada (RN-004 — sem meta não inventa
+   * desfecho; mês sem meta é neutro: não conta nem quebra a sequência). Escala
+   * de acompanhamento com LINGUAGEM NEUTRA (não implica ação trabalhista):
+   *   ok        (verde)    — bateu a meta no mês fechado mais recente com meta;
+   *   attention (amarelo)  — 1 mês fechado abaixo;
+   *   critical  (laranja)  — 2 meses seguidos abaixo;
+   *   action    (vermelho) — 3+ meses seguidos abaixo (acompanhamento/plano de ação);
+   *   none      (cinza)    — sem meta cadastrada no histórico → não sinaliza.
+   * REUSA o cálculo mensal já provado (`sellerPeriodScoreboard` por mês fechado)
+   * — NÃO há recursão (aquele método não chama este). Read-only, isolado por org.
+   */
+  static sellerGoalSignals(orgId: string, storeId: string, refDate: string, monthsBack = 6): any {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(refDate)) throw new Error("refDate deve ser YYYY-MM-DD");
+    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const LEVELS = ["ok", "attention", "critical", "action"] as const;
+    // Meses FECHADOS (YYYY-MM) estritamente antes do mês do refDate, do mais
+    // recente pro mais antigo.
+    let y = Number(refDate.slice(0, 4)), mo = Number(refDate.slice(5, 7));
+    const months: string[] = [];
+    for (let i = 0; i < Math.max(1, Math.min(24, monthsBack)); i++) { mo -= 1; if (mo === 0) { mo = 12; y -= 1; } months.push(`${y}-${String(mo).padStart(2, "0")}`); }
+    const norm = (s: any) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+    const idOf = (mat: any, name: any) => (mat ? `mat:${String(mat).trim()}` : `nom:${norm(name)}`);
+    // Por mês fechado: identidade -> { sales, quota } (reusa o placar mensal).
+    const perMonth = months.map((ym) => {
+      let sellers: any[] = [];
+      try { sellers = this.sellerPeriodScoreboard(orgId, storeId, this.monthRange(ym).end).sellers || []; } catch { sellers = []; }
+      const map = new Map<string, { sales: number; quota: number; name: string; matricula: string | null }>();
+      for (const s of sellers) map.set(idOf(s.matricula, s.sellerName), { sales: Number(s.month?.sales || 0), quota: Number(s.month?.quota || 0), name: s.sellerName, matricula: s.matricula || null });
+      return map;
+    });
+    // Universo de vendedores = união de todos os meses.
+    const ids = new Map<string, { name: string; matricula: string | null }>();
+    for (const map of perMonth) for (const [k, v] of map) if (!ids.has(k)) ids.set(k, { name: v.name, matricula: v.matricula });
+    const sellers = Array.from(ids.entries()).map(([key, info]) => {
+      let streak = 0, evaluated = 0; let hadGoal = false;
+      for (const map of perMonth) { // mais recente → mais antigo
+        const row = map.get(key);
+        if (!row || row.quota <= 0) continue; // sem meta nesse mês → neutro (não conta nem quebra)
+        hadGoal = true; evaluated++;
+        if (row.sales >= row.quota) break;    // bateu → encerra a sequência
+        streak++;
+      }
+      const level = !hadGoal ? "none" : LEVELS[Math.min(streak, 3)];
+      return { key, sellerName: info.name, matricula: info.matricula, streak, monthsBelow: streak, evaluated, level };
+    });
+    return { storeId, storeName: store.name, refDate, months, sellers };
   }
 
   /**

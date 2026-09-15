@@ -1937,6 +1937,19 @@ router.get("/seller-scoreboard", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// Sinalização de META por vendedor: sequência de meses fechados abaixo da meta
+// (só meses com meta cadastrada), com escala de acompanhamento (ok/attention/
+// critical/action). Read-only. Alimenta a coluna "Situação" da aba Metas.
+router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  try { res.json(RetailCommissionRaceService.sellerGoalSignals(orgId, storeId, date)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // Preferência da empresa p/ a aba Metas: mostrar/ocultar a coluna QUINZENA.
 // owner/admin. Aditivo, opt-in — não altera cálculo, só a exibição.
 router.put("/seller-scoreboard/fortnight-visibility", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

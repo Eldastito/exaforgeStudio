@@ -6345,7 +6345,17 @@ function SellerScoreboardTab() {
               <tbody>
                 {data.sellers.map((s: any) => (
                   <tr key={s.sellerKey} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-2 text-[13px] text-zinc-200">{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</td>
+                    <td className="px-3 py-2 text-[13px] text-zinc-200">
+                      <div>{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</div>
+                      {(() => {
+                        const src = s.month?.sources || {};
+                        const keys = Object.keys(src);
+                        if (!keys.length) return null;
+                        const LBL: Record<string, string> = { pdv: 'PDV', manual: 'Manual', erp: 'ERP', zappflow: 'Loja online' };
+                        const parts = keys.map(k => `${LBL[k] || k} ${brl(src[k])}`).join(' + ');
+                        return <div className={`mt-0.5 text-[10px] ${s.month?.doubled ? 'text-red-300' : 'text-zinc-500'}`} title="Origem das vendas do mês por fonte. Duas fontes na mesma venda = dobra (a mesma venda contada 2×).">fonte (mês): {parts}{s.month?.doubled ? ' ⚠ dobrado' : ''}</div>;
+                      })()}
+                    </td>
                     <td className="px-3 py-2"><Cell p={s.day} /></td>
                     <td className="px-3 py-2"><Cell p={s.week} /></td>
                     {!hideFortnight && <td className="px-3 py-2"><Cell p={s.fortnight} /></td>}

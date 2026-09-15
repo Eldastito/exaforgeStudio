@@ -113,6 +113,10 @@ async function main() {
   check("4.1 mês: realizado = 3400 (800+1200+900+500)", near(m.month.sales, 3400), `${m.month.sales}`);
   check("4.2 mês: cota = 9500 (3000+3500+1000*3, sem semana de julho)", near(m.month.quota, 9500), `${m.month.quota}`);
   check("4.3 mês: atingimento ≈ 35,79% (3400/9500)", near(m.month.attainment, 35.79), `${m.month.attainment}`);
+  // Composição por fonte (diagnóstico "de onde vem o valor"): só manual aqui,
+  // sem PDV → não é dupla contagem.
+  check("4.4 mês: fonte = só manual (3400), sem PDV", near(m.month.sources?.manual, 3400) && !m.month.sources?.pdv, JSON.stringify(m.month.sources));
+  check("4.5 mês: doubled = false (fonte única)", m.month.doubled === false, `${m.month.doubled}`);
 
   // ===== FECHA POR MÊS (RN-G2c-003): a semana do fim do mês NÃO vaza pra setembro =====
   // Venda em 01/09 (setembro) — não pode entrar na semana nem no mês de agosto.

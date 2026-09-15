@@ -878,11 +878,11 @@ export class RetailCommissionRaceService {
     for (const q of quotaRows) { const mat = q.seller_key.startsWith("mat:") ? q.seller_key.slice(4) : null; const uid = q.seller_key.startsWith("user:") ? q.seller_key.slice(5) : null; addRoster(uid, mat, q.seller_name || q.seller_key); }
     const rosterList = Array.from(new Set(roster.values()));
 
-    const salesOf = (rows: any[], r: Roster): number => {
+    const rowOf = (rows: any[], r: Roster): any => {
       const set = new Set(r.aliases);
-      const row = rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a)));
-      return round2(row?.sales || 0);
+      return rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a))) || null;
     };
+    const salesOf = (rows: any[], r: Roster): number => round2(rowOf(rows, r)?.sales || 0);
     const pct = (sales: number, quota: number): number | null => (quota > 0 ? round2((sales / quota) * 10000) / 100 : null);
     // curWeek / prevWeek já vêm das semanas fechadas no mês (acima).
 
@@ -911,14 +911,22 @@ export class RetailCommissionRaceService {
       let monthQuota = 0, anyExplicit = false, anyResolved = false;
       for (const w of monthWeeks) { const q = this.resolveWeeklyQuota(orgId, storeId, w, r.aliases, explicit, schedule, daily); monthQuota += q.amount; if (q.source === "explicit") anyExplicit = true; if (q.source !== "none") anyResolved = true; }
       monthQuota = round2(monthQuota);
-      const daySales = salesOf(dayRows, r), weekSales = salesOf(weekRows, r), fortSales = salesOf(fortRows, r), monthSales = salesOf(monthRows, r);
+      const daySales = salesOf(dayRows, r), weekSales = salesOf(weekRows, r), fortSales = salesOf(fortRows, r);
+      // MÊS: além do total, a COMPOSIÇÃO POR FONTE (pdv/manual/erp/zappflow) e o
+      // flag de dupla contagem — é a verdade-de-campo pra explicar "por que o
+      // valor não confere": mostra se a mesma venda entra por 2 fontes (dobra)
+      // ou se é atribuição do PDV (fonte única) que diverge do que a loja contou.
+      const monthRow = rowOf(monthRows, r);
+      const monthSales = round2(monthRow?.sales || 0);
+      const monthSources: Record<string, number> = {};
+      for (const [k, v] of Object.entries(monthRow?.salesBySource || {})) if (Number(v) > 0) monthSources[k] = round2(Number(v));
       return {
         sellerKey: primaryKeyOf(r.userId, r.matricula, r.name), sellerName: r.name, matricula: r.matricula,
         quotaSource: wq.source, monthQuotaSource: anyExplicit ? "explicit" : (anyResolved ? "schedule" : "none"), scheduledDaysThisWeek: scheduledDays,
         day: { sales: daySales, quota: dayQuota, attainment: pct(daySales, dayQuota), off: !worksRefDate },
         week: { sales: weekSales, quota: weekQuota, attainment: pct(weekSales, weekQuota) },
         fortnight: { sales: fortSales, quota: fortnightQuota, attainment: pct(fortSales, fortnightQuota) },
-        month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota) },
+        month: { sales: monthSales, quota: monthQuota, attainment: pct(monthSales, monthQuota), sources: monthSources, doubled: !!monthRow?.doubleSourced },
       };
     }).sort((a, b) => b.month.sales - a.month.sales);
 

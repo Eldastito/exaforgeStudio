@@ -18,6 +18,7 @@
  *   nunca por inferência de linguagem natural (§10.7).
  */
 import db from "./db.js";
+import { logAuthEvent } from "./auditLog.js";
 import { MixedModeRouterService, type MixedModeDecision } from "./MixedModeRouterService.js";
 
 const PENDING_TTL_MIN = 30;
@@ -28,6 +29,24 @@ export class MixedModeInboundService {
       const r = db.prepare(`SELECT mixed_mode_enabled FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
       return !!Number(r?.mixed_mode_enabled);
     } catch { return false; }
+  }
+
+  /**
+   * W3 — liga/desliga o modo misto (opt-in do PILOTO, decisão do dono via UI).
+   * Desligar é o rollback do runbook (§604): o inbound volta IDÊNTICO ao de
+   * hoje no próximo webhook, sem tocar em dados. `managersCount` volta junto
+   * pra UI avisar quando ligar sem nenhum gestor autorizado (modo misto sem
+   * gestor cadastrado não roteia ninguém pra gestão — não é erro, é inútil).
+   */
+  static setEnabled(orgId: string, enabled: boolean, actorUserId: string | null): { enabled: boolean; managersCount: number } {
+    db.prepare(`UPDATE organization_settings SET mixed_mode_enabled = ? WHERE organization_id = ?`)
+      .run(enabled ? 1 : 0, orgId);
+    try { logAuthEvent(orgId, actorUserId, undefined, "MIXED_MODE_TOGGLED", { enabled }); } catch { /* audit best-effort */ }
+    let managersCount = 0;
+    try {
+      managersCount = Number((db.prepare(`SELECT COUNT(*) c FROM authorized_managers WHERE organization_id = ?`).get(orgId) as any)?.c || 0);
+    } catch { /* tabela pode não existir em base mínima */ }
+    return { enabled: this.isEnabled(orgId), managersCount };
   }
 
   /** Existe atendimento (ticket aberto) em curso para este número neste canal? */

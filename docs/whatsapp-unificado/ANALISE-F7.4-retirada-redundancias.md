@@ -49,10 +49,13 @@ decisão do dono. Até lá: `IMPLEMENTADO` = auditoria; `VALIDADO`/remoção = a
 
 Ordem correta, cada passo com sua pré-condição (nenhum é feito agora):
 
-1. **Adotar o resolvedor único** (fatia de código, ainda pilot-gated p/ ativar):
-   migrar a SELEÇÃO de canal dos ~20 pontos de A5 para
-   `ChannelBindingService.resolve` (o gate já está no sink). **Aditivo/reversível**;
-   com bindings de compatibilidade (F2.3) o comportamento default não muda.
+1. **Adotar o resolvedor único** — **FEITO (W2, pós-autorização do piloto
+   15/09/2026)**: a SELEÇÃO dos 21 pontos A5 (Scheduler ×12, Quote, TaskReminder,
+   Payment, SupplierQuote, Campaign, escola ×3, admin/falatu/health) migrou para
+   `ChannelBindingService.selectOutboundChannel` (binding > SQL legado idêntico;
+   0-regressão provada em `test:channel-select-resolver`, que também é gate
+   anti-reintrodução das cópias). Variante `Clinic*` (7 serviços, SQL mais
+   estrito) diferida como W2b — não é cópia byte-idêntica de A5.
 2. **Piloto provar equivalência** (F7.2/F7.3): `pilot-readiness` verde + ciclo real
    aprovado + rollback exercitado.
 3. **Remover as ~20 cópias de A5** (item 1 do gate cumprido: nenhum consumidor

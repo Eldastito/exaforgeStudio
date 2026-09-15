@@ -7,6 +7,7 @@ import { DecisionSimulatorService } from "../DecisionSimulatorService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { SkillOsObservabilityService } from "../SkillOsObservabilityService.js";
 import db from "../db.js";
+import { ChannelBindingService } from "../ChannelBindingService.js";
 
 // Central de Saúde e Decisão (ADR-126) — síntese: status + 3 prioridades do dia.
 // Rota core (não é módulo opcional): disponível em todas as verticais.
@@ -109,7 +110,7 @@ router.post("/tutor/test", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
     if (!channel) return res.status(400).json({ error: "Conecte um canal de WhatsApp primeiro." });
     const out = await BusinessTutorService.sendNow(orgId, { send: (target, message) => MessageProviderService.sendMessage(channel.id, target, message) });
     if (!out.ok) return res.status(400).json({ error: out.error });

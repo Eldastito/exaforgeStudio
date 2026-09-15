@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { v4 as uuidv4 } from "uuid";
 import { InventoryService } from "./InventoryService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
@@ -203,7 +204,7 @@ export class QuoteService {
           LIMIT 200
         `).all(orgId, max, `-${hours} hours`) as any[];
 
-        const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+        const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "vendas");
 
         for (const q of due) {
           try {

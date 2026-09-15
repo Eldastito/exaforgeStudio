@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 import { v4 as uuidv4 } from "uuid";
 import { chat } from "./llm.js";
 import { MessageProviderService } from "./MessageProviderService.js";
@@ -106,7 +107,7 @@ export class SupplierQuoteService {
 
     const suppliers = this.eligibleSuppliers(orgId, reqId);
     const o = db.prepare("SELECT business_name FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
-    const fallbackChannel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    const fallbackChannel = ChannelBindingService.selectOutboundChannel(orgId, "compras");
 
     // E-mail é canal paralelo: só disponível se a org conectou o Google.
     // Checa uma vez (evita bater no OAuth por fornecedor).

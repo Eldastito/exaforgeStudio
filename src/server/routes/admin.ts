@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
+import { ChannelBindingService } from "../ChannelBindingService.js";
 import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
 import { SecurityConfigurationService } from "../SecurityConfigurationService.js";
@@ -567,9 +568,7 @@ router.post("/org-invites", async (req: AuthRequest, res): Promise<any> => {
     let whatsappError: string | null = null;
     if (sendWhatsapp && phone) {
       try {
-        const ch = db.prepare(
-          `SELECT id FROM channels WHERE organization_id = ? AND status != 'disabled' ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
-        ).get(req.organizationId) as any;
+        const ch = ChannelBindingService.selectOutboundChannel(req.organizationId!, "gestao");
         if (!ch) { whatsappError = "Nenhum canal conectado para enviar."; }
         else {
           const nome = (recipientName || "").trim().split(/\s+/)[0] || "";

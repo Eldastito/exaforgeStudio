@@ -522,6 +522,7 @@
     "test:retail-scoreboard-fortnight": "tsx scripts/test-retail-scoreboard-fortnight.ts",
     "test:retail-seller-goal-signals": "tsx scripts/test-retail-seller-goal-signals.ts",
     "test:retail-metas-manual-truth": "tsx scripts/test-retail-metas-manual-truth.ts",
+    "test:retail-floor-manager-pin-reset": "tsx scripts/test-retail-floor-manager-pin-reset.ts",
     "test:alterdata-price-mapper": "tsx scripts/test-alterdata-price-mapper.ts",
     "test:module-addon-selfservice": "tsx scripts/test-module-addon-selfservice.ts",
     "test:security-hardening": "tsx scripts/test-security-hardening.ts",

@@ -20,9 +20,18 @@ export function ChannelsPanel() {
 
   const [evolutionStatus, setEvolutionStatus] = useState<'disconnected' | 'connecting_evo' | 'connected_evo'>('disconnected');
   const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
-  // F2.1b — conexão autenticada: modo (adicionar novo × usar/importar existente).
-  const [evoMode, setEvoMode] = useState<'new' | 'existing'>('existing');
+  // W1 — conexão simplificada: o caminho padrão cria a instância sozinho (mode
+  // 'new', nome automático); importar instância existente vira opção avançada.
+  const [evoAdvanced, setEvoAdvanced] = useState(false);
   const [evoBusy, setEvoBusy] = useState(false);
+  const [evoInstanceName, setEvoInstanceName] = useState<string | null>(null);
+  // W1 — luzes honestas do canal (ChannelStateService/F1.2d): sessão × recebimento × operação.
+  const [evoState, setEvoState] = useState<any | null>(null);
+  // W1 — quem pode falar com a IA do negócio por este WhatsApp (Gestores do Zapp).
+  const [zappManagers, setZappManagers] = useState<any[]>([]);
+  const [zappNumber, setZappNumber] = useState('');
+  const [zappName, setZappName] = useState('');
+  const [zappBusy, setZappBusy] = useState(false);
   // F2.2 (UI) — usos por finalidade (channel_feature_bindings).
   const [bindingFeatures, setBindingFeatures] = useState<string[]>([]);
   const [bindings, setBindings] = useState<any[]>([]);
@@ -49,6 +58,7 @@ export function ChannelsPanel() {
     apiFetch('/api/areas').then(r => r.json()).then(d => setAreas(Array.isArray(d) ? d : [])).catch(() => {});
     loadEvoStatus();
     loadBindings();
+    loadZappManagers();
   }, []);
 
   // F2.2 (UI) — usos por finalidade.
@@ -84,25 +94,106 @@ export function ChannelsPanel() {
 
   // F2.1b — retomada: reflete o estado real do canal Evolution da org ao abrir a
   // tela (endpoint autenticado). Se já há um canal conectado, mostra conectado.
+  // W1 — também carrega as dimensões de estado (sessão/webhook/operação) pras luzes.
   const loadEvoStatus = () => {
     apiFetch('/api/channels/whatsapp/status').then(r => r.json()).then((d: any) => {
       const chs = Array.isArray(d?.channels) ? d.channels : [];
-      if (chs.some((c: any) => c.connected)) setEvolutionStatus('connected_evo');
+      const conn = chs.find((c: any) => c.connected);
+      if (conn) {
+        setEvolutionStatus('connected_evo');
+        setEvoInstanceName(conn.instanceName || null);
+      } else {
+        setEvoInstanceName(chs[0]?.instanceName || null);
+        setEvolutionStatus(s => (s === 'connecting_evo' ? s : 'disconnected'));
+      }
+    }).catch(() => {});
+    apiFetch('/api/channels/states').then(r => r.json()).then((d: any) => {
+      const chs = Array.isArray(d?.channels) ? d.channels : [];
+      setEvoState(chs.find((c: any) => c.provider === 'evolution' || c.provider === 'evolution_go') || null);
     }).catch(() => {});
   };
 
-  // F2.1b — conecta/importa pelo endpoint AUTENTICADO (org vem da sessão). O
-  // corpo só diz o modo e, no import, o nome da instância.
-  const connectEvolution = async () => {
+  // W1 — enquanto o QR está na tela, confere a cada 4s se o celular já leu; ao
+  // conectar, o "WhatsApp conectado ✅" aparece sozinho (o leigo não precisa
+  // recarregar nada pra saber que deu certo).
+  useEffect(() => {
+    if (evolutionStatus !== 'connecting_evo' || !evolutionQr) return;
+    const t = setInterval(() => {
+      apiFetch('/api/channels/whatsapp/status').then(r => r.json()).then((d: any) => {
+        const conn = (Array.isArray(d?.channels) ? d.channels : []).find((c: any) => c.connected);
+        if (conn) {
+          setEvolutionQr(null);
+          setEvolutionStatus('connected_evo');
+          setEvoInstanceName(conn.instanceName || null);
+          toast.success('WhatsApp conectado!');
+          loadRaw();
+          loadEvoStatus();
+        }
+      }).catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [evolutionStatus, evolutionQr]);
+
+  // W1 — Gestores do Zapp (mesma fonte de Configurações → Usuários: /api/managers).
+  const loadZappManagers = () => {
+    apiFetch('/api/managers').then(r => (r.ok ? r.json() : [])).then((d: any) => setZappManagers(Array.isArray(d) ? d : [])).catch(() => {});
+  };
+  const addZappManager = async () => {
+    if (!zappNumber.trim()) { toast.error('Informe o número com DDI+DDD (ex.: 5521999998888).'); return; }
+    setZappBusy(true);
+    try {
+      const r = await apiFetch('/api/managers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: zappNumber, name: zappName }),
+      });
+      if (r.ok) { toast.success('Número autorizado a falar com a IA.'); setZappNumber(''); setZappName(''); loadZappManagers(); }
+      else { const d = await r.json().catch(() => ({})); toast.error(d?.error || 'Não foi possível autorizar o número.'); }
+    } catch { toast.error('Não foi possível autorizar o número.'); } finally { setZappBusy(false); }
+  };
+  const removeZappManager = async (id: string) => {
+    if (!(await confirmDialog('Remover a autorização deste número?', { danger: true, confirmText: 'Remover' }))) return;
+    try {
+      const r = await apiFetch(`/api/managers/${id}`, { method: 'DELETE' });
+      if (r.ok) loadZappManagers(); else toast.error('Não foi possível remover.');
+    } catch { toast.error('Não foi possível remover.'); }
+  };
+
+  // W1 — traduz as dimensões da F1.2d em 3 luzes honestas pro leigo. "Recebimento
+  // aguardando a primeira mensagem" NÃO é erro (webhook not_verified só vira
+  // healthy com evento real — CA-02: saúde nunca inferida da criação da URL).
+  const evoLights = (): Array<{ label: string; ok: boolean; warn?: boolean; text: string }> => {
+    if (!evoState) return [];
+    const s = evoState.session, w = evoState.webhook, o = evoState.operation;
+    return [
+      {
+        label: 'Sessão do WhatsApp', ok: s === 'connected', warn: s === 'awaiting_pairing' || s === 'provisioning',
+        text: s === 'connected' ? 'conectada' : s === 'awaiting_pairing' ? 'aguardando leitura do QR' : s === 'provisioning' ? 'preparando' : 'desconectada',
+      },
+      {
+        label: 'Recebimento de mensagens', ok: w === 'healthy', warn: w === 'not_verified' || w === 'degraded',
+        text: w === 'healthy' ? 'funcionando (automático)' : w === 'not_verified' ? 'aguardando a primeira mensagem' : w === 'degraded' ? 'instável' : 'bloqueado — fale com o suporte',
+      },
+      {
+        label: 'Pronto para operar', ok: o === 'ready', warn: o === 'pending_validation',
+        text: o === 'ready' ? 'sim — atendimento e envios ativos' : o === 'pending_validation' ? 'validando' : 'não',
+      },
+    ];
+  };
+
+  // F2.1b/W1 — conecta pelo endpoint AUTENTICADO (org vem da sessão). Caminho
+  // padrão: mode 'new' (instância automática). Import de instância existente só
+  // pelas opções avançadas ({existing:true}) ou reconexão ({instanceName}).
+  const connectEvolution = async (opts?: { existing?: boolean; instanceName?: string }) => {
     setEvolutionStatus('connecting_evo');
     setEvolutionQr(null);
     setEvoBusy(true);
-    const instanceName = (document.getElementById('evo_inst') as HTMLInputElement | null)?.value?.trim() || '';
+    const instanceName = opts?.instanceName ?? ((document.getElementById('evo_inst') as HTMLInputElement | null)?.value?.trim() || '');
+    const useExisting = !!(opts?.existing || opts?.instanceName) && !!instanceName;
     try {
       const resp = await apiFetch('/api/channels/whatsapp/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(evoMode === 'existing' ? { mode: 'existing', instanceName } : { mode: 'new' }),
+        body: JSON.stringify(useExisting ? { mode: 'existing', instanceName } : { mode: 'new' }),
       });
       const data = await resp.json();
       if (resp.ok && data.qrBase64) {
@@ -111,11 +202,12 @@ export function ChannelsPanel() {
       } else if (resp.ok && data.state === 'open') {
         setEvolutionStatus('connected_evo');
         toast.success('Número já conectado.');
+        loadEvoStatus();
       } else {
         // Erros tipados do backend (RF-01/§8).
         const code = data?.code;
         const msg = code === 'attributed_to_other_org' ? 'Esta instância já pertence a outra empresa.'
-          : code === 'instance_not_found' ? 'Instância não encontrada no provedor. Para criar uma nova, escolha "Adicionar número novo".'
+          : code === 'instance_not_found' ? 'Instância não encontrada no provedor. Use o botão "Conectar WhatsApp" para criar uma nova.'
           : code === 'evolution_failed' ? (data?.needsReset ? 'Não veio o QR. A instância pode estar travada — o operador pode reiniciá-la.' : 'Falha ao falar com o provedor. Tente de novo.')
           : (data?.error || 'Não foi possível gerar o QR Code.');
         toast.error(msg);
@@ -404,8 +496,8 @@ export function ChannelsPanel() {
                     <RefreshCw className="w-6 h-6 text-blue-400" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-100">WhatsApp Ilimitado (Evolution API / Go)</h3>
-                    <p className="text-sm text-slate-400">Motor não-oficial para envio gratuito</p>
+                    <h3 className="text-lg font-semibold text-slate-100">WhatsApp da empresa</h3>
+                    <p className="text-sm text-slate-400">Um número conectado serve tudo: atendimento, cobranças, lembretes, campanhas e a conversa com a IA do negócio.</p>
                   </div>
                 </div>
                 
@@ -423,94 +515,124 @@ export function ChannelsPanel() {
               </div>
             </div>
 
-            <div className="text-sm text-slate-300 mb-6 relative z-10 bg-slate-950/50 p-4 rounded-lg border border-yellow-800/80">
-              <p className="font-semibold text-yellow-500 mb-2">Atenção: Limitações da Evolution</p>
-              <ol className="list-decimal pl-4 space-y-2 text-xs md:text-sm">
-                <li>Uma instância da Evolution representa <strong>exatamente 1 número de WhatsApp conectado</strong>. Não é possível conectar vários números diferentes na mesma instância.</li>
-                <li>Se você deseja atender vários clientes isoladamente com diferentes números, precisará criar <strong>múltiplas instâncias</strong> lá na Evolution e adaptar este sistema.</li>
-                <li>Deixamos pré-configurado com a URL e Instância <code>ExaForge</code> solicitadas, ou seja, vai conectar a apenas ao número associado ao ExaForge.</li>
-              </ol>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 relative z-10 flex-1">
-               {/* F2.1b — escolha do modo (org vem da sessão; nada de API key aqui). */}
-               <div className="space-y-2">
-                 <label className="text-xs text-slate-400 font-medium">3. Como conectar</label>
-                 <div className="flex rounded-lg border border-slate-800 bg-slate-950 p-1 text-xs">
-                   <button
-                     type="button"
-                     onClick={() => setEvoMode('existing')}
-                     className={`flex-1 rounded px-3 py-2 transition-colors ${evoMode === 'existing' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                   >
-                     Usar/importar instância existente
-                   </button>
-                   <button
-                     type="button"
-                     onClick={() => setEvoMode('new')}
-                     className={`flex-1 rounded px-3 py-2 transition-colors ${evoMode === 'new' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                   >
-                     Adicionar número novo
-                   </button>
-                 </div>
-                 {evoMode === 'existing' ? (
-                   <>
-                     <input
-                       type="text"
-                       defaultValue="ExaForge"
-                       id="evo_inst"
-                       placeholder="Ex: ExaForge"
-                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
-                     />
-                     <p className="text-[11px] text-slate-500">Nome da instância que já existe no seu Evolution. Só conecta se ela pertencer à sua empresa.</p>
-                   </>
-                 ) : (
-                   <p className="text-[11px] text-slate-500">O sistema cria uma instância nova com nome próprio (você não precisa digitar nada) e mostra o QR Code.</p>
-                 )}
-               </div>
-            </div>
-
-            {/* Area de QR Code do Evolution */}
-            {evolutionStatus === 'connecting_evo' ? (
-              <div className="mt-6 flex flex-col items-center justify-center p-6 bg-white/5 rounded-xl border border-slate-800">
+            {/* W1 — assistente em 3 estados: Desconectado → QR → Conectado. O webhook
+                é auto-configurado no provisionamento (F1.4) — sem passo manual. */}
+            {evolutionStatus === 'connected_evo' ? (
+              <div className="relative z-10 space-y-4">
+                <div className="flex flex-col items-center justify-center p-6 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-3" />
+                  <p className="text-base font-semibold text-slate-100">WhatsApp conectado</p>
+                  <p className="text-xs text-emerald-400 text-center mt-1">
+                    Tudo pronto — este número já atende clientes e envia as mensagens do sistema.
+                    {evoInstanceName ? <span className="text-slate-400"> (instância {evoInstanceName})</span> : null}
+                  </p>
+                </div>
+                {evoState && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    {evoLights().map(l => (
+                      <div key={l.label} className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${l.ok ? 'bg-emerald-500' : l.warn ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-200 truncate">{l.label}</p>
+                          <p className="text-[11px] text-slate-400 truncate">{l.text}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" disabled={evoBusy || !evoInstanceName}
+                    onClick={() => connectEvolution({ instanceName: evoInstanceName || undefined })}
+                    className="border-slate-700 text-slate-300 hover:text-white">
+                    <RefreshCw className="w-4 h-4 mr-2" /> Gerar novo QR (reconectar)
+                  </Button>
+                </div>
+              </div>
+            ) : evolutionStatus === 'connecting_evo' ? (
+              <div className="relative z-10 flex flex-col items-center justify-center p-6 bg-white/5 rounded-xl border border-slate-800">
                 {evolutionQr ? (
                   <>
                     <div className="bg-white p-2 rounded-xl mb-4">
                       <img src={evolutionQr} alt="QR Code" className="w-48 h-48" />
                     </div>
-                    <p className="text-sm font-medium text-slate-200">Leia o QR Code com o WhatsApp</p>
-                    <p className="text-xs text-slate-400 text-center mt-1">Logo após a leitura, a conexão estará ativa (aguarde uns segundos).</p>
+                    <p className="text-sm font-medium text-slate-200">Aponte a câmera do celular para o código</p>
+                    <p className="text-xs text-slate-400 text-center mt-1 max-w-md">
+                      No celular da empresa: abra o <strong>WhatsApp</strong> → <strong>Aparelhos conectados</strong> → <strong>Conectar aparelho</strong> → aponte para o código. Assim que ler, esta tela confirma sozinha.
+                    </p>
                   </>
                 ) : (
                   <>
                     <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
-                    <p className="text-sm text-slate-300">Solicitando QR Code na Evolution Go...</p>
+                    <p className="text-sm text-slate-300">Preparando o QR Code…</p>
                   </>
                 )}
               </div>
-            ) : evolutionStatus === 'connected_evo' ? (
-              <div className="mt-6 flex flex-col items-center justify-center p-6 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
-                <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-3" />
-                <p className="text-sm font-medium text-slate-200">Instância Conectada!</p>
-                <p className="text-xs text-emerald-400 text-center mt-1">O WhatsApp está vinculado com sucesso.</p>
+            ) : (
+              <div className="relative z-10 space-y-4">
+                <ol className="text-sm text-slate-300 space-y-1.5 list-decimal pl-5">
+                  <li>Clique em <strong>Conectar WhatsApp</strong>.</li>
+                  <li>Vai aparecer um QR Code aqui na tela.</li>
+                  <li>Leia o código com o WhatsApp do celular da empresa (Aparelhos conectados → Conectar aparelho).</li>
+                </ol>
+                <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white border-0 transition-colors h-12 text-base"
+                  disabled={evoBusy} onClick={() => connectEvolution()}>
+                  {evoBusy ? 'Conectando…' : 'Conectar WhatsApp'}
+                </Button>
+                <div>
+                  <button type="button" onClick={() => setEvoAdvanced(v => !v)} className="text-[11px] text-slate-500 hover:text-slate-300 underline">
+                    {evoAdvanced ? 'Ocultar opções avançadas' : 'Opções avançadas (importar instância existente)'}
+                  </button>
+                  {evoAdvanced && (
+                    <div className="mt-2 space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                      <p className="text-[11px] text-slate-500">Só use se a sua empresa já tem uma instância criada no provedor. Só conecta se ela pertencer à sua empresa.</p>
+                      <div className="flex gap-2">
+                        <input type="text" id="evo_inst" placeholder="Nome da instância existente"
+                          className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors" />
+                        <Button variant="outline" disabled={evoBusy} onClick={() => connectEvolution({ existing: true })}
+                          className="border-slate-700 text-slate-300 hover:text-white shrink-0">
+                          Importar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            ) : null}
+            )}
 
-            <div className="mt-6 pt-6 border-t border-slate-800 flex flex-col md:flex-row gap-4 relative z-10 w-full justify-stretch">
-               <Button
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white border-0 transition-colors h-11"
-                disabled={evoBusy}
-                onClick={connectEvolution}
-               >
-                 {evoBusy ? 'Conectando…' : (evoMode === 'existing' ? 'Conectar / Importar' : 'Adicionar e gerar QR Code')}
-               </Button>
-            </div>
-            
-            <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg mt-4 h-full">
-              <p className="text-xs text-slate-400 font-medium mb-1">Passo 4. URL de Webhook para colocar na Evolution:</p>
-              <code className="text-[11px] text-blue-400 break-all select-all font-mono">
-                {window.location.origin}/api/webhooks/evolution
-              </code>
-              <p className="text-[10px] text-slate-500 mt-2">Dica: O botão "Conectar" já tenta auto-configurar o Webhook, mas é sempre bom confirmar.</p>
+            {/* W1 — quem pode falar com a IA do negócio por este WhatsApp. Mesma
+                fonte de Configurações → Usuários (/api/managers) — sem 2ª lista. */}
+            <div className="mt-6 pt-6 border-t border-slate-800 relative z-10">
+              <h4 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <BrainCircuit className="w-4 h-4 text-indigo-400" /> Falar com a IA do negócio
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Os números abaixo podem conversar com o <strong>Diretor IA</strong> por este WhatsApp — basta mandar uma mensagem começando com <strong className="text-indigo-300">"Zapp"</strong> (ex.: "Zapp, como foram as vendas hoje?").
+              </p>
+              <div className="mt-3 space-y-2">
+                {zappManagers.length === 0 && (
+                  <p className="text-xs text-slate-500">Nenhum número autorizado ainda — cadastre o número do dono abaixo.</p>
+                )}
+                {zappManagers.map((m: any) => (
+                  <div key={m.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-200 truncate">{m.name || 'Sem nome'}</p>
+                      <p className="text-xs text-slate-500 truncate">{m.identifier}</p>
+                    </div>
+                    <button onClick={() => removeZappManager(m.id)} className="shrink-0 text-slate-500 hover:text-red-400" title="Remover autorização">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex flex-col md:flex-row gap-2 pt-2">
+                  <input type="text" value={zappNumber} onChange={e => setZappNumber(e.target.value)} placeholder="5521999998888 (DDI+DDD+número)"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500" />
+                  <input type="text" value={zappName} onChange={e => setZappName(e.target.value)} placeholder="Nome (ex.: Dono)"
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500" />
+                  <Button onClick={addZappManager} disabled={zappBusy || !zappNumber.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0">
+                    {zappBusy ? 'Salvando…' : 'Autorizar'}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
 

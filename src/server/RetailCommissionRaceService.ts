@@ -930,6 +930,59 @@ export class RetailCommissionRaceService {
   }
 
   /**
+   * SINALIZAÇÃO DE META por vendedor (pedido do lojista). Olha os últimos
+   * `monthsBack` meses FECHADOS (o mês atual em andamento NÃO conta — RN: não
+   * pune por mês incompleto) e mede a SEQUÊNCIA de meses seguidos ABAIXO da
+   * meta. Só conta mês com meta cadastrada (RN-004 — sem meta não inventa
+   * desfecho; mês sem meta é neutro: não conta nem quebra a sequência). Escala
+   * de acompanhamento com LINGUAGEM NEUTRA (não implica ação trabalhista):
+   *   ok        (verde)    — bateu a meta no mês fechado mais recente com meta;
+   *   attention (amarelo)  — 1 mês fechado abaixo;
+   *   critical  (laranja)  — 2 meses seguidos abaixo;
+   *   action    (vermelho) — 3+ meses seguidos abaixo (acompanhamento/plano de ação);
+   *   none      (cinza)    — sem meta cadastrada no histórico → não sinaliza.
+   * REUSA o cálculo mensal já provado (`sellerPeriodScoreboard` por mês fechado)
+   * — NÃO há recursão (aquele método não chama este). Read-only, isolado por org.
+   */
+  static sellerGoalSignals(orgId: string, storeId: string, refDate: string, monthsBack = 6): any {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(refDate)) throw new Error("refDate deve ser YYYY-MM-DD");
+    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    const LEVELS = ["ok", "attention", "critical", "action"] as const;
+    // Meses FECHADOS (YYYY-MM) estritamente antes do mês do refDate, do mais
+    // recente pro mais antigo.
+    let y = Number(refDate.slice(0, 4)), mo = Number(refDate.slice(5, 7));
+    const months: string[] = [];
+    for (let i = 0; i < Math.max(1, Math.min(24, monthsBack)); i++) { mo -= 1; if (mo === 0) { mo = 12; y -= 1; } months.push(`${y}-${String(mo).padStart(2, "0")}`); }
+    const norm = (s: any) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+    const idOf = (mat: any, name: any) => (mat ? `mat:${String(mat).trim()}` : `nom:${norm(name)}`);
+    // Por mês fechado: identidade -> { sales, quota } (reusa o placar mensal).
+    const perMonth = months.map((ym) => {
+      let sellers: any[] = [];
+      try { sellers = this.sellerPeriodScoreboard(orgId, storeId, this.monthRange(ym).end).sellers || []; } catch { sellers = []; }
+      const map = new Map<string, { sales: number; quota: number; name: string; matricula: string | null }>();
+      for (const s of sellers) map.set(idOf(s.matricula, s.sellerName), { sales: Number(s.month?.sales || 0), quota: Number(s.month?.quota || 0), name: s.sellerName, matricula: s.matricula || null });
+      return map;
+    });
+    // Universo de vendedores = união de todos os meses.
+    const ids = new Map<string, { name: string; matricula: string | null }>();
+    for (const map of perMonth) for (const [k, v] of map) if (!ids.has(k)) ids.set(k, { name: v.name, matricula: v.matricula });
+    const sellers = Array.from(ids.entries()).map(([key, info]) => {
+      let streak = 0, evaluated = 0; let hadGoal = false;
+      for (const map of perMonth) { // mais recente → mais antigo
+        const row = map.get(key);
+        if (!row || row.quota <= 0) continue; // sem meta nesse mês → neutro (não conta nem quebra)
+        hadGoal = true; evaluated++;
+        if (row.sales >= row.quota) break;    // bateu → encerra a sequência
+        streak++;
+      }
+      const level = !hadGoal ? "none" : LEVELS[Math.min(streak, 3)];
+      return { key, sellerName: info.name, matricula: info.matricula, streak, monthsBelow: streak, evaluated, level };
+    });
+    return { storeId, storeName: store.name, refDate, months, sellers };
+  }
+
+  /**
    * Materializa a corrida do mês num RUN draft da Fase G (aprovação humana —
    * D7). Um item por vendedor (com o detalhamento no JSON) + um por gerente.
    */

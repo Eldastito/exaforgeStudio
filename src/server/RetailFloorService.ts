@@ -285,6 +285,37 @@ export class RetailFloorService {
   }
 
   /**
+   * REDEFINE o PIN da loja SEM o PIN atual — recuperação de PIN esquecido.
+   * Diferente do setManagerPin, NÃO exige o PIN antigo; por isso a rota é
+   * gated SÓ a owner/admin (a conta-quiosque/gerente da loja não pode se
+   * auto-resetar — senão o PIN não protegeria nada). `pin=null` remove o PIN.
+   * Zera o lockout e AUDITA como reset (distinto de set), pra rastreabilidade.
+   */
+  static resetManagerPin(orgId: string, storeId: string, rawPin: string | null, actorId?: string): { hasManagerPin: boolean } {
+    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, storeId) as any;
+    if (!store) throw new Error("Loja não encontrada.");
+    if (!rawPin) {
+      db.prepare(
+        `UPDATE retail_stores SET manager_pin_salt = NULL, manager_pin_hash = NULL, manager_pin_failed_count = 0, manager_pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+      ).run(orgId, storeId);
+      try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_MANAGER_PIN_RESET", { storeId, cleared: true }); } catch { /* noop */ }
+      return { hasManagerPin: false };
+    }
+    const pin = String(rawPin).trim();
+    if (!/^\d{4,8}$/.test(pin)) {
+      const e: any = new Error("PIN inválido: use 4 a 8 dígitos numéricos.");
+      e.code = "PIN_INVALID_FORMAT"; throw e;
+    }
+    const salt = randomUUID();
+    const hash = createHash("sha256").update(salt + pin).digest("hex");
+    db.prepare(
+      `UPDATE retail_stores SET manager_pin_salt = ?, manager_pin_hash = ?, manager_pin_failed_count = 0, manager_pin_locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(salt, hash, orgId, storeId);
+    try { logAuthEvent(orgId, actorId, null, "RETAIL_FLOOR_MANAGER_PIN_RESET", { storeId, cleared: false }); } catch { /* noop */ }
+    return { hasManagerPin: true };
+  }
+
+  /**
    * Verifica o PIN da gerência da loja. Lança PIN_REQUIRED / PIN_INVALID /
    * PIN_LOCKED (códigos estáveis pra UI). Sem PIN configurado lança
    * PIN_NOT_SET — o quiosque guia a criação em vez de tentar verificar.

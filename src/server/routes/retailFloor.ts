@@ -135,6 +135,18 @@ router.post("/stores/:storeId/manager-pin/reset-lockout", requireRole("owner", "
   } catch (e: any) { fail(res, e); }
 });
 
+// REDEFINE o PIN esquecido SEM o PIN atual — só owner/admin (a conta-quiosque
+// não pode se auto-resetar). `pin` novo (4-8 dígitos) define; `pin` vazio remove.
+router.post("/stores/:storeId/manager-pin/reset", requireRole("owner", "admin"), (req: AuthRequest, res) => {
+  try {
+    const raw = req.body?.pin;
+    const pin = raw == null || String(raw).trim() === "" ? null : String(raw).trim();
+    res.json(RetailFloorService.resetManagerPin(req.organizationId!, req.params.storeId, pin, actor(req)));
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || "Erro", code: e?.code });
+  }
+});
+
 // ---- Fatia 2: turno + lista da vez ----
 
 // Abre o turno da loja (gestor da loja — RN-150-005).

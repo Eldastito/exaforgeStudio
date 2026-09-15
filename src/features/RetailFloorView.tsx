@@ -473,7 +473,7 @@ export function RetailFloorView() {
           onChanged={async () => { await loadCtx(); await loadStoreSellers(storeId); }} />
       )}
       {pinPrompt && (
-        <ManagerPinModal storeId={storeId} storeName={storeName} isManager={isManager}
+        <ManagerPinModal storeId={storeId} storeName={storeName} isManager={isManager} canConfigure={!!ctx.canConfigure}
           hasPin={!!(ctx.stores || []).find((s: any) => s.id === storeId)?.hasManagerPin}
           onClose={() => setPinPrompt(null)}
           onSuccess={() => {
@@ -820,15 +820,18 @@ function StorePicker({ stores, onPick }: { stores: any[]; onPick: (id: string) =
 // PIN da gerência (modo quiosque) — verificação/criação
 // ============================================================================
 
-function ManagerPinModal({ storeId, storeName, isManager, hasPin, onSuccess, onClose }: {
-  storeId: string; storeName: string; isManager: any; hasPin: boolean;
+function ManagerPinModal({ storeId, storeName, isManager, canConfigure, hasPin, onSuccess, onClose }: {
+  storeId: string; storeName: string; isManager: any; canConfigure?: boolean; hasPin: boolean;
   onSuccess: () => void; onClose: () => void;
 }) {
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const creating = !hasPin;
+  // Reset: owner/admin redefine um PIN esquecido SEM o PIN atual. Vira "creating"
+  // no formulário (pede novo PIN + confirmação), mas grava pela rota de reset.
+  const [resetting, setResetting] = useState(false);
+  const creating = !hasPin || resetting;
 
   const submit = async () => {
     setError(null);
@@ -840,7 +843,14 @@ function ManagerPinModal({ storeId, storeName, isManager, hasPin, onSuccess, onC
     }
     setBusy(true);
     try {
-      if (creating) {
+      if (resetting) {
+        const res = await apiFetch(`/api/retail-floor/stores/${storeId}/manager-pin/reset`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `Erro ${res.status}`);
+        toast.success('PIN da gerência redefinido.');
+      } else if (creating) {
         const res = await apiFetch(`/api/retail-floor/stores/${storeId}/manager-pin`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
         });
@@ -866,11 +876,13 @@ function ManagerPinModal({ storeId, storeName, isManager, hasPin, onSuccess, onC
   }
 
   return (
-    <Modal title={creating ? 'Criar PIN da gerência' : 'PIN da gerência'} subtitle={storeName} onClose={onClose}>
+    <Modal title={resetting ? 'Redefinir PIN da gerência' : (creating ? 'Criar PIN da gerência' : 'PIN da gerência')} subtitle={storeName} onClose={onClose}>
       <p className="text-sm text-[var(--color-text-muted)]">
-        {creating
-          ? 'Defina o PIN que trava as funções de gestão (fechar turno, equipe, conciliação, indicadores) neste aparelho compartilhado.'
-          : 'Digite o PIN da gerência para liberar as funções de gestão.'}
+        {resetting
+          ? 'Como dono/administrador, você pode definir um PIN novo sem o antigo. O PIN esquecido é substituído por este.'
+          : creating
+            ? 'Defina o PIN que trava as funções de gestão (fechar turno, equipe, conciliação, indicadores) neste aparelho compartilhado.'
+            : 'Digite o PIN da gerência para liberar as funções de gestão.'}
       </p>
       <div className="mt-4 space-y-3">
         <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
@@ -889,8 +901,21 @@ function ManagerPinModal({ storeId, storeName, isManager, hasPin, onSuccess, onC
         <button disabled={busy} onClick={submit}
           className="w-full rounded-xl bg-[var(--color-flow)] px-5 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 active:scale-95 disabled:opacity-50">
           {busy ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Lock className="mr-2 inline h-4 w-4" />}
-          {creating ? 'Salvar PIN e liberar' : 'Liberar gerência'}
+          {resetting ? 'Redefinir e liberar' : creating ? 'Salvar PIN e liberar' : 'Liberar gerência'}
         </button>
+        {/* Recuperação de PIN esquecido — só dono/admin, sem o PIN antigo. */}
+        {!resetting && hasPin && canConfigure && (
+          <button type="button" onClick={() => { setResetting(true); setPin(''); setConfirm(''); setError(null); }}
+            className="w-full text-center text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text-strong)]">
+            Esqueci o PIN — redefinir (dono/admin)
+          </button>
+        )}
+        {resetting && (
+          <button type="button" onClick={() => { setResetting(false); setPin(''); setConfirm(''); setError(null); }}
+            className="w-full text-center text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-strong)]">
+            Cancelar
+          </button>
+        )}
       </div>
     </Modal>
   );

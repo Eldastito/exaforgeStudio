@@ -24,6 +24,7 @@
  *    org-scoped conhece identidade (RN-GRP-01/RN-GRP-05).
  */
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 import db from "./db.js";
 
 export interface AccountIdentity {
@@ -190,6 +191,28 @@ export class AccountIdentityService {
       if (idn) credential = { password_hash: idn.password_hash ?? null, mfa_enabled: idn.mfa_enabled ? 1 : 0, mfa_secret: idn.mfa_secret ?? null, mfa_backup_codes: idn.mfa_backup_codes ?? null };
     }
     return { user, credential, identityId };
+  }
+
+  /**
+   * Confere a SENHA da conta de um usuário LOGADO (por userId) — para reautenticar
+   * antes de uma ação sensível (ex.: redefinir o PIN da gerência num tablet
+   * compartilhado, onde o papel sozinho não prova quem está na frente). Usa a
+   * credencial EFETIVA (da identidade quando existe; senão a da linha) e
+   * `bcrypt.compare` (mesma disciplina do login). Nunca lança — retorna false.
+   */
+  static async verifyPasswordForUser(userId: string, password: string | undefined): Promise<boolean> {
+    const pwd = String(password ?? "");
+    if (!pwd) return false;
+    const u = db.prepare("SELECT id, password_hash, identity_id FROM users WHERE id = ?").get(String(userId || "")) as any;
+    if (!u) return false;
+    let hash: string | null = u.password_hash ?? null;
+    const identityId = u.identity_id || AccountIdentityService.ensureForUser(String(userId)) || null;
+    if (identityId) {
+      const idn = db.prepare("SELECT password_hash FROM account_identities WHERE id = ?").get(identityId) as any;
+      if (idn?.password_hash) hash = idn.password_hash;
+    }
+    if (!hash) return false;
+    try { return await bcrypt.compare(pwd, String(hash)); } catch { return false; }
   }
 
   /**

@@ -934,6 +934,44 @@ function AlterdataConnectorPanel() {
     }
   };
 
+  // Linha do tempo da filial: primeiro/último dia com venda de cada código —
+  // pra provar uma passagem de bastão (código velho parou ↔ código novo começou).
+  const [timelineBusy, setTimelineBusy] = useState(false);
+  const [timeline, setTimeline] = useState<any>(null);
+  const runTimeline = async () => {
+    const input = window.prompt('Comparar a linha do tempo de quais códigos de filial? (separados por vírgula)', '1006,1084');
+    if (input == null) return;
+    const filiais = input.split(',').map((x) => x.trim()).filter(Boolean);
+    if (!filiais.length) { toast.error('Informe ao menos um código de filial.'); return; }
+    setTimelineBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/filial-timeline', { method: 'POST', body: JSON.stringify({ filiais, days: 160 }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok && d.queued) {
+        toast.success(`Linha do tempo iniciada (${(d.filiais || []).length} filial(is)) — em segundo plano.`);
+        setTimeline(null);
+        // Poll do resultado (job grava em _meta/lastFilialTimeline). Varredura de
+        // ~160 dias × turnos × filiais pode levar minutos; busca por ~5 min.
+        const startedAt = Date.now();
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            const rr = await apiFetch('/api/integrations/alterdata/last-sync');
+            const jj = await rr.json().catch(() => ({}));
+            const at = jj?.timeline?.at ? new Date(jj.timeline.at).getTime() : 0;
+            if (jj?.timeline && at >= startedAt) { setTimeline(jj.timeline); break; }
+          } catch { /* segue tentando */ }
+        }
+      } else {
+        toast.error(d.error || 'Falha ao levantar a linha do tempo.');
+      }
+    } catch {
+      toast.error('Falha ao levantar a linha do tempo.');
+    } finally {
+      setTimelineBusy(false);
+    }
+  };
+
   const [probing, setProbing] = useState(false);
   const [probes, setProbes] = useState<Array<{ resource: string; status: number; ok: boolean; snippet: string; path: string }> | null>(null);
   const runProbe = async () => {
@@ -1264,6 +1302,12 @@ function AlterdataConnectorPanel() {
           {orphansBusy ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
           Filiais órfãs
         </Button>
+        {/* Linha do tempo: primeiro/último dia com venda de cada código — pra
+            provar migração de código (velho parou ↔ novo começou). */}
+        <Button onClick={runTimeline} disabled={timelineBusy || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Mostra o primeiro e o último dia com venda de cada código de filial — pra confirmar quando um código parou e o outro começou (loja que migrou de código)'}>
+          {timelineBusy ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
+          Linha do tempo
+        </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
           Integração ativa
@@ -1319,6 +1363,31 @@ function AlterdataConnectorPanel() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Linha do tempo por filial: primeiro/último dia com venda de cada código.
+          Se um código PAROU e outro COMEÇOU logo em seguida, é a mesma loja que
+          migrou de código. */}
+      {timeline && Array.isArray(timeline.results) && (
+        <div className="mt-2 rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-xs">
+          <div className="font-semibold text-violet-200 mb-2">
+            Linha do tempo por filial
+            {timeline.at ? <span className="font-normal text-zinc-500"> · {new Date(timeline.at).toLocaleString('pt-BR')}</span> : null}
+          </div>
+          <div className="space-y-1 text-[11px] text-violet-200/90">
+            {timeline.results.map((r: any, i: number) => (
+              <div key={i}>
+                <span className="font-medium">filial {r.filial}</span>
+                {': '}
+                {r.firstData
+                  ? <>começou <span className="font-semibold">{r.firstData}</span> · parou/último <span className="font-semibold">{r.lastData}</span> · {Number(r.daysWithData || 0)} dia(s) com venda</>
+                  : 'sem venda na janela'}
+                {r.lastMovement ? <span className="text-zinc-500"> · últ. movimento {r.lastMovement}</span> : ''}
+                {Number(r.errors || 0) ? <span className="text-zinc-500"> · {r.errors} erro(s)</span> : ''}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

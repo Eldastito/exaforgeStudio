@@ -518,6 +518,7 @@
     "test:alterdata-price-cursor-key": "tsx scripts/test-alterdata-price-cursor-key.ts",
     "test:alterdata-resumo-historical-probe": "tsx scripts/test-alterdata-resumo-historical-probe.ts",
     "test:alterdata-orphan-filiais": "tsx scripts/test-alterdata-orphan-filiais.ts",
+    "test:alterdata-filial-timeline": "tsx scripts/test-alterdata-filial-timeline.ts",
     "test:alterdata-price-mapper": "tsx scripts/test-alterdata-price-mapper.ts",
     "test:module-addon-selfservice": "tsx scripts/test-module-addon-selfservice.ts",
     "test:security-hardening": "tsx scripts/test-security-hardening.ts",

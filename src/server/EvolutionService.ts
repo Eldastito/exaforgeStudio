@@ -323,11 +323,13 @@ export class EvolutionService {
       }
       return "";
     };
-    // 16/09/2026: janela AMPLIADA (3→5 tentativas, pausa 3s). O GetQr do
-    // evolution-go auto-inicia a sessão whatsmeow e só dorme 3s server-side —
-    // num cold start real o QR frequentemente ainda não existe na 3ª rodada
-    // (~7.5s), e o fluxo desistia cedo demais ("QR retornou vazio").
-    for (let attempt = 0; attempt < 5 && !qrBase64; attempt++) {
+    // 16/09/2026: janela AMPLIADA (3→5 tentativas, pausa 3s) MAS com ORÇAMENTO
+    // TOTAL de 35s. O GetQr do evolution-go auto-inicia a sessão e dorme 3s
+    // server-side — cold start real precisa de mais rodadas; porém, se cada
+    // request estiver ESTOURANDO o timeout de 12s (provedor mudo), 5 rodadas ×
+    // 2 endpoints passariam de 2 minutos com a UI pendurada. O deadline corta.
+    const qrDeadline = Date.now() + 35_000;
+    for (let attempt = 0; attempt < 5 && !qrBase64 && Date.now() < qrDeadline; attempt++) {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 3000));
       qrBase64 = await tryFetchQr();
       if (passkeyStage) break; // passkey em andamento: QR não vai existir

@@ -259,7 +259,24 @@ export class ChannelProvisioningService {
       instancesInProvider: null,
       orgInstance: null,
       channels: this.status(orgId).channels.map((c) => ({ instanceName: c.instanceName, status: c.status })),
+      lastProvisionError: null,
     };
+    // 16/09 (3º relato: "não está nem criando a instância") — o ERRO REAL do
+    // último provision/reset falho já fica gravado na auditoria; surfaçá-lo no
+    // diagnóstico tira a dependência de toast perdido. Redigido (só o erro e
+    // quando), org-scoped.
+    try {
+      const row = db.prepare(
+        `SELECT event_type, metadata_json, created_at FROM auth_audit_logs
+          WHERE organization_id = ? AND event_type IN ('WHATSAPP_PROVISION_FAILED','WHATSAPP_RESET_FAILED')
+          ORDER BY created_at DESC LIMIT 1`
+      ).get(orgId) as any;
+      if (row) {
+        let err = "";
+        try { err = String(JSON.parse(row.metadata_json || "{}")?.error || ""); } catch { /* noop */ }
+        out.lastProvisionError = { at: row.created_at, kind: row.event_type, error: err.slice(0, 200) || null };
+      }
+    } catch { /* best-effort */ }
     if (!cfg) return out;
     try { out.providerHost = new URL(cfg.baseUrl).host; } catch { out.providerHost = "(URL inválida)"; }
     const t0 = Date.now();

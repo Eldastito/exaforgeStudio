@@ -108,6 +108,14 @@ async function main() {
   check("6.1 passkeyStage → erro explica PASSKEY (não 'QR vazio')", r6.ok === false && /PASSKEY/i.test(r6.error || ""), r6.error);
   qrMode = "qr";
 
+  // ── 7) 3º relato ("não está nem criando"): o ERRO REAL do provision falho
+  //      fica visível no diagnóstico (lastProvisionError da auditoria). ──
+  const { logAuthEvent } = await import("../src/server/auditLog.js");
+  logAuthEvent(A, "u1", "u1", "WHATSAPP_PROVISION_FAILED", { instanceName: "ExaForge", error: "Evolution 401: invalid global api key" });
+  const d3 = await Svc.diagnose(A);
+  check("7.1 diagnóstico surfaça o último erro real de provisionamento", /Evolution 401/.test(d3.lastProvisionError?.error || ""), JSON.stringify(d3.lastProvisionError));
+  check("7.2 erro surfaçado ainda é token-safe", !JSON.stringify(d3).includes("GLOBAL-ADMIN-KEY"));
+
   restore();
   console.log("\n=== TEST: Reset + diagnóstico + contrato real (16/09) ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

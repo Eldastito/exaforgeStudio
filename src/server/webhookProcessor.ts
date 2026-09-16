@@ -9,6 +9,7 @@ import { CustomerMemoryService } from "./CustomerMemoryService.js";
 import { setUsageOrg } from "./usageContext.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { StudioWhatsAppCommandService } from "./StudioWhatsAppCommandService.js";
+import { SaleWhatsAppCommandService } from "./SaleWhatsAppCommandService.js";
 import { deliverBotMessage } from "./botOutbound.js";
 import { CadenceService } from "./CadenceService.js";
 import { LgpdService } from "./LgpdService.js";
@@ -145,6 +146,17 @@ async function runInternalInbound(orgId: string, channel: any, payload: { sender
     if (sc.handled) return;
   } catch (e) {
     console.error('[Estúdio] Falha no comando de imagem via WhatsApp:', e);
+  }
+
+  // WZ-2 (piloto): "registre a venda da peça X, tamanho GG, cor azul, referência
+  // 123456, valor xx,xx pago com cartão" → valida no CATÁLOGO real e registra
+  // pelo OrdersService (pago + baixa de estoque). Gatilho determinístico
+  // (RN-151); mesmo posicionamento do WZ-1 (antes do Controller, só gestores).
+  try {
+    const sale = await SaleWhatsAppCommandService.handle(orgId, channel.id, payload.senderId, payload.text || '');
+    if (sale.handled) return;
+  } catch (e) {
+    console.error('[Venda] Falha no comando de venda via WhatsApp:', e);
   }
 
   // Controller Financeiro IA (ADR-139): comandos CLAROS de gestão (saldo, a

@@ -990,6 +990,7 @@
     "test:whatsapp-disconnect": "tsx scripts/test-whatsapp-disconnect.ts",
     "test:sale-whatsapp-command": "tsx scripts/test-sale-whatsapp-command.ts",
     "test:legacy-route-removal": "tsx scripts/test-legacy-route-removal.ts",
+    "test:provision-reconnect": "tsx scripts/test-provision-reconnect.ts",
     "test:channel-binding-gate": "tsx scripts/test-channel-binding-gate.ts",
     "test:channel-binding-migration": "tsx scripts/test-channel-binding-migration.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",

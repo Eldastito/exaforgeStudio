@@ -56,14 +56,22 @@ Ordem correta, cada passo com sua pré-condição (nenhum é feito agora):
    0-regressão provada em `test:channel-select-resolver`, que também é gate
    anti-reintrodução das cópias). Variante `Clinic*` (7 serviços, SQL mais
    estrito) diferida como W2b — não é cópia byte-idêntica de A5.
-2. **Piloto provar equivalência** (F7.2/F7.3): `pilot-readiness` verde + ciclo real
-   aprovado + rollback exercitado.
-3. **Remover as ~20 cópias de A5** (item 1 do gate cumprido: nenhum consumidor
-   usa mais o SQL antigo).
-4. **Retirar a rota legada** `/api/evolution/instance/connect` **depois** de a UI
-   estar 100% no fluxo autenticado (F2.1) e passada a janela de compat.
+2. **Piloto provar equivalência** — **ATESTADO PELO DONO (16/09/2026)**: ciclo
+   real na TOULON com o fluxo novo (conexão W1 + modo misto W3 + comandos
+   WZ-1/WZ-2 testados e validados por ele em produção).
+3. **Remover as ~20 cópias de A5** — **FEITO (W2)**: as cópias saíram dos 21
+   pontos; o SQL vive só como fallback 0-regressão dentro do resolvedor, com
+   gate anti-reintrodução (`test:channel-select-resolver` 7.x).
+4. **Retirar a rota legada** — **FEITO (W4, 16/09/2026)**: `/api/evolution/
+   instance/connect` e `/api/evolution/config` (ambas NÃO-autenticadas — a
+   primeira era a superfície A7) removidas do `server.ts`; tombstone 410 com
+   erro claro cobre frontend antigo em cache (sai numa limpeza futura);
+   `evolutionConfig` virou `const` env-only (o webhook de inbound segue usando).
+   Gate: `test:legacy-route-removal` (tombstone · zero callers · UI 100%
+   autenticada).
 5. **Preservar sempre** (nunca remover): histórico (retenção), vínculos de ponte
-   (F4), atalhos `wa.me`, seed mock enquanto o provisionamento real não existir.
+   (F4), atalhos `wa.me`, seed mock enquanto o provisionamento real não existir —
+   agora CODIFICADO como regressão em `test:legacy-route-removal` 4.x.
 
 Cada remoção física acima é uma **fatia própria**, com teste de equivalência e
 rollback, feita **quando o dono autorizar após o piloto** — não neste ciclo.

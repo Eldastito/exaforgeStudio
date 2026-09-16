@@ -269,11 +269,14 @@ export function ChannelsPanel() {
         toast.success('Número já conectado.');
         loadEvoStatus();
       } else {
-        // Erros tipados do backend (RF-01/§8).
+        // Erros tipados do backend (RF-01/§8). O DETALHE real do provedor vai
+        // junto (16/09/2026 — "Falha ao falar com o provedor" genérico escondia
+        // o motivo do QR não sair; sem o detalhe ninguém consegue diagnosticar).
         const code = data?.code;
+        const detail = data?.error ? ` Detalhe: ${String(data.error).slice(0, 160)}` : '';
         const msg = code === 'attributed_to_other_org' ? 'Esta instância já pertence a outra empresa.'
           : code === 'instance_not_found' ? 'Instância não encontrada no provedor. Use o botão "Conectar WhatsApp" para criar uma nova.'
-          : code === 'evolution_failed' ? (data?.needsReset ? 'Não veio o QR. A instância pode estar travada — o operador pode reiniciá-la.' : 'Falha ao falar com o provedor. Tente de novo.')
+          : code === 'evolution_failed' ? (data?.needsReset ? `Não veio o QR. A instância pode estar travada — o operador pode reiniciá-la.${detail}` : `Falha ao falar com o provedor.${detail}`)
           : (data?.error || 'Não foi possível gerar o QR Code.');
         toast.error(msg);
         setEvolutionStatus('disconnected');

@@ -51,10 +51,40 @@ export interface ChannelProvisionResult {
 const NEW_PREFIX = "zapflow_";
 
 export class ChannelProvisioningService {
-  /** Nome de sistema pra instância NOVA de uma org geral (estável, sem colisão). */
+  /**
+   * Nome de sistema pra instância NOVA de uma org geral (estável, sem colisão).
+   * SANITIZADO (16/09/2026, relato do dono: QR não saía): orgId real é UUID com
+   * HÍFENS, e forks do Evolution costumam rejeitar nome de instância com
+   * caractere fora de [a-zA-Z0-9_] ou longo demais — o create falhava e o QR
+   * nunca vinha. Só letras/dígitos/underscore, cap de 32 chars do orgId.
+   * Determinístico → segue idempotente por (org, identifier).
+   */
   static newInstanceName(orgId: string): string {
     if (!orgId) throw new Error("orgId inválido");
-    return `${NEW_PREFIX}${orgId}`;
+    const clean = String(orgId).replace(/[^a-zA-Z0-9_]/g, "").slice(0, 32);
+    return `${NEW_PREFIX}${clean || "org"}`;
+  }
+
+  /**
+   * Instância EXISTENTE da org pra reconectar (16/09/2026 — a correção do "QR
+   * não sai"): o botão "Conectar WhatsApp" (mode 'new') cunhava SEMPRE uma
+   * instância nova, mesmo quando a org já tinha a dela (ex.: ExaForge
+   * desconectada após o Desconectar) — criar instância nova no provedor podia
+   * falhar e o número da empresa nunca era RECONECTADO. Agora 'new' reusa a
+   * instância existente quando há uma. Preferência: connected > disconnected
+   * (já pareou um dia) > awaiting_qr > provisioning (zumbi de tentativa
+   * falhada); empate → mais recente. 'disabled' (pausa administrativa) nunca
+   * é reusada.
+   */
+  private static reusableInstanceFor(orgId: string): string | null {
+    const row = db.prepare(
+      `SELECT identifier FROM channels
+        WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'
+        ORDER BY CASE status WHEN 'connected' THEN 0 WHEN 'disconnected' THEN 1 WHEN 'awaiting_qr' THEN 2 ELSE 3 END,
+                 updated_at DESC
+        LIMIT 1`
+    ).get(orgId) as any;
+    return row?.identifier || null;
   }
 
   /** Canal Evolution desta org com este identifier (ou undefined). */
@@ -101,7 +131,10 @@ export class ChannelProvisioningService {
         importing = true;
       }
     } else {
-      instanceName = this.newInstanceName(orgId);
+      // 'new' = "Conectar WhatsApp": RECONECTA a instância que a org já tem;
+      // só cunha zapflow_<org> quando a org não tem nenhuma (ver comentário
+      // em reusableInstanceFor — correção do "QR não sai", 16/09/2026).
+      instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
     }
 
     // Canal — reusa se existe (idempotente); cria se não (inclusive no import/claim).

@@ -35,6 +35,9 @@ export function ChannelsPanel() {
   // W3 — modo misto (um número = atendimento + gestão), opt-in do piloto.
   const [mixedMode, setMixedMode] = useState<{ enabled: boolean; managersCount: number } | null>(null);
   const [mixedBusy, setMixedBusy] = useState(false);
+  // 16/09 — diagnóstico da conexão com o provedor (config → alcance → instâncias).
+  const [diag, setDiag] = useState<any | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
   // F2.2 (UI) — usos por finalidade (channel_feature_bindings).
   const [bindingFeatures, setBindingFeatures] = useState<string[]>([]);
   const [bindings, setBindings] = useState<any[]>([]);
@@ -192,6 +195,40 @@ export function ChannelsPanel() {
         toast.error(d?.error || 'Não foi possível desconectar.');
       }
     } catch { toast.error('Não foi possível desconectar.'); } finally { setEvoBusy(false); }
+  };
+
+  // 16/09 — diagnóstico honesto: mostra ONDE a conexão quebra (config do
+  // servidor, alcance do provedor, instâncias) sem expor segredo nenhum.
+  const runDiagnose = async () => {
+    setDiagBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/whatsapp/diagnose');
+      const d = await r.json();
+      if (r.ok) setDiag(d); else toast.error(d?.error || 'Falha no diagnóstico.');
+    } catch { toast.error('Falha no diagnóstico.'); } finally { setDiagBusy(false); }
+  };
+
+  // 16/09 — RESET explícito da instância no provedor (a cura da F1.3 que nunca
+  // teve botão): apaga+recria+QR quando a sessão está zumbi e o QR nunca vem.
+  const resetInstanceEvo = async () => {
+    if (!(await confirmDialog('Reiniciar a instância no provedor? A sessão atual (se houver) é ENCERRADA e será preciso ler um QR novo. Use quando o QR não aparece de jeito nenhum.', { danger: true, confirmText: 'Reiniciar' }))) return;
+    setEvolutionStatus('connecting_evo');
+    setEvolutionQr(null);
+    setEvoBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/whatsapp/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d?.qrBase64) {
+        setEvolutionQr(d.qrBase64);
+        toast.success('Instância reiniciada — leia o QR novo.');
+      } else if (r.ok && d?.state === 'open') {
+        setEvolutionStatus('connected_evo');
+        loadEvoStatus();
+      } else {
+        toast.error(`Reset não gerou QR.${d?.error ? ` Detalhe: ${String(d.error).slice(0, 160)}` : ''}`);
+        setEvolutionStatus('disconnected');
+      }
+    } catch { toast.error('Falha no reset.'); setEvolutionStatus('disconnected'); } finally { setEvoBusy(false); }
   };
 
   // W3 — modo misto (um número só pra tudo): estado + toggle (owner/admin).
@@ -657,18 +694,50 @@ export function ChannelsPanel() {
                 </Button>
                 <div>
                   <button type="button" onClick={() => setEvoAdvanced(v => !v)} className="text-[11px] text-slate-500 hover:text-slate-300 underline">
-                    {evoAdvanced ? 'Ocultar opções avançadas' : 'Opções avançadas (importar instância existente)'}
+                    {evoAdvanced ? 'Ocultar opções avançadas' : 'Opções avançadas (importar · diagnosticar · reiniciar)'}
                   </button>
                   {evoAdvanced && (
-                    <div className="mt-2 space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-                      <p className="text-[11px] text-slate-500">Só use se a sua empresa já tem uma instância criada no provedor. Só conecta se ela pertencer à sua empresa.</p>
-                      <div className="flex gap-2">
-                        <input type="text" id="evo_inst" placeholder="Nome da instância existente"
-                          className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors" />
-                        <Button variant="outline" disabled={evoBusy} onClick={() => connectEvolution({ existing: true })}
-                          className="border-slate-700 text-slate-300 hover:text-white shrink-0">
-                          Importar
-                        </Button>
+                    <div className="mt-2 space-y-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-slate-500">Importar: só se a sua empresa já tem uma instância criada no provedor (só conecta se ela pertencer à sua empresa).</p>
+                        <div className="flex gap-2">
+                          <input type="text" id="evo_inst" placeholder="Nome da instância existente"
+                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors" />
+                          <Button variant="outline" disabled={evoBusy} onClick={() => connectEvolution({ existing: true })}
+                            className="border-slate-700 text-slate-300 hover:text-white shrink-0">
+                            Importar
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* 16/09 — QR não vem? Primeiro diagnostica, depois (se preciso) reinicia. */}
+                      <div className="pt-2 border-t border-slate-800/70 space-y-2">
+                        <div className="flex flex-col md:flex-row gap-2">
+                          <Button variant="outline" size="sm" disabled={diagBusy} onClick={runDiagnose}
+                            className="border-slate-700 text-slate-300 hover:text-white">
+                            {diagBusy ? 'Verificando…' : '🔎 Diagnosticar conexão'}
+                          </Button>
+                          <Button variant="outline" size="sm" disabled={evoBusy} onClick={resetInstanceEvo}
+                            className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10">
+                            Reiniciar instância travada (gera QR novo)
+                          </Button>
+                        </div>
+                        {diag && (
+                          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-1 text-[11px]">
+                            <p className={diag.configured?.evolutionBaseUrl && diag.configured?.evolutionApiKey ? 'text-emerald-400' : 'text-rose-400'}>
+                              Config do servidor: {diag.configured?.evolutionBaseUrl && diag.configured?.evolutionApiKey ? `ok${diag.providerHost ? ` (${diag.providerHost})` : ''}` : `FALTANDO ${[!diag.configured?.evolutionBaseUrl && 'EVOLUTION_BASE_URL', !diag.configured?.evolutionApiKey && 'EVOLUTION_API_KEY'].filter(Boolean).join(' + ')}`}
+                            </p>
+                            <p className={diag.reachable?.ok ? 'text-emerald-400' : 'text-rose-400'}>
+                              Provedor: {diag.reachable?.ok ? `acessível (HTTP ${diag.reachable.status}, ${diag.reachable.latencyMs}ms)` : `INACESSÍVEL — ${diag.reachable?.error || `HTTP ${diag.reachable?.status}${diag.reachable?.bodySnippet ? `: ${diag.reachable.bodySnippet}` : ''}`}`}
+                            </p>
+                            {diag.instancesInProvider != null && (
+                              <p className="text-slate-400">Instâncias no provedor: {diag.instancesInProvider}{diag.orgInstance ? ` · a da empresa ("${diag.orgInstance.name}") ${diag.orgInstance.existsInProvider ? 'existe lá' : 'NÃO existe lá'}` : ''}</p>
+                            )}
+                            {Array.isArray(diag.channels) && diag.channels.length > 0 && (
+                              <p className="text-slate-500">Canais aqui: {diag.channels.map((c: any) => `${c.instanceName} (${c.status})`).join(' · ')}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

@@ -19,6 +19,16 @@ import { randomUUID } from "crypto";
 // Compat: fetch nativo Node 18+; o teste stub'a `globalThis.fetch`.
 type FetchResult = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<any>; headers?: any };
 
+// 16/09/2026 (relato do dono: "QR não aparece") — TIMEOUT duro em TODA chamada
+// ao provedor. Sem ele, um Evolution fora do ar/mudo deixava o "Conectar"
+// pendurado e a UI girando pra sempre, sem erro nenhum pra diagnosticar.
+// Chama o `globalThis.fetch` da hora (os testes stub'am depois do import).
+const EVO_TIMEOUT_MS = 12_000;
+function evoFetch(url: string, init?: any): Promise<any> {
+  const signal = typeof (AbortSignal as any)?.timeout === "function" ? (AbortSignal as any).timeout(EVO_TIMEOUT_MS) : undefined;
+  return (globalThis as any).fetch(url, { ...(init || {}), ...(signal ? { signal } : {}) });
+}
+
 export interface EvolutionConfig {
   baseUrl: string;
   apiKey: string;
@@ -61,6 +71,24 @@ export class EvolutionService {
   }
 
   /**
+   * Localiza a instância no provedor e devolve id+token (16/09/2026 — o reset
+   * explícito precisa do id, mas o canal não o guarda; busca em /instance/all).
+   * null = não encontrada OU provedor inacessível (o caller decide o fallback).
+   */
+  static async findInstance(instanceName: string, config?: EvolutionConfig): Promise<{ id?: string; token?: string } | null> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg || !instanceName) return null;
+    try {
+      const resp = (await evoFetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      const hit = list.find((i: any) => i?.name === instanceName || i?.instanceName === instanceName);
+      return hit ? { id: hit.id, token: hit.token || hit.apikey } : null;
+    } catch { return null; }
+  }
+
+  /**
    * Verificação NÃO-destrutiva: a instância existe no provedor? (F2.1a — import.)
    * Lista `/instance/all` e procura pelo nome. Retorna false em rede/erro (nunca
    * lança) — o caller trata "não confirmado". NÃO cria nada: importar por digitar
@@ -70,7 +98,7 @@ export class EvolutionService {
     const cfg = config ?? this.getConfig();
     if (!cfg || !instanceName) return false;
     try {
-      const resp = (await fetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
+      const resp = (await evoFetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
       if (!resp.ok) return false;
       const data = await resp.json();
       const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
@@ -90,6 +118,25 @@ export class EvolutionService {
   static async logoutInstance(instanceName: string, config?: EvolutionConfig): Promise<boolean> {
     const cfg = config ?? this.getConfig();
     if (!cfg || !instanceName) return false;
+    // 16/09/2026 — CORRIGIDO contra o fonte real do evolution-go (routes.go +
+    // auth_middleware.go): logout é `DELETE /instance/logout` (SEM nome no
+    // path) e o middleware `Auth` resolve a instância PELO TOKEN DELA no
+    // header `apikey` (a chave GLOBAL não passa, sem fallback). A versão
+    // anterior mandava `/instance/logout/<nome>` com a chave global →
+    // 404/401 sempre (por isso providerLogout nunca confirmava). Busca o
+    // token da instância via /instance/all (AuthAdmin) e faz o logout certo;
+    // mantém os formatos antigos como fallback pra outros forks.
+    const found = await this.findInstance(instanceName, cfg);
+    if (found?.token) {
+      try {
+        const resp = (await evoFetch(`${cfg.baseUrl}/instance/logout`, { method: "DELETE", headers: { apikey: found.token } })) as FetchResult;
+        if (resp.ok) return true;
+      } catch { /* cai nos fallbacks */ }
+      try {
+        const resp = (await evoFetch(`${cfg.baseUrl}/instance/disconnect`, { method: "POST", headers: { "Content-Type": "application/json", apikey: found.token }, body: "{}" })) as FetchResult;
+        if (resp.ok) return true;
+      } catch { /* cai nos fallbacks */ }
+    }
     const attempts: { method: string; path: string }[] = [
       { method: "DELETE", path: `/instance/logout/${encodeURIComponent(instanceName)}` },
       { method: "POST", path: `/instance/logout/${encodeURIComponent(instanceName)}` },
@@ -97,7 +144,7 @@ export class EvolutionService {
     ];
     for (const a of attempts) {
       try {
-        const resp = (await fetch(`${cfg.baseUrl}${a.path}`, { method: a.method, headers: { apikey: cfg.apiKey, instance: instanceName } })) as FetchResult;
+        const resp = (await evoFetch(`${cfg.baseUrl}${a.path}`, { method: a.method, headers: { apikey: cfg.apiKey, instance: instanceName } })) as FetchResult;
         if (resp.ok) return true;
       } catch { /* tenta o próximo */ }
     }
@@ -130,7 +177,7 @@ export class EvolutionService {
 
     // 1. Verifica se instância já existe (dedup)
     try {
-      const listResp = (await fetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
+      const listResp = (await evoFetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
       if (listResp.ok) {
         const data = await listResp.json();
         const existing = data?.data?.find?.((i: any) => i.name === instanceName || i.instanceName === instanceName);
@@ -155,7 +202,7 @@ export class EvolutionService {
     };
     let createResp: FetchResult | null = null;
     try {
-      createResp = (await fetch(`${cfg.baseUrl}/instance/create`, {
+      createResp = (await evoFetch(`${cfg.baseUrl}/instance/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: cfg.apiKey },
         body: JSON.stringify(richPayload),
@@ -167,7 +214,7 @@ export class EvolutionService {
     // Se rico falhou 400, tenta payload minimal (Evolution GO exige `name` + `token`)
     if (!createResp.ok && createResp.status === 400) {
       try {
-        createResp = (await fetch(`${cfg.baseUrl}/instance/create`, {
+        createResp = (await evoFetch(`${cfg.baseUrl}/instance/create`, {
           method: "POST",
           headers: { "Content-Type": "application/json", apikey: cfg.apiKey },
           body: JSON.stringify({ name: instanceName, token: instanceToken }),
@@ -218,7 +265,7 @@ export class EvolutionService {
     //   em silêncio → instância ficava sem NENHUM evento → o webhook nunca
     //   receberia a conexão nem mensagens. Maiúsculo é obrigatório.
     try {
-      await fetch(`${cfg.baseUrl}/instance/connect`, {
+      await evoFetch(`${cfg.baseUrl}/instance/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
         body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
@@ -226,7 +273,7 @@ export class EvolutionService {
     } catch { /* best-effort */ }
 
     try {
-      await fetch(`${cfg.baseUrl}/webhook/set/${instanceName}`, {
+      await evoFetch(`${cfg.baseUrl}/webhook/set/${instanceName}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: activeToken },
         body: JSON.stringify({
@@ -251,6 +298,7 @@ export class EvolutionService {
     // a moment and try again" — por isso o retry com pausa de 2.5s (3 rodadas).
     let qrBase64 = "";
     let state = "";
+    let passkeyStage = "";
     const qrEndpoints = [
       `${cfg.baseUrl}/instance/qr`,
       `${cfg.baseUrl}/api/v1/instance/qr`,
@@ -258,22 +306,31 @@ export class EvolutionService {
     const tryFetchQr = async (): Promise<string> => {
       for (const url of qrEndpoints) {
         try {
-          const qrResp = (await fetch(url, {
+          const qrResp = (await evoFetch(url, {
             headers: { apikey: activeToken, instance: instanceName },
           })) as FetchResult;
           if (!qrResp.ok) continue;
           const ct = qrResp.headers?.get?.("content-type") || "application/json";
           if (!String(ct).includes("application/json")) continue;
           const qrData = await qrResp.json();
+          // 16/09/2026 (fonte real do build): quando a conta exige PASSKEY
+          // (WebAuthn), NÃO existe QR — o GetQr devolve passkeyStage. Sem
+          // capturar isso, reportávamos "QR vazio" e o operador ficava cego.
+          if (qrData?.data?.passkeyStage) { passkeyStage = String(qrData.data.passkeyStage); }
           const got = qrData?.data?.qrcode || qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || qrData?.data?.qr || qrData?.qr || "";
           if (got) return String(got);
         } catch { /* tenta próximo endpoint */ }
       }
       return "";
     };
-    for (let attempt = 0; attempt < 3 && !qrBase64; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 2500));
+    // 16/09/2026: janela AMPLIADA (3→5 tentativas, pausa 3s). O GetQr do
+    // evolution-go auto-inicia a sessão whatsmeow e só dorme 3s server-side —
+    // num cold start real o QR frequentemente ainda não existe na 3ª rodada
+    // (~7.5s), e o fluxo desistia cedo demais ("QR retornou vazio").
+    for (let attempt = 0; attempt < 5 && !qrBase64; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 3000));
       qrBase64 = await tryFetchQr();
+      if (passkeyStage) break; // passkey em andamento: QR não vai existir
     }
 
     // F1.3 (RF-02/INV-07/CA-02) — REMOVIDO o auto-heal destrutivo que antes,
@@ -291,7 +348,7 @@ export class EvolutionService {
     // diferente do Go/whatsmeow, que separa `connect` (subscribe) de `qr` (obter).
     if (!qrBase64) {
       try {
-        const legacyResp = (await fetch(`${cfg.baseUrl}/instance/connect/${instanceName}`, {
+        const legacyResp = (await evoFetch(`${cfg.baseUrl}/instance/connect/${instanceName}`, {
           headers: { apikey: cfg.apiKey },
         })) as FetchResult;
         if (legacyResp.ok) {
@@ -309,6 +366,11 @@ export class EvolutionService {
     if (qrBase64) {
       const finalQr = qrBase64.startsWith("data:image") ? qrBase64 : `data:image/png;base64,${qrBase64}`;
       return { ok: true, qrBase64: finalQr, token: activeToken };
+    }
+    // Passkey em andamento: honesto — não é falha de QR, é outro fluxo de
+    // pareamento (WebAuthn); o operador conclui pelo manager do provedor.
+    if (passkeyStage) {
+      return { ok: false, error: `A conta exige PASSKEY pra concluir o pareamento (estágio: ${passkeyStage}) — conclua pelo manager do Evolution e tente de novo.` };
     }
     // QR vazio: honesto. Sinaliza `needsReset` só quando temos o instanceId (o
     // reset EXPLÍCITO precisa dele) — a UI/rota oferece o reset ao operador com
@@ -336,7 +398,7 @@ export class EvolutionService {
     if (!instanceId) return { ok: false, error: "resetInstance exige instanceId" };
     // Apaga o client zumbi (Disconnect + limpeza no whatsmeow) — AuthAdmin.
     try {
-      await fetch(`${cfg.baseUrl}/instance/delete/${instanceId}`, {
+      await evoFetch(`${cfg.baseUrl}/instance/delete/${instanceId}`, {
         method: "DELETE",
         headers: { apikey: cfg.apiKey },
       });

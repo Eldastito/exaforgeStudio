@@ -48,6 +48,33 @@ router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: Au
   }
 });
 
+// 16/09/2026 — RESET explícito da instância no provedor (a cura da F1.3 que
+// nunca teve rota): apaga+recria+QR quando a sessão está zumbi e o GetQr
+// devolve vazio pra sempre. Encerra a sessão pareada atual — a UI confirma.
+router.post("/whatsapp/reset", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = await ChannelProvisioningService.reset(orgId, req.user?.userId || null);
+    if (!r.ok) return res.status(502).json({ error: r.error, code: r.code });
+    return res.json(r);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Falha no reset" });
+  }
+});
+
+// 16/09/2026 — diagnóstico token-safe da conexão com o provedor (config →
+// alcance → instâncias) pro operador ver ONDE quebra sem chutar.
+router.get("/whatsapp/diagnose", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    return res.json(await ChannelProvisioningService.diagnose(orgId));
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Falha no diagnóstico" });
+  }
+});
+
 // WZ — desconectar o WhatsApp pelo ZapFlow (pedido do dono): logout best-effort
 // no provedor + canais Evolution da org marcados 'disconnected' (UPDATE, nunca
 // DELETE). `providerLogout:false` = a UI avisa pra conferir o celular.

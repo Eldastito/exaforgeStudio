@@ -195,6 +195,93 @@ export class ChannelProvisioningService {
   }
 
   /**
+   * 16/09/2026 (relato do dono: QR não sai NEM depois da reconexão) — RESET
+   * EXPLÍCITO exposto de verdade. A F1.3 preservou `EvolutionService.
+   * resetInstance` como "operação do operador" mas NUNCA lhe deu rota/botão:
+   * quando a instância trava no provedor (sessão zumbi no whatsmeow, GetQr
+   * devolve vazio pra sempre), o produto sinalizava `needsReset` e dizia "o
+   * operador pode reiniciá-la" — sem existir onde. Este método fecha o beco:
+   * acha a instância da org, busca o id no provedor e apaga+recria+QR; se a
+   * instância nem existe lá, cai no provision normal (criar do zero é o
+   * "reset" possível). A sessão pareada ATUAL é encerrada — por isso a UI
+   * exige confirmação explícita (owner/admin). Auditado.
+   */
+  static async reset(orgId: string, actorUserId: string | null): Promise<ChannelProvisionResult> {
+    if (!orgId) return { ok: false, error: "organizationId ausente.", code: "org_missing" };
+    const instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
+
+    const found = await EvolutionService.findInstance(instanceName);
+    const result = found?.id
+      ? await EvolutionService.resetInstance(instanceName, found.id)
+      : await EvolutionService.provision(instanceName);
+
+    let existing = this.channelForOrg(orgId, instanceName);
+    let channelId = existing?.id;
+    if (!channelId) {
+      channelId = randomUUID();
+      try {
+        db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`)
+          .run(channelId, orgId, `WhatsApp (${instanceName})`, instanceName);
+      } catch (e: any) {
+        return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed" };
+      }
+    }
+
+    if (!result.ok) {
+      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_RESET_FAILED", { instanceName, channelId, hadProviderId: !!found?.id, error: result.error });
+      return { ok: false, channelId, instanceName, error: result.error, code: "evolution_failed" };
+    }
+    try {
+      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
+    } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId} pós-reset:`, e); }
+    logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
+    return { ok: true, channelId, instanceName, qrBase64: result.qrBase64, state: result.state };
+  }
+
+  /**
+   * 16/09/2026 — DIAGNÓSTICO honesto e token-safe da conexão com o provedor,
+   * pro operador (e pro suporte) verem ONDE o fluxo quebra sem chutar:
+   * config presente? provedor alcançável (status/latência/erro)? quantas
+   * instâncias existem? a da org existe lá? Nunca devolve apiKey nem a URL
+   * completa (só o host).
+   */
+  static async diagnose(orgId: string): Promise<any> {
+    const cfg = EvolutionService.getConfig();
+    const out: any = {
+      configured: {
+        evolutionBaseUrl: !!process.env.EVOLUTION_BASE_URL,
+        evolutionApiKey: !!process.env.EVOLUTION_API_KEY,
+        appUrl: !!process.env.APP_URL,
+      },
+      providerHost: null,
+      reachable: { ok: false, error: cfg ? undefined : "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados no servidor" },
+      instancesInProvider: null,
+      orgInstance: null,
+      channels: this.status(orgId).channels.map((c) => ({ instanceName: c.instanceName, status: c.status })),
+    };
+    if (!cfg) return out;
+    try { out.providerHost = new URL(cfg.baseUrl).host; } catch { out.providerHost = "(URL inválida)"; }
+    const t0 = Date.now();
+    try {
+      const resp: any = await fetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey }, ...(typeof (AbortSignal as any)?.timeout === "function" ? { signal: (AbortSignal as any).timeout(12_000) } : {}) });
+      out.reachable = { ok: !!resp.ok, status: resp.status, latencyMs: Date.now() - t0 };
+      if (resp.ok) {
+        let list: any[] = [];
+        try { const d = await resp.json(); list = Array.isArray(d?.data) ? d.data : (Array.isArray(d) ? d : []); } catch { /* corpo não-JSON */ }
+        out.instancesInProvider = list.length;
+        const name = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
+        out.orgInstance = { name, existsInProvider: list.some((i: any) => i?.name === name || i?.instanceName === name) };
+      } else {
+        try { out.reachable.bodySnippet = String(await resp.text()).slice(0, 160); } catch { /* noop */ }
+      }
+    } catch (e: any) {
+      out.reachable = { ok: false, error: String(e?.message || e).slice(0, 160), latencyMs: Date.now() - t0 };
+    }
+    return out;
+  }
+
+  /**
    * WZ (pedido do dono, 15/09/2026) — DESCONECTAR o WhatsApp pelo ZapFlow.
    * O card mostrava "conectado" (status legado no banco) sem ação de saída.
    * Faz duas coisas, nesta ordem:

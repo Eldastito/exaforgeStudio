@@ -122,6 +122,39 @@ async function main() {
   check("8.3 gerente tem alguma lotação", RetailStoreScopeService.hasAnyAssignment(A, ger) === true);
   check("8.4 usuário sem lotação → não é gerente de nada", RetailStoreScopeService.hasAnyAssignment(A, randomUUID()) === false);
 
+  // ===== 9. MALOTE AUTOMÁTICO: despesas descontam do dinheiro (MAL-001) =====
+  // O caso do áudio da cliente: R$ 200 em dinheiro, despesa de água/passagem
+  // R$ 32 → o malote do dia é 168 SEM ajuste manual. E 159,90 − 158,80 = 1,10.
+  const store3 = RetailStoreService.create(A, { name: "Carioca", code: "3" }).id;
+  RetailClosingService.submitDetailed(A, store3, "2026-08-12", { dinheiro: 200, despesas: [{ descricao: "água", valor: 20 }, { descricao: "passagem", valor: 12 }] });
+  RetailClosingService.submitDetailed(A, store3, "2026-08-13", { dinheiro: 159.90, despesas: [{ descricao: "cartucho e água", valor: 158.80 }] });
+  const led9 = Cash.monthLedger(A, store3, "2026-08");
+  const d12: any = led9.rows.find((r: any) => r.date === "2026-08-12");
+  const d13: any = led9.rows.find((r: any) => r.date === "2026-08-13");
+  check("9.1 dia 12: dinheiro líquido = 168 (200 − 32 de despesas)", near(d12.cash, 168), `${d12?.cash}`);
+  check("9.2 dia 12 expõe a conta: bruto 200 / despesas 32", near(d12.cashGross, 200) && near(d12.cashDespesas, 32), `${d12?.cashGross}/${d12?.cashDespesas}`);
+  check("9.3 dia 13: 159,90 − 158,80 = 1,10", near(d13.cash, 1.10), `${d13?.cash}`);
+  check("9.4 total entrou do mês já é líquido = 169,10", near(led9.totalCash, 169.10), `${led9.totalCash}`);
+  check("9.5 saldo dia 13 = 169,10 (nada depositado)", near(d13.saldo, 169.10), `${d13?.saldo}`);
+  // derived: a conta automática gravada no fechamento + gap da folha divergente
+  const c12 = RetailClosingService.listByDate(A, "2026-08-12").find((c: any) => c.store_id === store3);
+  const det12 = JSON.parse((c12 as any).details_json);
+  check("9.6 derived.maloteEsperado = 168", near(det12?.derived?.maloteEsperado, 168), `${det12?.derived?.maloteEsperado}`);
+  RetailClosingService.submitDetailed(A, store3, "2026-08-14", { dinheiro: 100, despesas: [{ descricao: "x", valor: 40 }], malote: "50,00" });
+  const c14 = RetailClosingService.listByDate(A, "2026-08-14").find((c: any) => c.store_id === store3);
+  const det14 = JSON.parse((c14 as any).details_json);
+  check("9.7 maloteGap acusa folha divergente (50 − 60 = −10)", near(det14?.derived?.maloteGap, -10), `${det14?.derived?.maloteGap}`);
+  // virada de mês: o saldo inicial carrega o LÍQUIDO acumulado
+  check("9.8 saldo inicial de setembro = líquido de agosto (229,10)", near(Cash.monthLedger(A, store3, "2026-09").saldoInicial, 229.10), `${Cash.monthLedger(A, store3, "2026-09").saldoInicial}`);
+  // override continua mandando — substitui o líquido do dia
+  Cash.setDayOverride(A, store3, "2026-08-12", 170);
+  check("9.9 override substitui o líquido do dia (170)", near(Cash.monthLedger(A, store3, "2026-08").rows.find((r: any) => r.date === "2026-08-12")?.cash, 170));
+  check("9.10 virada com override: saldo inicial de setembro = 231,10", near(Cash.monthLedger(A, store3, "2026-09").saldoInicial, 231.10), `${Cash.monthLedger(A, store3, "2026-09").saldoInicial}`);
+  Cash.setDayOverride(A, store3, "2026-08-12", null);
+  // fechamento semanal congela o snapshot já com o líquido
+  const wk9 = Cash.closeWeek(A, store3, { weekStart: "2026-08-10", weekEnd: "2026-08-16", depositor: "Gerente" }) as any;
+  check("9.11 snapshot da semana fechada = dinheiro líquido (229,10)", near(wk9?.total_cash, 229.10), `${wk9?.total_cash}`);
+
   console.log("\n=== TEST: Malote / depósito do dinheiro ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} checks passaram.`);

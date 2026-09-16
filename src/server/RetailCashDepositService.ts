@@ -8,8 +8,11 @@
  * depositado? O saldo "em caixa" é o que ainda falta depositar.
  *
  * Decisões:
- *  - **Dinheiro do dia vem do fechamento** (RN-I-001). A soma dos itens
- *    'dinheiro' dos fechamentos não-rejeitados da loja no dia. O gerente pode
+ *  - **Dinheiro do dia vem do fechamento, LÍQUIDO das despesas** (RN-I-001).
+ *    A soma dos itens 'dinheiro' dos fechamentos não-rejeitados da loja no dia
+ *    MENOS as despesas do dia (pagas do próprio caixa — details_json). É a
+ *    conta do malote que a gerente fazia à mão: R$ 200 em dinheiro − R$ 32 de
+ *    despesa → malote R$ 168, sem precisar ajustar. O gerente ainda pode
  *    SOBRESCREVER um dia via `retail_cash_day_override` (o "pode ajustar").
  *  - **Saldo = entrou − depositado** (RN-I-002). Saldo corrente por dia é
  *    cumulativo (dinheiro acumulado − depósitos acumulados), robusto a depósito
@@ -25,8 +28,34 @@ const r2 = (x: any) => Math.round((Number(x) || 0) * 100) / 100;
 const isDate = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 
 export class RetailCashDepositService {
-  /** Dinheiro do fechamento por dia (soma dos itens 'dinheiro', não-rejeitados). */
-  private static autoCash(orgId: string, storeId: string, start: string, end: string): Map<string, number> {
+  /**
+   * Despesas do dia por dia (saem do caixa em dinheiro — details_json do
+   * fechamento). Usa o total derivado quando existe; senão soma o array
+   * `despesas` (fechamento antigo, antes do campo derivado).
+   */
+  private static despesasByDay(orgId: string, storeId: string, start: string, end: string): Map<string, number> {
+    const rows = db.prepare(
+      `SELECT closing_date AS d,
+              COALESCE(SUM(COALESCE(
+                json_extract(details_json, '$.derived.totalDespesas'),
+                (SELECT SUM(COALESCE(json_extract(j.value, '$.valor'), 0)) FROM json_each(details_json, '$.despesas') j),
+                0)), 0) AS despesas
+         FROM retail_daily_closings
+        WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ?
+          AND status != 'rejected' AND details_json IS NOT NULL
+        GROUP BY closing_date`
+    ).all(orgId, storeId, start, end) as any[];
+    const out = new Map<string, number>();
+    for (const r of rows) { const v = r2(r.despesas); if (v > 0) out.set(String(r.d), v); }
+    return out;
+  }
+
+  /**
+   * Dinheiro do fechamento por dia, LÍQUIDO das despesas do dia (a conta do
+   * malote: itens 'dinheiro' − despesas). Dia só com despesa fica negativo —
+   * o dinheiro saiu do caixa acumulado.
+   */
+  private static autoCash(orgId: string, storeId: string, start: string, end: string): Map<string, { gross: number; despesas: number; net: number }> {
     const rows = db.prepare(
       `SELECT c.closing_date AS d, COALESCE(SUM(i.informed_amount), 0) AS cash
          FROM retail_daily_closings c
@@ -34,7 +63,15 @@ export class RetailCashDepositService {
         WHERE c.organization_id = ? AND c.store_id = ? AND c.closing_date BETWEEN ? AND ? AND c.status != 'rejected'
         GROUP BY c.closing_date`
     ).all(orgId, storeId, start, end) as any[];
-    return new Map(rows.map((r) => [String(r.d), r2(r.cash)]));
+    const out = new Map<string, { gross: number; despesas: number; net: number }>();
+    for (const r of rows) { const g = r2(r.cash); out.set(String(r.d), { gross: g, despesas: 0, net: g }); }
+    for (const [d, v] of this.despesasByDay(orgId, storeId, start, end)) {
+      const cur = out.get(d) || { gross: 0, despesas: 0, net: 0 };
+      cur.despesas = v;
+      cur.net = r2(cur.gross - v);
+      out.set(d, cur);
+    }
+    return out;
   }
 
   /** Ajustes manuais do dinheiro do dia (sobrescrevem o do fechamento). */
@@ -46,42 +83,57 @@ export class RetailCashDepositService {
     return new Map(rows.map((r) => [String(r.d), r2(r.amount)]));
   }
 
-  /** Dinheiro efetivo do dia (override tem prioridade sobre o fechamento). */
-  private static cashOn(orgId: string, storeId: string, start: string, end: string): Map<string, { amount: number; source: "fechamento" | "ajuste" }> {
+  /**
+   * Dinheiro efetivo do dia (override tem prioridade sobre o fechamento).
+   * `amount` é o LÍQUIDO (dinheiro − despesas); `gross`/`despesas` mostram a
+   * conta pra conferência quando o valor vem do fechamento.
+   */
+  private static cashOn(orgId: string, storeId: string, start: string, end: string): Map<string, { amount: number; source: "fechamento" | "ajuste"; gross?: number; despesas?: number }> {
     const auto = this.autoCash(orgId, storeId, start, end);
     const ov = this.overrides(orgId, storeId, start, end);
-    const out = new Map<string, { amount: number; source: "fechamento" | "ajuste" }>();
-    for (const [d, a] of auto) out.set(d, { amount: a, source: "fechamento" });
+    const out = new Map<string, { amount: number; source: "fechamento" | "ajuste"; gross?: number; despesas?: number }>();
+    for (const [d, a] of auto) out.set(d, { amount: a.net, gross: a.gross, despesas: a.despesas, source: "fechamento" });
     for (const [d, a] of ov) out.set(d, { amount: a, source: "ajuste" });
     return out;
   }
 
-  /** Saldo (dinheiro − depósitos) de TUDO antes de `date` — carrega a virada. */
+  /**
+   * Saldo (dinheiro líquido − depósitos) de TUDO antes de `date` — carrega a
+   * virada. Líquido = itens 'dinheiro' − despesas dos fechamentos (mesma conta
+   * do autoCash, agregada).
+   */
   private static saldoBefore(orgId: string, storeId: string, date: string): number {
     const cash = r2((db.prepare(
       `SELECT COALESCE(SUM(i.informed_amount), 0) AS s FROM retail_daily_closings c
          JOIN retail_daily_closing_items i ON i.closing_id = c.id AND i.payment_method = 'dinheiro'
         WHERE c.organization_id = ? AND c.store_id = ? AND c.closing_date < ? AND c.status != 'rejected'`
     ).get(orgId, storeId, date) as any)?.s);
-    // Override antes do mês: substitui o dinheiro do fechamento naquele dia.
+    const desp = r2((db.prepare(
+      `SELECT COALESCE(SUM(COALESCE(
+                json_extract(details_json, '$.derived.totalDespesas'),
+                (SELECT SUM(COALESCE(json_extract(j.value, '$.valor'), 0)) FROM json_each(details_json, '$.despesas') j),
+                0)), 0) AS s
+         FROM retail_daily_closings
+        WHERE organization_id = ? AND store_id = ? AND closing_date < ?
+          AND status != 'rejected' AND details_json IS NOT NULL`
+    ).get(orgId, storeId, date) as any)?.s);
+    // Override antes do mês: substitui o dinheiro LÍQUIDO do fechamento naquele dia.
     const ovRows = db.prepare(`SELECT cash_date AS d, amount FROM retail_cash_day_override WHERE organization_id = ? AND store_id = ? AND cash_date < ?`).all(orgId, storeId, date) as any[];
     let ovDelta = 0;
     for (const r of ovRows) {
-      const auto = r2((db.prepare(
-        `SELECT COALESCE(SUM(i.informed_amount), 0) AS s FROM retail_daily_closings c
-           JOIN retail_daily_closing_items i ON i.closing_id = c.id AND i.payment_method = 'dinheiro'
-          WHERE c.organization_id = ? AND c.store_id = ? AND c.closing_date = ? AND c.status != 'rejected'`
-      ).get(orgId, storeId, String(r.d)) as any)?.s);
-      ovDelta += r2(r.amount) - auto; // troca o auto pelo override
+      const d = String(r.d);
+      const autoNet = this.autoCash(orgId, storeId, d, d).get(d)?.net || 0;
+      ovDelta += r2(r.amount) - autoNet; // troca o auto (líquido) pelo override
     }
     const dep = r2((db.prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM retail_cash_deposits WHERE organization_id = ? AND store_id = ? AND deposit_date < ?`).get(orgId, storeId, date) as any)?.s);
-    return r2(cash + ovDelta - dep);
+    return r2(cash - desp + ovDelta - dep);
   }
 
   /**
-   * Planilha do MÊS por loja (o "malote"): por dia o dinheiro, o saldo corrente
-   * (em caixa a depositar) e o depósito daquele dia (se houve). Mais os totais
-   * de conferência.
+   * Planilha do MÊS por loja (o "malote"): por dia o dinheiro LÍQUIDO (bruto do
+   * fechamento − despesas do dia, com a quebra em cashGross/cashDespesas), o
+   * saldo corrente (em caixa a depositar) e o depósito daquele dia (se houve).
+   * Mais os totais de conferência.
    */
   static monthLedger(orgId: string, storeId: string, month: string): any {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
@@ -117,6 +169,9 @@ export class RetailCashDepositService {
       rows.push({
         date, day: dd,
         cash: cashAmt, cashSource: c?.source || null,
+        // A conta do malote pra conferência: bruto do fechamento − despesas.
+        cashGross: c?.source === "fechamento" ? (c.gross ?? null) : null,
+        cashDespesas: c?.source === "fechamento" ? (c.despesas ?? null) : null,
         deposits: deps.map((x) => ({ id: x.id, amount: r2(x.amount), depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
         saldo, // dinheiro em caixa (ainda não depositado) ao fim do dia
         locked: isLocked(date), // dia dentro de uma semana FECHADA (congelado)

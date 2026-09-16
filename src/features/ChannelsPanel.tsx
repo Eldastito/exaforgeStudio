@@ -756,6 +756,21 @@ export function ChannelsPanel() {
                             {diag.lastProvisionError?.error && (
                               <p className="text-amber-400">Último erro de conexão ({diag.lastProvisionError.at}): {diag.lastProvisionError.error}</p>
                             )}
+                            {/* 16/09 (4º relato) — logs da instância direto do provedor: é aqui
+                                que o evolution-go conta POR QUE o QR não saiu (Connect() com o
+                                WhatsApp falha em goroutine, invisível pro endpoint de QR). */}
+                            {Array.isArray(diag.providerLogs) && diag.providerLogs.length > 0 && (
+                              <div className="mt-1">
+                                <p className="text-slate-400">Logs da instância no provedor (mais recentes):</p>
+                                <div className="max-h-40 overflow-y-auto mt-1 space-y-0.5">
+                                  {diag.providerLogs.slice(-10).map((l: any, i: number) => (
+                                    <p key={i} className={/error/i.test(l.level) ? 'text-rose-400' : /warn/i.test(l.level) ? 'text-amber-400' : 'text-slate-500'}>
+                                      [{l.level || '—'}] {l.at ? `${String(l.at).slice(0, 19).replace('T', ' ')} · ` : ''}{l.message}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

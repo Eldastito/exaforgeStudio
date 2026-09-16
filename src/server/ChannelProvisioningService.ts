@@ -274,7 +274,9 @@ export class ChannelProvisioningService {
       if (row) {
         let err = "";
         try { err = String(JSON.parse(row.metadata_json || "{}")?.error || ""); } catch { /* noop */ }
-        out.lastProvisionError = { at: row.created_at, kind: row.event_type, error: err.slice(0, 200) || null };
+        // 300 e não 200: o erro agora carrega também o último log da instância
+        // (motivo real do QR vazio) — 200 cortava justamente essa parte.
+        out.lastProvisionError = { at: row.created_at, kind: row.event_type, error: err.slice(0, 300) || null };
       }
     } catch { /* best-effort */ }
     if (!cfg) return out;
@@ -288,7 +290,17 @@ export class ChannelProvisioningService {
         try { const d = await resp.json(); list = Array.isArray(d?.data) ? d.data : (Array.isArray(d) ? d : []); } catch { /* corpo não-JSON */ }
         out.instancesInProvider = list.length;
         const name = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
-        out.orgInstance = { name, existsInProvider: list.some((i: any) => i?.name === name || i?.instanceName === name) };
+        const hit = list.find((i: any) => i?.name === name || i?.instanceName === name);
+        out.orgInstance = { name, existsInProvider: !!hit };
+        // 16/09 (4º relato: "criou a instância mas o QR não sai") — os LOGS da
+        // instância no provedor são onde o evolution-go conta POR QUE a sessão
+        // whatsmeow não gerou QR (Connect() com o WhatsApp falha em goroutine,
+        // silencioso pro GetQr). Redigidos/truncados no EvolutionService.
+        if (hit?.id) {
+          try {
+            out.providerLogs = await EvolutionService.getInstanceLogs(name, undefined, { instanceId: hit.id, limit: 15 });
+          } catch { out.providerLogs = []; }
+        }
       } else {
         try { out.reachable.bodySnippet = String(await resp.text()).slice(0, 160); } catch { /* noop */ }
       }

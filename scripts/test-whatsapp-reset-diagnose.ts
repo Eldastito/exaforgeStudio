@@ -26,7 +26,9 @@ function check(name: string, ok: boolean, detail = "") { results.push({ name, ok
 
 // Provedor stubado com estado controlável + gravação das chamadas.
 let providerInstances: Array<{ name: string; id: string; token: string }> = [];
-let qrMode: "qr" | "passkey" = "qr";
+let qrMode: "qr" | "passkey" | "empty400" = "qr";
+// Logs simulados da instância (4º relato: o motivo real do QR vazio vive aqui).
+let providerLogs: Array<{ timestamp: string; level: string; message: string }> = [];
 const calls: Array<{ method: string; url: string; apikey?: string }> = [];
 function jsonResp(body: any, ok = true, status = 200) {
   return { ok, status, text: async () => JSON.stringify(body), json: async () => body, headers: { get: () => "application/json" } };
@@ -43,8 +45,10 @@ function installFetch() {
       const inst = providerInstances.find(i => i.token === opts?.headers?.apikey);
       return inst ? jsonResp({ message: "success" }) : jsonResp({ error: "unauthorized" }, false, 401);
     }
+    if (u.includes("/instance/logs/")) return jsonResp(providerLogs);
     if (u.includes("/instance/qr")) {
       if (qrMode === "passkey") return jsonResp({ message: "success", data: { passkeyStage: "started" } });
+      if (qrMode === "empty400") return jsonResp({ error: "no QR code available. Please wait a moment and try again" }, false, 400);
       return jsonResp({ message: "success", data: { qrcode: "data:image/png;base64,QRNEW" } });
     }
     return jsonResp({});
@@ -115,6 +119,28 @@ async function main() {
   const d3 = await Svc.diagnose(A);
   check("7.1 diagnóstico surfaça o último erro real de provisionamento", /Evolution 401/.test(d3.lastProvisionError?.error || ""), JSON.stringify(d3.lastProvisionError));
   check("7.2 erro surfaçado ainda é token-safe", !JSON.stringify(d3).includes("GLOBAL-ADMIN-KEY"));
+
+  // ── 8) 4º relato ("criou a instância mas o QR não sai"): o diagnóstico traz
+  //      os LOGS da instância do provedor — é lá que o evolution-go conta por
+  //      que a sessão whatsmeow não gerou QR (Connect() morre em goroutine). ──
+  providerLogs = [
+    { timestamp: "2026-09-16T17:48:40Z", level: "INFO", message: "[exa-id-1] Starting client" },
+    { timestamp: "2026-09-16T17:48:45Z", level: "ERROR", message: "[exa-id-1] Failed to connect: websocket dial timeout (apikey GLOBAL-ADMIN-KEY)" },
+  ];
+  const d4 = await Svc.diagnose(A);
+  check("8.1 diagnóstico traz providerLogs da instância", Array.isArray(d4.providerLogs) && d4.providerLogs.length === 2, JSON.stringify(d4.providerLogs));
+  check("8.2 log de erro presente com o motivo real", d4.providerLogs?.some((l: any) => /Failed to connect/.test(l.message)));
+  check("8.3 segredo REDIGIDO nos logs surfaçados", !JSON.stringify(d4.providerLogs).includes("GLOBAL-ADMIN-KEY"));
+
+  // ── 9) QR vazio agora carrega o PORQUÊ: corpo do 400 do provedor + último
+  //      log de erro da instância (antes: só "Evolution retornou vazio"). ──
+  qrMode = "empty400";
+  const r9 = await EvolutionService.connectAndGetQr("ExaForge", "exa-tok-1", undefined, "exa-id-1");
+  check("9.1 erro carrega a resposta do provedor (corpo do 400)", r9.ok === false && /no QR code available/.test(r9.error || ""), r9.error);
+  check("9.2 erro carrega o último log de ERRO da instância", /Failed to connect/.test(r9.error || ""), r9.error);
+  check("9.3 needsReset sinalizado (instanceId presente)", r9.needsReset === true);
+  check("9.4 segredo redigido também no erro", !(r9.error || "").includes("GLOBAL-ADMIN-KEY"));
+  qrMode = "qr";
 
   restore();
   console.log("\n=== TEST: Reset + diagnóstico + contrato real (16/09) ===\n");

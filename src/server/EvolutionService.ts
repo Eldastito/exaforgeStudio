@@ -89,6 +89,53 @@ export class EvolutionService {
   }
 
   /**
+   * 16/09/2026 (4º relato: instância criada, QR segue vazio) — LOGS da instância
+   * direto do provedor (`GET /instance/logs/{instanceId}`, AuthAdmin). O fonte do
+   * evolution-go mostra que quando o `client.Connect()` com o WhatsApp falha, a
+   * goroutine morre em SILÊNCIO e o GetQr responde só "no QR code available" pra
+   * sempre — o motivo real (rede do VPS, proxy, EOF, versão) fica SÓ no log da
+   * instância. Este método traz esse log pro nosso diagnóstico. Token-safe: a
+   * chave global e tokens de instância são redigidos; mensagem truncada. Nunca
+   * lança; [] em qualquer falha (rede, sem config, instância não achada).
+   */
+  static async getInstanceLogs(
+    instanceName: string,
+    config?: EvolutionConfig,
+    opts?: { instanceId?: string; limit?: number },
+  ): Promise<Array<{ at: string; level: string; message: string }>> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg || !instanceName) return [];
+    try {
+      let instanceId = opts?.instanceId;
+      let instanceToken: string | undefined;
+      if (!instanceId) {
+        const found = await this.findInstance(instanceName, cfg);
+        if (!found?.id) return [];
+        instanceId = found.id;
+        instanceToken = found.token;
+      }
+      const limit = Math.max(1, Math.min(opts?.limit ?? 15, 50));
+      const resp = (await evoFetch(`${cfg.baseUrl}/instance/logs/${encodeURIComponent(instanceId!)}?limit=${limit}`, {
+        headers: { apikey: cfg.apiKey },
+      })) as FetchResult;
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.logs) ? data.logs : []));
+      const redact = (s: string) => {
+        let out = String(s || "");
+        if (cfg.apiKey) out = out.split(cfg.apiKey).join("[REDACTED]");
+        if (instanceToken) out = out.split(instanceToken).join("[REDACTED]");
+        return out.slice(0, 300);
+      };
+      return list.slice(-limit).map((e: any) => ({
+        at: String(e?.timestamp || e?.at || ""),
+        level: String(e?.level || ""),
+        message: redact(e?.message),
+      }));
+    } catch { return []; }
+  }
+
+  /**
    * Verificação NÃO-destrutiva: a instância existe no provedor? (F2.1a — import.)
    * Lista `/instance/all` e procura pelo nome. Retorna false em rede/erro (nunca
    * lança) — o caller trata "não confirmado". NÃO cria nada: importar por digitar
@@ -299,6 +346,11 @@ export class EvolutionService {
     let qrBase64 = "";
     let state = "";
     let passkeyStage = "";
+    // 16/09/2026 (4º relato) — o handler do evolution-go responde o MOTIVO no
+    // corpo do 400 ({"error":"failed to start instance: ..."} ou "no QR code
+    // available..."). Antes a gente descartava o corpo (`continue`) e reportava
+    // o genérico "retornou vazio" — o operador ficava cego. Guarda o último.
+    let lastQrError = "";
     const qrEndpoints = [
       `${cfg.baseUrl}/instance/qr`,
       `${cfg.baseUrl}/api/v1/instance/qr`,
@@ -309,7 +361,15 @@ export class EvolutionService {
           const qrResp = (await evoFetch(url, {
             headers: { apikey: activeToken, instance: instanceName },
           })) as FetchResult;
-          if (!qrResp.ok) continue;
+          if (!qrResp.ok) {
+            try {
+              const body = await qrResp.text();
+              let msg = "";
+              try { msg = String(JSON.parse(body)?.error || ""); } catch { msg = body; }
+              if (msg) lastQrError = `HTTP ${qrResp.status}: ${msg.slice(0, 200)}`;
+            } catch { /* corpo ilegível — segue */ }
+            continue;
+          }
           const ct = qrResp.headers?.get?.("content-type") || "application/json";
           if (!String(ct).includes("application/json")) continue;
           const qrData = await qrResp.json();
@@ -374,10 +434,22 @@ export class EvolutionService {
     if (passkeyStage) {
       return { ok: false, error: `A conta exige PASSKEY pra concluir o pareamento (estágio: ${passkeyStage}) — conclua pelo manager do Evolution e tente de novo.` };
     }
-    // QR vazio: honesto. Sinaliza `needsReset` só quando temos o instanceId (o
-    // reset EXPLÍCITO precisa dele) — a UI/rota oferece o reset ao operador com
-    // confirmação; nunca resetamos aqui (F1.3).
-    return { ok: false, error: "QR não obtido (Evolution retornou vazio)", needsReset: !!instanceId };
+    // QR vazio: honesto — e agora com o PORQUÊ do provedor (4º relato). Duas
+    // fontes, na ordem de precisão:
+    //  1. o corpo do erro que o próprio endpoint de QR devolveu (lastQrError);
+    //  2. o último log de ERRO da instância no provedor (o Connect() com o
+    //     WhatsApp morre numa goroutine — a falha real SÓ aparece lá).
+    // Sinaliza `needsReset` só quando temos o instanceId (o reset EXPLÍCITO
+    // precisa dele); nunca resetamos aqui (F1.3).
+    let reason = lastQrError ? `provedor respondeu: ${lastQrError}` : "Evolution retornou vazio";
+    if (instanceId) {
+      try {
+        const logs = await this.getInstanceLogs(instanceName, cfg, { instanceId, limit: 15 });
+        const lastErr = [...logs].reverse().find((l) => /error|warn/i.test(l.level));
+        if (lastErr) reason += ` · último log da instância [${lastErr.level}]: ${lastErr.message.slice(0, 200)}`;
+      } catch { /* best-effort */ }
+    }
+    return { ok: false, error: `QR não obtido (${reason})`, needsReset: !!instanceId };
   }
 
   /**

@@ -590,6 +590,11 @@ export class RetailClosingService {
       pos,
       derived: {
         totalCredito, totalDebito, totalDespesas, informedTotal, rankingTotal,
+        // A conta AUTOMÁTICA do malote: dinheiro − despesas do dia (o sistema
+        // faz a conta; a gerente só confere). O gap compara com o que foi
+        // escrito no campo malote da folha (null quando não é um valor).
+        maloteEsperado: num(dinheiro - totalDespesas),
+        maloteGap: (() => { const t = parseMoneyText(details?.malote); return t == null ? null : num(t - (dinheiro - totalDespesas)); })(),
         // A linha LOJA da folha: soma do ranking deve bater com o total do dia.
         rankingGap: ranking.length ? num(informedTotal - rankingTotal) : null,
         // Comprovante do POS grampeado: cartões informados × cartões do POS.
@@ -688,6 +693,15 @@ export function resolveMatriculaByName(sellers: Array<{ matricula: any; name: an
   const byFirst = first.get(target.split(" ")[0]);
   if (byFirst && byFirst.size === 1) return [...byFirst][0];
   return null;
+}
+
+/** "R$ 1.234,56" / "168" → número, ou null quando o texto não é um valor. */
+function parseMoneyText(raw: any): number | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const clean = s.replace(/r\$/i, "").replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(clean);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
 }
 
 /** Extrator de fechamento injetável (teste offline, sem provedor de visão). */

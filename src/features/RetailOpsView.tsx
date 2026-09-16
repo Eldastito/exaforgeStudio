@@ -1894,7 +1894,7 @@ function MaloteTab() {
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100" />
-        <span className="text-[11px] text-zinc-500">O dinheiro do dia vem do fechamento; o depósito e o comprovante você registra aqui.</span>
+        <span className="text-[11px] text-zinc-500">O dinheiro do dia vem do fechamento com as despesas já descontadas (dinheiro − despesas = malote); o depósito e o comprovante você registra aqui.</span>
       </div>
 
       {!storeId ? (
@@ -1988,7 +1988,7 @@ function MaloteTab() {
               <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-wider text-zinc-500">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Dia</th>
-                  <th className="px-3 py-2 text-right font-medium">Dinheiro</th>
+                  <th className="px-3 py-2 text-right font-medium" title="Dinheiro do fechamento − despesas do dia">Dinheiro (malote)</th>
                   <th className="px-3 py-2 text-right font-medium">Em caixa</th>
                   <th className="px-3 py-2 text-left font-medium">Depósito</th>
                 </tr>
@@ -2002,8 +2002,10 @@ function MaloteTab() {
                       {r.locked && <span title="Semana fechada (travada)" className="ml-1 text-zinc-600">🔒</span>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      <span className={r.cash > 0 ? (r.cashSource === 'ajuste' ? 'text-amber-300' : 'text-zinc-100') : 'text-zinc-600'}>{r.cash > 0 ? brl(r.cash) : '—'}</span>
+                      <span className={Math.abs(r.cash) > 0.004 ? (r.cashSource === 'ajuste' ? 'text-amber-300' : r.cash < 0 ? 'text-red-300' : 'text-zinc-100') : 'text-zinc-600'}>{Math.abs(r.cash) > 0.004 ? brl(r.cash) : '—'}</span>
                       {!r.locked && <button onClick={() => ajustarDia(r.date, r.cash)} title="Ajustar o dinheiro deste dia" className="ml-1.5 text-[10px] text-zinc-600 hover:text-zinc-300">ajustar</button>}
+                      {/* MAL-001: a conta na tela — bruto − despesas, pra conferir sem calculadora. */}
+                      {r.cashDespesas > 0 && <span className="block text-[10px] text-zinc-500">{brl(r.cashGross)} − {brl(r.cashDespesas)} despesas</span>}
                     </td>
                     <td className={`px-3 py-2 text-right tabular-nums ${r.saldo > 0.01 ? 'text-amber-300' : 'text-zinc-500'}`}>{brl(r.saldo)}</td>
                     <td className="px-3 py-2">
@@ -2792,6 +2794,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [boletaInicial, setBoletaInicial] = useState(existing.boletaInicial || '');
   const [boletaFinal, setBoletaFinal] = useState(existing.boletaFinal || '');
   const [malote, setMalote] = useState(existing.malote || '');
+  // MAL-001: o malote é CALCULADO (dinheiro − despesas do dia) e preenchido
+  // sozinho — a gerente só confere. Digitar um valor manual desliga o
+  // automático (o dela vale); apagar o campo religa. Começa manual quando a
+  // folha já tinha malote gravado (não sobrescreve o que ela salvou).
+  const [maloteAuto, setMaloteAuto] = useState(!existing.malote);
   const [premioDia, setPremioDia] = useState(existing.premioDia || '');
   const [obs, setObs] = useState(existing.obs || '');
   const [posCred, setPosCred] = useState(existing.pos?.creditoValor ? String(existing.pos.creditoValor) : '');
@@ -2903,6 +2910,14 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
   const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
   const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
+  // MAL-001: a conta automática do malote = dinheiro − despesas do dia.
+  const maloteEsperado = useMemo(() => Math.round((n(dinheiro) - totalDespesas) * 100) / 100, [dinheiro, totalDespesas]);
+  useEffect(() => {
+    if (!maloteAuto) return;
+    // formatMoneyBR(0) devolve '' — mas malote 0,00 é um valor real (tudo virou despesa).
+    setMalote(n(dinheiro) > 0 || totalDespesas > 0 ? (maloteEsperado === 0 ? '0,00' : formatMoneyBR(maloteEsperado)) : '');
+    // eslint-disable-next-line
+  }, [maloteAuto, maloteEsperado]);
   const quota = quotaAmt;
   const cotaPorVendedor = quota > 0 && escalados.length > 0 ? quota / escalados.length : null;
 
@@ -2965,7 +2980,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       if (x.cadastros != null) setCadastros(String(x.cadastros));
       if (x.boletaInicial) setBoletaInicial(String(x.boletaInicial));
       if (x.boletaFinal) setBoletaFinal(String(x.boletaFinal));
-      if (x.malote) setMalote(String(x.malote));
+      // O malote da FOTO vale como informado (desliga o automático) — se a
+      // conta dinheiro − despesas divergir, o aviso embaixo do campo acusa.
+      if (x.malote) { setMalote(String(x.malote)); setMaloteAuto(false); }
       if (x.pos) { setPosCred(x.pos.creditoValor ? String(x.pos.creditoValor) : ''); setPosCredQtd(x.pos.creditoQtd ? String(x.pos.creditoQtd) : ''); setPosDeb(x.pos.debitoValor ? String(x.pos.debitoValor) : ''); setPosDebQtd(x.pos.debitoQtd ? String(x.pos.debitoQtd) : ''); }
       setScanNote(
         x.readError === 'truncated'
@@ -3210,8 +3227,17 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
                 <input inputMode="numeric" value={cadastros} onChange={e => setCadastros(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
               </label>
               <label className="text-xs text-zinc-400">Malote
-                <input value={malote} onChange={e => setMalote(e.target.value)} placeholder="—" className={inp} />
+                <input value={malote} onChange={e => { setMalote(e.target.value); setMaloteAuto(e.target.value.trim() === ''); }} placeholder="—" className={inp} />
               </label>
+              {/* MAL-001: a conta na tela — a gerente confere em vez de calcular. */}
+              {(n(dinheiro) > 0 || totalDespesas > 0) && (
+                Math.abs(n(malote) - maloteEsperado) > 0.01
+                  ? <p className="col-span-2 text-[11px] text-amber-300">
+                      A conta do dia dá <strong>{brl(maloteEsperado)}</strong> ({brl(n(dinheiro))} em dinheiro − {brl(totalDespesas)} de despesas) — difere do malote informado.{' '}
+                      <button onClick={() => { setMalote(maloteEsperado === 0 ? '0,00' : formatMoneyBR(maloteEsperado)); setMaloteAuto(true); }} className="underline hover:text-amber-200">usar {brl(maloteEsperado)}</button>
+                    </p>
+                  : <p className="col-span-2 text-[11px] text-emerald-300">Malote = {brl(n(dinheiro))} em dinheiro − {brl(totalDespesas)} de despesas = {brl(maloteEsperado)} (calculado sozinho — só confira).</p>
+              )}
               <label className="col-span-2 text-xs text-zinc-400">Prêmio do dia
                 <input value={premioDia} onChange={e => setPremioDia(e.target.value)} placeholder="—" className={inp} />
               </label>

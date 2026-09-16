@@ -158,11 +158,20 @@ honestamente como backlog:
   desconexão feita direto no celular vira "Desconectado" + botão Conectar sem
   recarregar) e o "Gerar novo QR (reconectar)" não trava mais sem instanceName.
   `test:studio-whatsapp-command` 19/19.
-- [ ] **WZ-2 — Registro de venda por comando**: "registre a venda da peça xpto do
-  tamanho GG, da cor azul, com a referencia 123456, com o valor xx,xx pago com
-  cartão de credito" → parser extrai peça/tamanho/cor/referência/valor/forma de
-  pagamento, **valida contra o catálogo real** (`products_services` — RN-151,
-  nunca inventa produto/valor) e registra a venda pelo serviço canônico do
-  domínio; ambiguidade → desambiguação ativa (padrão F3.4), nunca chute.
-  Dinheiro role-gated (§73); comando de gestor autorizado apenas.
+- [x] **WZ-2 — Registro de venda por comando** — **IMPLEMENTADO** (WZ-1 validada
+  pelo dono na TOULON em 16/09/2026 destravou). `SaleWhatsAppCommandService`:
+  parser DETERMINÍSTICO do comando verbatim do dono extrai
+  peça/tamanho/cor/referência/valor/pagamento; valida contra o CATÁLOGO REAL —
+  `products_services.reference` (o campo de referência do modelo Toulon) +
+  `product_variants` size/color (RN-151: referência inexistente recusa; nome
+  ambíguo lista candidatos COM referência e pede repetir com ela; variante
+  inexistente lista as disponíveis; nunca registra o que não existe); registra
+  pelo caminho CANÔNICO `OrdersService.createOrder` (autoClose→'pago', baixa de
+  estoque na transação — sem estoque desfaz TUDO e repassa o erro; entra na
+  comissão como fonte zappflow) com `priceOverride` aditivo (o VALOR FALADO é o
+  da transação; difere da tabela → o resumo diz os dois); `payment_method`
+  gravado; valor+pagamento OBRIGATÓRIOS (falta → pergunta, não chuta);
+  auditado (`SALE_REGISTERED_VIA_WHATSAPP`); wired em `runInternalInbound`
+  (depois do WZ-1, antes do Controller — só gestor autorizado).
+  `test:sale-whatsapp-command` 20/20 (OrdersService REAL em banco isolado).
 </content>

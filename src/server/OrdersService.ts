@@ -19,7 +19,10 @@ const ALL_STATUSES = new Set<OrderStatus>([
   "concluido", "cancelado", "reembolso", "devolucao",
 ]);
 
-interface NewOrderItem { productId?: string; variantId?: string; name?: string; unitPrice?: number; quantity: number; }
+// `priceOverride` (WZ-2): preço EXPLÍCITO da transação informado pelo operador
+// (venda com desconto/valor negociado) — quando presente, vence o preço de
+// catálogo. Ausente → resolução de preço idêntica à de sempre (0-regressão).
+interface NewOrderItem { productId?: string; variantId?: string; name?: string; unitPrice?: number; priceOverride?: number; quantity: number; }
 
 export class OrdersService {
   static isValidStatus(s: string): s is OrderStatus {
@@ -63,7 +66,7 @@ export class OrdersService {
         }
         const name = variant ? `${product?.name || it.name} (${variant.name})` : (product?.name || it.name);
         if (!name) throw new Error("Item de pedido sem produto/nome.");
-        const unitPrice = (variant?.price ?? product?.price ?? it.unitPrice ?? 0);
+        const unitPrice = (it.priceOverride ?? variant?.price ?? product?.price ?? it.unitPrice ?? 0);
         const lineTotal = unitPrice * it.quantity;
         total += lineTotal;
 

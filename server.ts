@@ -170,7 +170,6 @@ import { normalizeManagerRole } from "./src/server/migrations/normalizeManagerRo
 import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
-import { EvolutionService } from "./src/server/EvolutionService.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
 import { setUsageContext, moduleFromApiPath } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
@@ -807,64 +806,26 @@ async function startServer() {
   // --- META WEBHOOK (WhatsApp & Instagram) ---
   
   // --- EVOLUTION API Backend ---
-  let evolutionConfig = {
+  // W4 (F7.4 pendência nº 4 — piloto aprovado pelo dono, 16/09/2026): as rotas
+  // legadas NÃO-AUTENTICADAS `/api/evolution/config` (mutava a instância em
+  // memória sem login) e `/api/evolution/instance/connect` (provisionava/conectava
+  // sem login — superfície do achado A7) foram REMOVIDAS. A UI está 100% no fluxo
+  // autenticado F2.1 (`POST /api/channels/whatsapp/provision`, org da sessão)
+  // desde a W1, e nenhum código do repo as chama mais (gate em
+  // test:legacy-route-removal). Tombstone 410: um frontend antigo em cache recebe
+  // um erro CLARO em vez de 404 silencioso; pode sair numa limpeza futura.
+  // `evolutionConfig` segue vivo (const, só de ENV) — o WEBHOOK de inbound usa.
+  const evolutionConfig = {
     baseUrl: process.env.EVOLUTION_BASE_URL || '',
     apiKey: process.env.EVOLUTION_API_KEY || '',
     instanceName: process.env.EVOLUTION_INSTANCE_NAME || ''
   };
 
-  app.post("/api/evolution/config", (req, res) => {
-    // Only update instanceName if provided, keep URL/API Key from ENV if not in body
-    const { instanceName } = req.body;
-    evolutionConfig = {
-      ...evolutionConfig,
-      instanceName: instanceName || evolutionConfig.instanceName
-    };
-    console.log("[Evolution API] Configuração salva: ", evolutionConfig.instanceName);
-    res.json({ success: true, message: 'Configuração salva na sessão atual.' });
-  });
-
-  app.post("/api/evolution/instance/connect", async (req, res) => {
-    try {
-      const { instanceName } = req.body;
-      const finalInstance = instanceName || evolutionConfig.instanceName || process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || '';
-
-      // F1.4 (RF-02 §4 — "transformar em adaptador do serviço consolidado") — esta
-      // rota deixa de reimplementar create+connect+QR inline. Antes, o subscribe ia
-      // em MINÚSCULO (`["messages","connection"]`, linha antiga) que o Evolution GO
-      // DESCARTA em silêncio (achado A7) → a instância ficava SEM eventos; e o QR só
-      // tentava um endpoint, sem o campo `data.qrcode`. Agora delega ao
-      // `EvolutionService.provision` (subscribe MAIÚSCULO + múltiplos endpoints de QR
-      // + campo `data.qrcode` + reset NÃO-destrutivo da F1.3). Contrato de resposta
-      // preservado pro ChannelsPanel: `{ base64 }` | `{ state:'open' }` | 400.
-      const cfg = EvolutionService.getConfig({
-        baseUrl: evolutionConfig.baseUrl || undefined,
-        apiKey: evolutionConfig.apiKey || undefined,
-      });
-      if (!cfg || !finalInstance) {
-        return res.status(400).json({ error: "Faltam parâmetros de conexão (URL, API Key ou Instance Name)." });
-      }
-
-      const result = await EvolutionService.provision(finalInstance, cfg);
-
-      if (result.state === 'open') {
-        // Já conectada: reflete no canal pelo identifier ÚNICO (sem inventar org — F1.2c).
-        markEvolutionChannelStatusByIdentifier(finalInstance, 'connected');
-        return res.json({ state: 'open', token: result.token });
-      }
-      if (result.qrBase64) {
-        return res.json({ base64: result.qrBase64, token: result.token });
-      }
-      // Sem QR: honesto. `needsReset` (F1.3) sinaliza que talvez precise do reset
-      // EXPLÍCITO do operador — o connect NUNCA reseta sozinho.
-      return res.status(400).json({
-        error: result.error || "Instância pode já estar conectada ou houve erro na geração do QR Code. Verifique seu painel ou recarregue a página.",
-        needsReset: result.needsReset || false,
-      });
-    } catch (e: any) {
-      console.error("[Evolution] Erro ao conectar instância:", e);
-      return res.status(500).json({ error: e.message });
-    }
+  app.post(["/api/evolution/config", "/api/evolution/instance/connect"], (_req, res) => {
+    res.status(410).json({
+      error: "Rota descontinuada. Atualize a página — a conexão do WhatsApp agora é pelo painel Canais e IA (fluxo autenticado).",
+      code: "legacy_route_removed",
+    });
   });
 
   // Aceita ambas as URLs (Evolution API e Evolution GO) e a variante

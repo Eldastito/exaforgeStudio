@@ -120,6 +120,19 @@ export function ChannelsPanel() {
     }).catch(() => {});
   };
 
+  // 16/09 (3º relato: spinner "Preparando o QR" pendurado sem saída) — WATCHDOG:
+  // se em 75s não veio QR nem erro, o card volta pro estado desconectado com
+  // instrução de rodar o Diagnóstico. Sem isso, uma request morta deixava a
+  // tela girando pra sempre.
+  useEffect(() => {
+    if (evolutionStatus !== 'connecting_evo' || evolutionQr) return;
+    const t = setTimeout(() => {
+      setEvolutionStatus('disconnected');
+      toast.error('O provedor não respondeu a tempo. Abra "Opções avançadas → 🔎 Diagnosticar conexão" e me mande o resultado.');
+    }, 75000);
+    return () => clearTimeout(t);
+  }, [evolutionStatus, evolutionQr]);
+
   // W1 — enquanto o QR está na tela, confere a cada 4s se o celular já leu; ao
   // conectar, o "WhatsApp conectado ✅" aparece sozinho (o leigo não precisa
   // recarregar nada pra saber que deu certo).
@@ -677,7 +690,11 @@ export function ChannelsPanel() {
                 ) : (
                   <>
                     <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
-                    <p className="text-sm text-slate-300">Preparando o QR Code…</p>
+                    <p className="text-sm text-slate-300">Preparando o QR Code… (pode levar até 1 minuto)</p>
+                    <button type="button" className="mt-3 text-[11px] text-slate-500 hover:text-slate-300 underline"
+                      onClick={() => { setEvolutionStatus('disconnected'); setEvolutionQr(null); }}>
+                      Cancelar
+                    </button>
                   </>
                 )}
               </div>
@@ -735,6 +752,9 @@ export function ChannelsPanel() {
                             )}
                             {Array.isArray(diag.channels) && diag.channels.length > 0 && (
                               <p className="text-slate-500">Canais aqui: {diag.channels.map((c: any) => `${c.instanceName} (${c.status})`).join(' · ')}</p>
+                            )}
+                            {diag.lastProvisionError?.error && (
+                              <p className="text-amber-400">Último erro de conexão ({diag.lastProvisionError.at}): {diag.lastProvisionError.error}</p>
                             )}
                           </div>
                         )}

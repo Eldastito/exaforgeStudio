@@ -103,10 +103,15 @@ export class RetailStoreService {
 
   /**
    * EXCLUI uma loja duplicada com segurança: se existir OUTRA loja com o mesmo
-   * código, todo o histórico (estoque, fechamentos, cotas, tarefas, alertas,
-   * pedidos) é UNIFICADO nela antes de apagar — excluir sem unificar perderia
-   * fechamentos/estoque já gravados. Sem outra loja de mesmo código, só permite
-   * excluir se a loja não tiver fechamentos nem estoque (senão: desativar).
+   * código, todo o histórico é UNIFICADO nela antes de apagar — excluir sem
+   * unificar perderia o que já foi gravado. Cobre fechamentos (com itens por
+   * forma de pagamento e details_json), estoque, cotas, tarefas, alertas,
+   * pedidos E TAMBÉM escala + template de folga + lotação de vendedores +
+   * malote (depósitos, ajustes de dia, semanas fechadas) + boletas + vendas
+   * por vendedor — antes essas ficavam órfãs no store_id apagado, então a
+   * escala "sumia do fechamento" e o malote da loja unificada zerava.
+   * Sem outra loja de mesmo código, só permite excluir se a loja não tiver
+   * fechamentos nem estoque (senão: desativar).
    */
   static remove(orgId: string, id: string, actorId?: string): { deleted: boolean; mergedInto: string | null; mergedIntoName?: string } {
     const cur = this.get(orgId, id);
@@ -129,7 +134,8 @@ export class RetailStoreService {
       // Fechamentos: move os dias que o alvo não tem; nos conflitos, completa
       // campos vazios do alvo com os da duplicata e descarta a linha duplicada.
       const conflicts = db.prepare(
-        `SELECT s.id AS src_id, t.id AS tgt_id, s.informed_total AS s_inf, s.system_total AS s_sys, t.informed_total AS t_inf, t.system_total AS t_sys
+        `SELECT s.id AS src_id, t.id AS tgt_id, s.informed_total AS s_inf, s.system_total AS s_sys, s.details_json AS s_det,
+                t.informed_total AS t_inf, t.system_total AS t_sys, t.details_json AS t_det
            FROM retail_daily_closings s JOIN retail_daily_closings t
              ON t.organization_id = s.organization_id AND t.store_id = ? AND t.closing_date = s.closing_date
           WHERE s.organization_id = ? AND s.store_id = ?`
@@ -137,21 +143,46 @@ export class RetailStoreService {
       for (const c of conflicts) {
         if (Number(c.t_inf || 0) === 0 && Number(c.s_inf || 0) > 0) db.prepare(`UPDATE retail_daily_closings SET informed_total = ?, status = 'received' WHERE id = ?`).run(c.s_inf, c.tgt_id);
         if (Number(c.t_sys || 0) === 0 && Number(c.s_sys || 0) > 0) db.prepare(`UPDATE retail_daily_closings SET system_total = ? WHERE id = ?`).run(c.s_sys, c.tgt_id);
-        db.prepare(`DELETE FROM retail_daily_closing_items WHERE closing_id = ?`).run(c.src_id);
+        // A folha completa (despesas/ranking/malote) segue a mesma regra de
+        // completar o vazio — sem ela o malote perdia as despesas do dia.
+        if (!c.t_det && c.s_det) db.prepare(`UPDATE retail_daily_closings SET details_json = ? WHERE id = ?`).run(c.s_det, c.tgt_id);
+        // Itens por forma de pagamento: alvo sem itens HERDA os da duplicata
+        // (apagar aqui sumia com o 'dinheiro' do dia no malote); alvo com itens
+        // mantém os dele e os da duplicata são descartados.
+        const tgtHasItems = db.prepare(`SELECT 1 FROM retail_daily_closing_items WHERE closing_id = ? LIMIT 1`).get(c.tgt_id);
+        if (!tgtHasItems) db.prepare(`UPDATE retail_daily_closing_items SET closing_id = ? WHERE closing_id = ?`).run(c.tgt_id, c.src_id);
+        else db.prepare(`DELETE FROM retail_daily_closing_items WHERE closing_id = ?`).run(c.src_id);
         db.prepare(`DELETE FROM retail_daily_closings WHERE id = ?`).run(c.src_id);
       }
       db.prepare(`UPDATE retail_daily_closings SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
 
       // Tabelas com UNIQUE por loja: move o que não conflita, descarta o resto
       // (o alvo, que continuou sincronizando, tende a estar mais fresco).
-      for (const t of ["retail_store_quotas", "retail_store_inventory", "retail_stock_alerts", "retail_store_daily_tasks"]) {
+      // Escala, template de folga, lotação, malote (ajuste de dia + semana
+      // fechada) e boletas entram aqui — ficar de fora era o bug que fazia a
+      // escala sumir do fechamento e o malote zerar após unificar duplicata.
+      for (const t of [
+        "retail_store_quotas", "retail_store_inventory", "retail_stock_alerts", "retail_store_daily_tasks",
+        "retail_schedule_entries", "retail_seller_off_pattern", "retail_seller_store_assignments",
+        "retail_cash_day_override", "retail_cash_week_closings", "retail_boleta_days", "retail_boleta_events",
+      ]) {
         try {
           db.prepare(`UPDATE OR IGNORE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
           db.prepare(`DELETE FROM ${t} WHERE organization_id = ? AND store_id = ?`).run(orgId, id);
         } catch { /* tabela pode não existir em bases antigas */ }
       }
-      // Referências sem UNIQUE: só re-aponta.
-      for (const t of ["retail_store_responsibles", "retail_goods_receipts", "retail_store_patterns", "orders"]) {
+      // Vendas por vendedor vindas do FECHAMENTO: nos dias em que o alvo já tem
+      // as suas (source 'closing'), as da duplicata são descartadas — re-apontar
+      // dobraria a base de comissão do dia. O resto re-aponta abaixo.
+      try {
+        db.prepare(
+          `DELETE FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND source = 'closing'
+             AND sale_date IN (SELECT sale_date FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND source = 'closing')`
+        ).run(orgId, id, orgId, target.id);
+      } catch { /* noop */ }
+      // Referências sem UNIQUE: só re-aponta (depósitos do malote e vendas por
+      // vendedor inclusos — antes ficavam órfãos).
+      for (const t of ["retail_store_responsibles", "retail_goods_receipts", "retail_store_patterns", "orders", "retail_cash_deposits", "retail_seller_sales"]) {
         try { db.prepare(`UPDATE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id); } catch { /* noop */ }
       }
       db.prepare(`DELETE FROM retail_stores WHERE organization_id = ? AND id = ?`).run(orgId, id);

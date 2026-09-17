@@ -968,7 +968,12 @@ async function startServer() {
         const senderId = jidClass.senderId;
         const fromMe = info.IsFromMe ?? info.fromMe ?? data.key?.fromMe ?? false;
         const pushName = info.PushName || info.pushName || data.pushName || undefined;
-        const businessId = payload.instance || evolutionConfig.instanceName || 'evolution_api';
+        // 17/09/2026 — VERIFICADO no fonte do evolution-go (whatsmeow.go
+        // postMap): a identidade da instância vem em `instanceName` na RAIZ
+        // (junto de instanceId/instanceToken); `payload.instance` é de forks
+        // Node. Sem ler instanceName, o inbound caía no fallback do env e a
+        // mensagem não casava com canal nenhum (descartada sem inventar org).
+        const businessId = payload.instanceName || payload.instance || evolutionConfig.instanceName || 'evolution_api';
 
         if (fromMe) { console.log("[Evolution Webhook] Ignorado: fromMe."); return res.status(200).send("OK"); }
         if (jidClass.kind !== "individual") {

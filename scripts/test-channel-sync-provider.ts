@@ -18,7 +18,7 @@ let failures = 0; const results: { name: string; ok: boolean; detail?: string }[
 function check(name: string, ok: boolean, detail = "") { results.push({ name, ok, detail }); if (!ok) failures++; }
 
 // Instâncias "no provedor" + registro das chamadas de webhook feitas.
-let providerInstances: Array<{ name: string; token?: string; id?: string; status?: string }> = [];
+let providerInstances: Array<{ name: string; token?: string; id?: string; status?: string; connected?: boolean }> = [];
 const webhookCalls: Array<{ url: string; body: string }> = [];
 function jsonResp(body: any) {
   return { ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body, headers: { get: () => "application/json" } };
@@ -64,7 +64,9 @@ async function main() {
 
   // ===== 1. O caso do relato: open no provedor, awaiting_qr aqui =====
   // Provedor: instância pareada com token NOVO (a recriação troca o token).
-  providerInstances = [{ name: "zapflow_org_x", token: "tok-novo", id: "id1", status: "open" }];
+  // Formato REAL do evolution-go (/instance/all): `connected` BOOLEANO (não
+  // existe `status` string — verificado no fonte 0.7.2, instance_model.go).
+  providerInstances = [{ name: "zapflow_org_x", token: "tok-novo", id: "id1", connected: true }];
   mkCh(A, "zapflow_org_x", "awaiting_qr", "tok-velho");
   // Canais fantasma: instâncias que NÃO existem mais no provedor.
   mkCh(A, "ExaForge", "awaiting_qr");
@@ -87,11 +89,12 @@ async function main() {
   check("1.9 relatório: before/after/providerState/webhook", rep1?.before === "awaiting_qr" && rep1?.after === "connected" && rep1?.providerState === "open" && rep1?.webhookRegistered === true && rep1?.tokenUpdated === true, JSON.stringify(rep1));
 
   // ===== 2. Provedor diz que a sessão CAIU → rebaixa com evidência =====
-  providerInstances = [{ name: "zapflow_org_x", token: "tok-novo", id: "id1", status: "close" }];
+  providerInstances = [{ name: "zapflow_org_x", token: "tok-novo", id: "id1", connected: false }];
   await ChannelProvisioningService.syncFromProvider(A, "u1");
   check("2.1 connected + provedor 'close' → disconnected", chOf(A, "zapflow_org_x")?.status === "disconnected");
 
   // ===== 3. Idempotência: rodar de novo não muda nada =====
+  // Fork Node (status string) também precisa mapear — tolerância a fork.
   providerInstances = [{ name: "zapflow_org_x", token: "tok-novo", id: "id1", status: "open" }];
   await ChannelProvisioningService.syncFromProvider(A, "u1");
   const r3 = await ChannelProvisioningService.syncFromProvider(A, "u1");

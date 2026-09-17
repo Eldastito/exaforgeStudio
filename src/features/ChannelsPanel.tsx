@@ -221,6 +221,48 @@ export function ChannelsPanel() {
     } catch { toast.error('Falha no diagnóstico.'); } finally { setDiagBusy(false); }
   };
 
+  // 17/09 — SINCRONIZAR com o provedor: instância "Conectado" no manager +
+  // canal preso em "aguardando QR" aqui = o webhook de conexão não chegou. O
+  // sync adota a verdade do provedor (connected/disconnected), atualiza o token
+  // e RE-REGISTRA o webhook — devolve o fluxo de mensagens sem re-parear.
+  const syncWithProvider = async (silent = false) => {
+    setEvoBusy(true);
+    try {
+      const r = await apiFetch('/api/channels/whatsapp/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { if (!silent) toast.error(d?.error || 'Falha ao sincronizar com o provedor.'); return; }
+      const changed = (d?.channels || []).filter((c: any) => c.before !== c.after);
+      const connectedNow = (d?.channels || []).some((c: any) => c.after === 'connected');
+      if (!silent) {
+        toast.success(changed.length
+          ? `Sincronizado: ${changed.map((c: any) => `${c.instanceName} → ${c.after === 'connected' ? 'conectado' : 'desconectado'}`).join(' · ')}`
+          : 'Sincronizado — nada a corrigir.');
+      } else if (connectedNow) {
+        toast.success('WhatsApp sincronizado com o provedor: conectado.');
+      }
+      loadRaw();
+      loadEvoStatus();
+    } catch { if (!silent) toast.error('Falha ao sincronizar com o provedor.'); }
+    finally { setEvoBusy(false); }
+  };
+
+  // Auto-cura (uma vez por abertura da tela): se há canal Evolution e nenhum
+  // conectado, roda o sync silencioso — cobre o caso "pareou mas o webhook de
+  // conexão se perdeu" sem o operador precisar achar o botão.
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (autoSyncedRef.current) return;
+      autoSyncedRef.current = true;
+      apiFetch('/api/channels/whatsapp/status').then(r => r.json()).then((d: any) => {
+        const chs = Array.isArray(d?.channels) ? d.channels : [];
+        if (chs.length > 0 && !chs.some((c: any) => c.connected)) syncWithProvider(true);
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, []);
+
   // 16/09 — RESET explícito da instância no provedor (a cura da F1.3 que nunca
   // teve botão): apaga+recria+QR quando a sessão está zumbi e o QR nunca vem.
   const resetInstanceEvo = async () => {
@@ -734,6 +776,12 @@ export function ChannelsPanel() {
                             className="border-slate-700 text-slate-300 hover:text-white">
                             {diagBusy ? 'Verificando…' : '🔎 Diagnosticar conexão'}
                           </Button>
+                          {/* 17/09 — provedor diz "open" e aqui está preso em QR? Sincroniza
+                              (adota o estado do provedor + re-registra o webhook). */}
+                          <Button variant="outline" size="sm" disabled={evoBusy} onClick={() => syncWithProvider(false)}
+                            className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10">
+                            🔄 Sincronizar com o provedor
+                          </Button>
                           <Button variant="outline" size="sm" disabled={evoBusy} onClick={resetInstanceEvo}
                             className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10">
                             Reiniciar instância travada (gera QR novo)
@@ -748,7 +796,23 @@ export function ChannelsPanel() {
                               Provedor: {diag.reachable?.ok ? `acessível (HTTP ${diag.reachable.status}, ${diag.reachable.latencyMs}ms)` : `INACESSÍVEL — ${diag.reachable?.error || `HTTP ${diag.reachable?.status}${diag.reachable?.bodySnippet ? `: ${diag.reachable.bodySnippet}` : ''}`}`}
                             </p>
                             {diag.instancesInProvider != null && (
-                              <p className="text-slate-400">Instâncias no provedor: {diag.instancesInProvider}{diag.orgInstance ? ` · a da empresa ("${diag.orgInstance.name}") ${diag.orgInstance.existsInProvider ? 'existe lá' : 'NÃO existe lá'}` : ''}</p>
+                              <p className="text-slate-400">Instâncias no provedor: {diag.instancesInProvider}{diag.orgInstance ? ` · a da empresa ("${diag.orgInstance.name}") ${diag.orgInstance.existsInProvider ? `existe lá${diag.orgInstance.providerState ? ` — sessão "${diag.orgInstance.providerState}"` : ''}` : 'NÃO existe lá'}` : ''}</p>
+                            )}
+                            {/* 17/09 — RECEBIMENTO: a URL registrada, o secret e o último hit.
+                                "Nunca recebeu" com sessão open = webhook não chega (use Sincronizar). */}
+                            {diag.webhook && (
+                              <>
+                                <p className={diag.webhook.localhostWarning ? 'text-rose-400' : 'text-slate-400'}>
+                                  Webhook registrado: {diag.webhook.urlEffective || '—'}{diag.webhook.localhostWarning ? ' ⚠ APONTA PRA LOCALHOST — defina APP_URL no servidor' : ''}
+                                </p>
+                                <p className={diag.webhook.enforced && !diag.webhook.secretIncluded ? 'text-rose-400' : 'text-slate-500'}>
+                                  Segredo do webhook: {diag.webhook.secretIncluded ? 'incluído na URL' : 'NÃO incluído'} · exigência {diag.webhook.enforced ? 'LIGADA' : 'desligada'}
+                                  {diag.webhook.enforced && !diag.webhook.secretIncluded ? ' ⚠ eventos do provedor estão sendo rejeitados (401) — reconecte ou use Sincronizar pra re-registrar' : ''}
+                                </p>
+                                <p className={diag.webhook.lastHit ? (diag.webhook.lastHit.ok ? 'text-emerald-400' : 'text-rose-400') : 'text-amber-400'}>
+                                  Último evento recebido: {diag.webhook.lastHit ? `${format(new Date(diag.webhook.lastHit.at), 'dd/MM HH:mm:ss')} (${diag.webhook.lastHit.ok ? 'aceito' : `REJEITADO: ${diag.webhook.lastHit.reason}`})` : 'NUNCA — o provedor não está entregando eventos aqui'}
+                                </p>
+                              </>
                             )}
                             {Array.isArray(diag.channels) && diag.channels.length > 0 && (
                               <p className="text-slate-500">Canais aqui: {diag.channels.map((c: any) => `${c.instanceName} (${c.status})`).join(' · ')}</p>

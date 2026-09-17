@@ -35,6 +35,18 @@ export interface EvolutionConfig {
   webhookUrl: string;
 }
 
+// 17/09/2026 (instância pareada mas NENHUMA mensagem chegava) — o webhook era
+// registrado SEM o `?secret=`, e quando a exigência do segredo está ligada
+// (env WEBHOOK_SECRET, toggle de Integrações, WEBHOOK_STRICT ou qualquer org
+// com módulo clínica — isWebhookEnforced) TODO evento do provedor era
+// rejeitado 401 "segredo_incorreto": o canal nunca virava 'connected' e o
+// inbound morria na porta. O segredo vive no app_config (db) e este serviço é
+// deliberadamente livre de db — então o server injeta um PROVIDER no boot.
+let _webhookSecretProvider: (() => string | null) | null = null;
+export function setEvolutionWebhookSecretProvider(fn: (() => string | null) | null): void {
+  _webhookSecretProvider = fn;
+}
+
 export interface CreateInstanceResult {
   ok: boolean;
   instanceName: string;
@@ -56,6 +68,10 @@ export interface ConnectAndQrResult {
   // (`resetInstance`), nunca autocorreção silenciosa. QR ausente ≠ autorização
   // pra apagar a sessão.
   needsReset?: boolean;
+  // 17/09/2026 — resultado do registro do webhook (antes era mudo): false =
+  // instância pode parear e ficar SURDA (nenhum evento/mensagem chega).
+  webhookRegistered?: boolean;
+  webhookAttempts?: Array<{ path: string; status: number | string }>;
 }
 
 export class EvolutionService {
@@ -206,9 +222,75 @@ export class EvolutionService {
   static getConfig(overrides?: Partial<EvolutionConfig>): EvolutionConfig | null {
     const baseUrl = (overrides?.baseUrl ?? process.env.EVOLUTION_BASE_URL ?? "").replace(/\/$/, "");
     const apiKey = overrides?.apiKey ?? process.env.EVOLUTION_API_KEY ?? "";
-    const webhookUrl = overrides?.webhookUrl ?? `${process.env.APP_URL || "http://localhost:3000"}/api/webhooks/evolution`;
+    let webhookUrl = overrides?.webhookUrl ?? `${process.env.APP_URL || "http://localhost:3000"}/api/webhooks/evolution`;
+    // Anexa o segredo do webhook (mesma URL que a tela de Integrações manda
+    // colar à mão) — sem ele, com a exigência ligada, o inbound inteiro é 401.
+    if (!overrides?.webhookUrl && _webhookSecretProvider) {
+      try {
+        const s = _webhookSecretProvider();
+        if (s && !webhookUrl.includes("secret=")) {
+          webhookUrl += `${webhookUrl.includes("?") ? "&" : "?"}secret=${encodeURIComponent(s)}`;
+        }
+      } catch { /* sem secret disponível — registra sem, como antes */ }
+    }
     if (!baseUrl || !apiKey) return null;
     return { baseUrl, apiKey, webhookUrl };
+  }
+
+  /**
+   * Lista as instâncias do provedor com o ESTADO de conexão (a mesma fonte do
+   * "Status: open" do manager). null = provedor inacessível; [] = alcançável e
+   * vazio. Base do sync de canais (o provedor é a verdade da sessão).
+   */
+  static async listInstances(config?: EvolutionConfig): Promise<Array<{ name: string; id?: string; token?: string; state: string }> | null> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg) return null;
+    try {
+      const resp = (await evoFetch(`${cfg.baseUrl}/instance/all`, { headers: { apikey: cfg.apiKey } })) as FetchResult;
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      return list.map((i: any) => ({
+        name: String(i?.name || i?.instanceName || ""),
+        id: i?.id,
+        token: i?.token || i?.apikey,
+        // Forks variam o campo: status (GO) / connection / connectionStatus / state.
+        state: String(i?.status ?? i?.connection ?? i?.connectionStatus ?? i?.state ?? "").toLowerCase(),
+      })).filter((i: any) => i.name);
+    } catch { return null; }
+  }
+
+  /**
+   * Registra o webhook/subscribe na instância (extraído do connectAndGetQr) —
+   * agora com o RESULTADO visível: cada tentativa devolve o HTTP status, e `ok`
+   * diz se ALGUM formato foi aceito. Antes as duas chamadas eram try/catch
+   * mudos: um 404/401 aqui deixava a instância SEM webhook (pareada mas surda)
+   * e ninguém ficava sabendo.
+   */
+  static async registerWebhook(instanceName: string, activeToken: string, config?: EvolutionConfig): Promise<{ ok: boolean; attempts: Array<{ path: string; status: number | string }> }> {
+    const cfg = config ?? this.getConfig();
+    if (!cfg) return { ok: false, attempts: [{ path: "(config)", status: "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados" }] };
+    const attempts: Array<{ path: string; status: number | string }> = [];
+    try {
+      const r = (await evoFetch(`${cfg.baseUrl}/instance/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
+        body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
+      })) as FetchResult;
+      attempts.push({ path: "/instance/connect", status: r.status });
+    } catch (e: any) { attempts.push({ path: "/instance/connect", status: String(e?.message || e).slice(0, 80) }); }
+    try {
+      const r = (await evoFetch(`${cfg.baseUrl}/webhook/set/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: activeToken },
+        body: JSON.stringify({
+          webhook: { url: cfg.webhookUrl, byEvents: false, base64: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] },
+        }),
+      })) as FetchResult;
+      attempts.push({ path: "/webhook/set", status: r.status });
+    } catch (e: any) { attempts.push({ path: "/webhook/set", status: String(e?.message || e).slice(0, 80) }); }
+    const ok = attempts.some((a) => typeof a.status === "number" && a.status >= 200 && a.status < 300);
+    return { ok, attempts };
   }
 
   /**
@@ -311,23 +393,9 @@ export class EvolutionService {
     //   (event_types.go). Nosso antigo ["messages","connection"] era descartado
     //   em silêncio → instância ficava sem NENHUM evento → o webhook nunca
     //   receberia a conexão nem mensagens. Maiúsculo é obrigatório.
-    try {
-      await evoFetch(`${cfg.baseUrl}/instance/connect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
-        body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
-      });
-    } catch { /* best-effort */ }
-
-    try {
-      await evoFetch(`${cfg.baseUrl}/webhook/set/${instanceName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey: activeToken },
-        body: JSON.stringify({
-          webhook: { url: cfg.webhookUrl, byEvents: false, base64: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] },
-        }),
-      });
-    } catch { /* best-effort */ }
+    // 17/09/2026 — extraído pra registerWebhook (resultado visível + reusável
+    // pelo sync de canais, que re-registra numa instância já pareada).
+    const webhookReg = await this.registerWebhook(instanceName, activeToken, cfg);
 
     // 2. Pega QR — 3 variantes de endpoint testadas em ordem, primeira que
     // retornar base64 vence. Ordem escolhida por probabilidade em produção:
@@ -424,10 +492,10 @@ export class EvolutionService {
       } catch { /* noop */ }
     }
 
-    if (state === "open") return { ok: true, state: "open", token: activeToken };
+    if (state === "open") return { ok: true, state: "open", token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
     if (qrBase64) {
       const finalQr = qrBase64.startsWith("data:image") ? qrBase64 : `data:image/png;base64,${qrBase64}`;
-      return { ok: true, qrBase64: finalQr, token: activeToken };
+      return { ok: true, qrBase64: finalQr, token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
     }
     // Passkey em andamento: honesto — não é falha de QR, é outro fluxo de
     // pareamento (WebAuthn); o operador conclui pelo manager do provedor.
@@ -449,7 +517,7 @@ export class EvolutionService {
         if (lastErr) reason += ` · último log da instância [${lastErr.level}]: ${lastErr.message.slice(0, 200)}`;
       } catch { /* best-effort */ }
     }
-    return { ok: false, error: `QR não obtido (${reason})`, needsReset: !!instanceId };
+    return { ok: false, error: `QR não obtido (${reason})`, needsReset: !!instanceId, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
   }
 
   /**

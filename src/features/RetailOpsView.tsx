@@ -6818,6 +6818,65 @@ function ResponsiblesTab() {
           </div>
         )}
       </div>
+
+      <MergeRescueCard />
+    </div>
+  );
+}
+
+// 17/09/2026 — RESGATE dos dados órfãos de loja unificada, SEM terminal:
+// excluir loja duplicada antes da correção deixava escala/malote/cotas/vendas
+// apontando pra loja apagada ("sumiam" das telas). O botão roda primeiro o
+// DRY-RUN (só relata), e o Aplicar só aparece depois — nada é apagado nunca.
+function MergeRescueCard() {
+  const [report, setReport] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (apply: boolean) => {
+    setBusy(true);
+    try {
+      const res = await apiFetch('/api/retailops/stores/rescue-merge-orphans', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apply }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha no resgate.'); return; }
+      setReport(d);
+      if (apply) toast.success('Resgate aplicado — confira escala, malote e Metas.');
+    } finally { setBusy(false); }
+  };
+  const merges = (report?.merges || []).filter((m: any) => m.status === 'ok');
+  const totalOrphans = merges.reduce((a: number, m: any) => a + Number(m.totalOrphans || 0), 0);
+  return (
+    <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-200 mb-1">Resgatar dados de loja unificada</div>
+      <p className="text-[12px] text-zinc-400 mb-2">
+        Se uma loja duplicada foi <strong>excluída/unificada</strong> e a escala, o malote ou as metas "sumiram", os dados ficaram presos na loja apagada.
+        Este resgate devolve tudo para a loja que ficou. <strong>Nada é apagado</strong> — primeiro ele só mostra o que encontrou.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => run(false)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Verificar (não altera nada)
+        </button>
+        {report && !report.apply && totalOrphans > 0 && (
+          <button onClick={() => window.confirm(`Devolver ${totalOrphans} registro(s) para a(s) loja(s) sobrevivente(s)? Nada será apagado.`) && run(true)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">
+            <Check className="w-4 h-4" /> Aplicar resgate ({totalOrphans} registro(s))
+          </button>
+        )}
+      </div>
+      {report && (
+        <div className="mt-2 space-y-1.5 text-[12px]">
+          {(report.merges || []).length === 0 && <p className="text-zinc-500">Nenhuma unificação de loja encontrada no histórico — nada a resgatar.</p>}
+          {(report.merges || []).map((m: any, i: number) => (
+            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-1.5">
+              <span className="text-zinc-300">{m.oldName || 'Loja apagada'} → <strong>{m.newName || m.newId}</strong></span>{' '}
+              {m.status !== 'ok'
+                ? <span className="text-zinc-500">({m.status})</span>
+                : report.apply
+                  ? <span className="text-emerald-300">{m.moved} devolvido(s){m.leftover ? <span className="text-amber-300"> · {m.leftover} em conflito (mantidos onde estão)</span> : null}</span>
+                  : <span className="text-amber-200">{m.totalOrphans} registro(s) para devolver{m.totalOrphans === 0 ? ' — já está tudo no lugar' : ''}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

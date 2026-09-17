@@ -986,6 +986,7 @@
     "test:evolution-channel-status": "tsx scripts/test-evolution-channel-status.ts",
     "test:evolution-connect-subscribe": "tsx scripts/test-evolution-connect-subscribe.ts",
     "test:channel-provision": "tsx scripts/test-channel-provision.ts",
+    "test:channel-sync-provider": "tsx scripts/test-channel-sync-provider.ts",
     "test:channel-binding": "tsx scripts/test-channel-binding.ts",
     "test:channel-select-resolver": "tsx scripts/test-channel-select-resolver.ts",
     "test:mixed-mode-toggle": "tsx scripts/test-mixed-mode-toggle.ts",

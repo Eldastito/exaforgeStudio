@@ -24,6 +24,11 @@ import bigIdeaRoutes from "./src/server/routes/bigIdea.js";
 import recognitionRoutes from "./src/server/routes/recognition.js";
 import philosophyAuditRoutes from "./src/server/routes/philosophyAudit.js";
 import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent } from "./src/server/webhookSecurity.js";
+import { setEvolutionWebhookSecretProvider } from "./src/server/EvolutionService.js";
+// 17/09/2026 — injeta o segredo do webhook no registro feito pelo EvolutionService:
+// sem o `?secret=` na URL registrada, com a exigência ligada (env/clínica/toggle),
+// TODO evento do provedor era 401 → canal preso em awaiting_qr e inbound morto.
+setEvolutionWebhookSecretProvider(() => { try { return effectiveWebhookSecret(); } catch { return null; } });
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";

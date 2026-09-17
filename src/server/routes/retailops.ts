@@ -582,6 +582,18 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// RESGATE dos órfãos de merges de loja feitos ANTES da correção (17/09/2026):
+// escala/malote/cotas/vendas que ficaram apontando pro store_id apagado voltam
+// pra loja sobrevivente. Sem body.apply = DRY-RUN (só relata); apply=true grava.
+// Nunca apaga nada; idempotente; auditado no serviço. Só owner/admin, org-scoped.
+router.post("/stores/rescue-merge-orphans", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(RetailStoreService.rescueMergeOrphans({ organizationId: orgId, apply: req.body?.apply === true }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 // --- Custos fixos + RESULTADO/LUCRO por loja ---
 // Custos fixos cadastrados da loja (aluguel, luz, condomínio...) por categoria.
 // SEC-F13 (FE3/RN-CG-06/§73): dinheiro absoluto é owner/admin — o GET é role-gated

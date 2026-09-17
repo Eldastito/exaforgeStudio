@@ -69,8 +69,12 @@ async function main() {
   check("2.1 Fechada aparece (tem folgas lançadas)", !!fec);
   check("2.2 Fechada com working vazio (ninguém trabalha)", (fec?.working || []).length === 0, JSON.stringify(fec?.working));
 
-  // ===== 3. loja sem escala não entra (mesmo com gente lotada) =====
-  check("3.1 Sem Escala fora do resultado", !byId.has(semEscala));
+  // ===== 3. loja sem escala APARECE como bloco vazio marcado (pedido do
+  // cliente: o card do fechamento mostra todas as lojas) — nada é inferido =====
+  const sem: any = byId.get(semEscala);
+  check("3.1 Sem Escala aparece como bloco noSchedule, sem ninguém inferido",
+    !!sem && sem.noSchedule === true && (sem.working || []).length === 0 && (sem.off || []).length === 0, JSON.stringify(sem));
+  check("3.2 lojas com escala não são marcadas noSchedule", !(tou as any)?.noSchedule && !(fec as any)?.noSchedule);
 
   // ===== 4. explícito 'work' + inferência não duplica =====
   db.prepare(`DELETE FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ? AND seller_key = 'mat:2'`).run(A, toulon, DATE);

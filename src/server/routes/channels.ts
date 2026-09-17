@@ -75,6 +75,22 @@ router.get("/whatsapp/diagnose", requireRole("owner", "admin"), async (req: Auth
   }
 });
 
+// 17/09/2026 — SINCRONIZAR com o provedor: instância 'open' lá + canal preso em
+// awaiting_qr aqui = webhook que não chegou. O sync marca connected/disconnected
+// pela verdade do provedor, atualiza o token e RE-REGISTRA o webhook (com o
+// secret na URL) — devolve o fluxo de mensagens sem re-parear.
+router.post("/whatsapp/sync", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = await ChannelProvisioningService.syncFromProvider(orgId, req.user?.userId || null);
+    if (!r.ok) return res.status(502).json({ error: r.error, providerReachable: r.providerReachable });
+    return res.json(r);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Falha ao sincronizar" });
+  }
+});
+
 // WZ — desconectar o WhatsApp pelo ZapFlow (pedido do dono): logout best-effort
 // no provedor + canais Evolution da org marcados 'disconnected' (UPDATE, nunca
 // DELETE). `providerLogout:false` = a UI avisa pra conferir o celular.

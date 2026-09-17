@@ -32,6 +32,7 @@ import db from "./db.js";
 import { EncryptionService } from "./EncryptionService.js";
 import { EvolutionService } from "./EvolutionService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { getLastWebhookHit, isWebhookEnforced } from "./webhookSecurity.js";
 
 export type ProvisionMode = "new" | "existing";
 
@@ -261,6 +262,21 @@ export class ChannelProvisioningService {
       channels: this.status(orgId).channels.map((c) => ({ instanceName: c.instanceName, status: c.status })),
       lastProvisionError: null,
     };
+    // 17/09/2026 — o RECEBIMENTO é metade do diagnóstico: mostra a URL de
+    // webhook que registramos no provedor (secret redigido), se a exigência do
+    // segredo está ligada e o último hit recebido — "nunca recebeu" com sessão
+    // pareada é a assinatura de webhook não registrado/URL errada/secret ausente.
+    try {
+      const whUrl = cfg?.webhookUrl || null;
+      out.webhook = {
+        urlEffective: whUrl ? whUrl.replace(/(secret=)[^&]+/, "$1***") : null,
+        secretIncluded: !!whUrl?.includes("secret="),
+        enforced: isWebhookEnforced(),
+        appUrlConfigured: !!process.env.APP_URL,
+        localhostWarning: !!whUrl?.includes("localhost"),
+        lastHit: getLastWebhookHit(),
+      };
+    } catch { /* best-effort */ }
     // 16/09 (3º relato: "não está nem criando a instância") — o ERRO REAL do
     // último provision/reset falho já fica gravado na auditoria; surfaçá-lo no
     // diagnóstico tira a dependência de toast perdido. Redigido (só o erro e
@@ -291,7 +307,12 @@ export class ChannelProvisioningService {
         out.instancesInProvider = list.length;
         const name = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
         const hit = list.find((i: any) => i?.name === name || i?.instanceName === name);
-        out.orgInstance = { name, existsInProvider: !!hit };
+        out.orgInstance = {
+          name, existsInProvider: !!hit,
+          // O estado REAL da sessão no provedor (o "Status: open" do manager) —
+          // 'open' aqui com canal awaiting_qr = use o Sincronizar.
+          providerState: hit ? String(hit?.status ?? hit?.connection ?? hit?.connectionStatus ?? hit?.state ?? "").toLowerCase() || null : null,
+        };
         // 16/09 (4º relato: "criou a instância mas o QR não sai") — os LOGS da
         // instância no provedor são onde o evolution-go conta POR QUE a sessão
         // whatsmeow não gerou QR (Connect() com o WhatsApp falha em goroutine,
@@ -308,6 +329,82 @@ export class ChannelProvisioningService {
       out.reachable = { ok: false, error: String(e?.message || e).slice(0, 160), latencyMs: Date.now() - t0 };
     }
     return out;
+  }
+
+  /**
+   * 17/09/2026 (instância "Conectado" no manager, canais presos em awaiting_qr,
+   * nenhuma mensagem fluindo) — SINCRONIZA os canais com a VERDADE do provedor.
+   * O único caminho pra 'connected' era o webhook do provedor; se o webhook não
+   * chega (não registrado, URL sem secret com exigência ligada, APP_URL errada),
+   * o canal fica awaiting_qr PRA SEMPRE mesmo com a sessão pareada. Aqui:
+   *  - lê /instance/all (a mesma fonte do "Status: open" do manager);
+   *  - instância NÃO existe mais no provedor → canal vira 'disconnected'
+   *    (UPDATE, nunca DELETE — convenção nº 9; era o caso dos canais fantasma
+   *    "ExaForge"/"TOULON" apontando pra instâncias apagadas);
+   *  - instância OPEN → canal vira 'connected', o TOKEN do canal é atualizado
+   *    pro do provedor (token velho de instância recriada quebrava envio e
+   *    subscribe) e o WEBHOOK é RE-REGISTRADO com a URL atual (com secret) —
+   *    é isso que devolve o fluxo de mensagens sem re-parear;
+   *  - instância existe mas não-open → canal 'connected' é rebaixado a
+   *    'disconnected' (evidência do provedor, RF-02); os demais ficam como estão.
+   * 'disabled' (pausa administrativa) nunca é tocado. Isolado por org; auditado.
+   */
+  static async syncFromProvider(orgId: string, actorUserId: string | null): Promise<{
+    ok: boolean; providerReachable: boolean; error?: string;
+    channels: Array<{ instanceName: string; before: string; after: string; providerState: string | null; webhookRegistered?: boolean; tokenUpdated?: boolean }>;
+  }> {
+    if (!orgId) return { ok: false, providerReachable: false, error: "organizationId ausente.", channels: [] };
+    const instances = await EvolutionService.listInstances();
+    if (instances === null) {
+      return { ok: false, providerReachable: false, error: "Provedor inacessível (ou EVOLUTION_BASE_URL/EVOLUTION_API_KEY ausentes).", channels: [] };
+    }
+    const byName = new Map(instances.map((i) => [i.name, i]));
+    const rows = db.prepare(
+      `SELECT id, identifier, status, token_encrypted FROM channels
+        WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
+    ).all(orgId) as any[];
+    const report: Array<{ instanceName: string; before: string; after: string; providerState: string | null; webhookRegistered?: boolean; tokenUpdated?: boolean }> = [];
+    for (const r of rows) {
+      const inst = byName.get(String(r.identifier));
+      const before = String(r.status || "");
+      let after = before;
+      let webhookRegistered: boolean | undefined;
+      let tokenUpdated = false;
+      if (!inst) {
+        if (before !== "disconnected") {
+          after = "disconnected";
+          db.prepare(`UPDATE channels SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
+        }
+      } else if (inst.state === "open" || inst.state === "connected") {
+        // Token do provedor é a verdade (instância recriada gera token novo).
+        let currentToken = "";
+        try { currentToken = EncryptionService.decrypt(r.token_encrypted) || ""; } catch { currentToken = String(r.token_encrypted || ""); }
+        const providerToken = inst.token || "";
+        if (providerToken && providerToken !== currentToken) {
+          db.prepare(`UPDATE channels SET token_encrypted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
+            .run(EncryptionService.encrypt(providerToken), r.id, orgId);
+          tokenUpdated = true;
+        }
+        // Re-registra o webhook na sessão JÁ pareada — devolve o inbound sem QR novo.
+        try {
+          const reg = await EvolutionService.registerWebhook(String(r.identifier), providerToken || currentToken);
+          webhookRegistered = reg.ok;
+        } catch { webhookRegistered = false; }
+        if (before !== "connected") {
+          after = "connected";
+          db.prepare(`UPDATE channels SET status = 'connected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
+        }
+      } else if (before === "connected") {
+        // Provedor diz que a sessão NÃO está aberta — rebaixa com evidência.
+        after = "disconnected";
+        db.prepare(`UPDATE channels SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
+      }
+      report.push({ instanceName: String(r.identifier), before, after, providerState: inst ? inst.state : null, webhookRegistered, tokenUpdated });
+      if (after !== before || tokenUpdated || webhookRegistered !== undefined) {
+        logAuthEvent(orgId, actorUserId, r.id, "CHANNEL_SYNCED_FROM_PROVIDER", { instanceName: r.identifier, before, after, providerState: inst?.state ?? null, webhookRegistered, tokenUpdated });
+      }
+    }
+    return { ok: true, providerReachable: true, channels: report };
   }
 
   /**

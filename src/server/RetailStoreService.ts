@@ -102,6 +102,30 @@ export class RetailStoreService {
   }
 
   /**
+   * Colunas com escopo por loja em TODO o schema, descobertas no runtime:
+   * qualquer tabela com organization_id + (store_id | origin_store_id |
+   * dest_store_id). É a lista única usada pelo merge de duplicata e pelo
+   * resgate de órfãos — tabela nova entra sozinha, sem depender de lembrar
+   * de atualizar uma lista na mão (foi assim que escala/malote ficaram órfãos).
+   */
+  static storeScopedColumns(): Array<{ table: string; column: string }> {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).all() as any[];
+    const out: Array<{ table: string; column: string }> = [];
+    for (const t of tables) {
+      const name = String(t.name || "");
+      if (!name || name === "retail_stores") continue;
+      let cols: any[] = [];
+      try { cols = db.prepare(`PRAGMA table_info("${name.replace(/"/g, '""')}")`).all() as any[]; } catch { continue; }
+      const colNames = new Set(cols.map((c) => String(c.name)));
+      if (!colNames.has("organization_id")) continue;
+      for (const column of ["store_id", "origin_store_id", "dest_store_id"]) {
+        if (colNames.has(column)) out.push({ table: name, column });
+      }
+    }
+    return out;
+  }
+
+  /**
    * EXCLUI uma loja duplicada com segurança: se existir OUTRA loja com o mesmo
    * código, todo o histórico é UNIFICADO nela antes de apagar — excluir sem
    * unificar perderia o que já foi gravado. Cobre fechamentos (com itens por
@@ -156,40 +180,110 @@ export class RetailStoreService {
       }
       db.prepare(`UPDATE retail_daily_closings SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
 
-      // Tabelas com UNIQUE por loja: move o que não conflita, descarta o resto
-      // (o alvo, que continuou sincronizando, tende a estar mais fresco).
-      // Escala, template de folga, lotação, malote (ajuste de dia + semana
-      // fechada) e boletas entram aqui — ficar de fora era o bug que fazia a
-      // escala sumir do fechamento e o malote zerar após unificar duplicata.
-      for (const t of [
-        "retail_store_quotas", "retail_store_inventory", "retail_stock_alerts", "retail_store_daily_tasks",
-        "retail_schedule_entries", "retail_seller_off_pattern", "retail_seller_store_assignments",
-        "retail_cash_day_override", "retail_cash_week_closings", "retail_boleta_days", "retail_boleta_events",
-      ]) {
-        try {
-          db.prepare(`UPDATE OR IGNORE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id);
-          db.prepare(`DELETE FROM ${t} WHERE organization_id = ? AND store_id = ?`).run(orgId, id);
-        } catch { /* tabela pode não existir em bases antigas */ }
-      }
       // Vendas por vendedor vindas do FECHAMENTO: nos dias em que o alvo já tem
       // as suas (source 'closing'), as da duplicata são descartadas — re-apontar
-      // dobraria a base de comissão do dia. O resto re-aponta abaixo.
+      // dobraria a base de comissão do dia. O resto re-aponta no loop abaixo.
       try {
         db.prepare(
           `DELETE FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND source = 'closing'
              AND sale_date IN (SELECT sale_date FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND source = 'closing')`
         ).run(orgId, id, orgId, target.id);
       } catch { /* noop */ }
-      // Referências sem UNIQUE: só re-aponta (depósitos do malote e vendas por
-      // vendedor inclusos — antes ficavam órfãos).
-      for (const t of ["retail_store_responsibles", "retail_goods_receipts", "retail_store_patterns", "orders", "retail_cash_deposits", "retail_seller_sales"]) {
-        try { db.prepare(`UPDATE ${t} SET store_id = ? WHERE organization_id = ? AND store_id = ?`).run(target.id, orgId, id); } catch { /* noop */ }
+      // TODA tabela com escopo por loja (descoberta no runtime — escala, folgas,
+      // lotação, cotas de vendedor, malote, boletas, custos, PDV, piso etc.):
+      // move o que não conflita nos UNIQUEs, descarta o resto (o alvo, que
+      // continuou operando, tende a estar mais fresco). A lista dinâmica é o
+      // que garante que tabela nova NUNCA mais fica órfã no merge.
+      for (const { table, column } of RetailStoreService.storeScopedColumns()) {
+        try {
+          db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE organization_id = ? AND ${column} = ?`).run(target.id, orgId, id);
+          db.prepare(`DELETE FROM ${table} WHERE organization_id = ? AND ${column} = ?`).run(orgId, id);
+        } catch { /* tabela pode não existir em bases antigas */ }
       }
       db.prepare(`DELETE FROM retail_stores WHERE organization_id = ? AND id = ?`).run(orgId, id);
     });
     tx();
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_MERGED_DELETED", { name: cur.name, into: target.id, intoName: target.name }); } catch { /* noop */ }
     return { deleted: true, mergedInto: target.id, mergedIntoName: target.name };
+  }
+
+  /**
+   * RESGATE dos órfãos de merges feitos ANTES da correção do remove(): varre os
+   * eventos RETAIL_STORE_MERGED_DELETED do audit (a loja apagada está em
+   * target_user_id; a sobrevivente em metadata.into) e re-aponta pra
+   * sobrevivente tudo que ficou apontando pro store_id apagado — escala,
+   * template de folga, lotação, cotas de vendedor, malote (depósitos/ajustes/
+   * semanas fechadas), boletas, vendas, custos, PDV etc. (storeScopedColumns).
+   *
+   * NUNCA apaga nada: linha que conflita com o que a sobrevivente já tem
+   * (UNIQUE) fica onde está e sai no relatório como `leftover`; venda de
+   * vendedor source='closing' de dia que a sobrevivente também tem fica no
+   * lugar (mover dobraria a base de comissão). Dry-run por padrão (`apply`
+   * falso conta e não grava). Idempotente: rodar de novo encontra 0 órfãos.
+   */
+  static rescueMergeOrphans(opts: { apply?: boolean; organizationId?: string | null } = {}): { apply: boolean; merges: any[] } {
+    const apply = !!opts.apply;
+    const events = db.prepare(
+      `SELECT organization_id, target_user_id AS old_store_id, metadata_json, created_at FROM auth_audit_logs
+        WHERE event_type = 'RETAIL_STORE_MERGED_DELETED' ${opts.organizationId ? "AND organization_id = ?" : ""}
+        ORDER BY created_at`
+    ).all(...(opts.organizationId ? [opts.organizationId] : [])) as any[];
+    const cols = this.storeScopedColumns();
+    const merges: any[] = [];
+    for (const e of events) {
+      let meta: any = {};
+      try { meta = JSON.parse(e.metadata_json || "{}"); } catch { meta = {}; }
+      const orgId = String(e.organization_id || "");
+      const oldId = String(e.old_store_id || "");
+      const newId = String(meta?.into || "");
+      const entry: any = { orgId, oldId, oldName: meta?.name || null, newId, newName: meta?.intoName || null, mergedAt: e.created_at, status: "ok", tables: [], totalOrphans: 0, moved: 0, leftover: 0 };
+      merges.push(entry);
+      if (!orgId || !oldId || !newId) { entry.status = "skip: evento sem loja de destino"; continue; }
+      const targetStore = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, newId) as any;
+      if (!targetStore) { entry.status = "skip: loja sobrevivente não existe mais"; continue; }
+      if (db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, oldId)) { entry.status = "skip: a loja 'apagada' ainda existe no cadastro"; continue; }
+      entry.newName = targetStore.name || entry.newName;
+
+      // Dias em que MOVER a venda 'closing' da órfã dobraria a da sobrevivente.
+      let sellerSalesConflictDates: string[] = [];
+      try {
+        sellerSalesConflictDates = (db.prepare(
+          `SELECT DISTINCT s.sale_date AS d FROM retail_seller_sales s
+            WHERE s.organization_id = ? AND s.store_id = ? AND s.source = 'closing'
+              AND EXISTS (SELECT 1 FROM retail_seller_sales t WHERE t.organization_id = s.organization_id AND t.store_id = ? AND t.source = 'closing' AND t.sale_date = s.sale_date)`
+        ).all(orgId, oldId, newId) as any[]).map((r) => String(r.d));
+      } catch { sellerSalesConflictDates = []; }
+
+      const work = () => {
+        for (const { table, column } of cols) {
+          try {
+            const orphans = Number((db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE organization_id = ? AND ${column} = ?`).get(orgId, oldId) as any)?.n || 0);
+            if (!orphans) continue;
+            let moved: number | null = null, leftover: number | null = null;
+            if (apply) {
+              if (table === "retail_seller_sales" && sellerSalesConflictDates.length) {
+                const ph = sellerSalesConflictDates.map(() => "?").join(",");
+                moved = db.prepare(
+                  `UPDATE OR IGNORE retail_seller_sales SET store_id = ? WHERE organization_id = ? AND store_id = ?
+                     AND NOT (source = 'closing' AND sale_date IN (${ph}))`
+                ).run(newId, orgId, oldId, ...sellerSalesConflictDates).changes;
+              } else {
+                moved = db.prepare(`UPDATE OR IGNORE ${table} SET ${column} = ? WHERE organization_id = ? AND ${column} = ?`).run(newId, orgId, oldId).changes;
+              }
+              leftover = orphans - moved; // conflito de UNIQUE / venda que dobraria — fica no lugar
+            }
+            entry.tables.push({ table, column, orphans, moved, leftover });
+            entry.totalOrphans += orphans;
+            if (apply) { entry.moved += moved || 0; entry.leftover += leftover || 0; }
+          } catch { /* tabela pode não existir em bases antigas */ }
+        }
+      };
+      if (apply) db.transaction(work)(); else work();
+      if (apply && entry.moved > 0) {
+        try { logAuthEvent(orgId, "system", oldId, "RETAIL_STORE_MERGE_RESCUED", { into: newId, moved: entry.moved, leftover: entry.leftover }); } catch { /* noop */ }
+      }
+    }
+    return { apply, merges };
   }
 
   static update(orgId: string, id: string, patch: Partial<StoreInput>, actorId?: string): any | null {

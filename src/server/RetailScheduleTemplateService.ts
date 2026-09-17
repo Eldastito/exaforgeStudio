@@ -185,17 +185,21 @@ export class RetailScheduleTemplateService {
    * - **off**: reaproveita `whoIsOff` (grade 'off' + template dos que ainda
    *   não têm linha na grade).
    *
-   * Só entram lojas que têm ALGUÉM na escala do dia (trabalhando ou de folga);
-   * loja sem escala montada não vira bloco vazio — a inferência preenche a
-   * equipe de lojas que JÁ aparecem, nunca ressuscita loja fechada (todos de
-   * folga → ninguém trabalha). Retorna ordenado por nome de loja e, dentro, por
-   * nome de vendedor. `storeId` opcional (sem loja = todas as lojas ativas).
+   * TODA loja ativa aparece como bloco (pedido do cliente — o card do
+   * fechamento não pode ficar em branco): loja sem NENHUMA linha de escala no
+   * dia vem com `noSchedule: true` e listas vazias, pra UI mostrar "nenhuma
+   * escala lançada" em vez de sumir com a loja. A INFERÊNCIA continua restrita
+   * às lojas que têm escala lançada — bloco noSchedule nunca ganha equipe
+   * inferida, e loja fechada (todos de folga) segue com working vazio.
+   * Retorna ordenado por nome de loja e, dentro, por nome de vendedor.
+   * `storeId` opcional (sem loja = todas as lojas ativas).
    */
   static dayRoster(orgId: string, date: string, opts?: { storeId?: string | null }): Array<{
     storeId: string;
     storeName: string | null;
     working: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "roster" }>;
     off: Array<{ sellerKey: string; sellerName: string | null; source: "grid" | "template" }>;
+    noSchedule?: boolean;
   }> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
     const storeFilter = opts?.storeId ? " AND store_id = ?" : "";
@@ -254,6 +258,17 @@ export class RetailScheduleTemplateService {
         if (b.working.some((w) => w.sellerKey === key || (nName && norm(w.sellerName) === nName))) continue;
         b.working.push({ sellerKey: key, sellerName: r.name || null, source: "roster" });
       }
+    }
+
+    // TODA loja ativa vira bloco: as sem escala lançada entram vazias e
+    // marcadas noSchedule — a UI mostra "nenhuma escala lançada" em vez de
+    // esconder a loja (a inferência acima já rodou, então nada é inferido aqui).
+    const activeStores = opts?.storeId
+      ? db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`).all(orgId, opts.storeId) as any[]
+      : db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    for (const s of activeStores) {
+      if (map.has(s.id)) continue;
+      map.set(s.id, { storeId: s.id, storeName: s.name || null, working: [], off: [], noSchedule: true } as any);
     }
 
     // Resolve nome das lojas que só têm gente trabalhando (não vieram do whoIsOff).

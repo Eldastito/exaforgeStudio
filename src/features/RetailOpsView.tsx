@@ -4897,16 +4897,24 @@ function WhoIsOffCard({ storeId, className = '' }: { storeId?: string | null; cl
     <div className={`rounded-xl border border-zinc-700/50 bg-zinc-900/40 px-3 py-2 text-[12px] ${className}`}>
       <div className="font-medium text-zinc-300 mb-1.5">📅 Escala de hoje</div>
       {stores.length === 0 ? (
-        <div className="text-zinc-500 text-[11px]">Nenhuma escala lançada para hoje.</div>
+        <div className="text-zinc-500 text-[11px]">Nenhuma loja ativa cadastrada.</div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
+          {/* TODA loja ativa aparece (pedido do cliente) — sem escala lançada,
+              o bloco diz isso em vez de sumir com a loja. */}
           {stores.map((st) => (
             <div key={st.storeId} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-2">
               <div className="text-[11px] font-semibold text-zinc-200 mb-1 truncate" title={st.storeName || ''}>
                 🏬 {st.storeName || 'Loja'}
               </div>
-              {line('Trabalhando', '🟢', 'text-emerald-400', st.working || [], 'work')}
-              {line('Folga', '🔴', 'text-red-400', st.off || [], 'off')}
+              {st.noSchedule ? (
+                <div className="text-[11px] text-amber-300/80">Nenhuma escala lançada para hoje — monte na aba <strong>Escala &amp; cotas</strong>.</div>
+              ) : (
+                <>
+                  {line('Trabalhando', '🟢', 'text-emerald-400', st.working || [], 'work')}
+                  {line('Folga', '🔴', 'text-red-400', st.off || [], 'off')}
+                </>
+              )}
             </div>
           ))}
         </div>

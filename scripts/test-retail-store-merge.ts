@@ -68,6 +68,9 @@ async function main() {
   Cash.setDayOverride(A, D, "2026-08-11", 80);
   Cash.closeWeek(A, D, { weekStart: "2026-08-03", weekEnd: "2026-08-09", depositor: "Bia" });
 
+  // Cota semanal de vendedor na duplicata (a lista dinâmica de tabelas cobre).
+  ins(`INSERT INTO retail_seller_quotas (id, organization_id, store_id, seller_key, seller_name, week_start, quota_amount) VALUES (?, ?, ?, 'mat:1', 'Ana', '2026-08-10', 2500)`, randomUUID(), A, D);
+
   // Boletas + venda por vendedor manual na duplicata.
   ins(`INSERT INTO retail_boleta_days (id, organization_id, store_id, day, initial_number) VALUES (?, ?, ?, '2026-08-12', '017752')`, randomUUID(), A, D);
   ins(`INSERT INTO retail_boleta_events (id, organization_id, store_id, day, boleta_number, seq, status) VALUES (?, ?, ?, '2026-08-12', '017752', 1, 'active')`, randomUUID(), A, D);
@@ -98,7 +101,8 @@ async function main() {
   check("4.2 conflito com alvo vazio: informado 100 + details_json herdado", near(c13?.informed_total, 100) && !!c13?.details_json, `${c13?.informed_total}`);
   check("4.3 conflito com dados dos dois: alvo mantém os dele (50, não 999)", near(row("2026-08-14")?.cash, 50), `${row("2026-08-14")?.cash}`);
 
-  // ===== 5. Boletas + vendas por vendedor =====
+  // ===== 5. Boletas + vendas por vendedor + cota semanal =====
+  check("5.0 cota semanal de vendedor migrou (tabela da lista dinâmica)", count("retail_seller_quotas", T) === 1 && count("retail_seller_quotas", D) === 0);
   check("5.1 boletas migraram (dia + evento)", count("retail_boleta_days", T) === 1 && count("retail_boleta_events", T) === 1);
   const sales = db.prepare(`SELECT sale_date, seller_name, valor, source FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? ORDER BY sale_date`).all(A, T) as any[];
   check("5.2 venda manual re-apontada (Dani 70)", sales.some((s) => s.seller_name === "Dani" && near(s.valor, 70)));
@@ -107,7 +111,7 @@ async function main() {
   check("5.4 dia de conflito: só as vendas do alvo (Bia), sem dobrar", d14.length === 1 && d14[0].seller_name === "Bia", JSON.stringify(d14));
 
   // ===== 6. Nada órfão no store_id apagado =====
-  const orphanTables = ["retail_daily_closings", "retail_schedule_entries", "retail_seller_off_pattern", "retail_seller_store_assignments", "retail_cash_deposits", "retail_cash_day_override", "retail_cash_week_closings", "retail_boleta_days", "retail_boleta_events", "retail_seller_sales"];
+  const orphanTables = ["retail_daily_closings", "retail_schedule_entries", "retail_seller_off_pattern", "retail_seller_store_assignments", "retail_cash_deposits", "retail_cash_day_override", "retail_cash_week_closings", "retail_boleta_days", "retail_boleta_events", "retail_seller_sales", "retail_seller_quotas", "user_stores"];
   const orphans = orphanTables.filter((t) => count(t, D) > 0);
   check("6.1 nenhuma tabela ficou órfã na loja apagada", orphans.length === 0, orphans.join(","));
   check("6.2 loja duplicada sumiu do cadastro", !db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`).get(A, D));

@@ -10,7 +10,8 @@
  *  - agrupa por loja com working[] (grade 'work') e off[] (grade 'off' + template);
  *  - resolve nome da loja mesmo quando só há gente trabalhando;
  *  - respeita filtro por storeId;
- *  - só entram lojas com alguém na escala do dia.
+ *  - TODA loja ativa aparece (pedido do cliente): sem escala lançada, o bloco
+ *    vem vazio e marcado noSchedule — a UI avisa em vez de sumir com a loja.
  *
  * Uso:  npm run test:retail-day-roster
  */
@@ -56,9 +57,10 @@ async function main() {
   const all = RetailScheduleTemplateService.dayRoster(A, DATE);
   const byId = new Map(all.map((s) => [s.storeId, s]));
 
-  // ===== 1. agrupamento + nomes =====
-  check("1.1 duas lojas com escala aparecem (semEscala fora)", all.length === 2, `len=${all.length}`);
-  check("1.2 loja sem escala não vira bloco", !byId.has(semEscala));
+  // ===== 1. agrupamento + nomes (toda loja ativa aparece) =====
+  check("1.1 as três lojas ativas aparecem", all.length === 3, `len=${all.length}`);
+  const semBloco: any = byId.get(semEscala);
+  check("1.2 loja sem escala vira bloco vazio marcado noSchedule", !!semBloco && semBloco.noSchedule === true && (semBloco.working || []).length === 0 && (semBloco.off || []).length === 0, JSON.stringify(semBloco));
   const am = byId.get(americana);
   const gr = byId.get(grandeRio);
   check("1.3 Americana tem nome resolvido", am?.storeName === "Americana", am?.storeName || "");
@@ -80,9 +82,9 @@ async function main() {
   const onlyGr = RetailScheduleTemplateService.dayRoster(A, DATE, { storeId: grandeRio });
   check("4.1 filtro storeId retorna só a loja pedida", onlyGr.length === 1 && onlyGr[0].storeId === grandeRio);
 
-  // ===== 5. data sem escala nenhuma → vazio =====
+  // ===== 5. data sem escala nenhuma → todas as lojas como bloco noSchedule =====
   const vazio = RetailScheduleTemplateService.dayRoster(A, "2026-08-25");
-  check("5.1 dia sem escala → lista vazia", vazio.length === 0);
+  check("5.1 dia sem escala → todas as lojas aparecem vazias e marcadas", vazio.length === 3 && vazio.every((s: any) => s.noSchedule === true && s.working.length === 0 && s.off.length === 0), `len=${vazio.length}`);
 
   console.log("\n=== TEST: Escala do dia agrupada por loja ===\n");
   for (const r of results) console.log(`${r.ok ? "✅" : "❌"} ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

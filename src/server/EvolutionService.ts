@@ -238,11 +238,27 @@ export class EvolutionService {
   }
 
   /**
+   * Estado de conexão de uma linha do /instance/all, tolerante a fork.
+   * 17/09/2026 — VERIFICADO no fonte real (EvolutionAPI/evolution-go 0.7.2,
+   * instance_model.go): o GO serializa `connected` BOOLEANO (não existe campo
+   * `status` string — o "Status: open" do manager é derivação da UI dele).
+   * Sem ler o booleano, o sync nunca marcava conectado. Forks Node usam
+   * status/connection/state string.
+   */
+  static providerStateOf(i: any): string {
+    if (i?.connected === true) return "open";
+    if (i?.connected === false) return "close";
+    return String(i?.status ?? i?.connection ?? i?.connectionStatus ?? i?.state ?? "").toLowerCase();
+  }
+
+  /**
    * Lista as instâncias do provedor com o ESTADO de conexão (a mesma fonte do
    * "Status: open" do manager). null = provedor inacessível; [] = alcançável e
    * vazio. Base do sync de canais (o provedor é a verdade da sessão).
+   * `webhook`/`events` são o que está REGISTRADO na instância (evolution-go
+   * expõe os dois no /instance/all) — ouro pro diagnóstico de inbound.
    */
-  static async listInstances(config?: EvolutionConfig): Promise<Array<{ name: string; id?: string; token?: string; state: string }> | null> {
+  static async listInstances(config?: EvolutionConfig): Promise<Array<{ name: string; id?: string; token?: string; state: string; webhook?: string | null; events?: string | null }> | null> {
     const cfg = config ?? this.getConfig();
     if (!cfg) return null;
     try {
@@ -254,8 +270,9 @@ export class EvolutionService {
         name: String(i?.name || i?.instanceName || ""),
         id: i?.id,
         token: i?.token || i?.apikey,
-        // Forks variam o campo: status (GO) / connection / connectionStatus / state.
-        state: String(i?.status ?? i?.connection ?? i?.connectionStatus ?? i?.state ?? "").toLowerCase(),
+        state: this.providerStateOf(i),
+        webhook: i?.webhook ?? null,
+        events: i?.events ?? null,
       })).filter((i: any) => i.name);
     } catch { return null; }
   }
@@ -417,8 +434,12 @@ export class EvolutionService {
     // 16/09/2026 (4º relato) — o handler do evolution-go responde o MOTIVO no
     // corpo do 400 ({"error":"failed to start instance: ..."} ou "no QR code
     // available..."). Antes a gente descartava o corpo (`continue`) e reportava
-    // o genérico "retornou vazio" — o operador ficava cego. Guarda o último.
-    let lastQrError = "";
+    // o genérico "retornou vazio" — o operador ficava cego.
+    // 17/09/2026 — erro POR ENDPOINT: o 404 do endpoint alternativo
+    // (/api/v1/..., que não existe no evolution-go) SOBRESCREVIA o erro real
+    // do endpoint principal — o diagnóstico mostrava "404 page not found" e
+    // escondia o 401/400 verdadeiro do /instance/qr.
+    const qrErrors = new Map<string, string>();
     const qrEndpoints = [
       `${cfg.baseUrl}/instance/qr`,
       `${cfg.baseUrl}/api/v1/instance/qr`,
@@ -434,7 +455,7 @@ export class EvolutionService {
               const body = await qrResp.text();
               let msg = "";
               try { msg = String(JSON.parse(body)?.error || ""); } catch { msg = body; }
-              if (msg) lastQrError = `HTTP ${qrResp.status}: ${msg.slice(0, 200)}`;
+              if (msg) qrErrors.set(url.slice(cfg.baseUrl.length), `HTTP ${qrResp.status}: ${msg.slice(0, 160)}`);
             } catch { /* corpo ilegível — segue */ }
             continue;
           }
@@ -509,6 +530,7 @@ export class EvolutionService {
     //     WhatsApp morre numa goroutine — a falha real SÓ aparece lá).
     // Sinaliza `needsReset` só quando temos o instanceId (o reset EXPLÍCITO
     // precisa dele); nunca resetamos aqui (F1.3).
+    const lastQrError = Array.from(qrErrors.entries()).map(([p, e]) => `${p} → ${e}`).join(" · ");
     let reason = lastQrError ? `provedor respondeu: ${lastQrError}` : "Evolution retornou vazio";
     if (instanceId) {
       try {

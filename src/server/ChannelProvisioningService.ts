@@ -310,8 +310,14 @@ export class ChannelProvisioningService {
         out.orgInstance = {
           name, existsInProvider: !!hit,
           // O estado REAL da sessão no provedor (o "Status: open" do manager) —
-          // 'open' aqui com canal awaiting_qr = use o Sincronizar.
-          providerState: hit ? String(hit?.status ?? hit?.connection ?? hit?.connectionStatus ?? hit?.state ?? "").toLowerCase() || null : null,
+          // 'open' aqui com canal awaiting_qr = use o Sincronizar. Lê o
+          // `connected` BOOLEANO do evolution-go (providerStateOf, 17/09).
+          providerState: hit ? EvolutionService.providerStateOf(hit) || null : null,
+          // 17/09 — o que está REGISTRADO na instância (o GO expõe webhook e
+          // events no /instance/all): webhook vazio/errado aqui = inbound morto,
+          // seja qual for o estado da sessão. Secret redigido.
+          webhookRegistered: hit?.webhook ? String(hit.webhook).replace(/(secret=)[^&]+/, "$1***") : null,
+          subscribedEvents: hit?.events ?? null,
         };
         // 16/09 (4º relato: "criou a instância mas o QR não sai") — os LOGS da
         // instância no provedor são onde o evolution-go conta POR QUE a sessão

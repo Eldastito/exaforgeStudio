@@ -798,6 +798,15 @@ export function ChannelsPanel() {
                             {diag.instancesInProvider != null && (
                               <p className="text-slate-400">Instâncias no provedor: {diag.instancesInProvider}{diag.orgInstance ? ` · a da empresa ("${diag.orgInstance.name}") ${diag.orgInstance.existsInProvider ? `existe lá${diag.orgInstance.providerState ? ` — sessão "${diag.orgInstance.providerState}"` : ''}` : 'NÃO existe lá'}` : ''}</p>
                             )}
+                            {/* 17/09 — o que está REGISTRADO na instância lá no provedor:
+                                webhook vazio = o provedor não tem pra onde mandar (Sincronizar
+                                registra); eventos sem MESSAGE = mensagens nunca chegam. */}
+                            {diag.orgInstance?.existsInProvider && (
+                              <p className={diag.orgInstance.webhookRegistered ? 'text-slate-400' : 'text-rose-400'}>
+                                Webhook NA instância (provedor): {diag.orgInstance.webhookRegistered || 'VAZIO — nenhum evento é entregue; clique em 🔄 Sincronizar'}
+                                {diag.orgInstance.subscribedEvents ? ` · eventos: ${diag.orgInstance.subscribedEvents}` : ''}
+                              </p>
+                            )}
                             {/* 17/09 — RECEBIMENTO: a URL registrada, o secret e o último hit.
                                 "Nunca recebeu" com sessão open = webhook não chega (use Sincronizar). */}
                             {diag.webhook && (

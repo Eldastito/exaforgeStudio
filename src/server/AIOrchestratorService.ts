@@ -912,6 +912,17 @@ REGRAS DURAS (o sistema executa, você só convida):
   }
 
   /**
+   * Gate determinístico do canal admin: gestor autorizado + prefixo "zap"
+   * (a MESMA regra do processMessage — nunca inferência de linguagem natural).
+   * Usado pelo webhook para NÃO desviar um comando do Zapp pro menu de áreas
+   * de atendimento (senão o menu engole o comando em conversa nova).
+   */
+  static isZappCommand(orgId: string, senderId: string, text: string): boolean {
+    if (!String(text || "").trim().toLowerCase().replace(/[^a-z]/g, "").startsWith("zap")) return false;
+    return !!this.findAuthorizedManager(senderId, orgId);
+  }
+
+  /**
    * Busca um gestor autorizado tolerando variações do número (9º dígito BR).
    */
   private static findAuthorizedManager(senderId: string, orgId: string): any {

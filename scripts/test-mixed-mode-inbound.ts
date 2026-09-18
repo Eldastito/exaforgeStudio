@@ -1,13 +1,16 @@
 /**
- * TEST — F3.3b (RF-04 §10): fiação do modo misto no inbound.
+ * TEST — F3.3b (RF-04 §10) + decisão do dono (17/09/2026): fiação do modo
+ * misto no inbound SEM a pergunta "atendimento ou gestão?".
  *
- * Dirige o `processIncomingMessage` real (exportado) com tmp db + fetch stubado
- * + AIOrchestrator.processMessage neutralizado, num canal de ATENDIMENTO:
+ * A pergunta de escolha (§10.7) revelava a existência do canal de gestão a
+ * quem observa a conversa. Contrato NOVO:
  *  - flag OFF: gestor no número de atendimento → cria contato+ticket (0-regressão).
- *  - flag ON, sem ticket aberto, sem pendente → NÃO cria ticket, cria pendente,
- *    envia a pergunta "atendimento ou gestão?".
- *  - flag ON, resposta "2" (gestão) → roteia interno, sem ticket, limpa pendente.
- *  - flag ON, resposta "1" (atendimento) → cria ticket.
+ *  - flag ON, gestor SEM contexto → segue como CLIENTE (ticket criado), SEM
+ *    pendente e SEM pergunta — a IA nunca menciona "gestão".
+ *  - pendente LEGADO (criado antes do deploy) + mensagem comum → atendimento,
+ *    nenhuma pergunta reenviada.
+ *  - comando do Zapp (gestor autorizado + prefixo "zap") NÃO cai no menu de
+ *    áreas de atendimento — chega ao AIOrchestrator (Diretor IA responde).
  *  - flag ON, remetente DESCONHECIDO (cliente) → cria ticket (inalterado).
  *  - flag ON, gestor COM ticket aberto → segue atendimento (sem pendente).
  *
@@ -21,19 +24,24 @@ process.env.EVOLUTION_API_KEY = "k"; process.env.EVOLUTION_BASE_URL = "https://e
 let failures = 0; const results: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean) { results.push({ name, ok }); if (!ok) failures++; }
 
-let fetchCalls = 0;
+let fetchCalls = 0; const fetchBodies: string[] = [];
 function installFetch() {
-  (globalThis as any).fetch = async () => ({ ok: true, status: 200, text: async () => "{}", json: async () => ({ key: { id: "mid" } }), headers: { get: () => "application/json" } });
-  const orig = (globalThis as any).fetch;
-  (globalThis as any).fetch = async (...a: any[]) => { fetchCalls++; return orig(...a); };
+  (globalThis as any).fetch = async (_u: any, opts?: any) => {
+    fetchCalls++; fetchBodies.push(String(opts?.body || ""));
+    return { ok: true, status: 200, text: async () => "{}", json: async () => ({ key: { id: "mid" } }), headers: { get: () => "application/json" } };
+  };
 }
+// A pergunta suprimida — NENHUM envio pode conter este texto.
+const askedChoice = () => fetchBodies.some((b) => b.includes("para gest"));
 
 async function main() {
   const db = (await import("../src/server/db.js")).default;
   installFetch();
-  // Neutraliza o motor de atendimento (LLM) — o que provamos é a FIAÇÃO, não a IA.
+  // Neutraliza o motor de atendimento (LLM) e REGISTRA as chamadas — o que
+  // provamos é a FIAÇÃO (o Zapp CHEGAR ao Orquestrador), não a IA.
   const aiMod = await import("../src/server/AIOrchestratorService.js");
-  (aiMod.AIOrchestratorService as any).processMessage = async () => ({ handled: true });
+  const aiCalls: any[] = [];
+  (aiMod.AIOrchestratorService as any).processMessage = async (p: any) => { aiCalls.push(p); return { reply: "", actions: [], needsHuman: false }; };
   const { processIncomingMessage } = await import("../src/server/webhookProcessor.js");
   const { MixedModeInboundService } = await import("../src/server/MixedModeInboundService.js");
 
@@ -63,26 +71,35 @@ async function main() {
   await inbound(ch1, A, mgr, "quanto vendi hoje?");
   check("1.1 flag OFF: ticket criado pro gestor (0-regressão)", Number(ticketsFor(A, ch1.id, mgr).c) === 1);
 
-  // ── 2. Flag ON, sem contexto de cliente → ask_which (sem ticket) ──
+  // ── 2. Flag ON, gestor sem contexto → segue como CLIENTE, sem pergunta ──
   setFlag(A, 1);
   const ch2 = mkChannel(A);
-  fetchCalls = 0;
   await inbound(ch2, A, mgr, "e aí, como tá o caixa?");
-  check("2.1 flag ON: NÃO cria ticket no caso ambíguo", Number(ticketsFor(A, ch2.id, mgr).c) === 0);
-  check("2.2 criou pendente de escolha", MixedModeInboundService.hasPendingChoice(A, ch2.id, mgr) === true);
-  check("2.3 enviou a pergunta (fetch>0)", fetchCalls > 0);
+  check("2.1 flag ON: ticket criado (papel duplo default = atendimento)", Number(ticketsFor(A, ch2.id, mgr).c) === 1);
+  check("2.2 NÃO criou pendente de escolha", MixedModeInboundService.hasPendingChoice(A, ch2.id, mgr) === false);
+  check("2.3 NENHUM envio menciona a opção de gestão", askedChoice() === false);
 
-  // ── 3. Resposta "2" (gestão) → roteia interno, sem ticket, limpa pendente ──
-  await inbound(ch2, A, mgr, "2");
-  check("3.1 gestão: continua sem ticket", Number(ticketsFor(A, ch2.id, mgr).c) === 0);
-  check("3.2 pendente limpo", MixedModeInboundService.hasPendingChoice(A, ch2.id, mgr) === false);
+  // ── 3. Pendente LEGADO (pré-deploy) + mensagem comum → atendimento, sem repergunta ──
+  const ch3 = mkChannel(A);
+  MixedModeInboundService.setPending(A, ch3.id, mgr);
+  await inbound(ch3, A, mgr, "oi, tudo bem?");
+  check("3.1 pendente legado não repergunta: ticket criado", Number(ticketsFor(A, ch3.id, mgr).c) === 1);
+  check("3.2 nenhuma pergunta de escolha foi enviada", askedChoice() === false);
 
-  // ── 4. Resposta "1" (atendimento) → cria ticket ──
-  const ch4 = mkChannel(A);
-  await inbound(ch4, A, mgr, "oi"); // ask_which → pendente
-  await inbound(ch4, A, mgr, "1"); // escolhe atendimento
-  check("4.1 escolha atendimento → ticket criado", Number(ticketsFor(A, ch4.id, mgr).c) === 1);
-  check("4.2 pendente limpo após escolha", MixedModeInboundService.hasPendingChoice(A, ch4.id, mgr) === false);
+  // ── 4. Zapp fura o menu de áreas: comando chega ao Orquestrador ──
+  const zorg = `org_Z_${randomUUID().slice(0, 6)}`; mkOrg(zorg); setFlag(zorg, 1);
+  const zmgr = "5521999947477";
+  db.prepare(`INSERT INTO authorized_managers (id, organization_id, identifier, name) VALUES (?, ?, ?, 'Dono')`).run(randomUUID(), zorg, zmgr);
+  db.prepare(`INSERT INTO service_areas (id, organization_id, name, active, position) VALUES (?, ?, 'Vendas', 1, 0)`).run(randomUUID(), zorg);
+  db.prepare(`INSERT INTO service_areas (id, organization_id, name, active, position) VALUES (?, ?, 'Suporte', 1, 1)`).run(randomUUID(), zorg);
+  const chz = mkChannel(zorg);
+  // Controle: mensagem SEM prefixo cai no menu de áreas (IA não é chamada).
+  aiCalls.length = 0;
+  await inbound(chz, zorg, zmgr, "oi");
+  check("4.1 controle: sem prefixo, menu de áreas intercepta (IA não chamada)", aiCalls.length === 0);
+  // Comando do Zapp: fura o menu e chega ao Orquestrador.
+  await inbound(chz, zorg, zmgr, "Zapp, como estão as vendas hoje?");
+  check("4.2 'Zapp …' chega ao Orquestrador (não cai no menu de áreas)", aiCalls.length === 1 && String(aiCalls[0]?.message || "").startsWith("Zapp"));
 
   // ── 5. Flag ON, remetente DESCONHECIDO (cliente) → ticket (inalterado) ──
   const ch5 = mkChannel(A);
@@ -93,7 +110,6 @@ async function main() {
 
   // ── 6. Flag ON, gestor COM ticket aberto → segue atendimento (sem pendente) ──
   const ch6 = mkChannel(A);
-  // cria um ticket aberto pro gestor neste canal
   const cId = randomUUID();
   db.prepare(`INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, ?, 'Dono', ?)`).run(cId, A, ch6.id, mgr);
   db.prepare(`INSERT INTO tickets (id, organization_id, contact_id, status, stage, ai_paused) VALUES (?, ?, ?, 'open', 'novo_lead', 0)`).run(randomUUID(), A, cId);

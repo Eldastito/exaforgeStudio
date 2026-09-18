@@ -524,9 +524,14 @@ export async function processIncomingMessage(
        };
 
        // ÁREAS DE ATENDIMENTO: se a org tem 2+ áreas, roteia ANTES da IA.
+       // EXCEÇÃO: comando do Zapp (gestor autorizado + prefixo "zap") NÃO passa
+       // pelo menu de áreas — senão o menu engole o comando em conversa nova e
+       // o Diretor IA nunca responde. Gate determinístico, nunca NL.
        let areaPersona: string | undefined;
+       let isZappCmd = false;
+       try { isZappCmd = AIOrchestratorService.isZappCommand(orgId, payload.senderId, payload.text || ''); } catch { /* fail-open pro fluxo normal */ }
        const areas = AttendanceAreaService.activeAreas(orgId);
-       if (areas.length >= 2) {
+       if (areas.length >= 2 && !isZappCmd) {
          // Pedido de trocar de área. Se a mensagem já nomeia OUTRA área, pula
          // direto para ela; senão, volta ao menu para o cliente escolher.
          if (ticket.area_id && AttendanceAreaService.wantsSwitch(payload.text)) {

@@ -130,10 +130,18 @@ export class MixedModeInboundService {
 
     // 2) Sem pendente resolvido → roteador puro com o contexto de conversa.
     const hasCustomer = this.hasActiveCustomerContext(orgId, channel.id, senderId);
-    return MixedModeRouterService.route(orgId, senderId, {
+    const d = MixedModeRouterService.route(orgId, senderId, {
       channelKind: channel.kind,
       hasActiveCustomerContext: hasCustomer,
     });
+    // Decisão do dono (17/09/2026): a pergunta "atendimento ou gestão?" NUNCA
+    // é enviada — ela revela a existência do canal de gestão a quem observa a
+    // conversa (mesmo princípio anti-recon do Orquestrador). Papel duplo sem
+    // contexto claro segue como CLIENTE; gestão pelo número compartilhado é
+    // sempre via prefixo determinístico "Zapp" (resolvido pelo Orquestrador
+    // dentro do fluxo de atendimento).
+    if (d.lane === "ask_which") return { ...d, lane: "attendance", reason: "dual_role_defaults_to_attendance" };
+    return d;
   }
 }
 

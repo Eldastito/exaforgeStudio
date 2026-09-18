@@ -414,6 +414,22 @@ export class EvolutionService {
     // pelo sync de canais, que re-registra numa instância já pareada).
     const webhookReg = await this.registerWebhook(instanceName, activeToken, cfg);
 
+    // 1b. INV-07 (18/09/2026, caso real TOULON): "QR ausente em sessão conectada
+    // significa que pareamento não é necessário". O /instance/connect acima
+    // REVIVE o cliente no runtime do provedor; se as credenciais ainda valem,
+    // ele re-loga sozinho e o GetQr NUNCA vai ter QR (no fonte, GetQr numa
+    // sessão logada ainda REINICIA o cliente — insistir é nocivo). Então, antes
+    // de pedir QR, pergunta o estado real: já "open" → conectado, sem QR.
+    const liveState = async (): Promise<string> => {
+      try {
+        const all = await this.listInstances(cfg);
+        return all?.find((x) => x.name === instanceName)?.state || "";
+      } catch { return ""; }
+    };
+    if ((await liveState()) === "open") {
+      return { ok: true, state: "open", token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
+    }
+
     // 2. Pega QR — 3 variantes de endpoint testadas em ordem, primeira que
     // retornar base64 vence. Ordem escolhida por probabilidade em produção:
     //   a) `/instance/qr`         — Evolution GO (whatsmeow, evoapicloud) ★
@@ -440,6 +456,9 @@ export class EvolutionService {
     // do endpoint principal — o diagnóstico mostrava "404 page not found" e
     // escondia o 401/400 verdadeiro do /instance/qr.
     const qrErrors = new Map<string, string>();
+    // "session already logged in" no corpo do erro = a sessão re-logou no meio
+    // do fluxo (credencial válida) — não existe QR a esperar.
+    let alreadyLoggedIn = false;
     const qrEndpoints = [
       `${cfg.baseUrl}/instance/qr`,
       `${cfg.baseUrl}/api/v1/instance/qr`,
@@ -455,6 +474,7 @@ export class EvolutionService {
               const body = await qrResp.text();
               let msg = "";
               try { msg = String(JSON.parse(body)?.error || ""); } catch { msg = body; }
+              if (/already logged in/i.test(msg)) alreadyLoggedIn = true;
               if (msg) qrErrors.set(url.slice(cfg.baseUrl.length), `HTTP ${qrResp.status}: ${msg.slice(0, 160)}`);
             } catch { /* corpo ilegível — segue */ }
             continue;
@@ -482,6 +502,7 @@ export class EvolutionService {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 3000));
       qrBase64 = await tryFetchQr();
       if (passkeyStage) break; // passkey em andamento: QR não vai existir
+      if (alreadyLoggedIn) break; // sessão re-logou: QR não vai existir (INV-07)
     }
 
     // F1.3 (RF-02/INV-07/CA-02) — REMOVIDO o auto-heal destrutivo que antes,
@@ -511,6 +532,14 @@ export class EvolutionService {
           }
         }
       } catch { /* noop */ }
+    }
+
+    // INV-07: sem QR mas com sessão LOGADA no provedor = conectado — o caller
+    // marca o canal `connected` (mesmo tratamento do state "open" legacy).
+    // Confirma pelas duas fontes: o erro explícito do GetQr ("session already
+    // logged in") ou o estado vivo do /instance/all re-checado agora.
+    if (!qrBase64 && !passkeyStage && (alreadyLoggedIn || (await liveState()) === "open")) {
+      return { ok: true, state: "open", token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
     }
 
     if (state === "open") return { ok: true, state: "open", token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };

@@ -51,6 +51,36 @@ async function main() {
   // ── e o QR foi obtido pelo campo data.qrcode (minúsculo do GO) ──
   check("3.1 QR obtido (data.qrcode) → ok", r.ok === true && !!r.qrBase64 && r.qrBase64.includes("ZZZ"));
 
+  // ── 4. INV-07 (caso real 18/09): sessão JÁ LOGADA no provedor → "open", sem QR ──
+  // O /instance/connect revive o cliente; se a credencial vale, ele re-loga e
+  // GetQr nunca terá QR (e ainda REINICIA o cliente a cada chamada — nocivo).
+  // Pré-check no /instance/all: connected=true → devolve state "open" direto.
+  let qrCalls = 0;
+  (globalThis as any).fetch = async (url: string) => {
+    const u = String(url);
+    if (u.includes("/instance/all")) return jsonResp({ data: [{ name: "inst_name", id: "i1", token: "tok", connected: true }] });
+    if (u.includes("/instance/qr")) { qrCalls++; return jsonResp({}); }
+    return jsonResp({});
+  };
+  const r4 = await EvolutionService.connectAndGetQr("inst_name", "tok", CFG, "inst-1");
+  check("4.1 provedor 'open' antes do QR → ok + state open", r4.ok === true && r4.state === "open");
+  check("4.2 NÃO pede QR em sessão logada (GetQr reinicia o cliente)", qrCalls === 0);
+
+  // ── 5. "session already logged in" no meio do fluxo → "open" (sem 35s de retry) ──
+  (globalThis as any).fetch = async (url: string) => {
+    const u = String(url);
+    if (u.includes("/instance/all")) return jsonResp({ data: [{ name: "inst_name", id: "i1", token: "tok", connected: false }] });
+    if (u.includes("/instance/qr")) {
+      return { ok: false, status: 400, text: async () => JSON.stringify({ error: "session already logged in" }), json: async () => ({}), headers: { get: () => "application/json" } };
+    }
+    return jsonResp({});
+  };
+  const t5 = Date.now();
+  const r5 = await EvolutionService.connectAndGetQr("inst_name", "tok", CFG, "inst-1");
+  check("5.1 'already logged in' → ok + state open (não é falha de QR)", r5.ok === true && r5.state === "open");
+  check("5.2 corta o retry (não espera as 5 rodadas)", Date.now() - t5 < 10_000);
+  (globalThis as any).fetch = orig;
+
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name}`);
   console.log(`\n${failures === 0 ? "✅" : "❌"} evolution-connect-subscribe: ${passed}/${results.length} checks`);

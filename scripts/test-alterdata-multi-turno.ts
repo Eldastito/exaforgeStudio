@@ -86,6 +86,10 @@ async function main() {
       return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 100 }, { titulo: "Dinheiro", valor: 100 }] });
     }
     if (url.includes(`/ResumoFecharMovimento/1005/${hoje}/2`)) {
+      // Fiel à API real: na fase 1 o turno 2 AINDA NÃO FECHOU (resumo vazio) —
+      // a reconferência automática re-lê este endpoint no sync 1 e um mock que
+      // já respondesse o turno 2 completaria o dia cedo demais.
+      if (fase === 1) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 0 }] });
       return resp(200, { success: true, data: [
         { titulo: "Total de Vendas", valor: 2268.6 }, { titulo: "Dinheiro", valor: 700 }, { titulo: "PIX", valor: 389.7 }, { titulo: "Cartão", valor: 1178.9 },
       ] });

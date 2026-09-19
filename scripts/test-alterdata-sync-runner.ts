@@ -89,7 +89,11 @@ async function main() {
   const hoje = new Date().toISOString().slice(0, 10);
   __setAlterdataSyncHttpForTests(async (url: string) => {
     if (url.includes("/DataCaixa/versao/0")) return resp(200, { success: true, data: [{ data: `${hoje}T00:00:00`, filial: "1", turno: 1, finalizado2: 1, controleVersao: 900 }] }, {});
-    if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }, { titulo: "Cartão", valor: 2153.33 }, { titulo: "Sangria", valor: 50.0 }] }, {});
+    // Só o turno 1 de HOJE tem caixa; turno 2 e dias anteriores devolvem 0 —
+    // fiel à API real (a reconferência automática re-lê esses endpoints e um
+    // mock que respondesse igual pra tudo dobraria o dia).
+    if (url.includes(`/ResumoFecharMovimento/1/${hoje}/1`)) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 2253.33 }, { titulo: "Dinheiro", valor: 100.0 }, { titulo: "Cartão", valor: 2153.33 }, { titulo: "Sangria", valor: 50.0 }] }, {});
+    if (url.includes("/ResumoFecharMovimento/1/")) return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 0 }] }, {});
     // Fase 4: VendaMalote — venda a venda com a matrícula do vendedor (contrato
     // real: o item embrulha o registro em `caixa`).
     if (url.includes("/VendaMalote/versao/0")) return resp(200, { success: true, data: [{ caixa: { boleta: "010908", filial: "1", data: `${hoje}T00:00:00`, hora: "11:11", matricula: "10050015", usuario: "10660010", valor: 889.7, vendidas: 4, status: "N", dinheiro: 0, cartao: 0, creditoParcelado: 889.7 }, vendas: [{ item: 1, produto: "0822930941201", quantidade: 1, valor: 289.9, comissao: 5, vendedor: "10050026" }, { item: 2, produto: "0822930941202", quantidade: 3, valor: 599.8, comissao: 10, vendedor: "10050042" }], parcelasCartao: [{ numero: "000574", parcela: "1", seq: 1, codigoCartao: "05", valor: 296.57, liquido: 286.96, taxa: 3.24, vencimento: "2026-05-29T00:00:00" }, { numero: "000574", parcela: "2", seq: 2, codigoCartao: "05", valor: 296.57, liquido: 286.96, taxa: 3.24, vencimento: "2026-06-01T00:00:00" }], controleVersao: 950 }] }, {});

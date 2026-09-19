@@ -19,7 +19,11 @@ router.get("/status", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const o = db.prepare(`SELECT quickstart_applied, vertical FROM organization_settings WHERE organization_id = ?`).get(orgId) as any || {};
-    const pack = OnboardingTemplateService.availablePacks().find(p => p.vertical === (o.vertical || "outro"))
+    // 19/09/2026 — resolve alias (ex.: moda→varejo) ANTES do lookup: sem isso a
+    // org de moda caía no fallback "outro" (inexistente) → pack null → o card de
+    // Quick-Start nunca aparecia no Dashboard (achado do guia de implantação).
+    const wanted = OnboardingTemplateService.resolvePackVertical(o.vertical || "outro");
+    const pack = OnboardingTemplateService.availablePacks().find(p => p.vertical === wanted)
       || OnboardingTemplateService.availablePacks().find(p => p.vertical === "outro") || null;
     res.json({ applied: !!o.quickstart_applied, vertical: o.vertical || null, pack });
   } catch (e: any) { res.status(500).json({ error: e.message }); }

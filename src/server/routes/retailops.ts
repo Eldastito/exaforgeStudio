@@ -1938,6 +1938,12 @@ router.get("/seller-scoreboard", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const storeId = String(req.query.storeId || "");
   if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+  // 19/09/2026 — trava de loja (ADR-173) imposta AQUI também: o seletor da aba
+  // já filtrava, mas a API aceitava qualquer storeId da org — um gerente
+  // restrito que soubesse o id de outra loja lia o placar dela.
+  if (!RetailStoreScopeService.canAccessStore(orgId, req.user?.userId, req.user?.role, storeId)) {
+    return res.status(403).json({ error: "Sem permissão para esta loja." });
+  }
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
   try {
     const board = RetailCommissionRaceService.sellerPeriodScoreboard(orgId, storeId, date);
@@ -1957,6 +1963,10 @@ router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const storeId = String(req.query.storeId || "");
   if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+  // Trava de loja (ADR-173) — mesmo motivo do /seller-scoreboard acima.
+  if (!RetailStoreScopeService.canAccessStore(orgId, req.user?.userId, req.user?.role, storeId)) {
+    return res.status(403).json({ error: "Sem permissão para esta loja." });
+  }
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
   try { res.json(RetailCommissionRaceService.sellerGoalSignals(orgId, storeId, date)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }

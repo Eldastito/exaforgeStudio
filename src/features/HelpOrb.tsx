@@ -38,11 +38,14 @@ const VIEW_TO_MODULE: Record<string, string> = {
   saude: 'central_saude', diretor: 'diretor', vendas: 'vendas', retailfloor: 'retail_floor',
   compras: 'compras', agenda: 'agenda', catalog: 'catalogo', campanhas: 'campanhas',
   clinica: 'clinica', studio: 'estudio',
+  // 19/09/2026 — implantação varejo (artigos do Guia): Operação da Rede + Integrações.
+  retailops: 'retail', integrations: 'integracoes',
 };
 const MODULE_TO_VIEW: Record<string, string> = {
   central_saude: 'saude', diretor: 'diretor', vendas: 'vendas', retail_floor: 'retailfloor',
   compras: 'compras', agenda: 'agenda', catalogo: 'catalog', campanhas: 'campanhas',
   clinica: 'clinica', estudio: 'studio',
+  retail: 'retailops', integracoes: 'integrations',
   // superfícies de navegação ("onde fica…")
   hoje: 'saude', resultados: 'reports', empresa: 'settings',
 };

@@ -5129,7 +5129,7 @@ function ScheduleTab() {
   // Quantos escalados 'work' por dia — o denominador do "cota ÷ escalados".
   const workCount = (date: string) => Object.values(grid[date] || {}).filter(s => s === 'work').length;
 
-  if (!stores.length) return <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Cadastre as lojas na aba <strong>Comissão</strong> (botão “Nova loja”) pra montar a escala.</p>;
+  if (!stores.length) return <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Cadastre as lojas na aba <strong>Fechamento diário</strong> (botão “Nova loja”) pra montar a escala.</p>;
 
   return (
     <div>

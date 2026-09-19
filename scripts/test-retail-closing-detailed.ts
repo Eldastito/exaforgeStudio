@@ -120,6 +120,26 @@ async function main() {
   const salesAgain = db.prepare(`SELECT COUNT(*) n FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ?`).get(A, loja.id, DATE) as any;
   check("Re-sync substitui (não duplica): continuam 4 linhas", Number(salesAgain.n) === 4, `n=${salesAgain.n}`);
 
+  // ── 19/09/2026: linha de TOTAL ("Loja"/"TOTAL") no ranking NÃO vira vendedor ──
+  // (print da Av. Brasil: "Loja R$ 5.236,50" apareceu em Metas do vendedor —
+  // o gerente lançou a linha de total da folha e o sync gravava sem filtrar,
+  // dobrando a contagem em Metas/Comissão.)
+  RetailClosingService.submitDetailed(A, loja.id, DATE, {
+    credito: { Visa: 1379.30 }, debito: { Eletron: 469.80 },
+    ranking: [
+      { sellerName: "Rafaela", valor: 1199.40, atendimentos: 2, pecas: 3 },
+      { sellerName: "Loja", valor: 1849.10 },
+      { sellerName: "TOTAL GERAL", valor: 1849.10 },
+    ],
+  }, {}, "tester");
+  const syncedTot = RetailClosingService.syncRankingToSellerSales(A, c.id, "tester");
+  check("Linha 'Loja'/'TOTAL' filtrada: sync grava só a pessoa (1)", syncedTot === 1, `synced=${syncedTot}`);
+  const nomes = (db.prepare(`SELECT seller_name FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ? AND source = 'closing'`).all(A, loja.id, DATE) as any[]).map((r) => r.seller_name);
+  check("Nenhum 'Loja'/'TOTAL' em vendas por vendedor", nomes.length === 1 && nomes[0] === "Rafaela", JSON.stringify(nomes));
+  const { isRankingTotalLine } = await import("../src/server/RetailOpsService.js");
+  check("Filtro conservador: 'Lola' (nome real) passa", !isRankingTotalLine("Lola") && !isRankingTotalLine("Rafaela"));
+  check("Variações de total barradas (LOJA/total geral/Total Loja)", isRankingTotalLine("LOJA") && isRankingTotalLine(" total geral ") && isRankingTotalLine("Total Loja"));
+
   // ── Scan por foto com extração RICA (extrator injetável) ──────────────────
   const rich = {
     dinheiro: 0, pix: 0, credito: 1379.30, debito: 469.80, total: 1849.10,

@@ -647,6 +647,7 @@ export class RetailClosingService {
     try { details = JSON.parse(c.details_json || "null"); } catch { details = null; }
     const ranking: any[] = Array.isArray(details?.ranking) ? details.ranking : [];
     const sellers = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+    let inserted = 0, skippedTotal = 0;
     const tx = db.transaction(() => {
       // Sempre limpa e regrava (mesmo ranking vazio) — assim editar/limpar o
       // ranking reflete de imediato, sem linha fantasma sobrando.
@@ -657,13 +658,19 @@ export class RetailClosingService {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'closing', ?)`
       );
       for (const r of ranking) {
+        // 19/09/2026 (print da Av. Brasil: "Loja R$ 5.236,50" como vendedor) —
+        // a linha de TOTAL da folha ("LOJA"/"TOTAL") não é pessoa: o prompt do
+        // OCR já manda ignorá-la, mas o lançamento MANUAL/edição não filtrava e
+        // o total entrava como vendedor → dupla contagem em Metas/Comissão.
+        if (isRankingTotalLine(r.sellerName)) { skippedTotal++; continue; }
         const mat = resolveMatriculaByName(sellers, r.sellerName);
         ins.run(randomUUID(), orgId, c.store_id, c.closing_date, r.sellerName, mat, Number(r.valor) || 0, Number(r.pecas) || 0, Number(r.atendimentos) || 0, actorId || null);
+        inserted++;
       }
     });
     tx();
-    try { logAuthEvent(orgId, actorId || "system", closingId, "RETAIL_CLOSING_RANKING_SYNCED", { count: ranking.length, date: c.closing_date }); } catch { /* noop */ }
-    return ranking.length;
+    try { logAuthEvent(orgId, actorId || "system", closingId, "RETAIL_CLOSING_RANKING_SYNCED", { count: inserted, skippedTotal, date: c.closing_date }); } catch { /* noop */ }
+    return inserted;
   }
 }
 
@@ -674,6 +681,17 @@ export class RetailClosingService {
  * em ambiguidade (RN-SELL-1). Corrige o "a IA não pegou o vendedor" quando a
  * grafia manuscrita difere um pouco do cadastro (ex.: "Thamyres" vs "Tamires").
  */
+/**
+ * A linha é o TOTAL da folha, não uma pessoa? ("LOJA", "TOTAL", "TOTAL LOJA",
+ * "TOTAL GERAL" — variações de caixa/acento). Filtrada do ranking→vendas por
+ * vendedor: o total como "vendedor" dobra a contagem (print Av. Brasil, 19/09).
+ * Conservador: só rótulos inequívocos — um vendedor real chamado "Lola" passa.
+ */
+export function isRankingTotalLine(rawName: any): boolean {
+  const n = String(rawName || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  return n === "loja" || n === "total" || n === "total loja" || n === "total geral" || n === "loja total";
+}
+
 export function resolveMatriculaByName(sellers: Array<{ matricula: any; name: any }>, rawName: any): string | null {
   const norm = (s: any) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
   const target = norm(rawName);

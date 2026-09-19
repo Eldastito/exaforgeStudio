@@ -135,8 +135,11 @@ export class RetailReconciliationService {
     ).run(systemTotal, status, orgId, closing.id);
     // GANCHO de perda (ADR-114 Fatia 2): FALTA de caixa (informado < sistema)
     // vira lançamento automático de divergência. Sobra não é perda. Idempotente
-    // por fechamento (reimportar não duplica).
-    if (status === "divergent" && divergence !== null && divergence < 0) {
+    // por fechamento (reimportar não duplica). EXCETO informado source='pdv'
+    // (19/09/2026 — caso Toulon): esse informado é ESPELHO do próprio PDV, não
+    // uma gaveta contada — quando o TEF entra tarde e o sistema "engorda", a
+    // diferença é o espelho desatualizado, nunca dinheiro faltando.
+    if (status === "divergent" && divergence !== null && divergence < 0 && closing?.source !== "pdv") {
       try { LossMarginService.recordLossUnique(orgId, `retail_closing:${closing.id}`, { driver: "divergencia", amount: Math.abs(divergence), period: String(date).slice(0, 7), note: `falta no fechamento — ${opts.storeName || "PDV"} ${date}` }); } catch { /* noop */ }
     }
     return { informed, divergence, status };

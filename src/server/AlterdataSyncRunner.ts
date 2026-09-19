@@ -440,6 +440,10 @@ export class AlterdataSyncRunner {
       });
     }
 
+    // 5b) RECONFERÊNCIA automática dos últimos dias — best-effort, nunca
+    //     derruba o sync (throttle próprio dentro do método).
+    try { await AlterdataSyncRunner.recheckRecentClosings(orgId, ledger); } catch { /* noop */ }
+
     // 6) VENDAS DO PDV (módulo Sales — Fase 4): VendaMalote/versao é o stream
     //    venda a venda do caixa, com a MATRÍCULA do vendedor, valor, peças e
     //    formas de pagamento. Alimenta a comissão por vendedor e os rankings
@@ -946,6 +950,54 @@ export class AlterdataSyncRunner {
   }
 
   /**
+   * RECONFERÊNCIA automática dos últimos dias (caso Toulon 19/09/2026: a folha
+   * dizia R$ 5.476,80 e o sistema R$ 2.368,60 — os cartões/TEF entram no caixa
+   * da Alterdata HORAS depois do turno fechar). O delta do DataCaixa entrega
+   * cada turno UMA vez e não o revisita, então um dia lido cedo demais ficava
+   * com valor PARCIAL até alguém apertar "Recuperar fechamentos". Aqui o sync
+   * re-lê sozinho o resumo dos últimos RECHECK_DAYS das lojas com feed de PDV
+   * vivo, REUSANDO o backfill (mesma leitura por turno + merge idempotente do
+   * applyPdvTurnoTotals — valor igual reescreve o mesmo valor, valor novo
+   * substitui só o turno que mudou e a divergência é recalculada).
+   *
+   * Throttle próprio (cursor `_meta/lastRecheck`): o sync roda a cada ~15 min,
+   * mas a reconferência só a cada RECHECK_INTERVAL — senão seriam centenas de
+   * chamadas de resumo por dia sem necessidade (o TEF consolida em horas).
+   */
+  private static async recheckRecentClosings(orgId: string, ledger: LedgerRunHandle): Promise<void> {
+    const RECHECK_DAYS = 3;                       // hoje + 2 dias — janela em que o TEF ainda "engorda" o caixa
+    const RECHECK_INTERVAL_MS = 6 * 60 * 60_000;  // 4x/dia
+    const now = Date.now();
+    const last = Number(AlterdataConnectorService.getCursor(orgId, "_meta", "lastRecheck", "")) || 0;
+    if (now - last < RECHECK_INTERVAL_MS) return;
+    // Só lojas com PDV VIVO (fechamento com system_total recente): prova que o
+    // módulo Sales responde pra essa filial — org sem PDV não gasta 1 chamada.
+    const stores = db.prepare(
+      `SELECT DISTINCT s.code FROM retail_stores s
+         JOIN retail_daily_closings c ON c.organization_id = s.organization_id AND c.store_id = s.id
+        WHERE s.organization_id = ? AND s.active = 1 AND COALESCE(s.code, '') != ''
+          AND c.closing_date >= date('now', '-30 days') AND COALESCE(c.system_total, 0) > 0`
+    ).all(orgId) as Array<{ code: string }>;
+    if (!stores.length) return; // nada a reconferir — e o throttle não é consumido à toa
+    AlterdataConnectorService.setCursor(orgId, "_meta", "lastRecheck", "", String(now));
+    let applied = 0, errors = 0, fullFail = 0;
+    for (const s of stores) {
+      try {
+        const r = await AlterdataSyncRunner.backfillFilialClosings(orgId, String(s.code), RECHECK_DAYS);
+        applied += r.applied; errors += r.errors;
+        // Módulo fora do ar: toda chamada da loja falhou. Duas lojas seguidas
+        // assim → para de martelar; a próxima janela tenta de novo.
+        if (r.applied === 0 && r.errors >= RECHECK_DAYS * 2) { if (++fullFail >= 2) break; } else fullFail = 0;
+      } catch { errors++; }
+    }
+    ledger.record({
+      module: "sales", resource: "DataCaixa/Reconferencia", required: false,
+      status: applied > 0 ? "ready" : "empty_but_valid",
+      imported: applied, mappingErrors: errors,
+    });
+  }
+
+  /**
    * BACKFILL de FECHAMENTO por filial (RECUPERAÇÃO). O delta do DataCaixa é UM
    * stream global que começa em 2017 — uma loja cadastrada DEPOIS tem os caixas
    * recentes ATRÁS do cursor (nunca voltam num sync comum) e longe demais na
@@ -1007,7 +1059,16 @@ export class AlterdataSyncRunner {
         // gravado, sem abortar o backfill.
         try {
           const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
-          if (closing?.status === "pending" && Number(closing.informed_total || 0) === 0) {
+          const informedCents = Math.round(Number(closing?.informed_total || 0) * 100);
+          const fillEmpty = closing?.status === "pending" && informedCents === 0;
+          // 19/09/2026 (caso Toulon): informado que é ESPELHO do PDV
+          // (source='pdv', ainda não aprovado) ACOMPANHA o total novo quando o
+          // TEF entra tarde no caixa — aqui o dia inteiro foi relido, então
+          // total e formas estão completos. Informado humano (manual/OCR/
+          // WhatsApp) e fechamento aprovado NUNCA são tocados.
+          const refreshPdvMirror = closing?.source === "pdv" && closing?.status === "received"
+            && informedCents !== Math.round(totalR * 100);
+          if (fillEmpty || refreshPdvMirror) {
             RetailClosingService.setInformed(orgId, closing.id, {
               informedTotal: totalR,
               items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),

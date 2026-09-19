@@ -934,6 +934,26 @@ function AlterdataConnectorPanel() {
     }
   };
 
+  // RAIO-X DO DIA (caso Toulon "faltam R$ 3.108,10 de cartão"): linhas cruas do
+  // resumo do caixa (título→valor por turno) × soma das boletas do VendaMalote
+  // no banco × o que o fechamento gravou — responde SE o cartão está noutra
+  // linha do resumo ou se nem passou no caixa da Alterdata.
+  const [xrayBusy, setXrayBusy] = useState(false);
+  const [xray, setXray] = useState<any>(null);
+  const runXray = async () => {
+    const filial = window.prompt('Raio-X do dia — código da filial (ex.: 1082):', '');
+    if (filial == null || !filial.trim()) return;
+    const date = window.prompt('Data do dia (AAAA-MM-DD):', new Date().toISOString().slice(0, 10));
+    if (date == null || !/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) { if (date != null) toast.error('Data inválida (use AAAA-MM-DD).'); return; }
+    setXrayBusy(true);
+    try {
+      const res = await apiFetch('/api/integrations/alterdata/day-xray', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filial: filial.trim(), date: date.trim() }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok && d.ok) { setXray(d); toast.success('Raio-X pronto — veja o quadro abaixo.'); }
+      else toast.error(d.error || 'Falha no raio-x do dia.');
+    } catch { toast.error('Falha no raio-x do dia.'); } finally { setXrayBusy(false); }
+  };
+
   // Linha do tempo da filial: primeiro/último dia com venda de cada código —
   // pra provar uma passagem de bastão (código velho parou ↔ código novo começou).
   const [timelineBusy, setTimelineBusy] = useState(false);
@@ -1308,6 +1328,12 @@ function AlterdataConnectorPanel() {
           {timelineBusy ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
           Linha do tempo
         </Button>
+        {/* Raio-X do dia: quando o total do sistema no fechamento não bate com a
+            folha da loja — mostra as linhas cruas do resumo do caixa × boletas. */}
+        <Button onClick={runXray} disabled={xrayBusy || !st?.hasCredentials} className="zf-button zf-button-secondary" title={!st?.hasCredentials ? 'Salve as credenciais e teste a conexão primeiro' : 'Mostra as linhas cruas do resumo do caixa (título e valor, por turno) e a soma das boletas do dia — pra descobrir onde está o valor que falta quando o total do sistema não bate com a folha'}>
+          {xrayBusy ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
+          Raio-X do dia
+        </Button>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={!!st?.enabled} onChange={e => save({ enabled: e.target.checked })} disabled={saving} />
           Integração ativa
@@ -1388,6 +1414,37 @@ function AlterdataConnectorPanel() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Raio-X do dia: as linhas CRUAS do resumo do caixa × soma das boletas ×
+          o que o fechamento gravou — pra achar onde está o valor que falta. */}
+      {xray && (
+        <div className="mt-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs">
+          <div className="font-semibold text-cyan-200 mb-2">Raio-X do dia — filial {xray.filial} · {xray.date}</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Resumo do caixa (linhas cruas, por turno)</div>
+              {(xray.resumo || []).length === 0 && <p className="text-zinc-500">Nenhuma linha devolvida (caixa não fechado / dia sem movimento).</p>}
+              <div className="space-y-0.5">
+                {(xray.resumo || []).map((r: any, i: number) => (
+                  <div key={i} className={/total de vendas/i.test(r.titulo) ? 'text-cyan-200 font-semibold' : 'text-zinc-300'}>
+                    <span className="text-zinc-500">T{r.turno}</span> · {r.titulo || '(sem título)'}: {Number(r.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Boletas do dia (VendaMalote no banco)</div>
+              <p className="text-zinc-200">{xray.boletas?.count || 0} boleta(s) válidas · total <span className="font-semibold">{Number(xray.boletas?.total || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>{xray.boletas?.cancelled ? ` · ${xray.boletas.cancelled} cancelada(s)` : ''}</p>
+              {xray.closing && (
+                <p className="mt-2 text-zinc-400">Fechamento gravado: sistema {xray.closing.systemTotal != null ? Number(xray.closing.systemTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}
+                  {xray.closing.systemTurnos ? ` (turnos ${JSON.stringify(xray.closing.systemTurnos)})` : ''} · informado {xray.closing.informedTotal != null ? Number(xray.closing.informedTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'} · {xray.closing.status || '—'}</p>
+              )}
+              <p className="mt-2 text-[11px] text-zinc-500">Leitura: se as BOLETAS somam o valor da folha e o "Total de Vendas" do resumo vem menor, o valor que falta está em OUTRA linha do resumo (mande o print deste quadro). Se as boletas também vêm menores, as vendas não passaram no caixa da Alterdata — divergência real da operação.</p>
+            </div>
+          </div>
+          {Array.isArray(xray.errors) && xray.errors.length > 0 && <p className="mt-2 text-[11px] text-amber-300">{xray.errors.join(' · ')}</p>}
         </div>
       )}
 

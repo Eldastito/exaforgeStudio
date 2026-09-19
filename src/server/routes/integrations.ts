@@ -574,6 +574,22 @@ router.get("/alterdata/last-sync", (req: AuthRequest, res): any => {
   res.json({ ok: true, summary, lastError, backfill, timeline, running: AlterdataSyncRunner.isRunning(req.organizationId) });
 });
 
+// DIAGNÓSTICO: RAIO-X DO DIA (caso Toulon "faltam R$ 3.108,10 de cartão") —
+// linhas cruas do ResumoFecharMovimento (título→valor por turno) × soma das
+// boletas do VendaMalote no banco × o que o fechamento gravou. Read-only;
+// responde SE o cartão está noutra linha do resumo ou se nem passou no caixa.
+router.post("/alterdata/day-xray", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const filial = String(req.body?.filial || "").trim();
+    const date = String(req.body?.date || "").trim();
+    const xr = await AlterdataSyncRunner.dayXray(req.organizationId, filial, date);
+    res.json({ ok: true, ...xr });
+  } catch (e: any) {
+    res.status(502).json({ ok: false, error: e?.message || "Falha no raio-x do dia." });
+  }
+});
+
 // DIAGNÓSTICO: filiais que VENDEM no ERP mas NÃO têm loja cadastrada (órfãs) —
 // com a última data de movimento de cada uma. Uma órfã com movimento recente é
 // candidata a "pra onde uma loja migrou de código". Read-only. owner/admin.

@@ -828,6 +828,79 @@ export class AlterdataSyncRunner {
    * ficou muda em 10/08 e a loja pode ter seguido em outra filial). Read-only,
    * não grava, não lança (best-effort por filial). Isolado por org.
    */
+  /**
+   * RAIO-X DO DIA (19/09/2026 — caso Toulon "faltam R$ 3.108,10 de cartão"):
+   * a folha da loja fechou o dia em R$ 5.476,80, mas o "Total de Vendas" do
+   * ResumoFecharMovimento devolveu R$ 2.368,60 — a linha que usamos como
+   * system_total NÃO abrange todas as formas. Este diagnóstico mostra, lado a
+   * lado e SEM interpretar:
+   *  1. as linhas CRUAS do resumo do caixa (título → valor, por turno) — é
+   *     aqui que se enxerga em QUAL linha o cartão está (ou se não está);
+   *  2. a soma das BOLETAS do VendaMalote já sincronizadas no banco (a fonte
+   *     granular, venda a venda) — se ela bate com a folha, o PDV conhece as
+   *     vendas e o problema é a escolha da linha; se também vier menor, as
+   *     vendas não passaram no caixa da Alterdata (divergência REAL);
+   *  3. o que está gravado no fechamento (system_total/turnos/informado).
+   * Read-only; nada é gravado. A CORREÇÃO da derivação só entra com esse
+   * raio-x na mão (nunca chutar qual linha somar — RN: não inventa).
+   */
+  static async dayXray(orgId: string, filial: string, date: string): Promise<{
+    filial: string; date: string;
+    resumo: Array<{ turno: number; titulo: string; valor: number }>;
+    resumoTotais: Record<string, number>;
+    boletas: { count: number; cancelled: number; total: number; byBoleta: Array<{ boleta: string; valor: number; status: string | null }> };
+    closing: { systemTotal: number | null; systemTurnos: Record<string, number> | null; informedTotal: number | null; status: string | null } | null;
+    errors: string[];
+  }> {
+    const f = str(filial);
+    const d = String(date || "").slice(0, 10);
+    const out = {
+      filial: f, date: d,
+      resumo: [] as Array<{ turno: number; titulo: string; valor: number }>,
+      resumoTotais: {} as Record<string, number>,
+      boletas: { count: 0, cancelled: 0, total: 0, byBoleta: [] as Array<{ boleta: string; valor: number; status: string | null }> },
+      closing: null as any,
+      errors: [] as string[],
+    };
+    if (!f || !/^\d{4}-\d{2}-\d{2}$/.test(d)) { out.errors.push("filial e data (YYYY-MM-DD) são obrigatórias"); return out; }
+    // 1) Linhas CRUAS do resumo, turnos 1..3 (o 3º é raro; barato no diagnóstico).
+    for (const turno of [1, 2, 3]) {
+      try {
+        const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${d}/${turno}`);
+        for (const r of items as any[]) {
+          const titulo = String(r?.titulo || "").trim();
+          const valor = Math.round(Number(r?.valor || 0) * 100) / 100;
+          if (!titulo && !valor) continue;
+          out.resumo.push({ turno, titulo, valor });
+          const k = titulo.toLowerCase();
+          out.resumoTotais[k] = Math.round(((out.resumoTotais[k] || 0) + valor) * 100) / 100;
+        }
+      } catch (e: any) { out.errors.push(`turno ${turno}: ${String(e?.message || e).slice(0, 120)}`); }
+    }
+    // 2) Boletas do VendaMalote já no banco (fonte granular do MESMO dia).
+    const rows = db.prepare(
+      `SELECT boleta, valor, status FROM retail_pdv_sales WHERE organization_id = ? AND filial = ? AND sale_date = ? ORDER BY boleta`
+    ).all(orgId, f, d) as any[];
+    for (const r of rows) {
+      const cancelled = String(r.status || "N") === "C";
+      if (cancelled) { out.boletas.cancelled++; continue; }
+      out.boletas.count++;
+      out.boletas.total = Math.round((out.boletas.total + Number(r.valor || 0)) * 100) / 100;
+      if (out.boletas.byBoleta.length < 60) out.boletas.byBoleta.push({ boleta: String(r.boleta), valor: Math.round(Number(r.valor || 0) * 100) / 100, status: r.status || null });
+    }
+    // 3) O que está gravado no fechamento da loja correspondente.
+    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND (code = ? OR id = ?) AND active = 1 LIMIT 1`).get(orgId, f, f) as any;
+    if (store?.id) {
+      const c = db.prepare(`SELECT system_total, system_turnos_json, informed_total, status FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(orgId, store.id, d) as any;
+      if (c) {
+        let turnos: Record<string, number> | null = null;
+        try { turnos = JSON.parse(c.system_turnos_json || "null"); } catch { turnos = null; }
+        out.closing = { systemTotal: c.system_total != null ? Number(c.system_total) : null, systemTurnos: turnos, informedTotal: c.informed_total != null ? Number(c.informed_total) : null, status: c.status || null };
+      }
+    }
+    return out;
+  }
+
   static async orphanFiliaisReport(orgId: string): Promise<Array<{ filial: string; totalVenda: number; hasStore: boolean; storeName: string | null; lastMovement: string | null; lastFinalized: boolean | null }>> {
     type Row = { filial: string; totalVenda: number; hasStore: boolean; storeName: string | null; lastMovement: string | null; lastFinalized: boolean | null };
     const out: Row[] = [];

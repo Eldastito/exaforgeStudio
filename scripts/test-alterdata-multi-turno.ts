@@ -133,6 +133,21 @@ async function main() {
   const r5 = RetailReconciliationService.applyPdvTurnoTotals(A, storeA.id, hoje, {});
   check("5.1 informado = soma dos turnos → divergência ok", r5.status === "ok" && r5.divergence === 0, JSON.stringify(r5));
 
+  // ── 5b) RAIO-X DO DIA (2ª lacuna do caso Toulon: "faltam R$ 3.108,10 de
+  //     cartão"): linhas CRUAS do resumo + boletas do banco + fechamento. ──
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, status) VALUES (?, ?, '1005', 'B001', ?, 5376.8, 'N')`)
+    .run(randomUUID(), A, hoje);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, status) VALUES (?, ?, '1005', 'B002', ?, 100, 'N')`)
+    .run(randomUUID(), A, hoje);
+  db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, status) VALUES (?, ?, '1005', 'B003', ?, 999, 'C')`)
+    .run(randomUUID(), A, hoje);
+  const xr = await AlterdataSyncRunner.dayXray(A, "1005", hoje);
+  check("5b.1 raio-x traz as linhas CRUAS do resumo (títulos preservados)", xr.resumo.some((r: any) => r.titulo === "Total de Vendas" && r.turno === 1) && xr.resumo.some((r: any) => r.titulo === "PIX"), JSON.stringify(xr.resumoTotais));
+  check("5b.2 boletas do banco somadas SEM as canceladas (5.476,80)", xr.boletas.count === 2 && xr.boletas.cancelled === 1 && xr.boletas.total === 5476.8, JSON.stringify(xr.boletas));
+  check("5b.3 fechamento gravado exposto (sistema + turnos + informado)", xr.closing?.systemTotal === 2370 && xr.closing?.systemTurnos?.["1"] === 100, JSON.stringify(xr.closing));
+  const xrBad = await AlterdataSyncRunner.dayXray(A, "", "data-ruim");
+  check("5b.4 entrada inválida → erro honesto, nada consultado", xrBad.errors.length > 0 && xrBad.resumo.length === 0);
+
   // ── 6) Isolamento: outra org com o mesmo código não é tocada. ──
   const B = `org_${randomUUID().slice(0, 8)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'B', 'active')`).run(randomUUID(), B);

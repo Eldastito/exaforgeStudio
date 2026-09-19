@@ -547,6 +547,7 @@
     "test:retail-floor-kiosk": "tsx scripts/test-retail-floor-kiosk.ts",
     "test:implantacao-guiada": "tsx scripts/test-implantacao-guiada.ts",
     "test:retail-deposit-whatsapp": "tsx scripts/test-retail-deposit-whatsapp.ts",
+    "test:retail-setup-checklist": "tsx scripts/test-retail-setup-checklist.ts",
     "test:retail-floor-talao": "tsx scripts/test-retail-floor-talao.ts",
     "test:retail-floor-replenishment": "tsx scripts/test-retail-floor-replenishment.ts",
     "test:sicredi-cobranca": "tsx scripts/test-sicredi-cobranca.ts",

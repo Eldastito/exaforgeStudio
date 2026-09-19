@@ -639,7 +639,19 @@ Enquanto não substituir, a IA responde com honestidade em vez de inventar preç
   },
 ];
 
+// 19/09/2026 — verticais SEM pack próprio que reusam um pack irmão. Achado do
+// guia de implantação (TOULON): `moda` não tinha pack, o /status caía no
+// fallback `outro` (também inexistente) e o card de Quick-Start do Dashboard
+// NUNCA aparecia pra uma org de moda; aplicar lançava erro. Alias resolve sem
+// duplicar conteúdo (o pack de varejo serve moda — mesma operação de loja).
+const PACK_ALIASES: Record<string, string> = { moda: "varejo" };
+
 export class OnboardingTemplateService {
+  /** Resolve a vertical pro pack que a serve (alias → pack irmão). */
+  static resolvePackVertical(vertical: string): string {
+    return PACK_ALIASES[String(vertical || "")] || String(vertical || "");
+  }
+
   /** Lista os packs disponíveis (para a UI). */
   static availablePacks() {
     return PACKS.map(p => ({
@@ -664,7 +676,8 @@ export class OnboardingTemplateService {
     automations: { applied: number };
     faq: { created: number; skipped: number };
   }> {
-    const pack = PACKS.find(p => p.vertical === vertical);
+    const packVertical = this.resolvePackVertical(vertical);
+    const pack = PACKS.find(p => p.vertical === packVertical);
     if (!pack) throw new Error(`Vertical "${vertical}" não tem pack quick-start.`);
 
     const report = {

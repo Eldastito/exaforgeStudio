@@ -213,6 +213,140 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
     reviewedBy: "equipe_zapflow",
     sourceRef: "ADR-145",
   },
+  // ── Implantação Varejo/Moda (19/09/2026 — destilado do Guia de Implantação
+  // TOULON). O guia em documento é consulta única; estes artigos entregam a
+  // MESMA orientação dentro do produto, na tela onde a dúvida nasce. ──
+  {
+    id: "help_seed_retail_implantacao",
+    vertical: null,
+    module_key: "retail",
+    title: "Operação da Rede: por onde começar",
+    what: "A ordem certa de configuração da rede de lojas — os relatórios derivam dos cadastros, então a sequência importa.",
+    purpose: "Evitar telas zeradas ou 'erradas': quase todo problema de número vem de um cadastro-fundação pulado.",
+    steps: [
+      "1º Cadastre TODAS as lojas (aba Fechamento diário → 'Nova loja') com o CÓDIGO igual ao da filial no ERP.",
+      "2º Conecte o Alterdata (menu Integrações) e valide com o botão 'Filiais órfãs' — precisa dar ZERO.",
+      "3º Cadastre os vendedores (aba Vendedores da loja): matrícula do PDV + nome + loja.",
+      "4º Lance a escala da semana e as cotas (aba Escala & cotas).",
+      "5º Rode um dia completo: fechamento → aprovação → malote → depósito.",
+    ],
+    commonErrors: [
+      "Cadastrar loja depois do 1º sync: o histórico não volta sozinho — use 'Recuperar fechamentos' em Integrações.",
+      "Pular a validação de 'Filiais órfãs': o sync parece ok mas descarta filiais em silêncio.",
+    ],
+    keywords: "implantacao configurar comecar ordem rede lojas passo sequencia",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
+  {
+    id: "help_seed_retail_loja_codigo",
+    vertical: null,
+    module_key: "retail",
+    title: "Cadastro de loja e o código da filial",
+    what: "O código da loja é a chave que casa a loja com a filial do ERP/PDV — o campo mais importante da rede.",
+    purpose: "Sem o código certo, o PDV da filial inteira é descartado e Metas/Resultado aparecem zerados.",
+    steps: [
+      "Abra Operação da Rede → aba Fechamento diário → 'Nova loja' (ou edite a loja existente).",
+      "No campo Código, use EXATAMENTE o código da filial no ERP (ex.: 1005).",
+      "Preencha o WhatsApp da loja (recebe cobranças e envia o fechamento por foto).",
+      "Preencha a margem bruta média e os custos — sem eles o Resultado por loja não calcula lucro.",
+      "Se o ERP migrar o código da filial, EDITE o campo no mesmo dia (não exclua/recrie a loja).",
+    ],
+    commonErrors: [
+      "Metas do vendedor zerada numa loja só: quase sempre é código da filial errado — confira em Integrações → 'Filiais órfãs'.",
+      "Excluir e recriar a loja por erro de código: cria órfãos de escala/malote; o certo é EDITAR o código.",
+    ],
+    keywords: "loja filial codigo cadastro nova loja erp pdv zerado zerada",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
+  {
+    id: "help_seed_retail_matricula",
+    vertical: null,
+    module_key: "retail",
+    title: "Vendedores: matrícula e lotação",
+    what: "Cada vendedor casa com o PDV pela matrícula (o código dele no caixa). Nome + lotação completam o cadastro.",
+    purpose: "Comissão e Metas por pessoa: matrícula sem nome vira 'Matrícula NNNN' e vendedor sem lotação some da escala.",
+    steps: [
+      "Abra Operação da Rede → aba Vendedores da loja.",
+      "Cadastre matrícula (código do vendedor no PDV) + nome + loja de lotação.",
+      "Zere a seção 'Matrículas sem nome — pendência' (botão 'Dar nome').",
+      "Se a loja usa UM código compartilhado pra equipe toda: edite a loja e marque 'Comissão por vendedor vem de → Lançamento manual' — o gestor passa a lançar o ranking no fechamento.",
+    ],
+    commonErrors: [
+      "Loja marcada 'Lançamento manual' sem o gestor lançar o ranking: Metas fica zerada por design.",
+      "Vendedor cadastrado mas sem lotação: não aparece na grade da Escala nem nas cotas.",
+    ],
+    keywords: "vendedor matricula lotacao dar nome codigo compartilhado ranking manual",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
+  {
+    id: "help_seed_retail_escala_cotas",
+    vertical: null,
+    module_key: "retail",
+    title: "Escala & cotas: a régua das metas",
+    what: "A escala define quem trabalha em cada dia; a cota define a meta. Juntas são a régua de Metas do vendedor e da comissão.",
+    purpose: "Sem escala e sem cota, Metas mostra 'sem cota cadastrada' e nenhum prêmio condicionado à meta sai.",
+    steps: [
+      "Abra Operação da Rede → aba Escala & cotas.",
+      "Lance a escala da semana (clique cicla trabalha/folga) — ou copie da semana anterior, ou importe por foto.",
+      "Use 'Cota mensal da loja → dividir por semana' (a escala precisa estar lançada ANTES).",
+      "Preencha as cotas semanais por vendedor e clique 'Salvar cotas'.",
+    ],
+    commonErrors: [
+      "Dividir a cota mensal antes de lançar a escala: semana sem escala conta todos os dias e divide errado.",
+      "Estranhar o calendário: as semanas fecham no sábado e nunca atravessam a virada do mês.",
+    ],
+    keywords: "escala cota cotas meta metas semana dividir folga trabalha regua",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
+  {
+    id: "help_seed_retail_malote",
+    vertical: null,
+    module_key: "retail",
+    title: "Malote e depósitos: o 'Em caixa'",
+    what: "O malote é o dinheiro do fechamento com as despesas já descontadas (dinheiro − despesas). O 'Em caixa (a depositar)' é o que ainda não foi depositado.",
+    purpose: "Conferir que o dinheiro que entrou virou depósito no banco — o saldo só zera quando os depósitos são REGISTRADOS.",
+    steps: [
+      "O dinheiro do dia entra sozinho pelo fechamento diário (campo R$ dinheiro − despesas).",
+      "Registre CADA depósito: pela tela (Malote / Depósitos → 'Registrar depósito', a IA lê a foto do comprovante) ou pelo WhatsApp da loja (foto do comprovante com a palavra 'depósito' na legenda).",
+      "Feche a semana ('Fechar semana') pra travar os dias conferidos.",
+    ],
+    commonErrors: [
+      "'Em caixa' gigante/parecendo errado: quase sempre é depósito feito no banco mas NUNCA registrado no sistema — o saldo acumula desde o início.",
+      "Mandar o comprovante no WhatsApp sem a palavra 'depósito': o bot não reconhece a intenção e não registra.",
+    ],
+    keywords: "malote deposito depositos em caixa comprovante depositar saldo banco",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
+  {
+    id: "help_seed_alterdata_validacao",
+    vertical: null,
+    module_key: "integracoes",
+    title: "Alterdata: conectar e validar (filiais órfãs)",
+    what: "A integração que traz produto, estoque, preço e vendas do ERP — com um ritual de validação antes de confiar nos números.",
+    purpose: "Um sync 'funcionando' ainda pode descartar filiais em silêncio; a validação prova que tudo está casando.",
+    steps: [
+      "Em Integrações → ERP Alterdata: preencha Rede, Filiais, Ambiente (Homologação no início), Client ID/Secret.",
+      "Sequência de botões: Salvar → Testar conexão → Testar módulos → Sincronizar agora.",
+      "Clique 'Filiais órfãs': se aparecer QUALQUER filial, corrija o código da loja correspondente antes de seguir.",
+      "Cadastrou loja depois do sync? Use 'Recuperar fechamentos' (90 dias) ou 'Ressincronizar do zero'.",
+      "Só com órfãs zeradas: ligue 'Integração ativa'.",
+    ],
+    commonErrors: [
+      "Confiar nos relatórios com filial órfã aberta: os números ficam parciais sem nenhum aviso nas telas.",
+      "Ligar 'Importar clientes do PDV' sem registrar a aprovação LGPD: a promoção pra produção é bloqueada.",
+    ],
+    // "integracao" de propósito FORA dos keywords (peso 3): sozinho ele casaria
+    // qualquer pergunta genérica de integração (RN-HELP-1 — artigo plausível-
+    // porém-errado). O termo segue no corpo (peso 1); os específicos decidem.
+    keywords: "alterdata erp sincronizar filiais orfas conectar modaup token",
+    reviewedBy: "equipe_zapflow",
+    sourceRef: "Guia de Implantação Varejo Moda",
+  },
 ];
 
 let _seeded = false;

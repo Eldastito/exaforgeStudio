@@ -55,6 +55,39 @@ export class RetailWhatsAppIntakeService {
     const date = payload.date || BusinessTimeService.businessDate(orgId, now);
     const text = String(payload.text || "");
 
+    // 0a) COMPROVANTE DE DEPÓSITO (pedido do dono, 19/09/2026): a gerente manda a
+    // foto do comprovante (legenda com "depósito"/"comprovante") ou o valor em
+    // texto ("depositei 1.500") → registra no malote (`retail_cash_deposits`) e o
+    // card "DEPOSITADO"/"EM CAIXA" passa a refletir a realidade. VEM ANTES do
+    // fluxo de fechamento: sem este gate, a foto do comprovante cairia no OCR da
+    // folha e viraria fechamento errado. Intenção EXPLÍCITA obrigatória (não
+    // sequestra conversa); ilegível → orienta, nunca inventa (RetailCashDeposit-
+    // Service.submitFromWhatsApp: dedupe anti-conta-dupla + semana fechada trava).
+    if (hasDepositIntent(text)) {
+      const { RetailCashDepositService } = await import("./RetailCashDepositService.js");
+      const amountInText = parseDepositAmount(text);
+      if (payload.imageBase64 || amountInText != null) {
+        const res = await RetailCashDepositService.submitFromWhatsApp(orgId, store.id, {
+          imageBase64: payload.imageBase64, imageMime: payload.imageMime,
+          amountOverride: amountInText, fallbackDate: date,
+          senderId: payload.senderId, contactId: payload.contactId || null,
+        });
+        try { logAuthEvent(orgId, "system", store.id, "RETAIL_DEPOSIT_WHATSAPP", { date, status: res.status, amount: res.amount }); } catch { /* noop */ }
+        if (res.status === "registered") {
+          return { reply: `✅ Depósito de *${brl(res.amount!)}* registrado pra loja *${store.name}* (${brDate(res.date!)})${payload.imageBase64 ? " com o comprovante anexado" : ""}. Já aparece no Malote/Depósitos. 🙌` };
+        }
+        if (res.status === "duplicate") {
+          return { reply: `Esse depósito de *${brl(res.amount!)}* em ${brDate(res.date!)} já estava registrado pra loja *${store.name}* — não registrei de novo pra não contar em dobro. 👍` };
+        }
+        if (res.status === "week_closed") {
+          return { reply: `A semana de ${brDate(res.date!)} já foi *fechada* no malote da loja *${store.name}* — peça pro dono/admin reabrir a semana pra lançar este depósito de ${brl(res.amount!)}.` };
+        }
+        return { reply: `Recebi o comprovante da loja *${store.name}*, mas *não consegui ler o valor*. Me manda o valor em texto (ex.: "depósito 1.179,75") que eu registro — não vou chutar. 🙏` };
+      }
+      // Falou de depósito sem foto nem valor → orienta.
+      return { reply: `Pra registrar o depósito da loja *${store.name}*, me manda a *foto do comprovante* (com a palavra "depósito" na legenda) ou o valor em texto (ex.: "depósito 1.179,75"). 🙏` };
+    }
+
     // 0) BAIXA de MALOTE / ESCALA por confirmação (ADR-108): a pessoa responde
     // "malote enviado" / "escala ok" e a pendência recebe baixa (a cobrança para).
     // Cobre o caso de foto com legenda (ex.: manda a foto do malote escrevendo
@@ -265,6 +298,35 @@ export function hasClosingIntent(text: string): boolean {
   if (/\btotal\s+(do\s+dia|de\s+hoje|vendid)/.test(t)) return true;
   if (/\bvend(a|as|emos|i|eu)\b/.test(t) && /\b(dia|hoje)\b/.test(t)) return true;
   return false;
+}
+
+/**
+ * INTENÇÃO explícita de DEPÓSITO (gate da ingestão do comprovante). Exige a
+ * palavra da família "depósito/depositar/depositei" ou "comprovante" — foto de
+ * fechamento ou conversa comum nunca cai aqui. "Malote enviado" NÃO é depósito
+ * (é a pendência de logística do ADR-108, fluxo próprio).
+ */
+export function hasDepositIntent(text: string): boolean {
+  const t = stripAccents(String(text || "").toLowerCase());
+  return /\bdeposit(o|os|ar|ei|ou|ado|amos)?\b/.test(t) || /\bcomprovante/.test(t);
+}
+
+/**
+ * Valor do depósito numa FRASE ("depositei 1.500,00", "depósito de R$ 1179,75").
+ * Remove o vocabulário de depósito e reusa o parser BR estrito — se sobrar algo
+ * que não é essencialmente um número, devolve null (não chuta).
+ */
+export function parseDepositAmount(text: string): number | null {
+  const cleaned = stripAccents(String(text || "").toLowerCase())
+    .replace(/\b(deposito|depositos|depositar|depositei|depositou|depositado|depositamos|comprovante|banco|conta|segue|do|da|no|na|em|ontem|hoje)\b/g, " ");
+  const v = parseBrlAmount(cleaned);
+  return v != null && v > 0 ? v : null;
+}
+
+/** '2026-09-15' → '15/09'. */
+function brDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  return m ? `${m[3]}/${m[2]}` : String(iso || "");
 }
 
 /**

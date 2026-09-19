@@ -358,11 +358,16 @@ export class AlterdataSyncRunner {
       // com o total e as formas de pagamento do PDV — a loja não digita nada.
       // Quem informou manualmente antes continua valendo (supervisionado).
       const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
-      const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "outros": "outros" };
+      const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "pix": "pix", "outros": "outros" };
       for (const g of groups.values()) {
         const storeId = storeIdFor(g.filial);
         if (!storeId) { caixas.skippedNoStore++; continue; }
-        let total = 0;
+        // 19/09/2026 (caso Toulon "R$ 100 sumiram do dia") — total POR TURNO,
+        // não somado aqui: o delta só traz os turnos fechados DESDE o último
+        // sync; quando o turno 1 fecha de manhã e o 2 à noite, este loop via só
+        // um deles por rodada e o total do dia era SOBRESCRITO com o subset.
+        // O merge por turno (applyPdvTurnoTotals) soma o dia inteiro sempre.
+        const turnoTotals: Record<string, number> = {};
         let got = false;
         const pay = new Map<string, number>();
         for (const turno of g.turnos) {
@@ -371,7 +376,7 @@ export class AlterdataSyncRunner {
             for (const r of items as any[]) {
               const titulo = String(r?.titulo || "").trim().toLowerCase();
               const valor = Number(r?.valor || 0);
-              if (titulo === "total de vendas") { total += valor; got = true; }
+              if (titulo === "total de vendas") { turnoTotals[String(turno)] = (turnoTotals[String(turno)] || 0) + valor; got = true; }
               else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
             }
           } catch (e: any) {
@@ -386,7 +391,8 @@ export class AlterdataSyncRunner {
           }
         }
         if (!got) continue;
-        const totalR = Math.round(total * 100) / 100;
+        const applied = RetailReconciliationService.applyPdvTurnoTotals(orgId, storeId, g.date, turnoTotals);
+        const totalR = applied.mergedTotal; // dia INTEIRO (todos os turnos já vistos)
         if (autoClosing && totalR > 0) {
           const closing = RetailClosingService.getOrCreate(orgId, storeId, g.date);
           if (closing?.status === "pending" && Number(closing.informed_total || 0) === 0) {
@@ -395,9 +401,11 @@ export class AlterdataSyncRunner {
               items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),
               source: "pdv",
             });
+            // A divergência foi calculada ANTES do preenchimento (informado era
+            // 0 → not_checked); recalcula agora que o informado existe.
+            RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, totalR);
           }
         }
-        RetailReconciliationService.applyPdvTotal(orgId, storeId, g.date, totalR);
         caixas.applied++;
       }
 
@@ -894,27 +902,30 @@ export class AlterdataSyncRunner {
     out.storeId = storeId;
     out.storeName = store?.name || null;
     const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
-    const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "outros": "outros" };
+    const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "pix": "pix", "outros": "outros" };
     for (let i = 0; i < days; i++) {
       const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-      let total = 0;
+      // 19/09/2026 — POR TURNO (mesma correção do delta): o backfill consulta os
+      // dois turnos do dia de uma vez, então já somava certo; gravar por turno
+      // (applyPdvTurnoTotals) o torna a FERRAMENTA DE REPARO dos dias que o
+      // delta gravou pela metade (turno perdido) — reescreve as duas chaves.
+      const turnoTotals: Record<string, number> = {};
       let got = false;
       const pay = new Map<string, number>();
-      // Soma os TURNOS (raro ter 2º, mas existe). Turno inexistente devolve 0 /
-      // erro → tratado como sem dado, sem derrubar a varredura.
+      // Turno inexistente devolve 0 / erro → sem dado, sem derrubar a varredura.
       for (const turno of [1, 2]) {
         try {
           const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${date}/${turno}`);
           for (const r of items as any[]) {
             const titulo = String(r?.titulo || "").trim().toLowerCase();
             const valor = Number(r?.valor || 0);
-            if (titulo === "total de vendas") { total += valor; if (valor > 0) got = true; }
+            if (titulo === "total de vendas") { turnoTotals[String(turno)] = (turnoTotals[String(turno)] || 0) + valor; if (valor > 0) got = true; }
             else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
           }
         } catch { out.errors++; }
       }
       if (!got) continue; // dia sem caixa fechado (total 0) → não inventa fechamento
-      const totalR = Math.round(total * 100) / 100;
+      const totalR = Math.round(Object.values(turnoTotals).reduce((a, v) => a + Number(v || 0), 0) * 100) / 100;
       if (totalR <= 0) continue;
       if (autoClosing) {
         // Preenche o fechamento pendente com o PDV (loja não digita). Quem já
@@ -932,7 +943,9 @@ export class AlterdataSyncRunner {
           }
         } catch { /* folga geral etc — system_total ainda é aplicado abaixo */ }
       }
-      RetailReconciliationService.applyPdvTotal(orgId, storeId, date, totalR);
+      // Por turno: além de somar o dia inteiro, REESCREVE as chaves de turno —
+      // repara dias que o delta gravou pela metade (turno perdido).
+      RetailReconciliationService.applyPdvTurnoTotals(orgId, storeId, date, turnoTotals);
       if (out.sample.length < 5) out.sample.push({ date, total: totalR }); // amostra p/ cruzar com a grade
       out.applied++;
     }

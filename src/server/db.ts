@@ -11760,6 +11760,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE products_services ADD COLUMN reference TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN reference_from_barcode INTEGER DEFAULT 0`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_products_org_reference ON products_services (organization_id, reference)`); } catch(e){}
+  // Multi-TURNO do DataCaixa (19/09/2026, caso Toulon "R$ 100 sumiram do dia"):
+  // o delta traz cada turno fechado UMA vez; quando os turnos do dia fecham em
+  // syncs diferentes, o system_total era SOBRESCRITO com o subset do último
+  // delta (só o turno 2). Guarda o total POR TURNO ({"1":100,"2":2268.6}) pra
+  // somar sempre o dia INTEIRO. Aditivo; NULL = comportamento antigo.
+  try { db.exec(`ALTER TABLE retail_daily_closings ADD COLUMN system_turnos_json TEXT`); } catch(e){}
 };
 
 initDb();

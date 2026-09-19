@@ -143,6 +143,35 @@ export class RetailReconciliationService {
   }
 
   /**
+   * Total do PDV POR TURNO, com MERGE (19/09/2026 — caso Toulon "R$ 100
+   * sumiram"): o delta do DataCaixa entrega cada turno fechado UMA vez; quando
+   * os turnos do dia fecham em syncs diferentes, o `applyPdvTotal` cru
+   * SOBRESCREVIA o system_total com o subset do último delta (ex.: turno 1 de
+   * R$ 100 fechado de manhã, turno 2 de R$ 2.268,60 à noite → tela mostrava
+   * 2.268,60 e "sumiam" os R$ 100). Aqui cada turno é gravado na sua chave
+   * (`system_turnos_json`) e o system_total vira a SOMA de todos os turnos já
+   * vistos do dia. Reenvio do mesmo turno (caixa reaberto e refechado)
+   * substitui só aquele turno — idempotente e auto-corretivo.
+   */
+  static applyPdvTurnoTotals(orgId: string, storeId: string, date: string, turnoTotals: Record<string, number>, opts: { toleranceBRL?: number; storeName?: string } = {}): { informed: number; divergence: number | null; status: string | null; mergedTotal: number; turnos: Record<string, number> } {
+    const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
+    let existing: Record<string, number> = {};
+    try { const p = JSON.parse(closing?.system_turnos_json || "{}"); if (p && typeof p === "object") existing = p; } catch { existing = {}; }
+    const merged: Record<string, number> = { ...existing };
+    for (const [t, v] of Object.entries(turnoTotals || {})) {
+      const val = Math.round(Number(v || 0) * 100) / 100;
+      if (val > 0) merged[String(t)] = val;
+    }
+    const mergedTotal = Math.round(Object.values(merged).reduce((a, v) => a + Number(v || 0), 0) * 100) / 100;
+    try {
+      db.prepare(`UPDATE retail_daily_closings SET system_turnos_json = ? WHERE organization_id = ? AND id = ?`)
+        .run(JSON.stringify(merged), orgId, closing.id);
+    } catch { /* coluna aditiva pode faltar em fluxo atípico — o total ainda vale */ }
+    const res = this.applyPdvTotal(orgId, storeId, date, mergedTotal, opts);
+    return { ...res, mergedTotal, turnos: merged };
+  }
+
+  /**
    * Painel de conciliação do MÊS ('YYYY-MM'): os fechamentos já conciliados
    * (com system_total do Alterdata) — informado × sistema × divergência — e um
    * resumo. `onlyDivergent` filtra só as divergências. Isolado por org.

@@ -21,11 +21,19 @@
  *  - **Isolamento multi-tenant** — toda query filtra organization_id + store_id.
  */
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { validateImageBase64 } from "./mediaValidation.js";
 
 const r2 = (x: any) => Math.round((Number(x) || 0) * 100) / 100;
 const isDate = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+
+// OCR do comprovante injetável (teste offline) — espelha __setClosingExtractorForTests.
+type DepositExtractor = (base64: string, mimetype: string) => Promise<string>;
+let _depositExtractor: DepositExtractor | null = null;
+export function __setDepositExtractorForTests(fn: DepositExtractor | null): void { _depositExtractor = fn; }
 
 export class RetailCashDepositService {
   /**
@@ -211,6 +219,71 @@ export class RetailCashDepositService {
       actorId || null);
     try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_DEPOSIT", { date: input.date, amount }); } catch { /* noop */ }
     return db.prepare(`SELECT * FROM retail_cash_deposits WHERE id = ?`).get(id);
+  }
+
+  /**
+   * Ingestão do comprovante pelo WHATSAPP (pedido do dono, 19/09/2026 — "eles
+   * fazem depósito e mandam comprovante, tinha que aparecer aqui"). A gerente
+   * manda a FOTO do comprovante com legenda de depósito → OCR (o MESMO
+   * `extractDepositFromImage` do scan da tela) lê valor+data → registra via
+   * `registerDeposit` (invariantes preservadas: valor>0, semana fechada trava).
+   * Guardrails:
+   *  - NUNCA inventa: valor ilegível → não registra (retorna `unreadable`;
+   *    o caller orienta a mandar o valor em texto);
+   *  - DEDUPE anti-conta-dupla: mesmo (loja, data, valor) já registrado →
+   *    `duplicate` (reenvio do mesmo comprovante não dobra o depositado);
+   *  - comprovante salvo em /media (mesmo storage do scan da tela) best-effort;
+   *  - `amountOverride` cobre o caminho TEXTO ("depositei 1.500") sem foto.
+   */
+  static async submitFromWhatsApp(orgId: string, storeId: string, input: {
+    imageBase64?: string; imageMime?: string; amountOverride?: number | null;
+    fallbackDate: string; senderId: string; contactId?: string | null;
+  }): Promise<{ status: "registered" | "duplicate" | "unreadable" | "week_closed"; deposit?: any; amount?: number; date?: string }> {
+    let amount: number | null = input.amountOverride ?? null;
+    let date: string = input.fallbackDate;
+    let receiptUrl: string | null = null;
+
+    if (input.imageBase64) {
+      // Salva o comprovante (best-effort; conteúdo validado por magic bytes).
+      try {
+        const v = validateImageBase64(input.imageBase64);
+        if (v) {
+          const dir = path.join(process.env.DATA_DIR || process.cwd(), "media");
+          fs.mkdirSync(dir, { recursive: true });
+          const name = `${randomUUID()}.${v.ext}`;
+          fs.writeFileSync(path.join(dir, name), v.buffer);
+          receiptUrl = `/media/${name}`;
+        }
+      } catch { /* sem foto salva, o depósito ainda pode ser registrado */ }
+      // OCR — valor e data do comprovante (não inventa: null quando ilegível).
+      if (amount == null) {
+        try {
+          const extractor = _depositExtractor || (async (b: string, m: string) => (await import("./llm.js")).extractDepositFromImage(b, m));
+          const parsed = JSON.parse((await extractor(input.imageBase64, input.imageMime || "image/jpeg")) || "{}");
+          const v = Number(parsed?.valor);
+          if (Number.isFinite(v) && v > 0) amount = r2(v);
+          if (isDate(parsed?.data)) date = String(parsed.data);
+        } catch { /* OCR falhou → unreadable abaixo */ }
+      }
+    }
+    if (!(Number(amount) > 0)) return { status: "unreadable" };
+
+    // Dedupe: o MESMO comprovante reenviado (loja+data+valor) não dobra o depositado.
+    const dup = db.prepare(
+      `SELECT id FROM retail_cash_deposits WHERE organization_id = ? AND store_id = ? AND deposit_date = ? AND amount = ? LIMIT 1`
+    ).get(orgId, storeId, date, r2(amount)) as any;
+    if (dup) return { status: "duplicate", amount: r2(amount!), date };
+
+    try {
+      const dep = this.registerDeposit(orgId, storeId, {
+        date, amount: Number(amount), receiptUrl,
+        notes: `via WhatsApp (${String(input.senderId || "").slice(0, 40)})`,
+      }, input.contactId || undefined);
+      return { status: "registered", deposit: dep, amount: r2(amount!), date };
+    } catch (e: any) {
+      if (e?.message === "week_closed") return { status: "week_closed", amount: r2(amount!), date };
+      throw e;
+    }
   }
 
   /** Anexa/atualiza a foto do comprovante de um depósito já registrado. */

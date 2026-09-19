@@ -138,6 +138,8 @@ export function HealthCenterView() {
 
         <TutorWhatsAppCard />
 
+        <SetupChecklistCard />
+
         {/* Índice de Sobrevivência (ADR-127) */}
         {idx && (() => {
           const f = STATUS_UI[idx.faixa] || STATUS_UI.atencao;
@@ -455,6 +457,72 @@ function HireSimulatorCard() {
 }
 
 // Tutor de Gestão no WhatsApp (ADR-131) — opt-in do resumo diário da manhã.
+// CHECKLIST VIVO de implantação da rede (19/09/2026 — Guia de Implantação
+// Varejo): o backend DERIVA por query o que falta na fundação (código de
+// filial, escala, cotas, depósito…) e este card mostra progresso + onde
+// resolver. Auto-gated: some quando o módulo retail está desligado, quando o
+// usuário não é gestor (403) ou quando está tudo completo — checklist pronto
+// não é notícia.
+function SetupChecklistCard() {
+  const setViewMode = useStore((s) => s.setViewMode);
+  const [data, setData] = useState<any | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/retailops/setup-checklist')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((x: any) => { if (x?.applicable) setData(x); })
+      .catch(() => {});
+  }, []);
+
+  if (!data || data.done >= data.total) return null;
+  const pending = data.items.filter((i: any) => i.status !== 'ok');
+  const shown = expanded ? pending : pending.slice(0, 3);
+  const pct = Math.round((data.done / Math.max(1, data.total)) * 100);
+
+  return (
+    <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <ClipboardList className="w-4 h-4 text-amber-300 shrink-0" />
+          <span className="text-sm font-medium text-zinc-100">Implantação da rede — {data.done} de {data.total} completos</span>
+        </div>
+        <span className="text-[11px] text-zinc-400">{pct}%</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+        <div className="h-full bg-amber-400/80" style={{ width: `${pct}%` }} />
+      </div>
+      <ul className="mt-3 space-y-2">
+        {shown.map((i: any) => (
+          <li key={i.id} className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[13px] text-zinc-100">
+                {i.status === 'todo'
+                  ? <X className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  : <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                {i.label}
+              </div>
+              {i.detail && <p className="mt-0.5 text-[12px] text-zinc-400">{i.detail}</p>}
+              <p className="mt-0.5 text-[11px] text-zinc-500">{i.impact}</p>
+            </div>
+            <button
+              onClick={() => setViewMode(i.action.view as ViewMode)}
+              className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-300 hover:text-white hover:border-zinc-500"
+            >
+              {i.action.label} <ArrowRight className="w-3 h-3" />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {pending.length > 3 && (
+        <button onClick={() => setExpanded((v) => !v)} className="mt-2 text-[11px] text-amber-300/80 hover:text-amber-200">
+          {expanded ? 'Mostrar menos' : `Mostrar todos (${pending.length})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function TutorWhatsAppCard() {
   const [cfg, setCfg] = useState<any | null>(null);
   const [phone, setPhone] = useState('');

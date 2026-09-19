@@ -512,6 +512,18 @@ const closingUpload = multer({
   },
 });
 
+// CHECKLIST VIVO de implantação (19/09/2026 — Guia de Implantação Varejo):
+// derivado por query, read-only; a Central de Saúde mostra o que falta e onde
+// resolver. Owner/admin: é o estado de CONFIGURAÇÃO da org inteira.
+router.get("/setup-checklist", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { RetailSetupChecklistService } = await import("../RetailSetupChecklistService.js");
+    res.json(RetailSetupChecklistService.checklist(orgId));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // --- Lojas ---
 router.get("/stores", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

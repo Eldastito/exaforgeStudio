@@ -68,6 +68,14 @@ export class ExecutiveQueryRouterService {
     const storeTerm = store?.name || this.extractStoreTerm(question);
 
     if (/\bmetas?\b/.test(ql)) return { tool: "metas_progresso", args: {} };
+    // F4: finanças / comissão / catálogo.
+    if (/(a\s*receber|receb[ií]ve|vencid|fiado)/.test(ql)) return { tool: "a_receber", args: {} };
+    if (/(caixa|saldo|quanto tenho em caixa|dinheiro em caixa|a pagar|financeiro)/.test(ql)) return { tool: "caixa_resumo", args: {} };
+    if (/(comiss[aã]o|comissoes|comiss[oõ]es)/.test(ql)) return { tool: "comissao_estimada", args: { period: period || "mes" } };
+    if (/(pre[çc]o|quanto custa|valor d[eoa]|catalogo|cat[aá]logo)/.test(ql)) {
+      const product = this.extractCatalogTerm(question);
+      if (product) return { tool: "catalogo_produto", args: { product } };
+    }
     if (/fechament/.test(ql) && /(pendente|divergen|status|enviou|enviaram|mandou|mandaram|faltou enviar|quem)/.test(ql)) {
       return { tool: "fechamentos_status", args: { date: period || "ontem" } };
     }
@@ -80,6 +88,15 @@ export class ExecutiveQueryRouterService {
       return { tool: "vendas_por_loja", args: { store: storeTerm, period: period || "ontem" } };
     }
     return null;
+  }
+
+  /** "preço da camisa polo" / "quanto custa o vestido" → termo do produto. */
+  private static extractCatalogTerm(question: string): string | undefined {
+    const q = norm(question);
+    const m = q.match(/(?:pre[çc]o|valor)\s+d[eoa]s?\s+(.+)/) || q.match(/quanto\s+custa\s+(?:o|a|os|as)?\s*(.+)/) || q.match(/cat[aá]logo\s+(?:de|da|do)?\s*(.+)/);
+    if (!m) return undefined;
+    const term = m[1].replace(/[?!.]/g, " ").replace(/\s+/g, " ").trim();
+    return term.length >= 2 ? term : undefined;
   }
 
   /** Termo cru após "loja/filial" quando nenhuma loja real casou no texto. */

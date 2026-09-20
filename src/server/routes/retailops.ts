@@ -216,6 +216,22 @@ router.get("/insights/header", (req: AuthRequest, res): any => {
   });
 });
 
+/**
+ * RANKING dos melhores vendedores da REDE (pedido da dona, 20/09/2026).
+ * Padrão = MÊS corrente (do dia 1 até `date`); aceita `from`/`to` explícitos.
+ * Dinheiro (§73) → role-gated owner/admin. Rede toda (sem filtro de loja): a
+ * loja de cada vendedor sai no próprio item (a de maior venda no período).
+ */
+router.get("/insights/top-sellers", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || today(req)).slice(0, 10);
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : `${date.slice(0, 7)}-01`;
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : date;
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
+  res.json({ from, to, sellers: RetailSellerSalesService.networkTopSellers(orgId, from, to, limit) });
+});
+
 // Age a partir de um insight: propõe a AÇÃO recomendada do sinal (kernel C2).
 // A política de aprovação decide se já nasce aprovada ou aguardando (nada
 // executa sozinho). Retorna a ação criada.

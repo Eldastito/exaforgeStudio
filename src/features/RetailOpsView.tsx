@@ -229,8 +229,11 @@ function EmptyPrioritiesState({ storeFilter, header }: { storeFilter: string; he
 }
 
 function InsightsTab() {
+  const { user } = useAuth();
+  const isOwnerAdmin = ['owner', 'admin'].includes((user as any)?.role || '');
   const [data, setData] = useState<any | null>(null);
   const [header, setHeader] = useState<any | null>(null);
+  const [topSellers, setTopSellers] = useState<any[] | null>(null); // ranking de vendedores da rede (mês) — só gestor
   const [stores, setStores] = useState<any[]>([]);
   const [storeFilter, setStoreFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -247,6 +250,13 @@ function InsightsTab() {
     const qs = storeFilter ? `?storeId=${storeFilter}` : '';
     const d = await apiFetch(`/api/retailops/insights/header${qs}`).then(r => r.json()).catch(() => null);
     setHeader(d);
+  };
+  // Ranking de vendedores da REDE (mês corrente) — só na visão "rede toda" e só
+  // pra gestor (dinheiro §73). Loja filtrada usa a aba "Vendedores da loja".
+  const loadTopSellers = async () => {
+    if (storeFilter || !isOwnerAdmin) { setTopSellers(null); return; }
+    const d = await apiFetch('/api/retailops/insights/top-sellers').then(r => r.json()).catch(() => null);
+    setTopSellers(Array.isArray(d?.sellers) ? d.sellers : null);
   };
   const loadStores = async () => {
     const d = await apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({}));
@@ -284,6 +294,7 @@ function InsightsTab() {
       setData(await apiFetch(`/api/retailops/insights${qs}`).then(r => r.json()).catch(() => null));
       await loadActions();
       await loadHeader();
+      await loadTopSellers();
     } finally { setLoading(false); }
   };
   useEffect(() => { loadStores(); }, []);
@@ -308,6 +319,23 @@ function InsightsTab() {
       {/* Header: grandes números do dia da REDE (ou loja filtrada) — o que
           o dono precisa ver PRIMEIRO ao entrar na aba. */}
       {header?.daily && <InsightsHeader header={header} storeFilter={storeFilter} />}
+
+      {/* Top vendedores da REDE (mês corrente) — quem mais vende + a loja dele.
+          Só na visão rede toda e só pro gestor (dinheiro §73). */}
+      {!storeFilter && isOwnerAdmin && topSellers && topSellers.length > 0 && (
+        <div className="mb-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-2">
+          <p className="text-[10px] uppercase tracking-wider text-indigo-300/80 mb-1">🏅 Top vendedores da rede — mês</p>
+          {topSellers.map((s: any, i: number) => (
+            <div key={`${s.matricula || s.sellerName}-${i}`} className="flex items-center gap-2 text-[12px]">
+              <span className="w-4 text-right text-zinc-500">{i + 1}º</span>
+              <span className="flex-1 truncate text-zinc-200">{s.sellerName}</span>
+              <span className="truncate text-[11px] text-zinc-500 max-w-[40%]">{s.storeName || '—'}</span>
+              {s.pecas > 0 && <span className="text-[10px] text-zinc-600 tabular-nums">{s.pecas} pç</span>}
+              <span className="w-24 text-right font-medium text-emerald-300 tabular-nums">{brl(s.sales)}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mb-4 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Lightbulb className="w-4 h-4 text-amber-400" /> O que a IA observou{storeFilter ? ' nessa loja' : ' na rede'}</div>

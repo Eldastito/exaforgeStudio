@@ -164,6 +164,42 @@ export class RetailSellerSalesService {
   }
 
   /**
+   * RANKING dos melhores vendedores da REDE num período (pedido da dona,
+   * 20/09/2026): vendedor + a LOJA a que ele pertence + R$ vendido + peças,
+   * ordenado por venda desc. A loja é a de MAIOR venda do vendedor no período
+   * (um vendedor pode aparecer em mais de uma loja). Só leitura, isolado por
+   * org. Dinheiro → a ROTA é role-gated (§73). Nunca inventa: só o que está em
+   * `retail_seller_sales`.
+   */
+  static networkTopSellers(orgId: string, start: string, end: string, limit = 10): Array<{ sellerName: string; matricula: string | null; storeName: string | null; sales: number; pecas: number }> {
+    const rows = db.prepare(
+      `SELECT COALESCE(NULLIF(ss.matricula, ''), LOWER(TRIM(ss.seller_name))) AS seller_key,
+              ss.seller_name, ss.matricula, rs.name AS mapped_name,
+              st.name AS store_name,
+              SUM(ss.valor) AS sales, SUM(ss.pecas) AS pecas
+         FROM retail_seller_sales ss
+         LEFT JOIN retail_sellers rs ON rs.organization_id = ss.organization_id AND rs.matricula = ss.matricula
+         LEFT JOIN retail_stores st ON st.id = ss.store_id AND st.organization_id = ss.organization_id
+        WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ?
+        GROUP BY seller_key, ss.store_id`
+    ).all(orgId, start, end) as any[];
+    const bySeller = new Map<string, { sellerName: string; matricula: string | null; sales: number; pecas: number; topStore: string | null; topStoreSales: number }>();
+    for (const r of rows) {
+      const key = String(r.seller_key);
+      let e = bySeller.get(key);
+      if (!e) { e = { sellerName: r.mapped_name || r.seller_name, matricula: r.matricula || null, sales: 0, pecas: 0, topStore: null, topStoreSales: -1 }; bySeller.set(key, e); }
+      const s = Number(r.sales || 0);
+      e.sales += s;
+      e.pecas += Number(r.pecas || 0);
+      if (s > e.topStoreSales) { e.topStoreSales = s; e.topStore = r.store_name || null; }
+    }
+    return [...bySeller.values()]
+      .map((e) => ({ sellerName: e.sellerName, matricula: e.matricula, storeName: e.topStore, sales: round2(e.sales), pecas: Number(e.pecas) || 0 }))
+      .sort((a, b) => b.sales - a.sales)
+      .slice(0, Math.max(1, limit));
+  }
+
+  /**
    * Lê a folha por FOTO com a IA e devolve as linhas para o gestor CONFERIR — NÃO
    * salva nada. Extrator injetável (teste offline). O salvamento é o bulkCreate,
    * chamado só depois da confirmação humana.

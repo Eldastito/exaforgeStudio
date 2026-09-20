@@ -388,6 +388,18 @@ ${lines.join("\n")}`;
   static async ask(orgId: string, question: string, opts: { canSeeMoney?: boolean } = {}): Promise<string> {
     const q = String(question || "").trim();
     if (!q) return "Faça uma pergunta sobre o seu negócio (ex.: \"por que minhas vendas caíram?\").";
+    // F2 (Diretor IA com ferramentas): pergunta de CONSULTA tenta primeiro o
+    // roteador de ferramentas aterradas — número vem do sistema, não da
+    // memória do modelo. Sem ferramenta que responda → segue o fluxo do
+    // panorama abaixo, idêntico ao de sempre (RN-DIR-7, 0-regressão).
+    // Import dinâmico: convenção nº 11 (Router→llm→AIOrchestrator→este arquivo).
+    try {
+      const { ExecutiveQueryRouterService } = await import("./ExecutiveQueryRouterService.js");
+      const routed = await ExecutiveQueryRouterService.answer(orgId, q, { canSeeMoney: opts.canSeeMoney });
+      if (routed) return routed;
+    } catch (e) {
+      console.error("[DiretorIA] Roteador de ferramentas falhou (fallback panorama):", e);
+    }
     const panorama = this.buildPanorama(orgId, { canSeeMoney: opts.canSeeMoney });
     const prompt = `${this.GUARDRAILS}
 

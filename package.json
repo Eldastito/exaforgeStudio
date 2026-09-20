@@ -1049,7 +1049,8 @@
     "test:channel-producer-binding": "tsx scripts/test-channel-producer-binding.ts",
     "test:clinic-channel-fallback": "tsx scripts/test-clinic-channel-fallback.ts",
     "test:ai-products-context": "tsx scripts/test-ai-products-context.ts",
-    "test:diretor-retail-block": "tsx scripts/test-diretor-retail-block.ts"
+    "test:diretor-retail-block": "tsx scripts/test-diretor-retail-block.ts",
+    "test:diretor-tools": "tsx scripts/test-diretor-tools.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

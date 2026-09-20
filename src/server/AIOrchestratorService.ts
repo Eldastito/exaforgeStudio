@@ -192,7 +192,7 @@ export class AIOrchestratorService {
       ? ContextGuardService.fenceAll(contextContent.map((t) => ({ text: t, source: "base_conhecimento" }))).map((f) => f.fenced).join("\n\n")
       : "Nenhum documento encontrado na base de RAG.";
     
-    const productsText = await this.getProductsContext(params.organizationId);
+    const productsText = await this.getProductsContext(params.organizationId, text);
     let metricsData = "";
 
     if (isOrchestratorCommand) {
@@ -1102,7 +1102,20 @@ REGRAS DURAS (o sistema executa, você só convida):
     return m ? `${m[3]}/${m[2]}` : iso;
   }
 
-  private static async getProductsContext(orgId: string): Promise<string> {
+  /**
+   * Orçamento do catálogo no prompt (20/09/2026 — incidente TOULON): o catálogo
+   * inteiro (com grade tamanho/cor) entrava SEM teto e, após o sync Alterdata,
+   * passou de 1 MILHÃO de tokens — toda chamada da IA de atendimento morria em
+   * 429 "Request too large" e o cliente ficava sem resposta. Dentro do
+   * orçamento, o comportamento é o de sempre (catálogo completo, 0-regressão);
+   * acima dele, entram primeiro os produtos que CASAM com a mensagem do
+   * cliente, o resto até caber, e um aviso honesto de catálogo parcial (a IA
+   * pede o nome exato em vez de inventar — nunca registra pedido de item que
+   * não viu).
+   */
+  private static readonly PRODUCTS_CONTEXT_BUDGET_CHARS = 12_000;
+
+  private static async getProductsContext(orgId: string, queryText = ""): Promise<string> {
      try {
        // storefront_visible (ADR-028, decisão explícita de produto): o toggle
        // "Visível/Oculto" da vitrine agora vale TAMBÉM para a IA do WhatsApp —
@@ -1123,7 +1136,7 @@ REGRAS DURAS (o sistema executa, você só convida):
          LEFT JOIN inventory_items inv ON inv.variant_id = pv.id
          WHERE pv.organization_id = ? AND pv.product_service_id = ? AND pv.active = 1
        `);
-       return "Produtos/Serviços disponíveis (use EXATAMENTE estes nomes ao registrar um pedido):\n" + rows.map(r => {
+       const lineFor = (r: any): string => {
           const price = (r.price !== null && r.price !== undefined) ? `${r.currency || 'R$'} ${Number(r.price).toFixed(2)}` : "preço sob consulta";
           const desc = r.description ? ` — ${r.description}` : "";
           const dur = r.duration_minutes ? ` [duração: ${r.duration_minutes} min]` : "";
@@ -1145,7 +1158,33 @@ REGRAS DURAS (o sistema executa, você só convida):
              stock = sellable > 0 ? ` (em estoque: ${sellable})` : " (SEM ESTOQUE no momento)";
           }
           return `- ${r.name} (${r.type}): ${price}${stock}${dur}${desc}`;
-       }).join('\n');
+       };
+
+       const header = "Produtos/Serviços disponíveis (use EXATAMENTE estes nomes ao registrar um pedido):\n";
+       const budget = this.PRODUCTS_CONTEXT_BUDGET_CHARS;
+
+       // Caminho de sempre: catálogo pequeno/médio entra INTEIRO (0-regressão).
+       const allLines = rows.map(lineFor);
+       const full = header + allLines.join('\n');
+       if (full.length <= budget) return full;
+
+       // Catálogo grande: relevância primeiro (o que casa com a mensagem do
+       // cliente), depois preenche na ordem até o orçamento.
+       const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+       const tokens = norm(queryText).split(/[^a-z0-9]+/).filter(t => t.length >= 3);
+       const matches = (r: any) => tokens.length > 0 && tokens.some(t => norm(r.name).includes(t) || norm(r.description || "").includes(t));
+       const ordered = rows.map((r, i) => ({ i, hit: matches(r) })).sort((a, b) => Number(b.hit) - Number(a.hit) || a.i - b.i);
+
+       const picked: string[] = [];
+       let used = header.length;
+       let shown = 0;
+       for (const o of ordered) {
+          const line = allLines[o.i];
+          if (used + line.length + 1 > budget) { if (o.hit) continue; else break; }
+          picked.push(line); used += line.length + 1; shown++;
+       }
+       const note = `\n\n[ATENÇÃO: catálogo PARCIAL — mostrando ${shown} de ${rows.length} itens (os mais relevantes pra esta conversa). Se o cliente citar um produto que NÃO está na lista acima, NÃO invente preço/estoque nem registre pedido: peça o nome exato do produto e diga que vai confirmar a disponibilidade.]`;
+       return header + picked.join('\n') + note;
      } catch (e) {
        return "";
      }

@@ -83,15 +83,10 @@ export class RetailQuotaService {
     ).run(amount, amount, amount, amount, amount, orgId, storeId, date);
 
     for (const s of stores) {
-      const sched = db.prepare(
-        `SELECT COUNT(*) total, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) working
-           FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ?`
-      ).get(orgId, s.id, date) as any;
-      const scheduled = Number(sched?.total || 0);
-      const working = Number(sched?.working || 0);
-      // Loja fechada no dia: TEM escala e ninguém trabalha → sem cota.
-      if (scheduled > 0 && working === 0) {
-        suggestions.push({ storeId: s.id, storeName: s.name, suggested: 0, samples: 0, basis: "loja fechada (todos de folga na escala)", skipped: true });
+      // Loja fechada no dia (folga geral na escala OU dia fixo sem funcionamento
+      // do cadastro — chokepoint CLOSE-002) → sem cota; corrige cota errada.
+      if (RetailClosingService.isStoreClosedOnDate(orgId, s.id, date)) {
+        suggestions.push({ storeId: s.id, storeName: s.name, suggested: 0, samples: 0, basis: "loja fechada (folga geral na escala ou dia sem funcionamento)", skipped: true });
         if (apply) { this.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: 0, source: "pdv_suggest" }, actorId); updateClosingSnapshot(s.id, 0); }
         continue;
       }
@@ -155,8 +150,12 @@ export class RetailQuotaService {
     opts: { apply?: boolean } = {}, actorId?: string
   ): Promise<any> {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
-    const store = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    const store = db.prepare(`SELECT id, name, closed_weekdays FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
     if (!store) throw new Error("Loja não encontrada.");
+    // Dias fixos sem funcionamento do cadastro (0=domingo..6=sábado): valem
+    // quando a SEMANA não tem escala lançada (com escala, a escala decide).
+    let fixedClosed = new Set<number>();
+    try { const p = JSON.parse(store.closed_weekdays || "[]"); if (Array.isArray(p)) fixedClosed = new Set(p.map(Number)); } catch { /* cadastro sem dias fixos */ }
     const r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
     const amount = r2(monthlyAmount);
     if (!(amount > 0)) throw new Error("Informe a cota mensal (valor maior que zero).");
@@ -179,19 +178,23 @@ export class RetailQuotaService {
       return out;
     };
 
-    // 1ª passada — dias abertos por semana (fallback: semana sem escala = tudo aberto).
+    // 1ª passada — dias abertos por semana. Semana COM escala: a escala decide
+    // (dia sem ninguém 'work' = fechado). Semana SEM escala: dia fixo sem
+    // funcionamento do cadastro recebe 0 (caso Toulon: domingo ganhava fatia de
+    // 5 mil porque "sem escala = tudo aberto"); os demais dias contam abertos.
     const weekPlan = weeks.map((w) => {
       const dates = daysOf(w.start, w.end);
       const weekHasSchedule = dates.some((d) => (byDate.get(d)?.total || 0) > 0);
       const days = dates.map((d) => {
         const info = byDate.get(d);
-        const open = weekHasSchedule ? !!(info && info.working > 0) : true;
+        const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); // 0=domingo, igual strftime %w
+        const open = weekHasSchedule ? !!(info && info.working > 0) : !fixedClosed.has(dow);
         return { date: d, open };
       });
       return { start: w.start, end: w.end, weekHasSchedule, days, openDays: days.filter((x) => x.open).length };
     });
     const totalOpenDays = weekPlan.reduce((a, w) => a + w.openDays, 0);
-    if (totalOpenDays <= 0) throw new Error("A escala do mês marca todos os dias como folga (loja fechada) — não há dia aberto pra distribuir a cota. Ajuste a escala.");
+    if (totalOpenDays <= 0) throw new Error("A escala do mês (ou os dias sem funcionamento do cadastro da loja) marca todos os dias como fechados — não há dia aberto pra distribuir a cota. Ajuste a escala ou o cadastro.");
 
     // 2ª passada — fatia igual por dia aberto; resíduo no último dia aberto.
     const perDay = Math.floor((amount / totalOpenDays) * 100) / 100;
@@ -299,7 +302,11 @@ export class RetailClosingService {
         const cells = byStore[s.id] || {};
         let wInformed = 0, wSystem = 0, wQuota = 0;
         for (const d of days) { const c = cells[d]; if (c) { wInformed += Number(c.informed_total || 0); wSystem += Number(c.system_total || 0); wQuota += Number(c.quota_amount || 0); } }
-        return { store_id: s.id, store_name: s.name, cells, weekInformed: wInformed, weekSystem: wSystem, weekQuota: wQuota };
+        // Dias em que a loja está FECHADA na semana (folga geral ou dia fixo do
+        // cadastro) — a grade mostra "fechada" no lugar de "sem fechamento".
+        const closedDays: Record<string, boolean> = {};
+        for (const d of days) { if (this.isStoreClosedOnDate(orgId, s.id, d)) closedDays[d] = true; }
+        return { store_id: s.id, store_name: s.name, cells, closedDays, weekInformed: wInformed, weekSystem: wSystem, weekQuota: wQuota };
       }),
     };
   }
@@ -319,7 +326,7 @@ export class RetailClosingService {
     // CLOSE-002: trava — não informar fechamento em loja de FOLGA GERAL no dia
     // (tem escala no dia e ninguém 'work'). Evita lançamento no dia/loja errado.
     if (this.isStoreClosedOnDate(orgId, c.store_id, c.closing_date)) {
-      throw new Error("Loja fechada nesse dia (todos de folga na escala) — não é possível informar fechamento. Ajuste a escala se alguém trabalhou.");
+      throw new Error("Loja fechada nesse dia (folga geral na escala ou dia sem funcionamento no cadastro) — não é possível informar fechamento. Se alguém trabalhou, lance a escala do dia com quem trabalhou.");
     }
     const informed = Number(input.informedTotal || 0);
     const quota = Number(c.quota_amount || 0);
@@ -350,16 +357,34 @@ export class RetailClosingService {
   }
 
   /**
-   * CLOSE-002 — a loja está FECHADA no dia? Verdadeiro quando HÁ escala nesse
-   * dia e ninguém está 'work' (folga geral). Sem escala lançada no dia →
-   * false (não trava à toa). Mesma regra da trava da cota (QUOTA-002).
+   * CLOSE-002 — a loja está FECHADA no dia? Duas fontes, nesta ordem:
+   *  1. ESCALA lançada no dia decide SEMPRE (ninguém 'work' = folga geral =
+   *     fechada; alguém 'work' = aberta — inclusive num dia fixo fechado, o que
+   *     permite abrir um domingo excepcional).
+   *  2. Sem escala no dia, vale o DIA FIXO sem funcionamento do cadastro da
+   *     loja (`closed_weekdays` — caso Toulon Av. Brasil: não abre aos
+   *     domingos). Sem escala e sem dia fixo → aberta (não trava à toa).
+   * Mesma regra da trava da cota (QUOTA-002).
    */
   static isStoreClosedOnDate(orgId: string, storeId: string, date: string): boolean {
     const r = db.prepare(
       `SELECT COUNT(*) total, SUM(CASE WHEN status = 'work' THEN 1 ELSE 0 END) working
          FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ?`
     ).get(orgId, storeId, date) as any;
-    return Number(r?.total || 0) > 0 && Number(r?.working || 0) === 0;
+    if (Number(r?.total || 0) > 0) return Number(r?.working || 0) === 0;
+    return this.isFixedClosedWeekday(orgId, storeId, date);
+  }
+
+  /** O `date` cai num dia-da-semana FIXO sem funcionamento da loja? */
+  static isFixedClosedWeekday(orgId: string, storeId: string, date: string): boolean {
+    const s = db.prepare(`SELECT closed_weekdays FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId) as any;
+    if (!s?.closed_weekdays) return false;
+    try {
+      const days = JSON.parse(s.closed_weekdays);
+      if (!Array.isArray(days) || !days.length) return false;
+      const dow = Number((db.prepare(`SELECT strftime('%w', ?) w`).get(date) as any)?.w);
+      return days.includes(dow);
+    } catch { return false; }
   }
 
   /**
@@ -749,6 +774,9 @@ export class RetailTaskService {
     const stores = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
     let n = 0;
     for (const s of stores) {
+      // Loja fechada no dia (folga geral na escala ou dia fixo sem funcionamento)
+      // não é cobrada: sem pendência de fechamento/malote/escala no dia fechado.
+      if (RetailClosingService.isStoreClosedOnDate(orgId, s.id, date)) continue;
       for (const t of types) {
         const r = db.prepare(
           `INSERT OR IGNORE INTO retail_store_daily_tasks (id, organization_id, store_id, task_date, task_type, status, due_at)

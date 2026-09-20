@@ -28,10 +28,11 @@ router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: Au
     const r = await ChannelProvisioningService.provision(orgId, userId, { mode, instanceName });
     if (!r.ok) {
       const status = r.code === "attributed_to_other_org" ? 409
+        : r.code === "operation_in_progress" ? 409 // F4: corrida — mesma operação viva
         : r.code === "instance_not_found" ? 404
         : r.code === "evolution_failed" ? 502
         : 400;
-      return res.status(status).json({ error: r.error, code: r.code, needsReset: r.needsReset || false });
+      return res.status(status).json({ error: r.error, code: r.code, needsReset: r.needsReset || false, operationId: r.operationId });
     }
     return res.json({
       ok: true,
@@ -59,7 +60,7 @@ router.post("/whatsapp/reset", requireRole("owner", "admin"), async (req: AuthRe
     const r = await ChannelProvisioningService.reset(orgId, req.user?.userId || null, req.body?.channelId ? String(req.body.channelId) : null);
     if (!r.ok) {
       if (r.code === "channel_not_found") return res.status(404).json({ error: r.error, code: r.code });
-      if (r.code === "channel_required") return res.status(409).json({ error: r.error, code: r.code });
+      if (r.code === "channel_required" || r.code === "operation_in_progress") return res.status(409).json({ error: r.error, code: r.code, operationId: r.operationId });
       return res.status(502).json({ error: r.error, code: r.code });
     }
     return res.json(r);

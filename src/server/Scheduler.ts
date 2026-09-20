@@ -62,6 +62,7 @@ import { PlatformTelemetryService } from "./PlatformTelemetryService.js";
 import { PlatformBaselineService } from "./PlatformBaselineService.js";
 import { VerticalIntelligenceResearchService } from "./VerticalIntelligenceResearchService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
+import { ChannelProvisioningService } from "./ChannelProvisioningService.js";
 import { BackupService } from "./BackupService.js";
 
 // Quantos backups de redundância da plataforma manter por org (semanais).
@@ -1062,6 +1063,11 @@ export class Scheduler {
     try { this.runtimeAlertsPass(); } catch (e: any) { console.error('[Scheduler] runtimeAlertsPass error', e.message); }
     await this.retailPatternLearnPass().catch(e => console.error('[Scheduler] aprendizado de padrões falhou', e));
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
+    // F3 do PRD Conexão WhatsApp: reconciliação periódica dos canais com o
+    // provedor — LEAK-AWARE (só leitura de estado /instance/all + reparo de
+    // webhook; nunca GetQr/StartInstance, que vaza pool de Postgres no
+    // evolution-go). Mata o "conectado fantasma" quando o webhook se perde.
+    await ChannelProvisioningService.reconcilePass().catch(e => console.error('[Scheduler] reconciliação de canais WhatsApp falhou', e));
     // Depois do sync Alterdata: concilia atendimento declarado × vendas do PDV
     // (ADR-150 Fatia 6). Idempotente e só-promove.
     try { this.retailFloorReconciliationPass(); } catch (e: any) { console.error('[Scheduler] conciliação Retail Floor falhou', e?.message); }

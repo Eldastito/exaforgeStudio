@@ -11772,6 +11772,12 @@ const initDb = () => {
   // convenção strftime %w). NULL/[] = abre todos os dias (0-regressão). A escala
   // lançada no dia SEMPRE vence (permite abrir num domingo excepcional).
   try { db.exec(`ALTER TABLE retail_stores ADD COLUMN closed_weekdays TEXT`); } catch(e){}
+  // F3 do PRD Conexão WhatsApp (20/09/2026): ÚLTIMA OBSERVAÇÃO do provedor por
+  // canal — "connected" só é confiável com evidência datada (mata o "conectado
+  // fantasma": logout no celular + webhook perdido deixava a tela mentindo).
+  // Carimbo escrito onde há evidência REAL (sync/reconciliação, webhook de
+  // conexão, provisionamento). NULL = nunca observado (legado, honesto).
+  try { db.exec(`ALTER TABLE channels ADD COLUMN provider_observed_at DATETIME`); } catch(e){}
 };
 
 initDb();

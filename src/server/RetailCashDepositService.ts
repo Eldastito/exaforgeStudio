@@ -356,8 +356,17 @@ export class RetailCashDepositService {
     if (!storeId) throw new Error("storeId obrigatório");
     if (!isDate(input.weekStart) || !isDate(input.weekEnd)) throw new Error("weekStart/weekEnd (YYYY-MM-DD) obrigatórios");
     if (input.weekEnd < input.weekStart) throw new Error("weekEnd deve ser >= weekStart");
-    if (db.prepare(`SELECT 1 FROM retail_cash_week_closings WHERE organization_id = ? AND store_id = ? AND week_start = ? LIMIT 1`).get(orgId, storeId, input.weekStart)) {
-      throw new Error("week_already_closed");
+    // O intervalo é LIVRE (o malote do cliente é semanal num dia variável —
+    // ex.: dia 1 → dia 8), mas um dia não pode pertencer a DOIS fechamentos:
+    // reabrir é por week_start, e períodos sobrepostos deixariam dias
+    // meio-travados. Mesmo start = refechar (idempotência dura, erro antigo).
+    const overlap = db.prepare(
+      `SELECT week_start, week_end FROM retail_cash_week_closings
+        WHERE organization_id = ? AND store_id = ? AND week_start <= ? AND week_end >= ? LIMIT 1`
+    ).get(orgId, storeId, input.weekEnd, input.weekStart) as any;
+    if (overlap) {
+      if (overlap.week_start === input.weekStart) throw new Error("week_already_closed");
+      throw new Error(`Período se sobrepõe ao fechamento já feito de ${overlap.week_start} a ${overlap.week_end} — reabra-o primeiro ou escolha outro intervalo.`);
     }
     // Snapshot do dinheiro efetivo (fechamento + override) e do depositado no intervalo.
     let totalCash = 0;

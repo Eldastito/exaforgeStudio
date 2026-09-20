@@ -38,6 +38,12 @@ export class MessageProviderService {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+    // F1 do PRD Conexão WhatsApp (20/09/2026) — DESCONECTADO NÃO ENVIA. O
+    // disconnect marca status='disconnected', mas o gate só barrava 'disabled':
+    // um canal desconectado (pelo dono ou por logout no celular) continuava
+    // elegível e o envio "sumia" no provedor. Bloqueio aqui no SINK cobre
+    // envios síncronos E jobs — não existe caminho de envio fora deste serviço.
+    if (channel.status === 'disconnected') throw new Error("Canal do WhatsApp desconectado — reconecte em Canais e IA antes de enviar.");
 
     // F2.4 (CA-03) — GATE por finalidade no SINK. Opt-in pelo `feature`: um
     // produtor que informa a finalidade fica sujeito ao binding (desligar a
@@ -228,6 +234,8 @@ export class MessageProviderService {
     const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
     if (!channel) throw new Error("Canal não encontrado");
     if (channel.status === 'disabled') throw new Error("Canal desabilitado ou empresa bloqueada");
+    // F1 do PRD Conexão WhatsApp — mesmo gate do sendMessage (sink único).
+    if (channel.status === 'disconnected') throw new Error("Canal do WhatsApp desconectado — reconecte em Canais e IA antes de enviar.");
 
     // F2.4 (CA-03) — mesmo gate por finalidade do sendMessage.
     if (channel.organization_id && opts?.feature) {

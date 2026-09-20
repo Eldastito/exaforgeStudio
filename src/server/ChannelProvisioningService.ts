@@ -431,11 +431,20 @@ export class ChannelProvisioningService {
     const rows = db.prepare(
       `SELECT id, identifier, status FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
     ).all(orgId) as any[];
+    // F1 do PRD Conexão WhatsApp (20/09/2026) — BLOQUEIO LOCAL PRIMEIRO. Antes
+    // o logout remoto rodava ANTES do UPDATE: um provedor lento/mudo atrasava o
+    // bloqueio e, com o processo caindo no meio, o canal seguia elegível pra
+    // envio. Agora todos os canais viram 'disconnected' de imediato (o gate do
+    // MessageProviderService para os envios na hora) e o logout no provedor é
+    // best-effort DEPOIS — falha remota nunca reabre o canal localmente.
+    for (const r of rows) {
+      db.prepare(`UPDATE channels SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
+    }
     let providerLogout = false;
     for (const r of rows) {
-      try { if (await EvolutionService.logoutInstance(r.identifier)) providerLogout = true; } catch { /* best-effort */ }
-      db.prepare(`UPDATE channels SET status = 'disconnected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId);
-      logAuthEvent(orgId, actorUserId, r.id, "CHANNEL_WHATSAPP_DISCONNECTED", { instanceName: r.identifier, providerLogout });
+      let thisLogout = false;
+      try { if (await EvolutionService.logoutInstance(r.identifier)) { providerLogout = true; thisLogout = true; } } catch { /* best-effort */ }
+      logAuthEvent(orgId, actorUserId, r.id, "CHANNEL_WHATSAPP_DISCONNECTED", { instanceName: r.identifier, providerLogout: thisLogout });
     }
     return { ok: true, disconnected: rows.length, providerLogout };
   }

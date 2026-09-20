@@ -176,7 +176,7 @@ export class ChannelProvisioningService {
     }
 
     try {
-      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
     } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId}:`, e); }
 
@@ -192,10 +192,10 @@ export class ChannelProvisioningService {
   }
 
   /** Canais Evolution da org (sem segredos) — pra UI e retomada. */
-  static status(orgId: string): { channels: Array<{ channelId: string; instanceName: string; status: string; connected: boolean; hasQr: boolean }> } {
+  static status(orgId: string): { channels: Array<{ channelId: string; instanceName: string; status: string; connected: boolean; hasQr: boolean; providerObservedAt: string | null }> } {
     if (!orgId) return { channels: [] };
     const rows = db.prepare(
-      `SELECT id, identifier, status FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') ORDER BY created_at ASC`
+      `SELECT id, identifier, status, provider_observed_at FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') ORDER BY created_at ASC`
     ).all(orgId) as any[];
     return {
       channels: rows.map((r) => ({
@@ -204,8 +204,44 @@ export class ChannelProvisioningService {
         status: r.status,
         connected: r.status === "connected",
         hasQr: r.status !== "connected",
+        // F3: quando o provedor confirmou este estado pela última vez.
+        // NULL = nunca observado (legado) — a UI mostra honesto, não esconde.
+        providerObservedAt: r.provider_observed_at || null,
       })),
     };
+  }
+
+  /**
+   * F3 do PRD Conexão WhatsApp (20/09/2026) — RECONCILIAÇÃO periódica
+   * LEAK-AWARE. O webhook acelera a atualização, mas evento perdido deixava a
+   * tela "conectada" com sessão morta pra sempre. Este passe re-lê a verdade
+   * do provedor (via syncFromProvider) pra cada org com canal Evolution ativo.
+   *
+   * LEAK-AWARE (análise F0 §1): o evolution-go vaza um pool de Postgres por
+   * StartInstance — este passe usa SÓ leitura de estado (/instance/all) e o
+   * reparo de webhook (/webhook/set); NUNCA GetQr/StartInstance. Throttle
+   * per-org (intervalo mínimo + jitter) + teto de orgs por tick protegem o
+   * cluster mesmo em deploys com SCHEDULER_INTERVAL_MS curto. Best-effort:
+   * falha de uma org nunca derruba o passe.
+   */
+  private static lastReconcileAt = new Map<string, number>();
+  static readonly RECONCILE_MIN_INTERVAL_MS = 5 * 60_000;
+  static async reconcilePass(opts: { maxOrgsPerTick?: number } = {}): Promise<{ reconciled: number; skipped: number }> {
+    const out = { reconciled: 0, skipped: 0 };
+    if (!EvolutionService.getConfig()) return out; // sem provedor configurado — não gasta nada
+    const orgs = db.prepare(
+      `SELECT DISTINCT organization_id o FROM channels WHERE provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
+    ).all() as any[];
+    const cap = Math.max(1, opts.maxOrgsPerTick ?? 10);
+    for (const r of orgs) {
+      if (out.reconciled >= cap) { out.skipped++; continue; }
+      const now = Date.now();
+      const jitter = Math.floor(Math.random() * 60_000);
+      if (now - (this.lastReconcileAt.get(r.o) || 0) < this.RECONCILE_MIN_INTERVAL_MS + jitter) { out.skipped++; continue; }
+      this.lastReconcileAt.set(r.o, now);
+      try { await this.syncFromProvider(r.o, "system"); out.reconciled++; } catch { /* best-effort */ }
+    }
+    return out;
   }
 
   /**
@@ -261,7 +297,7 @@ export class ChannelProvisioningService {
       return { ok: false, channelId: targetChannelId, instanceName, error: result.error, code: "evolution_failed" };
     }
     try {
-      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
         .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
     } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${targetChannelId} pós-reset:`, e); }
     logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
@@ -411,6 +447,9 @@ export class ChannelProvisioningService {
       let after = before;
       let webhookRegistered: boolean | undefined;
       let tokenUpdated = false;
+      // F3: o /instance/all respondeu — TODA linha reconciliada ganha carimbo
+      // de observação (inclusive "instância não existe lá", que é evidência).
+      try { db.prepare(`UPDATE channels SET provider_observed_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`).run(r.id, orgId); } catch { /* best-effort */ }
       if (!inst) {
         if (before !== "disconnected") {
           after = "disconnected";

@@ -26,7 +26,9 @@ export function markEvolutionChannelStatusByIdentifier(identifier: string, statu
   try {
     const ch = db.prepare(`SELECT id FROM channels WHERE provider IN ('evolution','evolution_go') AND identifier = ?`).get(id) as any;
     if (!ch) return false;
-    db.prepare(`UPDATE channels SET status = ? WHERE id = ?`).run(status, ch.id);
+    // F3 do PRD Conexão WhatsApp: evento de conexão do provedor é EVIDÊNCIA —
+    // carimba a observação junto do status (mata o "conectado fantasma").
+    db.prepare(`UPDATE channels SET status = ?, provider_observed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(status, ch.id);
     return true;
   } catch { return false; }
 }

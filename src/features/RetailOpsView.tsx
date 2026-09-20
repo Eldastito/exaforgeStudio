@@ -2271,10 +2271,11 @@ function WeeklyClosingsCard() {
                       {data.days.map((d: string) => {
                         const c = s.cells[d];
                         const v = cellValue(c);
+                        const closed = !!s.closedDays?.[d];
                         return (
                           <td key={d} className={`px-2 py-1.5 text-right font-mono ${divergent(c) ? 'text-amber-400' : 'text-zinc-200'}`}
-                            title={c ? `Informado ${brl(c.informed_total)} · Sistema ${brl(c.system_total)} · Cota ${brl(c.quota_amount)} · ${c.status}${divergent(c) ? ' · DIVERGE' : ''}` : 'Sem fechamento'}>
-                            {v === null ? <span className="text-zinc-700">—</span> : brl(v)}
+                            title={c ? `Informado ${brl(c.informed_total)} · Sistema ${brl(c.system_total)} · Cota ${brl(c.quota_amount)} · ${c.status}${divergent(c) ? ' · DIVERGE' : ''}` : closed ? 'Loja fechada nesse dia (folga geral ou dia sem funcionamento no cadastro)' : 'Sem fechamento'}>
+                            {v !== null && v !== 0 ? brl(v) : closed ? <span className="font-sans text-[10px] italic text-zinc-600">fechada</span> : v === null ? <span className="text-zinc-700">—</span> : brl(v)}
                           </td>
                         );
                       })}
@@ -2419,6 +2420,11 @@ function ClosingsTab() {
               {stores.map((s) => {
                 const c = byStore[s.id];
                 const variance = Number(c?.variance_amount || 0);
+                // Dia fixo sem funcionamento do cadastro (ex.: domingo): badge
+                // "fechada" no lugar de cobrar fechamento. (A folga geral da
+                // escala continua valendo no servidor — a trava é o CLOSE-002.)
+                let closedToday = false;
+                try { const p = JSON.parse(s.closed_weekdays || '[]'); closedToday = Array.isArray(p) && p.includes(new Date(`${date}T12:00:00Z`).getUTCDay()); } catch { /* sem dias fixos */ }
                 // Desvio como % da cota — R$ negativo grande pesa demais na loja; o % conta a mesma
                 // história sem escancarar o rombo (ex.: "-8%" no lugar de "-R$ 2.000,00").
                 const quotaAmt = Number(c?.quota_amount || 0);
@@ -2444,7 +2450,11 @@ function ClosingsTab() {
                         >excluir</button>
                       </div>
                     </td>
-                    <td className="px-3 py-2">{c ? <Badge map={CLOSING_STATUS} s={c.status} /> : <span className="text-xs text-zinc-500">—</span>}</td>
+                    <td className="px-3 py-2">
+                      {closedToday && !(c?.informed_total > 0)
+                        ? <span className="text-[10px] rounded-full border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-zinc-400" title="Dia sem funcionamento no cadastro da loja — sem cota nem cobrança de fechamento.">fechada hoje</span>
+                        : c ? <Badge map={CLOSING_STATUS} s={c.status} /> : <span className="text-xs text-zinc-500">—</span>}
+                    </td>
                     <td className="px-3 py-2 text-right text-zinc-400">{c ? brl(c.quota_amount) : '—'}</td>
                     <td className="px-3 py-2 text-right text-zinc-200">{c?.informed_total != null ? brl(c.informed_total) : '—'}</td>
                     <td className={`px-3 py-2 text-right ${variance < 0 ? 'text-red-300' : variance > 0 ? 'text-emerald-300' : 'text-zinc-500'}`}>
@@ -2513,6 +2523,11 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
   const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
   const [margin, setMargin] = useState(store?.gross_margin_percent != null ? String(store.gross_margin_percent) : '');
+  // Dias fixos SEM funcionamento (0=domingo..6=sábado): sem cota, sem cobrança
+  // de pendência e fechamento bloqueado nesses dias. Escala do dia sempre vence.
+  const [closedDays, setClosedDays] = useState<number[]>(() => {
+    try { const p = JSON.parse(store?.closed_weekdays || '[]'); return Array.isArray(p) ? p.map(Number) : []; } catch { return []; }
+  });
   const [costs, setCosts] = useState<Record<string, string>>({});
   // Custos VARIÁVEIS: uma entrada por categoria, com duas naturezas (percent e fixedPerSale).
   const [varCosts, setVarCosts] = useState<Record<string, { percent: string; fixed: string }>>({});
@@ -2567,6 +2582,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
         longitude: lng.trim() === '' ? null : Number(lng.replace(',', '.')),
         sellerSource: sellerSource === 'manual' ? 'manual' : null,
         grossMarginPercent: margin.trim() === '' ? null : Number(margin.replace(',', '.')),
+        closedWeekdays: closedDays.length ? closedDays : null,
       });
       const res = editing
         ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
@@ -2630,6 +2646,20 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             </label>
           </div>
           <span className="block text-[11px] text-zinc-500 -mt-1">As coordenadas (lat/long) permitem sugerir a transferência entre as lojas <strong>mais próximas</strong>. Pegue no Google Maps: clique com o botão direito no ponto → o primeiro item copia “lat, long”.</span>
+          <div className="block text-xs text-zinc-400">Dias em que a loja NÃO abre
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'].map((lbl, dow) => {
+                const on = closedDays.includes(dow);
+                return (
+                  <button key={dow} type="button" onClick={() => setClosedDays(p => on ? p.filter(d => d !== dow) : [...p, dow])}
+                    className={`rounded-lg border px-2.5 py-1 text-xs ${on ? 'border-rose-500/50 bg-rose-500/15 text-rose-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                    {lbl}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="mt-1 block text-[11px] text-zinc-500">Ex.: loja que não abre aos <strong>domingos</strong>. Nesses dias a loja não recebe cota (a cota mensal redistribui pros dias abertos), não é cobrada por fechamento/malote e o dia aparece como “fechada”. Feriado avulso: lance <strong>folga geral na escala</strong> daquele dia. Domingo excepcional aberto: lance a escala do dia com quem trabalhou — a escala sempre vence.</span>
+          </div>
           <label className="block text-xs text-zinc-400">Comissão por vendedor vem de
             <select value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
               <option value="pdv">PDV/ERP (padrão)</option>

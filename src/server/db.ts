@@ -11766,6 +11766,12 @@ const initDb = () => {
   // delta (só o turno 2). Guarda o total POR TURNO ({"1":100,"2":2268.6}) pra
   // somar sempre o dia INTEIRO. Aditivo; NULL = comportamento antigo.
   try { db.exec(`ALTER TABLE retail_daily_closings ADD COLUMN system_turnos_json TEXT`); } catch(e){}
+  // Dias fixos SEM funcionamento da loja (caso Toulon Av. Brasil: não abre aos
+  // domingos, mas a cota mensal distribuía fatia no domingo e a pendência de
+  // fechamento cobrava a loja). JSON de dias-da-semana (0=domingo..6=sábado,
+  // convenção strftime %w). NULL/[] = abre todos os dias (0-regressão). A escala
+  // lançada no dia SEMPRE vence (permite abrir num domingo excepcional).
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN closed_weekdays TEXT`); } catch(e){}
 };
 
 initDb();

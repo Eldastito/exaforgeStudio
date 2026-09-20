@@ -31,9 +31,14 @@ export type StoreInput = {
    * estimar o LUCRO e o PONTO DE EQUILÍBRIO por loja (faturamento − custo da
    * mercadoria). null = não informada; nesse caso o resultado não é calculado. */
   grossMarginPercent?: number | null;
+  /** Dias-da-semana em que a loja NÃO abre (0=domingo..6=sábado, strftime %w).
+   * Nesses dias: sem cota (a distribuição mensal pula), fechamento bloqueado e
+   * sem cobrança de pendência. A escala lançada no dia sempre vence (abre um
+   * domingo excepcional). null/[] = abre todos os dias. */
+  closedWeekdays?: number[] | null;
 };
 
-const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, created_at, updated_at`;
+const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays, created_at, updated_at`;
 const numOrNull = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const sellerSourceOrNull = (v: any): string | null => (v === "manual" ? "manual" : null);
 // Margem em %: aceita 0..100; fora disso (ou vazio) vira null (não informada).
@@ -41,6 +46,16 @@ const marginOrNull = (v: any): number | null => {
   const n = numOrNull(v);
   if (n === null) return null;
   return Math.min(100, Math.max(0, Math.round(n * 100) / 100));
+};
+// Dias fechados: só inteiros 0..6, únicos e ordenados; vazio vira null. Todos
+// os 7 dias fechados é cadastro sem sentido (loja que nunca abre) — rejeita.
+const closedWeekdaysOrNull = (v: any): string | null => {
+  if (v === null || v === undefined) return null;
+  const arr = Array.isArray(v) ? v : [];
+  const days = [...new Set(arr.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  if (!days.length) return null;
+  if (days.length >= 7) throw new Error("A loja não pode estar fechada todos os dias da semana — desmarque pelo menos um dia.");
+  return JSON.stringify(days);
 };
 
 export class RetailStoreService {
@@ -81,8 +96,8 @@ export class RetailStoreService {
     this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, orgId, name,
       input.code ? String(input.code).trim() : null,
@@ -95,7 +110,8 @@ export class RetailStoreService {
       numOrNull(input.latitude),
       numOrNull(input.longitude),
       sellerSourceOrNull(input.sellerSource),
-      marginOrNull(input.grossMarginPercent)
+      marginOrNull(input.grossMarginPercent),
+      closedWeekdaysOrNull(input.closedWeekdays)
     );
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_CREATED", { name }); } catch { /* noop */ }
     return this.get(orgId, id);
@@ -304,6 +320,7 @@ export class RetailStoreService {
       longitude: patch.longitude !== undefined ? numOrNull(patch.longitude) : undefined,
       seller_source: patch.sellerSource !== undefined ? sellerSourceOrNull(patch.sellerSource) : undefined,
       gross_margin_percent: patch.grossMarginPercent !== undefined ? marginOrNull(patch.grossMarginPercent) : undefined,
+      closed_weekdays: patch.closedWeekdays !== undefined ? closedWeekdaysOrNull(patch.closedWeekdays) : undefined,
     };
     // Guarda de código único entre lojas ATIVAS: cobre troca de código e
     // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.

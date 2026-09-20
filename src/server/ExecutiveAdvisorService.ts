@@ -12,6 +12,7 @@ import { PlanService } from "./PlanService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { ExecutiveBusinessSnapshotService } from "./ExecutiveBusinessSnapshotService.js";
 import { ExecutiveConstraintService } from "./ExecutiveConstraintService.js";
+import { RetailDashboardService } from "./RetailDashboardService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -49,7 +50,44 @@ REGRAS:
     // restrito — pergunta aberta pelo WhatsApp/web deixa de vazar financeiro).
     const money = opts.canSeeMoney !== false;
     const base = ContextEngineService.render(orgId);
-    return base + this.executiveBlock(orgId, { canSeeMoney: money }) + this.goalsBlock(orgId, { canSeeMoney: money }) + this.retailPatternsBlock(orgId) + (money ? this.retailCommissionBlock(orgId) : "") + this.businessSignalsBlock(orgId, { canSeeMoney: money }) + this.learnedEffectivenessBlock(orgId) + (money ? this.planRecommendationsBlock(orgId) : "");
+    return base + this.executiveBlock(orgId, { canSeeMoney: money }) + this.goalsBlock(orgId, { canSeeMoney: money }) + (money ? this.retailStoresBlock(orgId) : "") + this.retailPatternsBlock(orgId) + (money ? this.retailCommissionBlock(orgId) : "") + this.businessSignalsBlock(orgId, { canSeeMoney: money }) + this.learnedEffectivenessBlock(orgId) + (money ? this.planRecommendationsBlock(orgId) : "");
+  }
+
+  /**
+   * VAREJO — VENDAS POR LOJA (incidente TOULON 20/09): "Zapp, como foram as
+   * vendas da Avenida Brasil?" não era respondível — o panorama só tinha o
+   * consolidado da empresa e a IA "prometia verificar com a equipe". Bloco
+   * DERIVADO dos fechamentos reais (`retail_daily_closings`, RN-004):
+   * acumulado do mês por loja + o ÚLTIMO fechamento de cada uma. Dinheiro →
+   * só entra com canSeeMoney (§73). INERTE sem loja ativa (0-regressão pra
+   * org sem varejo). Rejeitado nunca soma; loja sem fechamento aparece como
+   * "sem fechamento no mês" — nunca vira 0 inventado.
+   */
+  static retailStoresBlock(orgId: string): string {
+    try {
+      const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name LIMIT 30`).all(orgId) as any[];
+      if (!stores.length) return "";
+      const month = new Date().toISOString().slice(0, 7);
+      const m = RetailDashboardService.monthly(orgId, month);
+      const byStore = new Map<string, any>((m.perStore || []).map((r: any) => [r.store_id, r]));
+      const last = db.prepare(
+        `SELECT c.store_id, c.closing_date, c.informed_total, c.status
+           FROM retail_daily_closings c
+          WHERE c.organization_id = ? AND c.status != 'rejected'
+            AND c.closing_date = (SELECT MAX(c2.closing_date) FROM retail_daily_closings c2
+                                   WHERE c2.organization_id = c.organization_id AND c2.store_id = c.store_id AND c2.status != 'rejected')`
+      ).all(orgId) as any[];
+      const lastBy = new Map<string, any>(last.map((r: any) => [r.store_id, r]));
+      const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+      const lines = stores.map((s) => {
+        const mo = byStore.get(s.id);
+        const lc = lastBy.get(s.id);
+        const mtd = mo ? `${brl(mo.sales)} no mês (${mo.closings} fechamento(s))` : "sem fechamento no mês";
+        const ult = lc ? ` · último fechamento ${lc.closing_date}: ${brl(lc.informed_total)} (${lc.status})` : "";
+        return `- ${s.name}: ${mtd}${ult}`;
+      });
+      return `\n\n=== VAREJO — VENDAS POR LOJA (mês ${month}, fatos dos fechamentos; NUNCA invente número; fechamento rejeitado não soma) ===\n${lines.join("\n")}\nTotal da rede no mês: ${brl(m.totalSales)}.`;
+    } catch { return ""; }
   }
 
   /**

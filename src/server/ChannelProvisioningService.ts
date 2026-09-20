@@ -46,7 +46,9 @@ export interface ChannelProvisionResult {
   imported?: boolean;      // canal foi criado por IMPORT (claim) nesta chamada
   needsReset?: boolean;
   error?: string;
-  code?: "org_missing" | "instance_required" | "attributed_to_other_org" | "instance_not_found" | "evolution_failed" | "channel_required" | "channel_not_found";
+  code?: "org_missing" | "instance_required" | "attributed_to_other_org" | "instance_not_found" | "evolution_failed" | "channel_required" | "channel_not_found" | "operation_in_progress";
+  /** F4: id da operação de conexão (a mesma volta no conflito de corrida). */
+  operationId?: string;
 }
 
 const NEW_PREFIX = "zapflow_";
@@ -86,6 +88,48 @@ export class ChannelProvisioningService {
         LIMIT 1`
     ).get(orgId) as any;
     return row?.identifier || null;
+  }
+
+  /**
+   * F4 do PRD Conexão WhatsApp (20/09/2026) — LOCK de operação (padrão AC-012:
+   * SELECT dentro da transação antes do INSERT). Duplo clique / 2 abas no
+   * "Conectar" disparavam duas chamadas simultâneas ao provedor; o nome
+   * determinístico reusa o canal, mas nada serializava a corrida. Só a 1ª
+   * chamada vence; a 2ª recebe o operationId VIVO da operação em andamento.
+   * 'running' com expires_at vencido é zumbi (processo caiu) — substituível.
+   */
+  private static readonly OPERATION_TTL_MS = 90_000; // > deadline do GetQr (35s + retries)
+  private static beginOperation(orgId: string, type: string, key: string): { ok: boolean; id: string } {
+    const tx = db.transaction(() => {
+      const row = db.prepare(
+        `SELECT id, state, expires_at FROM channel_connection_operations WHERE organization_id = ? AND idempotency_key = ?`
+      ).get(orgId, key) as any;
+      if (row && row.state === "running" && Date.parse(String(row.expires_at || "")) > Date.now()) {
+        return { ok: false, id: String(row.id) }; // conflito: devolve a operação VIVA
+      }
+      const id = randomUUID();
+      const expiresAt = new Date(Date.now() + this.OPERATION_TTL_MS).toISOString();
+      if (row) {
+        db.prepare(
+          `UPDATE channel_connection_operations SET id = ?, type = ?, state = 'running', started_at = CURRENT_TIMESTAMP, expires_at = ?, completed_at = NULL, error_code = NULL
+            WHERE organization_id = ? AND idempotency_key = ?`
+        ).run(id, type, expiresAt, orgId, key);
+      } else {
+        db.prepare(
+          `INSERT INTO channel_connection_operations (id, organization_id, idempotency_key, type, state, expires_at) VALUES (?, ?, ?, ?, 'running', ?)`
+        ).run(id, orgId, key, type, expiresAt);
+      }
+      return { ok: true, id };
+    });
+    return tx();
+  }
+
+  private static finishOperation(orgId: string, opId: string, ok: boolean, errorCode?: string | null): void {
+    try {
+      db.prepare(
+        `UPDATE channel_connection_operations SET state = ?, completed_at = CURRENT_TIMESTAMP, error_code = ? WHERE id = ? AND organization_id = ?`
+      ).run(ok ? "succeeded" : "failed", errorCode || null, opId, orgId);
+    } catch { /* best-effort — a operação zumbi expira pelo TTL */ }
   }
 
   /**
@@ -151,44 +195,60 @@ export class ChannelProvisioningService {
       instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
     }
 
-    // Canal — reusa se existe (idempotente); cria se não (inclusive no import/claim).
-    let existing = this.channelForOrg(orgId, instanceName);
-    let channelId = existing?.id;
-    if (!channelId) {
-      channelId = randomUUID();
-      try {
-        db.prepare(
-          `INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`
-        ).run(channelId, orgId, `WhatsApp (${instanceName})`, instanceName);
-      } catch (e: any) {
-        return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed" };
-      }
-      if (importing) {
-        logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_IMPORTED", { instanceName, channelId });
-      }
+    // F4: LOCK da operação — só UMA conexão por (org, instância) por vez.
+    // Duplo clique / 2 abas: a 2ª chamada recebe o operationId vivo e não
+    // dispara nada no provedor.
+    const op = this.beginOperation(orgId, "provision", `provision:${instanceName}`);
+    if (!op.ok) {
+      return { ok: false, error: "Já existe uma conexão em andamento pra este número — aguarde alguns segundos e tente de novo.", code: "operation_in_progress", operationId: op.id };
     }
-
-    // Evolution: create(idempotente)+connect+QR pelo serviço consolidado.
-    const result = await EvolutionService.provision(instanceName);
-    if (!result.ok) {
-      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISION_FAILED", { instanceName, channelId, error: result.error });
-      return { ok: false, channelId, instanceName, error: result.error, code: "evolution_failed", needsReset: result.needsReset };
-    }
-
     try {
-      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
-    } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId}:`, e); }
+      // Canal — reusa se existe (idempotente); cria se não (inclusive no import/claim).
+      let existing = this.channelForOrg(orgId, instanceName);
+      let channelId = existing?.id;
+      if (!channelId) {
+        channelId = randomUUID();
+        try {
+          db.prepare(
+            `INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`
+          ).run(channelId, orgId, `WhatsApp (${instanceName})`, instanceName);
+        } catch (e: any) {
+          this.finishOperation(orgId, op.id, false, "evolution_failed");
+          return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed", operationId: op.id };
+        }
+        if (importing) {
+          logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_IMPORTED", { instanceName, channelId });
+        }
+      }
 
-    logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISIONED", {
-      instanceName, channelId, mode, imported: importing, alreadyExists: !!result.alreadyExists, state: result.state || "awaiting_qr",
-    });
+      // Evolution: create(idempotente)+connect+QR pelo serviço consolidado.
+      const result = await EvolutionService.provision(instanceName);
+      if (!result.ok) {
+        logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISION_FAILED", { instanceName, channelId, error: result.error });
+        this.finishOperation(orgId, op.id, false, "evolution_failed");
+        return { ok: false, channelId, instanceName, error: result.error, code: "evolution_failed", needsReset: result.needsReset, operationId: op.id };
+      }
 
-    return {
-      ok: true, channelId, instanceName,
-      qrBase64: result.qrBase64, state: result.state,
-      alreadyExists: result.alreadyExists, imported: importing,
-    };
+      try {
+        db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
+      } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId}:`, e); }
+
+      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISIONED", {
+        instanceName, channelId, mode, imported: importing, alreadyExists: !!result.alreadyExists, state: result.state || "awaiting_qr",
+      });
+
+      this.finishOperation(orgId, op.id, true);
+      return {
+        ok: true, channelId, instanceName,
+        qrBase64: result.qrBase64, state: result.state,
+        alreadyExists: result.alreadyExists, imported: importing,
+        operationId: op.id,
+      };
+    } catch (e) {
+      this.finishOperation(orgId, op.id, false, "exception");
+      throw e;
+    }
   }
 
   /** Canais Evolution da org (sem segredos) — pra UI e retomada. */
@@ -275,33 +335,48 @@ export class ChannelProvisioningService {
       instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
     }
 
-    const found = await EvolutionService.findInstance(instanceName);
-    const result = found?.id
-      ? await EvolutionService.resetInstance(instanceName, found.id)
-      : await EvolutionService.provision(instanceName);
-
-    let existing = this.channelForOrg(orgId, instanceName);
-    let targetChannelId = existing?.id;
-    if (!targetChannelId) {
-      targetChannelId = randomUUID();
-      try {
-        db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`)
-          .run(targetChannelId, orgId, `WhatsApp (${instanceName})`, instanceName);
-      } catch (e: any) {
-        return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed" };
-      }
-    }
-
-    if (!result.ok) {
-      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_RESET_FAILED", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, error: result.error });
-      return { ok: false, channelId: targetChannelId, instanceName, error: result.error, code: "evolution_failed" };
+    // F4: mesmo LOCK do provision — reset concorrente (ou reset durante um
+    // provision da mesma instância seria outra chave; a corrida perigosa é
+    // reset×reset) devolve o operationId vivo sem tocar o provedor.
+    const op = this.beginOperation(orgId, "reset", `reset:${instanceName}`);
+    if (!op.ok) {
+      return { ok: false, error: "Já existe um reset em andamento pra este número — aguarde alguns segundos.", code: "operation_in_progress", operationId: op.id };
     }
     try {
-      db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
-    } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${targetChannelId} pós-reset:`, e); }
-    logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
-    return { ok: true, channelId: targetChannelId, instanceName, qrBase64: result.qrBase64, state: result.state };
+      const found = await EvolutionService.findInstance(instanceName);
+      const result = found?.id
+        ? await EvolutionService.resetInstance(instanceName, found.id)
+        : await EvolutionService.provision(instanceName);
+
+      let existing = this.channelForOrg(orgId, instanceName);
+      let targetChannelId = existing?.id;
+      if (!targetChannelId) {
+        targetChannelId = randomUUID();
+        try {
+          db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`)
+            .run(targetChannelId, orgId, `WhatsApp (${instanceName})`, instanceName);
+        } catch (e: any) {
+          this.finishOperation(orgId, op.id, false, "evolution_failed");
+          return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed", operationId: op.id };
+        }
+      }
+
+      if (!result.ok) {
+        logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_RESET_FAILED", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, error: result.error });
+        this.finishOperation(orgId, op.id, false, "evolution_failed");
+        return { ok: false, channelId: targetChannelId, instanceName, error: result.error, code: "evolution_failed", operationId: op.id };
+      }
+      try {
+        db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+          .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
+      } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${targetChannelId} pós-reset:`, e); }
+      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
+      this.finishOperation(orgId, op.id, true);
+      return { ok: true, channelId: targetChannelId, instanceName, qrBase64: result.qrBase64, state: result.state, operationId: op.id };
+    } catch (e) {
+      this.finishOperation(orgId, op.id, false, "exception");
+      throw e;
+    }
   }
 
   /**

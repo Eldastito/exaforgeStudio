@@ -11778,6 +11778,26 @@ const initDb = () => {
   // Carimbo escrito onde há evidência REAL (sync/reconciliação, webhook de
   // conexão, provisionamento). NULL = nunca observado (legado, honesto).
   try { db.exec(`ALTER TABLE channels ADD COLUMN provider_observed_at DATETIME`); } catch(e){}
+  // F4 do PRD Conexão WhatsApp: OPERAÇÕES de conexão com idempotency key —
+  // duplo clique/2 abas no "Conectar" podiam correr (o nome determinístico
+  // reusa o canal, mas nada impedia duas chamadas simultâneas ao provedor).
+  // UNIQUE(org, idempotency_key) + transação (padrão AC-012) = só 1 vence;
+  // a 2ª recebe operation_in_progress com o operationId vivo. 'running' com
+  // expires_at vencido é zumbi (processo caiu no meio) e pode ser substituída.
+  try { db.exec(`
+    CREATE TABLE IF NOT EXISTS channel_connection_operations (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      type TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'running',
+      started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME,
+      completed_at DATETIME,
+      error_code TEXT,
+      UNIQUE (organization_id, idempotency_key)
+    );
+  `); } catch(e){}
 };
 
 initDb();

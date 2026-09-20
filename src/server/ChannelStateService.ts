@@ -45,7 +45,8 @@ export interface ChannelLogicalState {
 function sessionFrom(rawStatus: string | null): SessionState {
   switch (String(rawStatus || "")) {
     case "connected": return "connected";
-    case "awaiting_qr": case "qr": case "pairing": return "awaiting_pairing";
+    // F5: passkey é pareamento em andamento (WebAuthn) — mesma dimensão do QR.
+    case "awaiting_qr": case "qr": case "pairing": case "awaiting_passkey": return "awaiting_pairing";
     case "provisioning": case "connecting": return "provisioning";
     case "disconnected": case "close": case "logged_out": return "disconnected";
     case "error": case "failed": return "error";

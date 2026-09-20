@@ -106,10 +106,13 @@ async function main() {
   const logoutCall = calls.find(c => c.url.endsWith("/instance/logout") && c.method === "DELETE");
   check("5.2 DELETE /instance/logout com apikey=<token da instância>", logoutCall?.apikey === "exa-tok-1", logoutCall?.apikey);
 
-  // ── 6) PASSKEY honesto. ──
+  // ── 6) PASSKEY honesto. F5 do PRD Conexão WhatsApp (20/09/2026): passkey
+  //      deixou de ser ERRO e virou SUCESSO PENDENTE (awaiting_passkey) — o
+  //      operador conclui a etapa no ZapFlow, não no Manager. Cobertura
+  //      completa da etapa em test:whatsapp-passkey. ──
   qrMode = "passkey";
   const r6 = await EvolutionService.connectAndGetQr("ExaForge", "exa-tok-1");
-  check("6.1 passkeyStage → erro explica PASSKEY (não 'QR vazio')", r6.ok === false && /PASSKEY/i.test(r6.error || ""), r6.error);
+  check("6.1 passkeyStage → awaiting_passkey (etapa, nunca mais erro)", r6.ok === true && r6.state === "awaiting_passkey" && r6.passkey?.stage === "started", JSON.stringify({ ok: r6.ok, state: r6.state, stage: r6.passkey?.stage }));
   qrMode = "qr";
 
   // ── 7) 3º relato ("não está nem criando"): o ERRO REAL do provision falho

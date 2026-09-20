@@ -49,6 +49,9 @@ export interface ChannelProvisionResult {
   code?: "org_missing" | "instance_required" | "attributed_to_other_org" | "instance_not_found" | "evolution_failed" | "channel_required" | "channel_not_found" | "operation_in_progress";
   /** F4: id da operação de conexão (a mesma volta no conflito de corrida). */
   operationId?: string;
+  /** F5: etapa de PASSKEY em andamento (sucesso pendente — nunca erro). O
+   * código só trafega na resposta autenticada; jamais em log/audit. */
+  passkey?: { stage: string; code?: string; openUrl?: string; misconfigured?: boolean };
 }
 
 const NEW_PREFIX = "zapflow_";
@@ -231,11 +234,11 @@ export class ChannelProvisioningService {
 
       try {
         db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-          .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
+          .run(result.state === "open" ? "connected" : result.state === "awaiting_passkey" ? "awaiting_passkey" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
       } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId}:`, e); }
 
       logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_PROVISIONED", {
-        instanceName, channelId, mode, imported: importing, alreadyExists: !!result.alreadyExists, state: result.state || "awaiting_qr",
+        instanceName, channelId, mode, imported: importing, alreadyExists: !!result.alreadyExists, state: result.state || "awaiting_qr", passkeyStage: result.passkey?.stage,
       });
 
       this.finishOperation(orgId, op.id, true);
@@ -243,6 +246,7 @@ export class ChannelProvisioningService {
         ok: true, channelId, instanceName,
         qrBase64: result.qrBase64, state: result.state,
         alreadyExists: result.alreadyExists, imported: importing,
+        passkey: result.passkey,
         operationId: op.id,
       };
     } catch (e) {
@@ -368,11 +372,11 @@ export class ChannelProvisioningService {
       }
       try {
         db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), provider_observed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-          .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
+          .run(result.state === "open" ? "connected" : result.state === "awaiting_passkey" ? "awaiting_passkey" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
       } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${targetChannelId} pós-reset:`, e); }
       logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
       this.finishOperation(orgId, op.id, true);
-      return { ok: true, channelId: targetChannelId, instanceName, qrBase64: result.qrBase64, state: result.state, operationId: op.id };
+      return { ok: true, channelId: targetChannelId, instanceName, qrBase64: result.qrBase64, state: result.state, passkey: result.passkey, operationId: op.id };
     } catch (e) {
       this.finishOperation(orgId, op.id, false, "exception");
       throw e;

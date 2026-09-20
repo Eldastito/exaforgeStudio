@@ -20,6 +20,10 @@ export function ChannelsPanel() {
 
   const [evolutionStatus, setEvolutionStatus] = useState<'disconnected' | 'connecting_evo' | 'connected_evo'>('disconnected');
   const [evolutionQr, setEvolutionQr] = useState<string | null>(null);
+  // F5 do PRD Conexão WhatsApp: conta direcionada a PASSKEY não tem QR — o
+  // provedor devolve a etapa da cerimônia (link + código, TTL ~5 min). É uma
+  // ETAPA de conexão, não um erro.
+  const [evolutionPasskey, setEvolutionPasskey] = useState<{ stage: string; code?: string; openUrl?: string; misconfigured?: boolean } | null>(null);
   // W1 — conexão simplificada: o caminho padrão cria a instância sozinho (mode
   // 'new', nome automático); importar instância existente vira opção avançada.
   const [evoAdvanced, setEvoAdvanced] = useState(false);
@@ -125,24 +129,29 @@ export function ChannelsPanel() {
   // instrução de rodar o Diagnóstico. Sem isso, uma request morta deixava a
   // tela girando pra sempre.
   useEffect(() => {
-    if (evolutionStatus !== 'connecting_evo' || evolutionQr) return;
+    // F5: a etapa de passkey é um estado VÁLIDO de espera (o dono confirma em
+    // outra aba, TTL ~5 min) — o watchdog não pode derrubá-la.
+    if (evolutionStatus !== 'connecting_evo' || evolutionQr || evolutionPasskey) return;
     const t = setTimeout(() => {
       setEvolutionStatus('disconnected');
       toast.error('O provedor não respondeu a tempo. Abra "Opções avançadas → 🔎 Diagnosticar conexão" e me mande o resultado.');
     }, 75000);
     return () => clearTimeout(t);
-  }, [evolutionStatus, evolutionQr]);
+  }, [evolutionStatus, evolutionQr, evolutionPasskey]);
 
   // W1 — enquanto o QR está na tela, confere a cada 4s se o celular já leu; ao
   // conectar, o "WhatsApp conectado ✅" aparece sozinho (o leigo não precisa
   // recarregar nada pra saber que deu certo).
   useEffect(() => {
-    if (evolutionStatus !== 'connecting_evo' || !evolutionQr) return;
+    // F5: vale pro QR e pra PASSKEY — quando a sessão abre no provedor, a tela
+    // conclui sozinha (o leigo não recarrega nada).
+    if (evolutionStatus !== 'connecting_evo' || (!evolutionQr && !evolutionPasskey)) return;
     const t = setInterval(() => {
       apiFetch('/api/channels/whatsapp/status').then(r => r.json()).then((d: any) => {
         const conn = (Array.isArray(d?.channels) ? d.channels : []).find((c: any) => c.connected);
         if (conn) {
           setEvolutionQr(null);
+          setEvolutionPasskey(null);
           setEvolutionStatus('connected_evo');
           setEvoInstanceName(conn.instanceName || null);
           toast.success('WhatsApp conectado!');
@@ -152,7 +161,7 @@ export function ChannelsPanel() {
       }).catch(() => {});
     }, 4000);
     return () => clearInterval(t);
-  }, [evolutionStatus, evolutionQr]);
+  }, [evolutionStatus, evolutionQr, evolutionPasskey]);
 
   // WZ-1 (relato do dono): o número pode ser desconectado DIRETO no celular
   // (WhatsApp → Aparelhos conectados → sair). O painel precisa perceber sozinho:
@@ -199,6 +208,7 @@ export function ChannelsPanel() {
       if (r.ok && d?.ok) {
         setEvolutionStatus('disconnected');
         setEvolutionQr(null);
+        setEvolutionPasskey(null);
         toast.success(d.providerLogout
           ? 'WhatsApp desconectado.'
           : 'Desconectado aqui no ZapFlow. Se o celular ainda mostrar o aparelho em "Aparelhos conectados", remova por lá também.');
@@ -269,6 +279,7 @@ export function ChannelsPanel() {
     if (!(await confirmDialog('Reiniciar a instância no provedor? A sessão atual (se houver) é ENCERRADA e será preciso ler um QR novo. Use quando o QR não aparece de jeito nenhum.', { danger: true, confirmText: 'Reiniciar' }))) return;
     setEvolutionStatus('connecting_evo');
     setEvolutionQr(null);
+    setEvolutionPasskey(null);
     setEvoBusy(true);
     try {
       const r = await apiFetch('/api/channels/whatsapp/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
@@ -279,6 +290,8 @@ export function ChannelsPanel() {
       } else if (r.ok && d?.state === 'open') {
         setEvolutionStatus('connected_evo');
         loadEvoStatus();
+      } else if (r.ok && d?.passkey) {
+        setEvolutionPasskey(d.passkey); // F5: reset também pode cair na cerimônia de passkey
       } else {
         toast.error(`Reset não gerou QR.${d?.error ? ` Detalhe: ${String(d.error).slice(0, 160)}` : ''}`);
         setEvolutionStatus('disconnected');
@@ -343,6 +356,7 @@ export function ChannelsPanel() {
   const connectEvolution = async (opts?: { existing?: boolean; instanceName?: string }) => {
     setEvolutionStatus('connecting_evo');
     setEvolutionQr(null);
+    setEvolutionPasskey(null);
     setEvoBusy(true);
     const instanceName = opts?.instanceName ?? ((document.getElementById('evo_inst') as HTMLInputElement | null)?.value?.trim() || '');
     const useExisting = !!(opts?.existing || opts?.instanceName) && !!instanceName;
@@ -360,6 +374,14 @@ export function ChannelsPanel() {
         setEvolutionStatus('connected_evo');
         toast.success('Número já conectado.');
         loadEvoStatus();
+      } else if (resp.ok && data.passkey) {
+        // F5: etapa de PASSKEY — a conta exige confirmação WebAuthn do dono.
+        // Não é erro: a tela mostra o link + código e conclui sozinha quando a
+        // sessão abrir (poll acima).
+        setEvolutionPasskey(data.passkey);
+        if (data.passkey.misconfigured) {
+          toast.error('A conta exige passkey, mas o servidor do provedor está sem a PASSKEY_PUBLIC_URL configurada — configure no Evolution GO e clique em "Gerar novo".');
+        }
       } else {
         // Erros tipados do backend (RF-01/§8). O DETALHE real do provedor vai
         // junto (16/09/2026 — "Falha ao falar com o provedor" genérico escondia
@@ -719,7 +741,54 @@ export function ChannelsPanel() {
               </div>
             ) : evolutionStatus === 'connecting_evo' ? (
               <div className="relative z-10 flex flex-col items-center justify-center p-6 bg-white/5 rounded-xl border border-slate-800">
-                {evolutionQr ? (
+                {evolutionPasskey ? (
+                  /* F5 do PRD Conexão WhatsApp — etapa de PASSKEY guiada aqui
+                     dentro (antes virava erro e mandava o operador pro Manager). */
+                  <div className="w-full max-w-md space-y-3">
+                    <p className="text-sm font-semibold text-slate-100">Concluir com passkey</p>
+                    <p className="text-xs text-slate-400">
+                      O WhatsApp exige a <strong>passkey</strong> (chave de acesso) do dono do número pra concluir este pareamento — não tem QR nesse fluxo.
+                      A confirmação acontece em <strong>web.whatsapp.com</strong>; use um navegador compatível (Chrome ou Edge). O código expira em <strong>~5 minutos</strong>.
+                    </p>
+                    {evolutionPasskey.misconfigured ? (
+                      <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-2.5 text-xs text-rose-200">
+                        O servidor do provedor (Evolution GO) está <strong>sem a variável PASSKEY_PUBLIC_URL</strong> — sem ela não existe página pra abrir.
+                        Configure no docker-compose (URL pública HTTPS do Evolution GO), reinicie o serviço e clique em "Gerar novo".
+                      </div>
+                    ) : evolutionPasskey.openUrl ? (
+                      <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white border-0"
+                        onClick={() => window.open(evolutionPasskey.openUrl!, '_blank', 'noopener,noreferrer')}>
+                        Abrir página da passkey
+                      </Button>
+                    ) : null}
+                    {evolutionPasskey.code && (
+                      <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2">
+                        <span className="text-[11px] text-slate-500">Código:</span>
+                        <span className="font-mono text-sm text-slate-100 tracking-widest">{evolutionPasskey.code}</span>
+                        <button type="button" className="ml-auto text-[11px] text-blue-300 hover:text-blue-200 underline"
+                          onClick={() => { navigator.clipboard?.writeText(evolutionPasskey.code!).then(() => toast.success('Código copiado.')).catch(() => {}); }}>
+                          Copiar
+                        </button>
+                      </div>
+                    )}
+                    <p className="text-[11px] text-slate-500">
+                      Etapa atual: {evolutionPasskey.stage === 'challenge' ? 'aguardando a passkey do dono'
+                        : evolutionPasskey.stage === 'awaiting_confirmation' ? 'resposta enviada — aguardando o código de confirmação'
+                        : evolutionPasskey.stage === 'confirmation' ? 'confira o código acima e confirme no navegador'
+                        : evolutionPasskey.stage}. Assim que concluir, esta tela confirma sozinha.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button type="button" className="text-[11px] text-slate-400 hover:text-slate-200 underline" disabled={evoBusy}
+                        onClick={() => connectEvolution()}>
+                        Gerar novo (se expirou)
+                      </button>
+                      <button type="button" className="text-[11px] text-slate-500 hover:text-slate-300 underline"
+                        onClick={() => { setEvolutionStatus('disconnected'); setEvolutionQr(null); setEvolutionPasskey(null); }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : evolutionQr ? (
                   <>
                     <div className="bg-white p-2 rounded-xl mb-4">
                       <img src={evolutionQr} alt="QR Code" className="w-48 h-48" />
@@ -734,7 +803,7 @@ export function ChannelsPanel() {
                     <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
                     <p className="text-sm text-slate-300">Preparando o QR Code… (pode levar até 1 minuto)</p>
                     <button type="button" className="mt-3 text-[11px] text-slate-500 hover:text-slate-300 underline"
-                      onClick={() => { setEvolutionStatus('disconnected'); setEvolutionQr(null); }}>
+                      onClick={() => { setEvolutionStatus('disconnected'); setEvolutionQr(null); setEvolutionPasskey(null); }}>
                       Cancelar
                     </button>
                   </>

@@ -34,6 +34,8 @@ router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: Au
         : 400;
       return res.status(status).json({ error: r.error, code: r.code, needsReset: r.needsReset || false, operationId: r.operationId });
     }
+    // F5: QR e passkey são material de pareamento de vida curta — nunca cachear.
+    if (r.qrBase64 || r.passkey) res.set("Cache-Control", "no-store");
     return res.json({
       ok: true,
       channelId: r.channelId,
@@ -42,6 +44,7 @@ router.post("/whatsapp/provision", requireRole("owner", "admin"), async (req: Au
       state: r.state,
       imported: !!r.imported,
       alreadyExists: !!r.alreadyExists,
+      passkey: r.passkey,
     });
   } catch (e: any) {
     console.error("[Channels] whatsapp/provision fatal:", e);
@@ -63,6 +66,7 @@ router.post("/whatsapp/reset", requireRole("owner", "admin"), async (req: AuthRe
       if (r.code === "channel_required" || r.code === "operation_in_progress") return res.status(409).json({ error: r.error, code: r.code, operationId: r.operationId });
       return res.status(502).json({ error: r.error, code: r.code });
     }
+    if (r.qrBase64 || r.passkey) res.set("Cache-Control", "no-store"); // F5
     return res.json(r);
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || "Falha no reset" });

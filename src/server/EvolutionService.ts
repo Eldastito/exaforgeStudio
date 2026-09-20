@@ -68,6 +68,14 @@ export interface ConnectAndQrResult {
   // (`resetInstance`), nunca autocorreção silenciosa. QR ausente ≠ autorização
   // pra apagar a sessão.
   needsReset?: boolean;
+  // F5 do PRD Conexão WhatsApp (fonte 0.7.2: instance_service.go:99-101 e
+  // 457-463): conta direcionada a PASSKEY não tem QR — o GetQr devolve o
+  // estágio, o código e a openUrl da cerimônia (TTL ~5 min,
+  // ceremony/store.go:29). É SUCESSO PENDENTE (state 'awaiting_passkey'),
+  // nunca erro. `misconfigured` = servidor sem PASSKEY_PUBLIC_URL (a openUrl
+  // vem como o literal <SET_PASSKEY_PUBLIC_URL> — sem ela não há o que abrir).
+  // O código NUNCA vai pra log — só pra resposta autenticada.
+  passkey?: { stage: string; code?: string; openUrl?: string; misconfigured?: boolean };
   // 17/09/2026 — resultado do registro do webhook (antes era mudo): false =
   // instância pode parear e ficar SURDA (nenhum evento/mensagem chega).
   webhookRegistered?: boolean;
@@ -447,6 +455,8 @@ export class EvolutionService {
     let qrBase64 = "";
     let state = "";
     let passkeyStage = "";
+    let passkeyCode = "";
+    let passkeyOpenUrl = "";
     // 16/09/2026 (4º relato) — o handler do evolution-go responde o MOTIVO no
     // corpo do 400 ({"error":"failed to start instance: ..."} ou "no QR code
     // available..."). Antes a gente descartava o corpo (`continue`) e reportava
@@ -485,7 +495,13 @@ export class EvolutionService {
           // 16/09/2026 (fonte real do build): quando a conta exige PASSKEY
           // (WebAuthn), NÃO existe QR — o GetQr devolve passkeyStage. Sem
           // capturar isso, reportávamos "QR vazio" e o operador ficava cego.
-          if (qrData?.data?.passkeyStage) { passkeyStage = String(qrData.data.passkeyStage); }
+          // F5: além do estágio, captura o CÓDIGO e a URL da cerimônia — antes
+          // eram descartados e o operador ia parar no Manager.
+          if (qrData?.data?.passkeyStage) {
+            passkeyStage = String(qrData.data.passkeyStage);
+            if (qrData.data.passkeyCode) passkeyCode = String(qrData.data.passkeyCode);
+            if (qrData.data.passkeyOpenUrl) passkeyOpenUrl = String(qrData.data.passkeyOpenUrl);
+          }
           const got = qrData?.data?.qrcode || qrData?.base64 || qrData?.data?.Qrcode || qrData?.qrcode?.base64 || qrData?.data?.qr || qrData?.qr || "";
           if (got) return String(got);
         } catch { /* tenta próximo endpoint */ }
@@ -547,10 +563,19 @@ export class EvolutionService {
       const finalQr = qrBase64.startsWith("data:image") ? qrBase64 : `data:image/png;base64,${qrBase64}`;
       return { ok: true, qrBase64: finalQr, token: activeToken, webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts };
     }
-    // Passkey em andamento: honesto — não é falha de QR, é outro fluxo de
-    // pareamento (WebAuthn); o operador conclui pelo manager do provedor.
+    // F5 do PRD Conexão WhatsApp: passkey em andamento é SUCESSO PENDENTE —
+    // não é falha de QR, é outro fluxo de pareamento (WebAuthn). A UI mostra a
+    // etapa (abrir link + código); antes convertíamos em erro e mandávamos o
+    // operador pro Manager. Sem PASSKEY_PUBLIC_URL no servidor Evolution, a
+    // openUrl vem como <SET_PASSKEY_PUBLIC_URL> → `misconfigured` (a UI pede a
+    // configuração em vez de mostrar um link quebrado).
     if (passkeyStage) {
-      return { ok: false, error: `A conta exige PASSKEY pra concluir o pareamento (estágio: ${passkeyStage}) — conclua pelo manager do Evolution e tente de novo.` };
+      const misconfigured = !passkeyOpenUrl || passkeyOpenUrl.includes("SET_PASSKEY_PUBLIC_URL") || !/^https:\/\//i.test(passkeyOpenUrl);
+      return {
+        ok: true, state: "awaiting_passkey", token: activeToken,
+        webhookRegistered: webhookReg.ok, webhookAttempts: webhookReg.attempts,
+        passkey: { stage: passkeyStage, code: passkeyCode || undefined, openUrl: misconfigured ? undefined : passkeyOpenUrl, misconfigured },
+      };
     }
     // QR vazio: honesto — e agora com o PORQUÊ do provedor (4º relato). Duas
     // fontes, na ordem de precisão:

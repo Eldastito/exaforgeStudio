@@ -11813,6 +11813,15 @@ const initDb = () => {
       UNIQUE (organization_id, idempotency_key)
     );
   `); } catch(e){}
+
+  // ADR-083 Malote — RETIRADA de malote distinta do DEPÓSITO bancário. Caso
+  // Av. Brasil: o dono (Carlos) pega o dinheiro em mão toda semana em vez de
+  // depositar no banco. As duas coisas BAIXAM o "em caixa a depositar" da mesma
+  // forma; o `kind` só distingue a origem no relatório (banco × mão). Legado =
+  // 'deposito' (toda linha antiga era depósito bancário). Aditivo/0-regressão.
+  try { db.exec(`ALTER TABLE retail_cash_deposits ADD COLUMN kind TEXT DEFAULT 'deposito'`); } catch(e){}
+  // Snapshot da RETIRADA no fecho de semana (espelha total_deposited).
+  try { db.exec(`ALTER TABLE retail_cash_week_closings ADD COLUMN total_withdrawn REAL NOT NULL DEFAULT 0`); } catch(e){}
 };
 
 initDb();

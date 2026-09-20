@@ -2237,6 +2237,7 @@ router.post("/cash/deposit", (req: AuthRequest, res): any => {
       const dep = RetailCashDepositService.registerDeposit(orgId, storeId, {
         date: String(body.date || ""), amount: Number(body.amount),
         depositor: body.depositor, periodStart: body.periodStart, periodEnd: body.periodEnd, notes: body.notes, receiptUrl,
+        kind: body.kind === "retirada" ? "retirada" : "deposito",
       }, req.user?.userId);
       res.status(201).json(dep);
     } catch (e: any) {

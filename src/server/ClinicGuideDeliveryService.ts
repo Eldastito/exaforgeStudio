@@ -26,6 +26,7 @@ import { LgpdService } from "./LgpdService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { ClinicGuideService } from "./ClinicGuideService.js";
 import { JWT_SECRET } from "./config/secret.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 
 const SENSITIVE_CONSENT = "dados_sensiveis";
 const COMMS_CONSENT = "comunicacoes";
@@ -100,16 +101,9 @@ function safeStorageKey(storageKey: string): string {
 }
 
 function resolveChannel(orgId: string, contactChannelId: string | null): string | null {
-  if (contactChannelId) {
-    const c = db.prepare(`SELECT id, status FROM channels WHERE id = ? AND organization_id = ?`).get(contactChannelId, orgId) as any;
-    if (c && c.status !== "disabled" && c.status !== "disconnected") return c.id;
-  }
-  const fb = db.prepare(
-    `SELECT id FROM channels WHERE organization_id = ?
-       AND status NOT IN ('disabled','disconnected')
-      ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
-  ).get(orgId) as any;
-  return fb?.id || null;
+  // F7.2: canal do registro do paciente primeiro; binding de 'clinica' decide
+  // o fallback; sem binding, fallback legado exato (tudo no helper canônico).
+  return ChannelBindingService.selectContactChannel(orgId, "clinica", contactChannelId);
 }
 
 function insertDelivery(row: {

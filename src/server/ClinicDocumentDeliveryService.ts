@@ -38,6 +38,7 @@ import { MessageProviderService } from "./MessageProviderService.js";
 // `sha256(":clinical_document_v1")` — reproduzível publicamente — quando a env
 // não estava setada, permitindo forjar URL de qualquer PDF clínico.
 import { JWT_SECRET } from "./config/secret.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 
 export type DocKind = "prescription" | "certificate" | "receipt";
 
@@ -202,20 +203,10 @@ export class ClinicDocumentDeliveryService {
     if (!contact) throw new Error("Paciente não encontrado.");
     if (!contact.identifier) throw new Error("Paciente sem identificador (telefone/WhatsApp) para enviar.");
 
-    let channelId: string = contact.channel_id;
-    if (channelId) {
-      const c = db.prepare(`SELECT id, status FROM channels WHERE id = ? AND organization_id = ?`).get(channelId, orgId) as any;
-      if (!c || c.status === "disabled" || c.status === "disconnected") channelId = "";
-    }
-    if (!channelId) {
-      const fallback = db.prepare(
-        `SELECT id FROM channels WHERE organization_id = ?
-           AND status NOT IN ('disabled','disconnected')
-         ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
-      ).get(orgId) as any;
-      if (!fallback) throw new Error("Nenhum canal WhatsApp ativo para enviar. Conecte um canal e tente novamente.");
-      channelId = fallback.id;
-    }
+    // F7.2: canal do registro do paciente primeiro; binding de 'clinica' decide
+    // o fallback; sem binding, fallback legado exato (tudo no helper canônico).
+    const channelId = ChannelBindingService.selectContactChannel(orgId, "clinica", contact.channel_id);
+    if (!channelId) throw new Error("Nenhum canal WhatsApp ativo para enviar. Conecte um canal e tente novamente.");
 
     // 4) Renderiza PDF em bytes → salva em disco privado.
     // Fase 18: caminho é `{orgId}/{uuid}.pdf` — subpasta por org protege a

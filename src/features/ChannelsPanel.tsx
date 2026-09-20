@@ -117,10 +117,19 @@ export function ChannelsPanel() {
         setEvoInstanceName(chs[0]?.instanceName || null);
         setEvolutionStatus(s => (s === 'connecting_evo' ? s : 'disconnected'));
       }
-    }).catch(() => {});
-    apiFetch('/api/channels/states').then(r => r.json()).then((d: any) => {
-      const chs = Array.isArray(d?.channels) ? d.channels : [];
-      setEvoState(chs.find((c: any) => c.provider === 'evolution' || c.provider === 'evolution_go') || null);
+      // Incidente 20/09: com N canais evolution (antigos pausados/desconectados +
+      // o ativo), as luzes pegavam o PRIMEIRO da lista e contradiziam o banner
+      // ("Sessão: desconectada" com WhatsApp conectado). As luzes refletem o
+      // canal ATIVO do banner; sem conectado, o melhor candidato não-pausado.
+      apiFetch('/api/channels/states').then(r2 => r2.json()).then((d2: any) => {
+        const states = (Array.isArray(d2?.channels) ? d2.channels : [])
+          .filter((c: any) => c.provider === 'evolution' || c.provider === 'evolution_go');
+        const pick = (conn && states.find((c: any) => c.channelId === conn.channelId))
+          || states.find((c: any) => c.administration !== 'paused' && c.session === 'connected')
+          || states.find((c: any) => c.administration !== 'paused')
+          || states[0] || null;
+        setEvoState(pick);
+      }).catch(() => {});
     }).catch(() => {});
   };
 

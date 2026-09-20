@@ -1008,6 +1008,7 @@
     "test:whatsapp-observed-at": "tsx scripts/test-whatsapp-observed-at.ts",
     "test:whatsapp-operation-lock": "tsx scripts/test-whatsapp-operation-lock.ts",
     "test:whatsapp-passkey": "tsx scripts/test-whatsapp-passkey.ts",
+    "test:whatsapp-webhook-channel": "tsx scripts/test-whatsapp-webhook-channel.ts",
     "test:channel-binding-gate": "tsx scripts/test-channel-binding-gate.ts",
     "test:channel-binding-migration": "tsx scripts/test-channel-binding-migration.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import db from "./db.js";
+import { ChannelWebhookCredentialService } from "./ChannelWebhookCredentialService.js";
 
 // Segurança do webhook do WhatsApp (Evolution), self-service.
 // O app gera e guarda um segredo automaticamente (persistido em app_config),
@@ -86,6 +87,26 @@ export function getLastWebhookHit(): { at: number; ok: boolean; reason: string }
  * (payload não identificável) → `true` (não bloqueia a 1ª entrega; não há como deduplicar).
  * Best-effort: qualquer erro de storage devolve `true` (nunca DERRUBA a entrega legítima).
  */
+/**
+ * F6 do PRD Conexão WhatsApp — validação ÚNICA do segredo recebido no webhook:
+ * aceita o segredo GLOBAL (canais legados registrados com a URL antiga) OU a
+ * credencial POR CANAL (`whc_...`, com janela de rotação). Quando a credencial
+ * do canal casa, devolve o identifier — o handler atribui a saúde ao canal
+ * certo. Comparações em tempo constante nos dois caminhos.
+ */
+export function checkWebhookSecret(provided: string): { ok: boolean; channelIdentifier?: string } {
+  const p = String(provided || "");
+  const expected = effectiveWebhookSecret();
+  const a = Buffer.from(p);
+  const b = Buffer.from(expected);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) return { ok: true };
+  try {
+    const hit = ChannelWebhookCredentialService.verify(p);
+    if (hit) return { ok: true, channelIdentifier: hit.identifier };
+  } catch { /* best-effort — cai no rejeitado */ }
+  return { ok: false };
+}
+
 export function claimWebhookEvent(provider: string, eventId: string | null | undefined): boolean {
   const id = String(eventId || "").trim();
   if (!id) return true; // sem identificador → não há como deduplicar; processa

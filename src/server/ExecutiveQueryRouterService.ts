@@ -21,6 +21,7 @@
  */
 import db from "./db.js";
 import { chat } from "./llm.js";
+import { logAuthEvent } from "./auditLog.js";
 import { ExecutiveQueryToolsService, type ExecutiveToolResult } from "./ExecutiveQueryToolsService.js";
 
 const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -34,14 +35,22 @@ export class ExecutiveQueryRouterService {
    * Tenta responder a pergunta por FERRAMENTA. Devolve o texto da resposta
    * (ou o `clarify` da ferramenta) — ou `null` pro caller cair no panorama.
    */
-  static async answer(orgId: string, question: string, opts: { canSeeMoney?: boolean } = {}): Promise<string | null> {
+  static async answer(orgId: string, question: string, opts: { canSeeMoney?: boolean; actorId?: string | null } = {}): Promise<string | null> {
     const q = String(question || "").trim();
     if (!orgId || !q) return null;
     const canSeeMoney = opts.canSeeMoney !== false;
+    const actorId = opts.actorId ?? null;
     try {
       let pick = this.detect(orgId, q);
       if (!pick) pick = await this.llmSelect(orgId, q, { canSeeMoney });
-      if (!pick) return null;
+      if (!pick) {
+        // F5: pergunta que PARECE consulta de negócio mas nenhuma ferramenta
+        // cobriu vira BACKLOG (o dono vê o que foi perguntado e não respondido,
+        // em vez de eu adivinhar a próxima ferramenta). Pergunta analítica
+        // ("por que…") não conta — é do panorama, não é lacuna de ferramenta.
+        this.recordMiss(orgId, q, actorId);
+        return null;
+      }
 
       const res = ExecutiveQueryToolsService.run(orgId, pick.tool, pick.args, { canSeeMoney });
       if (res.clarify) return res.clarify;
@@ -166,6 +175,62 @@ Responda SÓ JSON: {"tool": "<nome ou null>", "args": {…}}`;
       const args = parsed.args && typeof parsed.args === "object" ? parsed.args : {};
       return { tool: name, args };
     } catch { return null; }
+  }
+
+  // ── F5: lacunas viram backlog ─────────────────────────────────────────────
+  /** Minimiza a pergunta pro log (LGPD): tira telefone, CPF, cartão, e-mail. */
+  static minimizeQuestion(q: string): string {
+    return String(q || "")
+      .replace(/\b\d{11,}\b/g, "[num]")                         // telefone/CPF colados
+      .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "[cpf]")     // CPF formatado
+      .replace(/\b(?:\d[ .-]?){13,19}\b/g, "[cartao]")          // cartão
+      .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email]")          // e-mail
+      .replace(/\s+/g, " ").trim().slice(0, 200);
+  }
+
+  /**
+   * Só registra miss se a pergunta CHEIRA a consulta de negócio (evita poluir o
+   * backlog com saudação/analítica/conversa fiada). Best-effort — nunca lança.
+   */
+  private static recordMiss(orgId: string, question: string, actorId: string | null): void {
+    try {
+      const ql = norm(question);
+      if (ql.length < 8) return;
+      if (/(por ?que|explique|analis|motivo|diagnostic)/.test(ql)) return; // é do panorama
+      const looksBusiness = /(vend|fatur|estoque|cota|meta|caixa|saldo|receber|pagar|comiss|pre[çc]o|ticket|cliente|produto|loja|filial|fechament|quant|ranking|top |melhor|pior|desempenh|resultado|lucro|margem|receita)/.test(ql);
+      if (!looksBusiness) return;
+      logAuthEvent(orgId, actorId, null, "DIRETOR_QUERY_MISS", { q: this.minimizeQuestion(question) });
+    } catch { /* backlog é best-effort */ }
+  }
+
+  /**
+   * Backlog das próximas ferramentas: perguntas de consulta que nenhuma
+   * ferramenta cobriu, agrupadas por texto minimizado, mais recentes primeiro.
+   * Read model (RN-004) sobre o audit — sem tabela nova.
+   */
+  static gaps(orgId: string, opts: { limit?: number; sinceDays?: number } = {}): { totalMisses: number; items: { question: string; count: number; lastAt: string }[] } {
+    const limit = Math.min(Math.max(1, opts.limit || 50), 200);
+    const sinceDays = Math.min(Math.max(1, opts.sinceDays || 90), 365);
+    try {
+      const rows = db.prepare(
+        `SELECT metadata_json, created_at FROM auth_audit_logs
+          WHERE organization_id = ? AND event_type = 'DIRETOR_QUERY_MISS'
+            AND created_at >= datetime('now', ?)
+          ORDER BY created_at DESC LIMIT 2000`
+      ).all(orgId, `-${sinceDays} days`) as any[];
+      const agg = new Map<string, { question: string; count: number; lastAt: string }>();
+      for (const r of rows) {
+        let q = "";
+        try { q = String(JSON.parse(r.metadata_json || "{}")?.q || ""); } catch { /* ignore */ }
+        if (!q) continue;
+        const key = q.toLowerCase();
+        const cur = agg.get(key);
+        if (cur) cur.count++;
+        else agg.set(key, { question: q, count: 1, lastAt: r.created_at });
+      }
+      const items = [...agg.values()].sort((a, b) => b.count - a.count || (a.lastAt < b.lastAt ? 1 : -1)).slice(0, limit);
+      return { totalMisses: rows.length, items };
+    } catch { return { totalMisses: 0, items: [] }; }
   }
 
   // ── 4) Resposta final (curta; sem LLM → fatos crus, nunca trava) ─────────

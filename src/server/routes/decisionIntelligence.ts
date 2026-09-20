@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { AuthRequest, requireMasterAdmin } from "../middleware/auth.js";
+import { AuthRequest, requireMasterAdmin, requireRole } from "../middleware/auth.js";
+import { ExecutiveQueryRouterService } from "../ExecutiveQueryRouterService.js";
 import { EvidencePackageService } from "../EvidencePackageService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { DecisionEngine } from "../DecisionEngine.js";
@@ -40,6 +41,17 @@ router.get("/evidence", (req: AuthRequest, res): any => {
   const period = typeof req.query?.period === "string" ? req.query.period : undefined;
   const force = req.query?.force === "1" || req.query?.force === "true";
   res.json({ evidence: EvidencePackageService.build(orgId, { subject, period, force }) });
+});
+
+// GET /api/decision-intelligence/diretor-tools/gaps — F5: backlog das perguntas
+// de consulta que nenhuma ferramenta do Diretor IA cobriu (o que o dono
+// perguntou e a IA não soube responder). Read model sobre o audit; gestor.
+router.get("/diretor-tools/gaps", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const limit = Number(req.query?.limit) || undefined;
+  const sinceDays = Number(req.query?.sinceDays) || undefined;
+  res.json(ExecutiveQueryRouterService.gaps(orgId, { limit, sinceDays }));
 });
 
 // GET /api/decision-intelligence/priorities — Pareto de sinais abertos já com

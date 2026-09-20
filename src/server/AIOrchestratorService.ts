@@ -166,7 +166,7 @@ export class AIOrchestratorService {
         const question = text.replace(/^\s*zap[a-z]*\b[\s,.:;!?-]*/i, "").trim();
         if (question) {
           const { ExecutiveQueryRouterService } = await import("./ExecutiveQueryRouterService.js");
-          const routed = await ExecutiveQueryRouterService.answer(params.organizationId, question, { canSeeMoney: true });
+          const routed = await ExecutiveQueryRouterService.answer(params.organizationId, question, { canSeeMoney: true, actorId: manager?.id || params.senderId });
           if (routed) {
             this.logInteraction({
               organizationId: params.organizationId,

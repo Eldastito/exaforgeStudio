@@ -12,7 +12,6 @@ import { PlanService } from "./PlanService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { ExecutiveBusinessSnapshotService } from "./ExecutiveBusinessSnapshotService.js";
 import { ExecutiveConstraintService } from "./ExecutiveConstraintService.js";
-import { RetailDashboardService } from "./RetailDashboardService.js";
 
 /**
  * Diretor Executivo IA / Central de Agentes (Fase A da visão de SO Empresarial).
@@ -67,26 +66,57 @@ REGRAS:
     try {
       const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name LIMIT 30`).all(orgId) as any[];
       if (!stores.length) return "";
-      const month = new Date().toISOString().slice(0, 7);
-      const m = RetailDashboardService.monthly(orgId, month);
-      const byStore = new Map<string, any>((m.perStore || []).map((r: any) => [r.store_id, r]));
+      // Datas no fuso do NEGÓCIO (closing_date é data local BR) — na virada do
+      // dia UTC o "hoje" errado mandaria o bloco pro dia seguinte.
+      const tz = process.env.TZ_DISPLAY || "America/Sao_Paulo";
+      const hoje = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+      const ontem = new Date(Date.parse(hoje + "T12:00:00Z") - 86400000).toISOString().slice(0, 10);
+      const month = hoje.slice(0, 7);
+      // REAL = fechamento com dado de verdade. 'pending' é PLACEHOLDER pré-criado
+      // com a cota (venda 0 fictícia — chegou a aparecer "último fechamento" de
+      // data FUTURA com R$ 0,00 pro gestor); nunca soma nem vira "último".
+      // Data futura idem: fechamento do futuro não existe.
+      const mtd = db.prepare(
+        `SELECT store_id, COALESCE(SUM(informed_total),0) AS sales, COUNT(*) AS n
+           FROM retail_daily_closings
+          WHERE organization_id = ? AND closing_date BETWEEN ? AND ?
+            AND status NOT IN ('pending','rejected')
+          GROUP BY store_id`
+      ).all(orgId, `${month}-01`, hoje) as any[];
+      const mtdBy = new Map<string, any>(mtd.map((r: any) => [r.store_id, r]));
       const last = db.prepare(
         `SELECT c.store_id, c.closing_date, c.informed_total, c.status
            FROM retail_daily_closings c
-          WHERE c.organization_id = ? AND c.status != 'rejected'
+          WHERE c.organization_id = ? AND c.status NOT IN ('pending','rejected') AND c.closing_date <= ?
             AND c.closing_date = (SELECT MAX(c2.closing_date) FROM retail_daily_closings c2
-                                   WHERE c2.organization_id = c.organization_id AND c2.store_id = c.store_id AND c2.status != 'rejected')`
-      ).all(orgId) as any[];
+                                   WHERE c2.organization_id = c.organization_id AND c2.store_id = c.store_id
+                                     AND c2.status NOT IN ('pending','rejected') AND c2.closing_date <= ?)`
+      ).all(orgId, hoje, hoje) as any[];
       const lastBy = new Map<string, any>(last.map((r: any) => [r.store_id, r]));
+      const yday = db.prepare(
+        `SELECT store_id, informed_total, quota_amount, status FROM retail_daily_closings
+          WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'`
+      ).all(orgId, ontem) as any[];
+      const ydayBy = new Map<string, any>(yday.map((r: any) => [r.store_id, r]));
       const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+      let total = 0;
       const lines = stores.map((s) => {
-        const mo = byStore.get(s.id);
+        const mo = mtdBy.get(s.id); if (mo) total += Number(mo.sales || 0);
         const lc = lastBy.get(s.id);
-        const mtd = mo ? `${brl(mo.sales)} no mês (${mo.closings} fechamento(s))` : "sem fechamento no mês";
+        const yd = ydayBy.get(s.id);
+        const mtdTxt = mo ? `${brl(mo.sales)} no mês (${mo.n} fechamento(s))` : "sem fechamento no mês";
+        // Formato do Informe Diário (venda × cota → bateu/faltou) — é assim que
+        // o dono lê o fechamento de ontem na Operação da Rede.
+        let ontemTxt = `ontem (${ontem}): fechamento ainda não enviado`;
+        if (yd && yd.status !== "pending") {
+          const v = Number(yd.informed_total || 0), q = Number(yd.quota_amount || 0);
+          const res = q > 0 ? (v >= q ? ` · cota ${brl(q)} → BATEU (+${brl(v - q)})` : ` · cota ${brl(q)} → faltou ${brl(q - v)}`) : "";
+          ontemTxt = `ontem (${ontem}): ${brl(v)}${res}`;
+        }
         const ult = lc ? ` · último fechamento ${lc.closing_date}: ${brl(lc.informed_total)} (${lc.status})` : "";
-        return `- ${s.name}: ${mtd}${ult}`;
+        return `- ${s.name}: ${mtdTxt} · ${ontemTxt}${ult}`;
       });
-      return `\n\n=== VAREJO — VENDAS POR LOJA (mês ${month}, fatos dos fechamentos; NUNCA invente número; fechamento rejeitado não soma) ===\n${lines.join("\n")}\nTotal da rede no mês: ${brl(m.totalSales)}.`;
+      return `\n\n=== VAREJO — VENDAS POR LOJA (mês ${month} até ${hoje}, fatos dos fechamentos; NUNCA invente número; 'fechamento ainda não enviado' NÃO é venda zero — diga que está pendente) ===\n${lines.join("\n")}\nTotal da rede no mês: ${brl(total)}.`;
     } catch { return ""; }
   }
 

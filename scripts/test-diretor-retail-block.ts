@@ -1,19 +1,21 @@
 /**
  * TESTE — Bloco "Varejo — vendas por loja" no panorama do Diretor IA (20/09/2026).
  * -----------------------------------------------------------------------------
- * Incidente TOULON: "Zapp, como foram as vendas da Avenida Brasil?" não era
- * respondível — nenhum caminho da IA (Diretor/pergunta_negocio nem o raio-x do
- * orquestrador) recebia venda POR LOJA, e o modelo "prometia verificar com a
- * equipe". O bloco novo DERIVA dos fechamentos reais (retail_daily_closings).
+ * Incidente TOULON (2 rodadas):
+ *  1ª) "Zapp, como foram as vendas da Avenida Brasil?" não era respondível —
+ *      nenhum caminho da IA recebia venda POR LOJA.
+ *  2ª) o bloco vazou um fechamento 'pending' de DATA FUTURA com R$ 0,00 como
+ *      "último fechamento" — 'pending' é PLACEHOLDER pré-criado com a cota
+ *      (RetailClosingService.getOrCreate), nunca é venda; e a pergunta comum
+ *      ("vendas de ONTEM") não tinha resposta direta.
  *
  * Prova, offline:
- *  - bloco lista cada loja ativa com acumulado do mês + último fechamento;
- *  - fechamento REJEITADO nunca soma; loja sem fechamento aparece honesta
- *    ("sem fechamento no mês"), nunca vira 0 inventado;
- *  - dinheiro é role-gated: canSeeMoney:false → bloco NÃO entra no panorama;
- *  - org sem loja ativa → bloco vazio (0-regressão pra org sem varejo);
- *  - fiação: buildPanorama (com dinheiro) carrega o bloco e o raio-x do
- *    orquestrador referencia o mesmo bloco (fonte única);
+ *  - acumulado do mês por loja só com fechamento REAL (pending/rejected fora);
+ *  - linha de ONTEM por loja: valor quando fechado; "ainda não enviado" quando
+ *    pendente/ausente (nunca R$ 0,00 inventado);
+ *  - fechamento de data FUTURA ou pending nunca vira "último fechamento";
+ *  - dinheiro role-gated (§73); org sem loja ativa → bloco vazio;
+ *  - fiação: buildPanorama + raio-x do orquestrador usam o mesmo bloco;
  *  - isolamento multi-tenant.
  *
  * Uso: npm run test:diretor-retail-block
@@ -29,6 +31,16 @@ async function main() {
   const { default: db } = await import("../src/server/db.js");
   const { ExecutiveAdvisorService } = await import("../src/server/ExecutiveAdvisorService.js");
 
+  // Mesma régua de datas do bloco (fuso do negócio).
+  const tz = process.env.TZ_DISPLAY || "America/Sao_Paulo";
+  const hoje = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+  const addDays = (date: string, n: number) => new Date(Date.parse(date + "T12:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const ontem = addDays(hoje, -1);
+  const anteontem = addDays(hoje, -2);
+  const futuro = addDays(hoje, 5);
+  const month = hoje.slice(0, 7);
+  const inMonth = (d: string) => d.slice(0, 7) === month;
+
   const mkOrg = (tag: string) => {
     const orgId = `org_${tag}_${randomUUID().slice(0, 6)}`;
     db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, ?, 'active')`).run(randomUUID(), orgId, `Rede ${tag}`);
@@ -39,30 +51,36 @@ async function main() {
     db.prepare(`INSERT INTO retail_stores (id, organization_id, name, active) VALUES (?, ?, ?, 1)`).run(id, org, name);
     return id;
   };
-  const month = new Date().toISOString().slice(0, 7);
-  const d = (day: string) => `${month}-${day}`;
-  const mkClosing = (org: string, storeId: string, date: string, total: number, status = "reconciled") => {
-    db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(randomUUID(), org, storeId, date, status, total);
+  const mkClosing = (org: string, storeId: string, date: string, total: number, status = "reconciled", quota = 0) => {
+    db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, quota_amount) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(randomUUID(), org, storeId, date, status, total, quota);
   };
 
   const A = mkOrg("A");
   const avBrasil = mkStore(A, "Avenida Brasil");
   const centro = mkStore(A, "Centro");
   mkStore(A, "Sem Fechamento");
-  mkClosing(A, avBrasil, d("01"), 5000);
-  mkClosing(A, avBrasil, d("02"), 3000);
-  mkClosing(A, avBrasil, d("03"), 9999, "rejected"); // nunca soma
-  mkClosing(A, centro, d("02"), 1200.5);
+  mkClosing(A, avBrasil, anteontem, 5000, "reconciled");
+  mkClosing(A, avBrasil, ontem, 3000, "received", 2800); // bateu a cota (+200)
+  mkClosing(A, avBrasil, futuro, 0, "pending");        // placeholder futuro — o bug da 2ª rodada
+  mkClosing(A, centro, anteontem, 1200.5, "approved");
+  mkClosing(A, centro, ontem, 0, "pending");           // ontem ainda não enviado
+  mkClosing(A, centro, hoje, 9999, "rejected");        // rejeitado nunca soma
+
+  const expAv = (inMonth(anteontem) ? 5000 : 0) + (inMonth(ontem) ? 3000 : 0);
+  const expCentro = inMonth(anteontem) ? 1200.5 : 0;
+  const brl = (v: number) => `R$ ${v.toFixed(2)}`;
 
   // ── 1) Conteúdo do bloco. ──
   const b = ExecutiveAdvisorService.retailStoresBlock(A);
   check("1.1 bloco presente com o cabeçalho de varejo por loja", b.includes("VAREJO — VENDAS POR LOJA"), b.slice(0, 60));
-  check("1.2 Avenida Brasil com acumulado certo (rejeitado não soma)", b.includes("Avenida Brasil: R$ 8000.00 no mês (2 fechamento(s))"), b);
-  check("1.3 último fechamento da Avenida Brasil é o dia 02 (03 foi rejeitado)", b.includes(`último fechamento ${d("02")}: R$ 3000.00`), "");
-  check("1.4 Centro com o próprio número", b.includes("Centro: R$ 1200.50 no mês (1 fechamento(s))"), "");
-  check("1.5 loja sem fechamento aparece honesta (nunca 0 inventado)", b.includes("Sem Fechamento: sem fechamento no mês"), "");
-  check("1.6 total da rede soma só o válido", b.includes("Total da rede no mês: R$ 9200.50"), "");
+  check("1.2 Avenida Brasil: acumulado só com fechamento REAL", expAv > 0 ? b.includes(`Avenida Brasil: ${brl(expAv)} no mês`) : b.includes("Avenida Brasil: sem fechamento no mês"), b);
+  check("1.3 ONTEM da Avenida Brasil responde direto com o valor", b.includes(`ontem (${ontem}): ${brl(3000)}`), "");
+  check("1.3b ONTEM traz cota e resultado no formato do Informe (bateu/faltou)", b.includes(`cota ${brl(2800)} → BATEU (+${brl(200)})`), b);
+  check("1.4 último fechamento é ONTEM — o pending FUTURO nunca aparece", b.includes(`último fechamento ${ontem}: ${brl(3000)}`) && !b.includes(futuro), "");
+  check("1.5 ONTEM pendente do Centro é honesto (nunca R$ 0,00 inventado)", b.includes(`Centro:`) && b.includes("fechamento ainda não enviado"), "");
+  check("1.6 loja sem fechamento aparece honesta", b.includes("Sem Fechamento: sem fechamento no mês"), "");
+  check("1.7 total da rede soma só o REAL (pending/rejected fora)", b.includes(`Total da rede no mês: ${brl(expAv + expCentro)}`), b.slice(-80));
 
   // ── 2) Gate de dinheiro + inércia. ──
   const pMoney = ExecutiveAdvisorService.buildPanorama(A, { canSeeMoney: true });

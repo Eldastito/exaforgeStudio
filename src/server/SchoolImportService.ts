@@ -4,6 +4,7 @@ import { onlyDigits } from "./phoneMatch.js";
 import { StudentService } from "./StudentService.js";
 import { TeacherService } from "./TeacherService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 
 /**
  * Módulo Escola (ADR-144, Fatia 5) — Conectores reais: o motor de IMPORT.
@@ -71,8 +72,14 @@ export class SchoolImportService {
   static importGuardians(orgId: string, rows: ImportPayload["guardians"] = [], actorId?: string): SectionReport {
     const rep = empty();
     if (!(rows || []).length) return rep;
-    // Um contato precisa de canal (contacts.channel_id NOT NULL). Usa o canal da org.
-    const channel = db.prepare(`SELECT id FROM channels WHERE organization_id = ? ORDER BY (status != 'disabled') DESC, created_at ASC LIMIT 1`).get(orgId) as any;
+    // Um contato precisa de canal (contacts.channel_id NOT NULL). F7: o binding
+    // de 'escola' decide a âncora quando ele DECIDE explicitamente; sem binding,
+    // mantém a âncora legada EXATA — o upsert do contato é por (org, canal,
+    // telefone), então trocar a seleção default duplicaria responsáveis num
+    // re-import. Âncora não é envio (org só com canal pausado segue importando).
+    const dEscola = ChannelBindingService.resolve(orgId, "escola", { direction: "outbound" });
+    const channel = (dEscola.ok && dEscola.channelId ? { id: dEscola.channelId }
+      : db.prepare(`SELECT id FROM channels WHERE organization_id = ? ORDER BY (status != 'disabled') DESC, created_at ASC LIMIT 1`).get(orgId)) as any;
     for (const row of rows || []) {
       const studentId = this.resolveStudentId(orgId, row?.student);
       if (!studentId) { rep.skipped++; continue; }

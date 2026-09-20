@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { JWT_SECRET } from "./config/secret.js";
 import { MessageProviderService } from "./MessageProviderService.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 
 export type Interval = "monthly" | "weekly" | "yearly";
 
@@ -227,7 +228,10 @@ export class SubscriptionService {
     try {
       const contact = db.prepare("SELECT * FROM contacts WHERE id = ? AND organization_id = ?").get(contactId, orgId) as any;
       if (!contact) return false;
-      const channel = db.prepare("SELECT id FROM channels WHERE organization_id = ? AND status = 'connected' LIMIT 1").get(orgId) as any;
+      // F7: seleção pelo resolvedor canônico (binding de 'cobranca' decide,
+      // como no PaymentService; sem binding, seleção legada). O gate de envio
+      // barra canal desconectado no sink.
+      const channel = ChannelBindingService.selectOutboundChannel(orgId, "cobranca");
       if (!channel) return false;
 
       const token = this.generatePortalToken(orgId, contactId);

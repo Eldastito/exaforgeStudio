@@ -89,12 +89,25 @@ async function main() {
     "src/server/Scheduler.ts", "src/server/QuoteService.ts", "src/server/TaskReminderService.ts",
     "src/server/PaymentService.ts", "src/server/SupplierQuoteService.ts", "src/server/CampaignService.ts",
     "src/server/routes/escola.ts", "src/server/routes/falatu.ts", "src/server/routes/health.ts", "src/server/routes/admin.ts",
+    // F7 do PRD Conexão WhatsApp: produtores com seletor próprio migrados.
+    "src/server/ProspectExecutionService.ts", "src/server/SchoolImportService.ts", "src/server/SubscriptionService.ts",
   ];
   const NEEDLE = "ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1";
   for (const rel of migrated) {
     const src = fs.readFileSync(path.join(root, rel), "utf8");
     check(`7.x ${rel} sem cópia do SQL legado`, !src.includes(NEEDLE));
   }
+  // F7: os produtores migrados usam o resolvedor (selectOutboundChannel pra
+  // envio; resolve() pra âncora de contato, que preserva o default legado),
+  // e os seletores próprios sumiram.
+  for (const rel of ["src/server/ProspectExecutionService.ts", "src/server/SchoolImportService.ts", "src/server/SubscriptionService.ts"]) {
+    const src = fs.readFileSync(path.join(root, rel), "utf8");
+    check(`7.z ${rel} usa o resolvedor canônico`, src.includes("ChannelBindingService."));
+  }
+  const prospectSrc = fs.readFileSync(path.join(root, "src/server/ProspectExecutionService.ts"), "utf8");
+  check("7.w Prospect sem seletor próprio de WhatsApp (provider IN + connected)", !prospectSrc.includes("AND status = 'connected' ORDER BY created_at"));
+  const subSrc = fs.readFileSync(path.join(root, "src/server/SubscriptionService.ts"), "utf8");
+  check("7.w Subscription sem seletor próprio (status='connected' LIMIT 1)", !subSrc.includes("AND status = 'connected' LIMIT 1"));
   const sched = fs.readFileSync(path.join(root, "src/server/Scheduler.ts"), "utf8");
   const uses = (sched.match(/selectOutboundChannel\(/g) || []).length;
   check("7.y Scheduler usa o resolvedor nos 12 pontos", uses >= 12, `usos=${uses}`);

@@ -5,6 +5,7 @@ import { ProspectService } from "./ProspectService.js";
 import { MessageProviderService } from "./MessageProviderService.js";
 import { GoogleOAuthService } from "./GoogleOAuthService.js";
 import { phoneMatches, onlyDigits } from "./phoneMatch.js";
+import { ChannelBindingService } from "./ChannelBindingService.js";
 
 /**
  * Prospect AI — EXECUÇÃO E MEDIÇÃO (ADR-079, Fase B).
@@ -18,8 +19,6 @@ import { phoneMatches, onlyDigits } from "./phoneMatch.js";
  * Guardrails herdados da Fase A: nada é enviado sem aprovação humana, e o
  * envio re-checa bloqueio, opt-out e teto de tentativas ANTES do provedor.
  */
-const WHATSAPP_PROVIDERS = ["whatsapp_cloud", "evolution", "evolution_go"];
-
 export class ProspectExecutionService {
   /** Registra um evento do funil de prospecção (fonte das métricas da Fase C). */
   static emit(orgId: string, eventType: string, refs: {
@@ -61,9 +60,11 @@ export class ProspectExecutionService {
     if (o.channel === "whatsapp") {
       const phone = onlyDigits(contact.phone);
       if (!phone) throw new Error("Contato sem telefone — não dá para enviar por WhatsApp.");
-      const ch = db.prepare(`SELECT id FROM channels WHERE organization_id = ? AND provider IN (${WHATSAPP_PROVIDERS.map(() => "?").join(",")}) AND status = 'connected' ORDER BY created_at ASC LIMIT 1`)
-        .get(orgId, ...WHATSAPP_PROVIDERS) as any;
-      if (!ch) throw new Error("Nenhum canal de WhatsApp conectado. Conecte um canal em Configurações › Canais.");
+      // F7 do PRD Conexão WhatsApp: seleção pelo resolvedor canônico (binding
+      // por finalidade decide; sem binding, seleção legada). O gate de envio
+      // do MessageProviderService barra canal desconectado no sink.
+      const ch = ChannelBindingService.selectOutboundChannel(orgId, "prospeccao");
+      if (!ch) throw new Error("Nenhum canal de WhatsApp disponível pra prospecção — conecte um canal (ou reative a finalidade em Canais e IA).");
       if (viaExecutor) {
         const { CommandExecutorService } = await import("./CommandExecutorService.js");
         providerMessageId = (await CommandExecutorService.sendGovernedMessage(orgId, {
@@ -174,7 +175,15 @@ export class ProspectExecutionService {
     const pcontact = (acc.contacts || []).find((c: any) => c.phone || c.email) || (acc.contacts || [])[0];
     const identifier = onlyDigits(pcontact?.phone) || String(pcontact?.email || "").trim().toLowerCase();
     if (!identifier) throw new Error("Conta sem contato com telefone ou e-mail — adicione um contato antes de converter.");
-    const ch = db.prepare("SELECT id FROM channels WHERE organization_id = ? ORDER BY created_at ASC LIMIT 1").get(orgId) as any;
+    // F7: âncora do contato CRM segue o binding de 'atendimento' quando ele
+    // DECIDE explicitamente; sem binding, mantém a âncora legada EXATA (qualquer
+    // canal, mais antigo primeiro) — o upsert do contato é por (org, canal,
+    // identificador), então trocar a seleção default quebraria a idempotência
+    // de reconversão. Âncora não é envio: org só com canal pausado segue
+    // convertendo (0-regressão).
+    const dAtend = ChannelBindingService.resolve(orgId, "atendimento", { direction: "outbound" });
+    const ch = (dAtend.ok && dAtend.channelId ? { id: dAtend.channelId }
+      : db.prepare("SELECT id FROM channels WHERE organization_id = ? ORDER BY created_at ASC LIMIT 1").get(orgId)) as any;
     if (!ch) throw new Error("Nenhum canal cadastrado — conecte um canal antes de converter leads para o CRM.");
 
     let crmContact = db.prepare("SELECT id FROM contacts WHERE organization_id = ? AND channel_id = ? AND identifier = ?").get(orgId, ch.id, identifier) as any;

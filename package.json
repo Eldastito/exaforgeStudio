@@ -1046,7 +1046,8 @@
     "test:manager-experience": "tsx scripts/test-manager-experience.ts",
     "test:group-consolidation": "tsx scripts/test-group-consolidation.ts",
     "test:group-billing": "tsx scripts/test-group-billing.ts",
-    "test:channel-producer-binding": "tsx scripts/test-channel-producer-binding.ts"
+    "test:channel-producer-binding": "tsx scripts/test-channel-producer-binding.ts",
+    "test:clinic-channel-fallback": "tsx scripts/test-clinic-channel-fallback.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

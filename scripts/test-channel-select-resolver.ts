@@ -91,6 +91,11 @@ async function main() {
     "src/server/routes/escola.ts", "src/server/routes/falatu.ts", "src/server/routes/health.ts", "src/server/routes/admin.ts",
     // F7 do PRD Conexão WhatsApp: produtores com seletor próprio migrados.
     "src/server/ProspectExecutionService.ts", "src/server/SchoolImportService.ts", "src/server/SubscriptionService.ts",
+    // F7.2: fallback clínico centralizado no helper selectContactChannel.
+    "src/server/ClinicAddendumNoticeService.ts", "src/server/ClinicFollowUpNoticeService.ts",
+    "src/server/ClinicGuideDeliveryService.ts", "src/server/ClinicMonthlyReportDeliveryService.ts",
+    "src/server/ClinicDocumentDeliveryService.ts", "src/server/ClinicReminderService.ts",
+    "src/server/ClinicVacancyService.ts",
   ];
   const NEEDLE = "ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1";
   for (const rel of migrated) {

@@ -287,6 +287,36 @@ export class ChannelBindingService {
     } catch { return undefined; }
   }
 
+  /**
+   * F7.2 do PRD Conexão WhatsApp — canal pro AVISO com contato conhecido
+   * (Clinic*Delivery/Notice/Reminder/Vacancy). Ordem preservada dos serviços
+   * clínicos: (1) o canal do REGISTRO do paciente vence quando usável — o
+   * histórico da conversa mora lá; (2) binding da finalidade decide o
+   * fallback; (3) finalidade desligada pra saída → null (CA-03, produtor
+   * pula); (4) sem binding, o fallback legado EXATO dos serviços clínicos
+   * (exclui desconectado — mais estrito que a seleção legada genérica, que
+   * poderia entregar canal desconectado pro gate do sink rejeitar depois).
+   */
+  static selectContactChannel(
+    orgId: string,
+    featureKey: FeatureKey | string,
+    contactChannelId?: string | null,
+  ): string | null {
+    if (!orgId) return null;
+    if (contactChannelId && this.channelUsable(orgId, contactChannelId)) return contactChannelId;
+    const d = this.resolve(orgId, String(featureKey), { direction: "outbound" });
+    if (d.ok && d.channelId) return d.channelId;
+    if (d.code === "feature_disabled") return null;
+    try {
+      const fb = db.prepare(
+        `SELECT id FROM channels WHERE organization_id = ?
+           AND status NOT IN ('disabled','disconnected')
+          ORDER BY (provider LIKE 'evolution%') DESC, created_at ASC LIMIT 1`
+      ).get(orgId) as any;
+      return fb?.id || null;
+    } catch { return null; }
+  }
+
   /** Lista os bindings de uma finalidade (para UI/diagnóstico), sem segredos. */
   static list(orgId: string, featureKey?: string): any[] {
     if (!orgId) return [];

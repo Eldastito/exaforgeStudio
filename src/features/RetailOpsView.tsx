@@ -1781,6 +1781,9 @@ function MaloteTab() {
   const [depAmount, setDepAmount] = useState('');
   const [depWho, setDepWho] = useState('');
   const [depFile, setDepFile] = useState<File | null>(null);
+  // Baixa do caixa: 'deposito' (banco) ou 'retirada' (dinheiro pego em mão —
+  // caso das lojas que não depositam, o portador leva o malote).
+  const [depKind, setDepKind] = useState<'deposito' | 'retirada'>('deposito');
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
@@ -1842,13 +1845,14 @@ function MaloteTab() {
     try {
       const fd = new FormData();
       fd.append('storeId', storeId); fd.append('date', depDate); fd.append('amount', String(amount));
+      fd.append('kind', depKind);
       if (depWho.trim()) fd.append('depositor', depWho.trim());
       // Se o scan já salvou a foto, reaproveita a URL (não re-envia o arquivo).
       if (scannedReceipt) fd.append('receiptUrl', scannedReceipt);
       else if (depFile) fd.append('receipt', depFile);
       const res = await apiFetch('/api/retailops/cash/deposit', { method: 'POST', body: fd });
-      if (res.ok) { toast.success('Depósito registrado.'); setDepAmount(''); setDepWho(''); setDepFile(null); setScannedReceipt(null); setScanNote(null); if (fileRef.current) fileRef.current.value = ''; load(); }
-      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao registrar o depósito.'); }
+      if (res.ok) { toast.success(depKind === 'retirada' ? 'Retirada registrada.' : 'Depósito registrado.'); setDepAmount(''); setDepWho(''); setDepFile(null); setScannedReceipt(null); setScanNote(null); if (fileRef.current) fileRef.current.value = ''; load(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao registrar.'); }
     } finally { setSaving(false); }
   };
   const excluir = async (id: string) => {
@@ -1900,7 +1904,7 @@ function MaloteTab() {
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="rounded-lg bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 text-sm text-zinc-100" />
-        <span className="text-[11px] text-zinc-500">O dinheiro do dia vem do fechamento com as despesas já descontadas (dinheiro − despesas = malote); o depósito e o comprovante você registra aqui.</span>
+        <span className="text-[11px] text-zinc-500">O dinheiro do dia vem do fechamento com as despesas já descontadas (dinheiro − despesas = malote). Registre aqui a saída do caixa: <strong className="text-zinc-400">depósito</strong> no banco ou <strong className="text-zinc-400">retirada</strong> em mão — as duas baixam o "em caixa".</span>
       </div>
 
       {!storeId ? (
@@ -1909,8 +1913,10 @@ function MaloteTab() {
         <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>
       ) : led && (
         <>
-          {/* Conferência: entrou × depositado × em caixa */}
-          <div className="grid gap-2 sm:grid-cols-4">
+          {/* Conferência: entrou × depositado × (retirado) × em caixa. A coluna
+              Retirado só aparece quando a loja usa retirada em mão (0-regressão
+              visual pras lojas que só depositam). */}
+          <div className={`grid gap-2 ${led.totalWithdrawn > 0.01 ? 'sm:grid-cols-3 lg:grid-cols-5' : 'sm:grid-cols-4'}`}>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-zinc-500">Saldo anterior</div>
               <div className="text-lg font-semibold text-zinc-300 tabular-nums">{brl(led.saldoInicial)}</div>
@@ -1920,22 +1926,32 @@ function MaloteTab() {
               <div className="text-lg font-semibold text-zinc-100 tabular-nums">{brl(led.totalCash)}</div>
             </div>
             <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Depositado</div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Depositado (banco)</div>
               <div className="text-lg font-semibold text-emerald-300 tabular-nums">{brl(led.totalDeposited)}</div>
             </div>
+            {led.totalWithdrawn > 0.01 && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-wider text-zinc-500">Retirado (mão)</div>
+                <div className="text-lg font-semibold text-sky-300 tabular-nums">{brl(led.totalWithdrawn)}</div>
+              </div>
+            )}
             <div className={`rounded-xl border px-3 py-2 ${led.saldoFinal > 0.01 ? 'border-amber-500/40 bg-amber-500/10' : 'border-zinc-800 bg-zinc-900/40'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Em caixa (a depositar)</div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Em caixa (a baixar)</div>
               <div className={`text-lg font-semibold tabular-nums ${led.saldoFinal > 0.01 ? 'text-amber-300' : 'text-zinc-300'}`}>{brl(led.saldoFinal)}</div>
             </div>
           </div>
 
-          {/* Registrar depósito + comprovante */}
+          {/* Registrar baixa do caixa: depósito no banco OU retirada em mão */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Registrar depósito</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Registrar baixa do caixa</div>
+            <div className="mb-2 inline-flex rounded-lg border border-zinc-800 p-0.5 text-[12px]">
+              <button type="button" onClick={() => setDepKind('deposito')} className={`rounded-md px-2.5 py-1 font-medium ${depKind === 'deposito' ? 'bg-emerald-500/15 text-emerald-200' : 'text-zinc-400 hover:text-zinc-200'}`}>Depósito (banco)</button>
+              <button type="button" onClick={() => setDepKind('retirada')} className={`rounded-md px-2.5 py-1 font-medium ${depKind === 'retirada' ? 'bg-sky-500/15 text-sky-200' : 'text-zinc-400 hover:text-zinc-200'}`}>Retirada (mão)</button>
+            </div>
             <div className="flex flex-wrap items-end gap-2">
               <label className="text-[11px] text-zinc-400">Data<input type="date" value={depDate} onChange={e => setDepDate(e.target.value)} className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
-              <label className="text-[11px] text-zinc-400">Valor depositado<input inputMode="decimal" value={depAmount} onChange={e => setDepAmount(maskMoneyBRInput(e.target.value))} placeholder="0,00" className="block w-32 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100 text-right tabular-nums" /></label>
-              <label className="text-[11px] text-zinc-400">Quem depositou<input value={depWho} onChange={e => setDepWho(e.target.value)} placeholder="Nome" className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
+              <label className="text-[11px] text-zinc-400">{depKind === 'retirada' ? 'Valor retirado' : 'Valor depositado'}<input inputMode="decimal" value={depAmount} onChange={e => setDepAmount(maskMoneyBRInput(e.target.value))} placeholder="0,00" className="block w-32 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100 text-right tabular-nums" /></label>
+              <label className="text-[11px] text-zinc-400">{depKind === 'retirada' ? 'Quem retirou' : 'Quem depositou'}<input value={depWho} onChange={e => setDepWho(e.target.value)} placeholder="Nome" className="block w-40 rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" /></label>
               <label className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 cursor-pointer">
                 {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} {scanning ? 'Lendo comprovante…' : (depFile ? 'Comprovante anexado (IA lê o valor)' : 'Foto do comprovante (IA lê o valor)')}
                 <input ref={fileRef} type="file" accept="image/*" className="hidden" disabled={scanning} onChange={e => { onPickReceipt(e.target.files?.[0] || null); }} />
@@ -1959,7 +1975,7 @@ function MaloteTab() {
                     <span className="text-zinc-300 tabular-nums w-28">{`${c.weekStart.slice(8)}/${c.weekStart.slice(5, 7)} → ${c.weekEnd.slice(8)}/${c.weekEnd.slice(5, 7)}`}</span>
                     <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 text-[11px]"><Check className="w-3 h-3" /> Fechado</span>
                     {c.depositor && <span className="text-zinc-500">assinou {c.depositor}</span>}
-                    <span className="text-zinc-500 tabular-nums">dinheiro {brl(c.totalCash)} · depositado {brl(c.totalDeposited)}</span>
+                    <span className="text-zinc-500 tabular-nums">dinheiro {brl(c.totalCash)} · depositado {brl(c.totalDeposited)}{c.totalWithdrawn > 0.01 ? ` · retirado ${brl(c.totalWithdrawn)}` : ''}</span>
                     {c.receiptUrl && <a href={c.receiptUrl} target="_blank" rel="noreferrer" className="text-sky-300 hover:text-sky-200">comprovante</a>}
                     {isOwnerAdmin && <button onClick={() => reabrirSemana(c.weekStart)} className="text-zinc-500 hover:text-amber-300">reabrir</button>}
                   </div>
@@ -2016,7 +2032,7 @@ function MaloteTab() {
                   <th className="px-3 py-2 text-left font-medium">Dia</th>
                   <th className="px-3 py-2 text-right font-medium" title="Dinheiro do fechamento − despesas do dia">Dinheiro (malote)</th>
                   <th className="px-3 py-2 text-right font-medium">Em caixa</th>
-                  <th className="px-3 py-2 text-left font-medium">Depósito</th>
+                  <th className="px-3 py-2 text-left font-medium">Baixa (depósito / retirada)</th>
                 </tr>
               </thead>
               <tbody>
@@ -2037,10 +2053,11 @@ function MaloteTab() {
                     <td className="px-3 py-2">
                       {(r.deposits || []).map((d: any) => (
                         <span key={d.id} className="inline-flex items-center gap-1.5 mr-2">
-                          <span className="text-emerald-300 font-medium tabular-nums">{brl(d.amount)}</span>
+                          <span className={`font-medium tabular-nums ${d.kind === 'retirada' ? 'text-sky-300' : 'text-emerald-300'}`}>{brl(d.amount)}</span>
+                          {d.kind === 'retirada' && <span className="rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 px-1 py-0.5 text-[10px]">retirada</span>}
                           {d.depositor && <span className="text-[11px] text-zinc-500">· {d.depositor}</span>}
                           {d.receiptUrl && <a href={d.receiptUrl} target="_blank" rel="noreferrer" className="text-[11px] text-sky-300 hover:text-sky-200">comprovante</a>}
-                          {!r.locked && <button onClick={() => excluir(d.id)} title="Excluir depósito" className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>}
+                          {!r.locked && <button onClick={() => excluir(d.id)} title={d.kind === 'retirada' ? 'Excluir retirada' : 'Excluir depósito'} className="text-zinc-600 hover:text-red-300"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </span>
                       ))}
                     </td>

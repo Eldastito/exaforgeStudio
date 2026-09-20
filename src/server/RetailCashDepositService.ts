@@ -18,6 +18,12 @@
  *    cumulativo (dinheiro acumulado − depósitos acumulados), robusto a depósito
  *    parcial/arredondado. Cobre a virada de mês via saldo inicial (tudo antes
  *    do 1º dia do mês).
+ *  - **RETIRADA de malote × DEPÓSITO bancário** (RN-I-003). Nem toda loja
+ *    deposita no banco: em algumas o dono/portador pega o dinheiro em mão. As
+ *    duas coisas BAIXAM o "em caixa a depositar" (dinheiro que saiu do caixa),
+ *    então `saldoBefore`/saldo do dia somam AMBAS; o que muda é o RELATÓRIO —
+ *    `totalDeposited` (banco) e `totalWithdrawn` (mão) são separados, nunca
+ *    misturados. `kind` = 'deposito' (default/legado) | 'retirada'.
  *  - **Isolamento multi-tenant** — toda query filtra organization_id + store_id.
  */
 import { randomUUID } from "node:crypto";
@@ -151,7 +157,7 @@ export class RetailCashDepositService {
 
     const cash = this.cashOn(orgId, storeId, start, end);
     const deposits = db.prepare(
-      `SELECT id, deposit_date, amount, period_start, period_end, depositor, receipt_url, notes
+      `SELECT id, deposit_date, amount, period_start, period_end, depositor, receipt_url, notes, COALESCE(kind, 'deposito') AS kind
          FROM retail_cash_deposits WHERE organization_id = ? AND store_id = ? AND deposit_date BETWEEN ? AND ?
         ORDER BY deposit_date, created_at`
     ).all(orgId, storeId, start, end) as any[];
@@ -162,7 +168,7 @@ export class RetailCashDepositService {
     // Semanas FECHADAS (travadas) que tocam o mês — pra marcar cada dia como locked.
     const closed = this.weekClosings(orgId, storeId, month);
     const isLocked = (date: string) => closed.some((w) => w.weekStart <= date && w.weekEnd >= date);
-    let saldo = saldoInicial, totalCash = 0, totalDep = 0;
+    let saldo = saldoInicial, totalCash = 0, totalDeposited = 0, totalWithdrawn = 0;
     const rows: any[] = [];
     for (let dd = 1; dd <= days; dd++) {
       const date = `${month}-${String(dd).padStart(2, "0")}`;
@@ -171,17 +177,21 @@ export class RetailCashDepositService {
       saldo = r2(saldo + cashAmt);
       totalCash = r2(totalCash + cashAmt);
       const deps = depByDate.get(date) || [];
-      const depTotal = r2(deps.reduce((a, x) => a + Number(x.amount || 0), 0));
-      saldo = r2(saldo - depTotal);
-      totalDep = r2(totalDep + depTotal);
+      // Depósito (banco) e retirada (mão) baixam o caixa igual — o saldo desce
+      // por AMBOS; só o relatório os separa (RN-I-003).
+      const depSum = r2(deps.filter((x) => x.kind !== "retirada").reduce((a, x) => a + Number(x.amount || 0), 0));
+      const retSum = r2(deps.filter((x) => x.kind === "retirada").reduce((a, x) => a + Number(x.amount || 0), 0));
+      saldo = r2(saldo - depSum - retSum);
+      totalDeposited = r2(totalDeposited + depSum);
+      totalWithdrawn = r2(totalWithdrawn + retSum);
       rows.push({
         date, day: dd,
         cash: cashAmt, cashSource: c?.source || null,
         // A conta do malote pra conferência: bruto do fechamento − despesas.
         cashGross: c?.source === "fechamento" ? (c.gross ?? null) : null,
         cashDespesas: c?.source === "fechamento" ? (c.despesas ?? null) : null,
-        deposits: deps.map((x) => ({ id: x.id, amount: r2(x.amount), depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
-        saldo, // dinheiro em caixa (ainda não depositado) ao fim do dia
+        deposits: deps.map((x) => ({ id: x.id, amount: r2(x.amount), kind: x.kind || "deposito", depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
+        saldo, // dinheiro em caixa (ainda não baixado) ao fim do dia
         locked: isLocked(date), // dia dentro de uma semana FECHADA (congelado)
       });
     }
@@ -189,35 +199,41 @@ export class RetailCashDepositService {
       month, storeId, days,
       saldoInicial: r2(saldoInicial),
       totalCash: r2(totalCash),
-      totalDeposited: r2(totalDep),
-      saldoFinal: r2(saldoInicial + totalCash - totalDep), // em caixa a depositar
+      totalDeposited: r2(totalDeposited),
+      totalWithdrawn: r2(totalWithdrawn),
+      saldoFinal: r2(saldoInicial + totalCash - totalDeposited - totalWithdrawn), // em caixa a depositar/retirar
       rows,
-      deposits: deposits.map((x) => ({ id: x.id, date: String(x.deposit_date), amount: r2(x.amount), depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
+      deposits: deposits.map((x) => ({ id: x.id, date: String(x.deposit_date), amount: r2(x.amount), kind: x.kind || "deposito", depositor: x.depositor || null, receiptUrl: x.receipt_url || null, periodStart: x.period_start || null, periodEnd: x.period_end || null, notes: x.notes || null })),
       weekClosings: closed, // semanas fechadas (travadas) que tocam o mês
     };
   }
 
-  /** Registra um depósito (valor, data, quem, comprovante). Só owner/gerente. */
+  /**
+   * Registra uma BAIXA do caixa (valor, data, quem, comprovante). Só owner/
+   * gerente. `kind`: 'deposito' (banco, default/legado) ou 'retirada' (dinheiro
+   * pego em mão). As duas baixam o "em caixa a depositar".
+   */
   static registerDeposit(orgId: string, storeId: string, input: {
-    date: string; amount: number; depositor?: string | null; periodStart?: string | null; periodEnd?: string | null; receiptUrl?: string | null; notes?: string | null;
+    date: string; amount: number; depositor?: string | null; periodStart?: string | null; periodEnd?: string | null; receiptUrl?: string | null; notes?: string | null; kind?: "deposito" | "retirada";
   }, actorId?: string): any {
     if (!storeId) throw new Error("storeId obrigatório");
     if (!isDate(input.date)) throw new Error("date (YYYY-MM-DD) obrigatório");
     const amount = r2(input.amount);
-    if (!(amount > 0)) throw new Error("valor do depósito deve ser maior que zero");
+    if (!(amount > 0)) throw new Error("valor deve ser maior que zero");
+    const kind = input.kind === "retirada" ? "retirada" : "deposito";
     if (this.isWeekClosed(orgId, storeId, input.date)) throw new Error("week_closed"); // semana fechada — reabra pra lançar
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_cash_deposits (id, organization_id, store_id, deposit_date, amount, period_start, period_end, depositor, receipt_url, notes, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_cash_deposits (id, organization_id, store_id, deposit_date, amount, period_start, period_end, depositor, receipt_url, notes, created_by, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, orgId, storeId, input.date, amount,
       isDate(input.periodStart) ? input.periodStart : null,
       isDate(input.periodEnd) ? input.periodEnd : null,
       (input.depositor || "").trim() || null,
       (input.receiptUrl || "").trim() || null,
       (input.notes || "").trim() || null,
-      actorId || null);
-    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_DEPOSIT", { date: input.date, amount }); } catch { /* noop */ }
+      actorId || null, kind);
+    try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_DEPOSIT", { date: input.date, amount, kind }); } catch { /* noop */ }
     return db.prepare(`SELECT * FROM retail_cash_deposits WHERE id = ?`).get(id);
   }
 
@@ -338,7 +354,7 @@ export class RetailCashDepositService {
     ).all(orgId, storeId, mEnd, mStart) as any[];
     return rows.map((w) => ({
       id: w.id, weekStart: w.week_start, weekEnd: w.week_end,
-      totalCash: r2(w.total_cash), totalDeposited: r2(w.total_deposited),
+      totalCash: r2(w.total_cash), totalDeposited: r2(w.total_deposited), totalWithdrawn: r2(w.total_withdrawn),
       depositor: w.depositor || null, receiptUrl: w.receipt_url || null, notes: w.notes || null,
       closedAt: w.closed_at || null,
     }));
@@ -368,18 +384,23 @@ export class RetailCashDepositService {
       if (overlap.week_start === input.weekStart) throw new Error("week_already_closed");
       throw new Error(`Período se sobrepõe ao fechamento já feito de ${overlap.week_start} a ${overlap.week_end} — reabra-o primeiro ou escolha outro intervalo.`);
     }
-    // Snapshot do dinheiro efetivo (fechamento + override) e do depositado no intervalo.
+    // Snapshot do dinheiro efetivo (fechamento + override) e das baixas no
+    // intervalo, separando depósito (banco) de retirada (mão) — RN-I-003.
     let totalCash = 0;
     for (const { amount } of this.cashOn(orgId, storeId, input.weekStart, input.weekEnd).values()) totalCash = r2(totalCash + amount);
     const totalDeposited = r2((db.prepare(
       `SELECT COALESCE(SUM(amount), 0) AS s FROM retail_cash_deposits
-        WHERE organization_id = ? AND store_id = ? AND deposit_date BETWEEN ? AND ?`
+        WHERE organization_id = ? AND store_id = ? AND deposit_date BETWEEN ? AND ? AND COALESCE(kind, 'deposito') != 'retirada'`
+    ).get(orgId, storeId, input.weekStart, input.weekEnd) as any)?.s);
+    const totalWithdrawn = r2((db.prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS s FROM retail_cash_deposits
+        WHERE organization_id = ? AND store_id = ? AND deposit_date BETWEEN ? AND ? AND COALESCE(kind, 'deposito') = 'retirada'`
     ).get(orgId, storeId, input.weekStart, input.weekEnd) as any)?.s);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_cash_week_closings (id, organization_id, store_id, week_start, week_end, total_cash, total_deposited, depositor, receipt_url, notes, closed_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, orgId, storeId, input.weekStart, input.weekEnd, totalCash, totalDeposited,
+      `INSERT INTO retail_cash_week_closings (id, organization_id, store_id, week_start, week_end, total_cash, total_deposited, total_withdrawn, depositor, receipt_url, notes, closed_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, orgId, storeId, input.weekStart, input.weekEnd, totalCash, totalDeposited, totalWithdrawn,
       (input.depositor || "").trim() || null, (input.receiptUrl || "").trim() || null, (input.notes || "").trim() || null, actorId || null);
     try { logAuthEvent(orgId, actorId || "system", storeId, "RETAIL_CASH_WEEK_CLOSED", { weekStart: input.weekStart, weekEnd: input.weekEnd, totalCash, totalDeposited }); } catch { /* noop */ }
     return db.prepare(`SELECT * FROM retail_cash_week_closings WHERE id = ?`).get(id);

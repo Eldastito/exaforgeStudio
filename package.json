@@ -122,6 +122,7 @@
     "test:retail-seller-scoreboard": "tsx scripts/test-retail-seller-scoreboard.ts",
     "test:retail-daily-informe": "tsx scripts/test-retail-daily-informe.ts",
     "test:retail-cash-deposit": "tsx scripts/test-retail-cash-deposit.ts",
+    "test:retail-cash-withdrawal": "tsx scripts/test-retail-cash-withdrawal.ts",
     "test:retail-monthly-quota": "tsx scripts/test-retail-monthly-quota.ts",
     "test:alterdata-catalog-grade": "tsx scripts/test-alterdata-catalog-grade.ts",
     "test:pdv-filial-scope": "tsx scripts/test-pdv-filial-scope.ts",

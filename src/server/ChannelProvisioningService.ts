@@ -46,7 +46,7 @@ export interface ChannelProvisionResult {
   imported?: boolean;      // canal foi criado por IMPORT (claim) nesta chamada
   needsReset?: boolean;
   error?: string;
-  code?: "org_missing" | "instance_required" | "attributed_to_other_org" | "instance_not_found" | "evolution_failed";
+  code?: "org_missing" | "instance_required" | "attributed_to_other_org" | "instance_not_found" | "evolution_failed" | "channel_required" | "channel_not_found";
 }
 
 const NEW_PREFIX = "zapflow_";
@@ -86,6 +86,19 @@ export class ChannelProvisioningService {
         LIMIT 1`
     ).get(orgId) as any;
     return row?.identifier || null;
+  }
+
+  /**
+   * F2 do PRD Conexão WhatsApp (20/09/2026) — alvo EXPLÍCITO por channelId,
+   * sempre validado contra a org da sessão. Canal de outro tenant ou id
+   * inexistente devolvem o MESMO null (a rota responde 404 sem revelar que o
+   * canal existe em outra organização).
+   */
+  private static evolutionChannelById(orgId: string, channelId: string): { id: string; identifier: string; status: string } | null {
+    if (!orgId || !channelId) return null;
+    return (db.prepare(
+      `SELECT id, identifier, status FROM channels WHERE id = ? AND organization_id = ? AND provider IN ('evolution','evolution_go')`
+    ).get(channelId, orgId) as any) || null;
   }
 
   /** Canal Evolution desta org com este identifier (ou undefined). */
@@ -207,9 +220,24 @@ export class ChannelProvisioningService {
    * "reset" possível). A sessão pareada ATUAL é encerrada — por isso a UI
    * exige confirmação explícita (owner/admin). Auditado.
    */
-  static async reset(orgId: string, actorUserId: string | null): Promise<ChannelProvisionResult> {
+  static async reset(orgId: string, actorUserId: string | null, channelId?: string | null): Promise<ChannelProvisionResult> {
     if (!orgId) return { ok: false, error: "organizationId ausente.", code: "org_missing" };
-    const instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
+    // F2 do PRD Conexão WhatsApp (20/09/2026) — reset é DESTRUTIVO e precisa de
+    // alvo: com channelId, reseta AQUELE canal; sem channelId, só quando a org
+    // tem no máximo 1 canal não-desabilitado (a escolha implícita do
+    // reusableInstanceFor com 2 números podia resetar o canal ERRADO).
+    let instanceName: string;
+    if (channelId) {
+      const target = this.evolutionChannelById(orgId, channelId);
+      if (!target) return { ok: false, error: "Canal não encontrado.", code: "channel_not_found" };
+      instanceName = target.identifier;
+    } else {
+      const n = Number((db.prepare(
+        `SELECT COUNT(*) n FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
+      ).get(orgId) as any)?.n || 0);
+      if (n > 1) return { ok: false, error: "Esta empresa tem mais de um canal de WhatsApp — informe qual canal reiniciar (channelId).", code: "channel_required" };
+      instanceName = this.reusableInstanceFor(orgId) || this.newInstanceName(orgId);
+    }
 
     const found = await EvolutionService.findInstance(instanceName);
     const result = found?.id
@@ -217,27 +245,27 @@ export class ChannelProvisioningService {
       : await EvolutionService.provision(instanceName);
 
     let existing = this.channelForOrg(orgId, instanceName);
-    let channelId = existing?.id;
-    if (!channelId) {
-      channelId = randomUUID();
+    let targetChannelId = existing?.id;
+    if (!targetChannelId) {
+      targetChannelId = randomUUID();
       try {
         db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'evolution', ?, ?, 'provisioning')`)
-          .run(channelId, orgId, `WhatsApp (${instanceName})`, instanceName);
+          .run(targetChannelId, orgId, `WhatsApp (${instanceName})`, instanceName);
       } catch (e: any) {
         return { ok: false, error: `Falha ao registrar canal: ${e?.message || e}`, code: "evolution_failed" };
       }
     }
 
     if (!result.ok) {
-      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_RESET_FAILED", { instanceName, channelId, hadProviderId: !!found?.id, error: result.error });
-      return { ok: false, channelId, instanceName, error: result.error, code: "evolution_failed" };
+      logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_RESET_FAILED", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, error: result.error });
+      return { ok: false, channelId: targetChannelId, instanceName, error: result.error, code: "evolution_failed" };
     }
     try {
       db.prepare(`UPDATE channels SET status = ?, token_encrypted = COALESCE(?, token_encrypted), updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), channelId);
-    } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${channelId} pós-reset:`, e); }
-    logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
-    return { ok: true, channelId, instanceName, qrBase64: result.qrBase64, state: result.state };
+        .run(result.state === "open" ? "connected" : "awaiting_qr", EncryptionService.encrypt(result.token || null), targetChannelId);
+    } catch (e) { console.error(`[ChannelProvision] Falha ao atualizar canal ${targetChannelId} pós-reset:`, e); }
+    logAuthEvent(orgId, actorUserId, actorUserId, "WHATSAPP_INSTANCE_RESET", { instanceName, channelId: targetChannelId, hadProviderId: !!found?.id, state: result.state || "awaiting_qr" });
+    return { ok: true, channelId: targetChannelId, instanceName, qrBase64: result.qrBase64, state: result.state };
   }
 
   /**
@@ -355,11 +383,17 @@ export class ChannelProvisioningService {
    *    'disconnected' (evidência do provedor, RF-02); os demais ficam como estão.
    * 'disabled' (pausa administrativa) nunca é tocado. Isolado por org; auditado.
    */
-  static async syncFromProvider(orgId: string, actorUserId: string | null): Promise<{
-    ok: boolean; providerReachable: boolean; error?: string;
+  static async syncFromProvider(orgId: string, actorUserId: string | null, channelId?: string | null): Promise<{
+    ok: boolean; providerReachable: boolean; error?: string; code?: "channel_not_found";
     channels: Array<{ instanceName: string; before: string; after: string; providerState: string | null; webhookRegistered?: boolean; tokenUpdated?: boolean }>;
   }> {
     if (!orgId) return { ok: false, providerReachable: false, error: "organizationId ausente.", channels: [] };
+    // F2 do PRD Conexão WhatsApp: sync é reconciliação (não-destrutivo) — o
+    // channelId é FILTRO opcional, sem trava de ambiguidade; validado antes de
+    // gastar chamada no provedor.
+    if (channelId && !this.evolutionChannelById(orgId, channelId)) {
+      return { ok: false, providerReachable: false, error: "Canal não encontrado.", code: "channel_not_found", channels: [] };
+    }
     const instances = await EvolutionService.listInstances();
     if (instances === null) {
       return { ok: false, providerReachable: false, error: "Provedor inacessível (ou EVOLUTION_BASE_URL/EVOLUTION_API_KEY ausentes).", channels: [] };
@@ -367,8 +401,9 @@ export class ChannelProvisioningService {
     const byName = new Map(instances.map((i) => [i.name, i]));
     const rows = db.prepare(
       `SELECT id, identifier, status, token_encrypted FROM channels
-        WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
-    ).all(orgId) as any[];
+        WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'
+          ${channelId ? "AND id = ?" : ""}`
+    ).all(...(channelId ? [orgId, channelId] : [orgId])) as any[];
     const report: Array<{ instanceName: string; before: string; after: string; providerState: string | null; webhookRegistered?: boolean; tokenUpdated?: boolean }> = [];
     for (const r of rows) {
       const inst = byName.get(String(r.identifier));
@@ -426,11 +461,27 @@ export class ChannelProvisioningService {
    * `providerLogout:false` no retorno = a sessão pode seguir viva no celular;
    * a UI manda conferir Aparelhos conectados. Isolado por org; auditado.
    */
-  static async disconnect(orgId: string, actorUserId: string | null): Promise<{ ok: boolean; disconnected: number; providerLogout: boolean }> {
+  static async disconnect(orgId: string, actorUserId: string | null, channelId?: string | null): Promise<{ ok: boolean; disconnected: number; providerLogout: boolean; error?: string; code?: "channel_required" | "channel_not_found" }> {
     if (!orgId) return { ok: false, disconnected: 0, providerLogout: false };
-    const rows = db.prepare(
-      `SELECT id, identifier, status FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
-    ).all(orgId) as any[];
+    // F2 do PRD Conexão WhatsApp (20/09/2026) — alvo por channelId: com id,
+    // desconecta SÓ aquele canal; sem id, só quando há no máximo 1 canal
+    // ACIONÁVEL (não-desabilitado e ainda não-desconectado) — com 2 números,
+    // "desconectar" sem alvo derrubava os dois.
+    let rows: any[];
+    if (channelId) {
+      const target = this.evolutionChannelById(orgId, channelId);
+      if (!target) return { ok: false, disconnected: 0, providerLogout: false, error: "Canal não encontrado.", code: "channel_not_found" };
+      // 'disabled' é pausa ADMINISTRATIVA (outra dimensão) — não vira 'disconnected'.
+      rows = target.status === "disabled" ? [] : [target];
+    } else {
+      rows = db.prepare(
+        `SELECT id, identifier, status FROM channels WHERE organization_id = ? AND provider IN ('evolution','evolution_go') AND COALESCE(status,'') != 'disabled'`
+      ).all(orgId) as any[];
+      const actionable = rows.filter((r) => String(r.status || "") !== "disconnected");
+      if (actionable.length > 1) {
+        return { ok: false, disconnected: 0, providerLogout: false, error: "Esta empresa tem mais de um canal de WhatsApp ativo — informe qual canal desconectar (channelId).", code: "channel_required" };
+      }
+    }
     // F1 do PRD Conexão WhatsApp (20/09/2026) — BLOQUEIO LOCAL PRIMEIRO. Antes
     // o logout remoto rodava ANTES do UPDATE: um provedor lento/mudo atrasava o
     // bloqueio e, com o processo caindo no meio, o canal seguia elegível pra

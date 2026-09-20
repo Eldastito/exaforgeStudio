@@ -55,8 +55,13 @@ router.post("/whatsapp/reset", requireRole("owner", "admin"), async (req: AuthRe
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const r = await ChannelProvisioningService.reset(orgId, req.user?.userId || null);
-    if (!r.ok) return res.status(502).json({ error: r.error, code: r.code });
+    // F2: alvo por channelId (opcional; obrigatório quando a org tem 2+ canais).
+    const r = await ChannelProvisioningService.reset(orgId, req.user?.userId || null, req.body?.channelId ? String(req.body.channelId) : null);
+    if (!r.ok) {
+      if (r.code === "channel_not_found") return res.status(404).json({ error: r.error, code: r.code });
+      if (r.code === "channel_required") return res.status(409).json({ error: r.error, code: r.code });
+      return res.status(502).json({ error: r.error, code: r.code });
+    }
     return res.json(r);
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || "Falha no reset" });
@@ -83,8 +88,12 @@ router.post("/whatsapp/sync", requireRole("owner", "admin"), async (req: AuthReq
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const r = await ChannelProvisioningService.syncFromProvider(orgId, req.user?.userId || null);
-    if (!r.ok) return res.status(502).json({ error: r.error, providerReachable: r.providerReachable });
+    // F2: channelId opcional filtra a reconciliação pra um canal só.
+    const r = await ChannelProvisioningService.syncFromProvider(orgId, req.user?.userId || null, req.body?.channelId ? String(req.body.channelId) : null);
+    if (!r.ok) {
+      if (r.code === "channel_not_found") return res.status(404).json({ error: r.error, code: r.code });
+      return res.status(502).json({ error: r.error, providerReachable: r.providerReachable });
+    }
     return res.json(r);
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || "Falha ao sincronizar" });
@@ -98,7 +107,10 @@ router.post("/whatsapp/disconnect", requireRole("owner", "admin"), async (req: A
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const r = await ChannelProvisioningService.disconnect(orgId, req.user?.userId || null);
+    // F2: alvo por channelId (opcional; obrigatório quando há 2+ canais ativos).
+    const r = await ChannelProvisioningService.disconnect(orgId, req.user?.userId || null, req.body?.channelId ? String(req.body.channelId) : null);
+    if (!r.ok && r.code === "channel_not_found") return res.status(404).json({ error: r.error, code: r.code });
+    if (!r.ok && r.code === "channel_required") return res.status(409).json({ error: r.error, code: r.code });
     return res.json(r);
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || "Falha ao desconectar" });

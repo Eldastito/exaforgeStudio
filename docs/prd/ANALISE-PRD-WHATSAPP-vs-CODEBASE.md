@@ -94,14 +94,17 @@ Re-busca no HEAD (`FROM channels` em serviços de negócio). Classificação:
 
 | Fatia | Entrega | Estado |
 |---|---|---|
-| **F0** | Esta análise + probe de fonte + baseline verde | **FECHADA (este doc)** |
-| **F1** | Gate canônico de envio: elegibilidade (admin/status + evidência) aplicada no `MessageProviderService` e jobs; disconnect bloqueia local imediatamente | próxima |
-| **F2** | `channelId` obrigatório em disconnect/reset/sync/diagnose (compat: org com 1 canal segue sem id) | |
-| **F3** | `observed_at` + sync reconcilia com o provedor; depois passe periódico **leak-aware** (só leitura de estado, jitter/backoff/teto) | |
-| **F4** | `channel_connection_operations` + idempotency key + lock AC-012 (duplo clique/2 abas) | |
-| **F5** | Passkey completo: backend normaliza `passkeyStage/Code/OpenUrl` como `awaiting_passkey` (sucesso pendente, nunca erro) + UI etapa no `ChannelsPanel` (abrir link, copiar código, TTL ~5 min, refresh) + detecção do `<SET_PASSKEY_PUBLIC_URL>` como erro de configuração | grounded pela fonte (§2) |
-| **F6** | Credencial opaca + saúde + dedupe de webhook POR CANAL | |
-| **F7+** | Migração dos seletores do §5 pro `selectOutboundChannel` (PRs pequenos, por serviço) + gate ampliado | |
-| — | Meta Cloud | parked (terceiro) |
+| **F0** | Esta análise + probe de fonte + baseline verde | **FECHADA** (#1708) |
+| **F1** | Gate canônico de envio: elegibilidade (admin/status + evidência) aplicada no `MessageProviderService` e jobs; disconnect bloqueia local imediatamente | **FECHADA** (#1709 — `test:whatsapp-send-gate` 17) |
+| **F2** | `channelId` obrigatório em disconnect/reset/sync/diagnose (compat: org com 1 canal segue sem id) | **FECHADA** (#1710 — `test:whatsapp-channel-scope` 15) |
+| **F3** | `observed_at` + sync reconcilia com o provedor; passe periódico **leak-aware** no Scheduler (só `/instance/all`+`/webhook/set`, intervalo mínimo 5min, jitter, teto por tick) | **FECHADA** (#1711 — `test:whatsapp-observed-at` 16) |
+| **F4** | `channel_connection_operations` + idempotency key + lock AC-012 (duplo clique/2 abas) | **FECHADA** (#1712 — `test:whatsapp-operation-lock` 13) |
+| **F5** | Passkey completo: backend normaliza `passkeyStage/Code/OpenUrl` como `awaiting_passkey` (sucesso pendente, nunca erro) + UI etapa no `ChannelsPanel` (abrir link, copiar código, TTL ~5 min, refresh) + detecção do `<SET_PASSKEY_PUBLIC_URL>` como erro de configuração | **FECHADA** (#1713 — `test:whatsapp-passkey` 13) |
+| **F6** | Credencial opaca `whc_` + saúde + validação de webhook POR CANAL (`ChannelWebhookCredentialService`, rotação com janela 48h, `webhookStateFor` por canal) | **FECHADA** (#1714 — `test:whatsapp-webhook-channel` 20) |
+| **F7.1** | Migração dos produtores do §5 (Prospect envio+âncora, School âncora, Subscription) pro resolvedor canônico + gate ampliado | **FECHADA** (#1715 — `test:channel-producer-binding` 10; gate 31) |
+| **F7.2** | Fallback das 7 Clinic* centralizado em `ChannelBindingService.selectContactChannel` (contact-first preservado; binding `clinica` decide; fallback exclui desconectado) | **FECHADA** (#1716 — `test:clinic-channel-fallback` 17; gate 38) |
+| — | Meta Cloud | parked (terceiro — verificação de negócio na Meta) |
+
+**PRD executável COMPLETO em 20/09/2026** (9 PRs #1708–#1716). Pendências de OPERAÇÃO (lado do dono, no VPS): confirmar `evolution-go` ≥ 0.7.2 e definir `PASSKEY_PUBLIC_URL` no docker-compose (necessárias pro fluxo passkey da F5).
 
 **Guardrails herdados do PRD (valem em todas as fatias)**: QR/passkey ausente nunca dispara reset · reset é explícito+confirmado+auditado · organizationId sempre da sessão, nunca do corpo · canal de outro tenant responde 404 · segredo/QR/código nunca em log ou resposta além do necessário · toda fatia com teste tmpDir + regressão da bateria do §4.

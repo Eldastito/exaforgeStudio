@@ -155,6 +155,36 @@ export class AIOrchestratorService {
 
     let agentToUse = isOrchestratorCommand ? "orchestrator_agent" : "attendance_agent";
 
+    // F3 (Diretor IA com ferramentas): comando "Zapp" que é CONSULTA vai pro
+    // MESMO roteador de ferramentas aterradas do ask() — fonte única, número
+    // do sistema, sem gastar o raio-x gordo. Gestor autorizado no canal admin
+    // vê dinheiro (mesma régua do raio-x de sempre). Nada roteado → segue o
+    // fluxo do orquestrador abaixo, idêntico (0-regressão). Import dinâmico:
+    // convenção nº 11 (Router→llm→este arquivo formam ciclo).
+    if (isOrchestratorCommand) {
+      try {
+        const question = text.replace(/^\s*zap[a-z]*\b[\s,.:;!?-]*/i, "").trim();
+        if (question) {
+          const { ExecutiveQueryRouterService } = await import("./ExecutiveQueryRouterService.js");
+          const routed = await ExecutiveQueryRouterService.answer(params.organizationId, question, { canSeeMoney: true });
+          if (routed) {
+            this.logInteraction({
+              organizationId: params.organizationId,
+              agentUsed: "diretor_tools",
+              inputPrompt: question.slice(0, 300),
+              outputResponse: routed.slice(0, 500),
+              confidence: 1,
+              needsHuman: 0,
+              actions: "[]",
+            });
+            return { reply: routed, actions: [], needsHuman: false };
+          }
+        }
+      } catch (e) {
+        console.error("[DiretorTools] Roteador falhou no comando Zapp (segue raio-x):", e);
+      }
+    }
+
     // GUARDRAIL DE CUSTO (opt-in): se AI_DAILY_LIMIT estiver definido (>0),
     // limita o nº de respostas automáticas por organização por dia. Sem a env,
     // o comportamento é EXATAMENTE o de hoje (ilimitado). Ao exceder, em vez de

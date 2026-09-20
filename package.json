@@ -1051,7 +1051,8 @@
     "test:ai-products-context": "tsx scripts/test-ai-products-context.ts",
     "test:diretor-retail-block": "tsx scripts/test-diretor-retail-block.ts",
     "test:diretor-tools": "tsx scripts/test-diretor-tools.ts",
-    "test:diretor-router": "tsx scripts/test-diretor-router.ts"
+    "test:diretor-router": "tsx scripts/test-diretor-router.ts",
+    "test:diretor-entrypoints": "tsx scripts/test-diretor-entrypoints.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1079.0",

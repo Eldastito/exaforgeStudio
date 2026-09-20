@@ -20,6 +20,8 @@
  */
 import db from "./db.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
+import { FinancialLedgerService } from "./FinancialLedgerService.js";
+import { RetailCommissionService } from "./RetailCommissionService.js";
 
 export interface ExecutiveToolDef {
   name: string;
@@ -79,6 +81,26 @@ export class ExecutiveQueryToolsService {
       description: "Metas do mês e distância à meta (realizado, quanto falta, ritmo). Metas em R$ só aparecem pra quem pode ver dinheiro.",
       args: [],
     },
+    {
+      name: "caixa_resumo", money: true,
+      description: "Resumo financeiro do negócio agora: caixa atual, total a receber e total a pagar.",
+      args: [],
+    },
+    {
+      name: "a_receber", money: true,
+      description: "Recebíveis em aberto: total a receber, detalhe fiado × contas e quanto está vencido.",
+      args: [],
+    },
+    {
+      name: "comissao_estimada", money: true,
+      description: "Comissão estimada da equipe de varejo num período (mês atual por default).",
+      args: [{ name: "period", description: "mes|mes_passado ou {from,to} (default: mês atual)" }],
+    },
+    {
+      name: "catalogo_produto", money: true,
+      description: "Preço e (quando controlado) estoque geral de um produto do catálogo.",
+      args: [{ name: "product", description: "Nome (ou parte) do produto/serviço", required: true }],
+    },
   ];
 
   /** Cardápio visível pro papel — ferramenta de dinheiro some pra quem não pode (§73). */
@@ -98,6 +120,10 @@ export class ExecutiveQueryToolsService {
         case "fechamentos_status": return this.fechamentosStatus(orgId, args);
         case "estoque_loja": return this.estoqueLoja(orgId, args);
         case "metas_progresso": return this.metasProgresso(orgId, { canSeeMoney: money });
+        case "caixa_resumo": return this.caixaResumo(orgId);
+        case "a_receber": return this.aReceber(orgId);
+        case "comissao_estimada": return this.comissaoEstimada(orgId, args);
+        case "catalogo_produto": return this.catalogoProduto(orgId, args);
       }
     } catch (e) {
       console.error(`[DiretorTools] Falha em ${tool}:`, e);
@@ -263,5 +289,50 @@ export class ExecutiveQueryToolsService {
       return `- ${g.label}: meta ${fmt(g.target, g.unit)} · realizado ${fmt(g.current, g.unit)} (${g.attainmentPct}%) · falta ${fmt(g.remaining, g.unit)} → ${pace}`;
     });
     return { ok: true, tool: "metas_progresso", data: { goals: visible }, summary: `Metas do mês:\n${lines.join("\n")}` };
+  }
+
+  // ── F4: finanças/comissão/catálogo (todas money — §73 já barra no run) ────
+  private static caixaResumo(orgId: string): ExecutiveToolResult {
+    const s = FinancialLedgerService.summary(orgId) as any;
+    const summary = `Financeiro agora:\n- Caixa atual: ${brl(s.caixaAtual)}\n- A receber: ${brl(s.aReceber)}\n- A pagar (em aberto): ${brl(s.aPagar)}`;
+    return { ok: true, tool: "caixa_resumo", data: { caixaAtual: s.caixaAtual, aReceber: s.aReceber, aPagar: s.aPagar }, summary };
+  }
+
+  private static aReceber(orgId: string): ExecutiveToolResult {
+    const s = FinancialLedgerService.summary(orgId) as any;
+    const det = s.aReceberDetalhe || {};
+    const venc = s.aReceberVencido ? `\n- Vencido: ${brl(s.aReceberVencido)} (atenção)` : "";
+    const summary = `A receber: ${brl(s.aReceber)}\n- Fiado: ${brl(det.fiado)} · Contas: ${brl(det.manual)}${venc}`;
+    return { ok: true, tool: "a_receber", data: { aReceber: s.aReceber, detalhe: det, vencido: s.aReceberVencido || 0 }, summary };
+  }
+
+  private static comissaoEstimada(orgId: string, args: Record<string, any>): ExecutiveToolResult {
+    const period = this.resolvePeriod(args.period || args.from || args.to ? args : { period: "mes" });
+    if ("error" in period) return { ok: false, tool: "comissao_estimada", error: "invalid_period" };
+    const total = RetailCommissionService.estimateTotal(orgId, period.from, period.to);
+    return { ok: true, tool: "comissao_estimada", data: { period, total }, summary: `Comissão estimada da equipe (${period.label}): ${brl(total)}. (estimativa dos fechamentos do período — o valor final sai no fechamento da comissão)` };
+  }
+
+  private static catalogoProduto(orgId: string, args: Record<string, any>): ExecutiveToolResult {
+    const term = norm(args.product || "");
+    if (!term) return { ok: false, tool: "catalogo_produto", error: "missing_arg" };
+    const rows = (db.prepare(
+      `SELECT ps.id, ps.name, ps.type, ps.price, ps.currency, ps.stock_control_enabled,
+              inv.quantity_available, inv.quantity_reserved
+         FROM products_services ps
+    LEFT JOIN inventory_items inv ON inv.product_service_id = ps.id AND inv.variant_id IS NULL
+        WHERE ps.organization_id = ? AND ps.active = 1 AND COALESCE(ps.storefront_visible,1) = 1`
+    ).all(orgId) as any[]).filter((r) => norm(r.name).includes(term)).slice(0, 8);
+    if (!rows.length) return { ok: true, tool: "catalogo_produto", summary: `Nenhum produto ativo casa com "${args.product}". Peça o nome exato — não invente preço nem estoque.` };
+    const lines = rows.map((r) => {
+      const price = r.price != null ? `${r.currency || "R$"} ${Number(r.price).toFixed(2)}` : "preço sob consulta";
+      let stock = "";
+      if (r.stock_control_enabled) {
+        const sellable = Math.max(0, Number(r.quantity_available || 0) - Number(r.quantity_reserved || 0));
+        stock = sellable > 0 ? ` · estoque geral ${sellable}` : " · SEM estoque";
+      }
+      return `- ${r.name} (${r.type}): ${price}${stock}`;
+    });
+    return { ok: true, tool: "catalogo_produto", data: { count: rows.length }, summary: `Catálogo:\n${lines.join("\n")}` };
   }
 }

@@ -1003,6 +1003,7 @@
     "test:legacy-route-removal": "tsx scripts/test-legacy-route-removal.ts",
     "test:provision-reconnect": "tsx scripts/test-provision-reconnect.ts",
     "test:whatsapp-reset-diagnose": "tsx scripts/test-whatsapp-reset-diagnose.ts",
+    "test:whatsapp-send-gate": "tsx scripts/test-whatsapp-send-gate.ts",
     "test:channel-binding-gate": "tsx scripts/test-channel-binding-gate.ts",
     "test:channel-binding-migration": "tsx scripts/test-channel-binding-migration.ts",
     "test:falatu-trigger-only": "tsx scripts/test-falatu-trigger-only.ts",

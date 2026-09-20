@@ -91,8 +91,13 @@ export class ChannelBindingService {
   /** Canal existe, é da org e não está desabilitado? (revalidação dura.) */
   private static channelUsable(orgId: string, channelId: string | null): boolean {
     if (!channelId) return false;
+    // F1 do PRD Conexão WhatsApp (20/09/2026): canal DESCONECTADO também não é
+    // utilizável — antes o binding apontando pra um canal desconectado seguia
+    // "resolvendo" e o envio morria no provedor. Agora a resolução cai pro
+    // fallback/regra da org/seleção legada (outro canal conectado assume); se
+    // não houver outro, o gate do sink barra com erro claro.
     const c = db.prepare(
-      `SELECT 1 FROM channels WHERE id = ? AND organization_id = ? AND COALESCE(status,'') != 'disabled' LIMIT 1`
+      `SELECT 1 FROM channels WHERE id = ? AND organization_id = ? AND COALESCE(status,'') NOT IN ('disabled','disconnected') LIMIT 1`
     ).get(channelId, orgId);
     return !!c;
   }

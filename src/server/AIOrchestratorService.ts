@@ -199,8 +199,14 @@ export class AIOrchestratorService {
       try {
         // Raio-x completo do negócio (CRM, funil, vendas, estoque, campanhas, agenda).
         metricsData = BusinessContextService.build(params.organizationId);
+        // Incidente 20/09: "Zapp, como foram as vendas da Avenida Brasil?" não
+        // era respondível — o raio-x só tinha o consolidado. Bloco por LOJA
+        // derivado dos fechamentos reais (import dinâmico: convenção nº 11,
+        // ExecutiveAdvisor→llm→este arquivo formam ciclo).
+        const { ExecutiveAdvisorService } = await import("./ExecutiveAdvisorService.js");
+        metricsData += ExecutiveAdvisorService.retailStoresBlock(params.organizationId);
       } catch (e) {
-        metricsData = "Não foi possível carregar o panorama do negócio no momento.";
+        metricsData = metricsData || "Não foi possível carregar o panorama do negócio no momento.";
       }
     }
 

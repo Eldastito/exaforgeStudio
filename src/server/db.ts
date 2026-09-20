@@ -11784,6 +11784,21 @@ const initDb = () => {
   // UNIQUE(org, idempotency_key) + transação (padrão AC-012) = só 1 vence;
   // a 2ª recebe operation_in_progress com o operationId vivo. 'running' com
   // expires_at vencido é zumbi (processo caiu no meio) e pode ser substituída.
+  // F6 do PRD Conexão WhatsApp: credencial de webhook POR CANAL + saúde POR
+  // CANAL. Antes o segredo e o "último hit" eram GLOBAIS (webhook_secret no
+  // app_config) — um canal quebrado mascarava o outro e um segredo vazado
+  // abria TODOS os canais. `webhook_secret_enc` (AES-GCM — precisa do claro
+  // pra re-embutir a URL no provedor a cada re-registro) + `webhook_secret_hash`
+  // (SHA-256, lookup na validação) + prev/rotated_at (rotação com janela) +
+  // last_received/valid/error (saúde por canal; ausência ≠ falha). NULL em
+  // tudo = canal legado no segredo global (0-regressão).
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_secret_enc TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_secret_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_secret_prev_hash TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_secret_rotated_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_last_received_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_last_valid_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE channels ADD COLUMN webhook_last_error TEXT`); } catch(e){}
   try { db.exec(`
     CREATE TABLE IF NOT EXISTS channel_connection_operations (
       id TEXT PRIMARY KEY,

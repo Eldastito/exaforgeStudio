@@ -122,6 +122,22 @@ router.post("/whatsapp/disconnect", requireRole("owner", "admin"), async (req: A
   }
 });
 
+// F6 — ROTACIONA a credencial de webhook DO CANAL: a anterior segue válida por
+// uma janela (48h) enquanto o provedor ainda chama com a URL velha; o
+// re-registro no provedor é best-effort (o sync re-registra na próxima passada).
+router.post("/whatsapp/:channelId/webhook-secret/rotate", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { ChannelWebhookCredentialService } = await import("../ChannelWebhookCredentialService.js");
+    const r = await ChannelWebhookCredentialService.rotate(orgId, String(req.params.channelId), req.user?.userId || null);
+    if (!r.ok) return res.status(404).json({ error: "Canal não encontrado", code: r.code });
+    return res.json({ ok: true, reregistered: !!r.reregistered });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Falha ao rotacionar a credencial" });
+  }
+});
+
 // Estado dos canais Evolution da org (sem segredos) — pra UI e retomada do QR.
 router.get("/whatsapp/status", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

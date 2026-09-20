@@ -58,14 +58,14 @@ function sessionFrom(rawStatus: string | null): SessionState {
 export class ChannelStateService {
   /** Estados lógicos de UM canal (org-scoped). null se o canal não é da org. */
   static state(orgId: string, channelId: string): ChannelLogicalState | null {
-    const ch = db.prepare(`SELECT id, provider, status, updated_at FROM channels WHERE id = ? AND organization_id = ?`).get(channelId, orgId) as any;
+    const ch = db.prepare(`SELECT id, provider, status, updated_at, webhook_last_received_at, webhook_last_valid_at, webhook_last_error FROM channels WHERE id = ? AND organization_id = ?`).get(channelId, orgId) as any;
     if (!ch) return null;
     return this.derive(ch);
   }
 
   /** Estados lógicos de todos os canais da org. */
   static list(orgId: string): ChannelLogicalState[] {
-    const rows = db.prepare(`SELECT id, provider, status, updated_at FROM channels WHERE organization_id = ? ORDER BY created_at ASC`).all(orgId) as any[];
+    const rows = db.prepare(`SELECT id, provider, status, updated_at, webhook_last_received_at, webhook_last_valid_at, webhook_last_error FROM channels WHERE organization_id = ? ORDER BY created_at ASC`).all(orgId) as any[];
     return rows.map((ch) => this.derive(ch));
   }
 
@@ -78,13 +78,28 @@ export class ChannelStateService {
     return "healthy";
   }
 
+  /**
+   * F6 do PRD Conexão WhatsApp: saúde do webhook POR CANAL quando o canal já
+   * tem observação própria (hits atribuídos pelo instanceName do payload) —
+   * um canal rejeitado deixa de contaminar o estado dos outros. Canal legado
+   * sem observação própria cai no sinal GLOBAL (0-regressão). Ausência de hit
+   * não vira falha: webhook só dispara com tráfego.
+   */
+  private static webhookStateFor(ch: any): WebhookState {
+    const received = ch?.webhook_last_received_at ? Date.parse(String(ch.webhook_last_received_at)) : 0;
+    const valid = ch?.webhook_last_valid_at ? Date.parse(String(ch.webhook_last_valid_at)) : 0;
+    if (!received && !valid) return this.webhookState();
+    if (ch?.webhook_last_error && received >= valid) return "rejected"; // o último hit DESTE canal foi rejeitado
+    return "healthy";
+  }
+
   private static derive(ch: any): ChannelLogicalState {
     const rawStatus: string | null = ch.status ?? null;
     const administration: AdminState = rawStatus === "disabled" ? "paused" : "active";
     // CA-02: canal pausado (disabled) não força a sessão a 'disconnected' — pausar
     // local não é logout remoto. Trata como conectado (última conhecida) até prova.
     const session: SessionState = rawStatus === "disabled" ? "connected" : sessionFrom(rawStatus);
-    const webhook = this.webhookState();
+    const webhook = this.webhookStateFor(ch);
 
     let operation: OperationState;
     if (administration === "paused" || session === "disconnected" || session === "error" || session === "not_configured") {

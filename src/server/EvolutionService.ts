@@ -42,8 +42,11 @@ export interface EvolutionConfig {
 // rejeitado 401 "segredo_incorreto": o canal nunca virava 'connected' e o
 // inbound morria na porta. O segredo vive no app_config (db) e este serviço é
 // deliberadamente livre de db — então o server injeta um PROVIDER no boot.
-let _webhookSecretProvider: (() => string | null) | null = null;
-export function setEvolutionWebhookSecretProvider(fn: (() => string | null) | null): void {
+// F6: o provider aceita o instanceName OPCIONAL — com ele, o server devolve a
+// credencial POR CANAL (ChannelWebhookCredentialService); sem ele (getConfig
+// genérico), devolve o segredo global (comportamento antigo, 0-regressão).
+let _webhookSecretProvider: ((instanceName?: string) => string | null) | null = null;
+export function setEvolutionWebhookSecretProvider(fn: ((instanceName?: string) => string | null) | null): void {
   _webhookSecretProvider = fn;
 }
 
@@ -295,12 +298,25 @@ export class EvolutionService {
   static async registerWebhook(instanceName: string, activeToken: string, config?: EvolutionConfig): Promise<{ ok: boolean; attempts: Array<{ path: string; status: number | string }> }> {
     const cfg = config ?? this.getConfig();
     if (!cfg) return { ok: false, attempts: [{ path: "(config)", status: "EVOLUTION_BASE_URL/EVOLUTION_API_KEY não configurados" }] };
+    // F6: credencial POR CANAL — quando o provider tem um segredo pra ESTA
+    // instância, o `secret=` da URL registrada é o do canal (não o global). O
+    // segredo nasce aqui (ensureForInstance no server) junto do registro.
+    let webhookUrl = cfg.webhookUrl;
+    if (_webhookSecretProvider) {
+      try {
+        const s = _webhookSecretProvider(instanceName);
+        if (s) {
+          const base = webhookUrl.replace(/([?&])secret=[^&]*/,"$1").replace(/[?&]$/, "");
+          webhookUrl = base + (base.includes("?") ? "&" : "?") + "secret=" + encodeURIComponent(s);
+        }
+      } catch { /* mantém a URL com o segredo global */ }
+    }
     const attempts: Array<{ path: string; status: number | string }> = [];
     try {
       const r = (await evoFetch(`${cfg.baseUrl}/instance/connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: activeToken, instance: instanceName },
-        body: JSON.stringify({ webhookUrl: cfg.webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
+        body: JSON.stringify({ webhookUrl, subscribe: ["MESSAGE", "CONNECTION", "QRCODE"] }),
       })) as FetchResult;
       attempts.push({ path: "/instance/connect", status: r.status });
     } catch (e: any) { attempts.push({ path: "/instance/connect", status: String(e?.message || e).slice(0, 80) }); }
@@ -309,7 +325,7 @@ export class EvolutionService {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: activeToken },
         body: JSON.stringify({
-          webhook: { url: cfg.webhookUrl, byEvents: false, base64: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] },
+          webhook: { url: webhookUrl, byEvents: false, base64: false, events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"] },
         }),
       })) as FetchResult;
       attempts.push({ path: "/webhook/set", status: r.status });

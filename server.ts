@@ -23,12 +23,20 @@ import recoveryRoutes from "./src/server/routes/recovery.js";
 import bigIdeaRoutes from "./src/server/routes/bigIdea.js";
 import recognitionRoutes from "./src/server/routes/recognition.js";
 import philosophyAuditRoutes from "./src/server/routes/philosophyAudit.js";
-import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent } from "./src/server/webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent, checkWebhookSecret } from "./src/server/webhookSecurity.js";
 import { setEvolutionWebhookSecretProvider } from "./src/server/EvolutionService.js";
+import { ChannelWebhookCredentialService } from "./src/server/ChannelWebhookCredentialService.js";
 // 17/09/2026 — injeta o segredo do webhook no registro feito pelo EvolutionService:
 // sem o `?secret=` na URL registrada, com a exigência ligada (env/clínica/toggle),
 // TODO evento do provedor era 401 → canal preso em awaiting_qr e inbound morto.
-setEvolutionWebhookSecretProvider(() => { try { return effectiveWebhookSecret(); } catch { return null; } });
+// F6 (20/09/2026): com o instanceName, a credencial é POR CANAL (nasce no
+// registro do webhook); sem canal correspondente, cai no segredo global.
+setEvolutionWebhookSecretProvider((instanceName?: string) => {
+  if (instanceName) {
+    try { const s = ChannelWebhookCredentialService.ensureForInstance(instanceName); if (s) return s; } catch { /* global abaixo */ }
+  }
+  try { return effectiveWebhookSecret(); } catch { return null; }
+});
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
@@ -345,17 +353,15 @@ async function startServer() {
       }
       return true;
     }
-    const expected = effectiveWebhookSecret();
     // Aceita o segredo via header (x-webhook-secret) OU query (?secret=).
     // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
     // o que pode corromper o valor do query (ex.: secret=ABC/MESSAGES_UPSERT).
     // Por isso, normalizamos pegando só o trecho antes de uma eventual barra.
     const rawProvided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
     const provided = String(rawProvided).split('/')[0].trim();
-    // Comparação em tempo constante para evitar timing attacks.
-    const a = Buffer.from(provided);
-    const b = Buffer.from(expected);
-    const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+    // F6: validação única — segredo GLOBAL (legado) OU credencial POR CANAL
+    // (whc_..., com janela de rotação). Tempo constante nos dois caminhos.
+    const ok = checkWebhookSecret(provided).ok;
     if (!ok) {
       console.warn(`[SECURITY] Webhook rejeitado (segredo ausente/incorreto). path=${req.path}`);
       res.status(401).json({ error: "Unauthorized webhook" });
@@ -845,6 +851,13 @@ async function startServer() {
       // Autenticidade + anti-abuso/custo (W1/M3)
       const okSecret = verifyWebhookSecret(req, res);
       recordWebhookHit(okSecret, okSecret ? 'recebido' : 'segredo_incorreto');
+      // F6: saúde POR CANAL — atribui o hit ao canal do instanceName do payload
+      // (inclusive o rejeitado: um canal com segredo errado não contamina o
+      // estado dos demais). Best-effort, nunca derruba o handler.
+      try {
+        const instForHealth = String((req.body as any)?.instanceName || (req.body as any)?.instance || "");
+        if (instForHealth) ChannelWebhookCredentialService.recordHit(instForHealth, okSecret, okSecret ? 'recebido' : 'segredo_incorreto');
+      } catch { /* noop */ }
       if (!okSecret) return;
       const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
       if (!rateLimit(`wh:${ip}`, 120, 60 * 1000)) {

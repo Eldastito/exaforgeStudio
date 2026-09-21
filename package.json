@@ -696,6 +696,7 @@
     "test:invoice-scan": "tsx scripts/test-invoice-scan.ts",
     "test:nfe-parser": "tsx scripts/test-nfe-parser.ts",
     "test:fiscal-inbound-fixtures": "tsx scripts/test-fiscal-inbound-fixtures.ts",
+    "test:nfe-document-parser": "tsx scripts/test-nfe-document-parser.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",

@@ -700,6 +700,7 @@
     "test:fiscal-document-service": "tsx scripts/test-fiscal-document-service.ts",
     "test:fiscal-store-resolver": "tsx scripts/test-fiscal-store-resolver.ts",
     "test:fiscal-product-mapping": "tsx scripts/test-fiscal-product-mapping.ts",
+    "test:fiscal-expected-receipt": "tsx scripts/test-fiscal-expected-receipt.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",

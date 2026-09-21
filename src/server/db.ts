@@ -1657,6 +1657,10 @@ const initDb = () => {
   // autoritativo por (loja, produto) — o modo decide quem manda.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_stock_source TEXT DEFAULT 'native'`); } catch(e){}
   // (o override por loja `retail_stores.stock_source` é criado junto da tabela, abaixo)
+  // ADR-200 (Entrada Automática de NF-e v1): kill-switch por org da captura fiscal
+  // de entrada. Default 0 = DESLIGADO (feature nova, opt-in explícito). Nenhum
+  // fluxo de entrada de NF-e por provedor roda enquanto este flag estiver 0.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN fiscal_inbound_enabled INTEGER DEFAULT 0`); } catch(e){}
 
   // Retail Ops (ADR-083, Fase A) — CADASTRO DE LOJAS. Dimensão de loja física
   // (inexistente até aqui: estoque/pedidos eram só por organização). Cada loja

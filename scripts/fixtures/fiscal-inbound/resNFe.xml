@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIXTURE SANITIZADA (ADR-200, Fase 0). Dados fictícios. RESUMO (resNFe) como
+     vem da DistribuicaoDFe antes da manifestação: NÃO contém itens. Mesma chave
+     do procNFe-autorizado.xml (testa convergência/dedupe). -->
+<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <chNFe>35240612345678000199550010000001231000000122</chNFe>
+  <CNPJ>12345678000199</CNPJ>
+  <xNome>Atacadista Exemplo LTDA</xNome>
+  <IE>111222333444</IE>
+  <dhEmi>2026-06-10T09:15:00-03:00</dhEmi>
+  <tpNF>1</tpNF>
+  <vNF>1078.00</vNF>
+  <digVal>QW1vc3RyYURpZ2VzdFZhbG9yRmFrZQ==</digVal>
+  <dhRecbto>2026-06-10T09:16:00-03:00</dhRecbto>
+  <cSitNFe>1</cSitNFe>
+</resNFe>

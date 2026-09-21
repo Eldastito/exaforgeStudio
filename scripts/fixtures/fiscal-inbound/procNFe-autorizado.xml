@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIXTURE SANITIZADA (ADR-200, Fase 0). Dados fictícios. NF-e autorizada
+     completa: nfeProc > NFe + protNFe (cStat=100). 2 itens com EAN, quantidade
+     decimal. NÃO usar em produção. -->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240612345678000199550010000001231000000122" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <natOp>VENDA DE MERCADORIA</natOp>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>123</nNF>
+        <dhEmi>2026-06-10T09:15:00-03:00</dhEmi>
+        <tpNF>1</tpNF>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>Atacadista Exemplo LTDA</xNome>
+        <IE>111222333444</IE>
+      </emit>
+      <dest>
+        <CNPJ>98765432000155</CNPJ>
+        <xNome>Loja Toulon Exemplo LTDA</xNome>
+        <IE>555666777888</IE>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>FORN-001</cProd>
+          <cEAN>7891234567895</cEAN>
+          <xProd>CAMISETA BASICA GOLA CARECA PRETA TAM M</xProd>
+          <NCM>61091000</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>UN</uCom>
+          <qCom>12.0000</qCom>
+          <vUnCom>29.9000000000</vUnCom>
+          <vProd>358.80</vProd>
+          <cEANTrib>7891234567895</cEANTrib>
+          <uTrib>UN</uTrib>
+          <qTrib>12.0000</qTrib>
+          <vUnTrib>29.9000000000</vUnTrib>
+          <indTot>1</indTot>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>FORN-002</cProd>
+          <cEAN>7899876543210</cEAN>
+          <xProd>CALCA JEANS SLIM AZUL TAM 42</xProd>
+          <NCM>62034200</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>UN</uCom>
+          <qCom>8.0000</qCom>
+          <vUnCom>89.9000000000</vUnCom>
+          <vProd>719.20</vProd>
+          <cEANTrib>7899876543210</cEANTrib>
+          <uTrib>UN</uTrib>
+          <qTrib>8.0000</qTrib>
+          <vUnTrib>89.9000000000</vUnTrib>
+          <indTot>1</indTot>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>1078.00</vProd>
+          <vDesc>0.00</vDesc>
+          <vFrete>0.00</vFrete>
+          <vOutro>0.00</vOutro>
+          <vNF>1078.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <chNFe>35240612345678000199550010000001231000000122</chNFe>
+      <dhRecbto>2026-06-10T09:15:30-03:00</dhRecbto>
+      <nProt>135240000012345</nProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

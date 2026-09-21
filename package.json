@@ -705,6 +705,7 @@
     "test:fiscal-map-receipt-item": "tsx scripts/test-fiscal-map-receipt-item.ts",
     "test:fiscal-document-filters": "tsx scripts/test-fiscal-document-filters.ts",
     "test:fiscal-assign-store": "tsx scripts/test-fiscal-assign-store.ts",
+    "test:fiscal-connection": "tsx scripts/test-fiscal-connection.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",

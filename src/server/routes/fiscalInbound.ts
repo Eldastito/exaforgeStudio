@@ -58,6 +58,17 @@ router.get("/documents/:id", requireRole("owner", "admin", "manager"), (req: Aut
   } catch (e: any) { fail(res, e); }
 });
 
+/** Atribui manualmente a loja do documento (quando o CNPJ não resolveu). */
+router.post("/documents/:id/assign-store", requireRole("owner", "admin", "manager"), (req: AuthRequest, res): any => {
+  try {
+    const { storeId } = req.body || {};
+    if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    const r = FiscalDocumentService.assignStore(req.organizationId!, String(req.params.id), String(storeId));
+    if (!r.ok) return res.status(409).json(r);
+    res.json({ ok: true, document: FiscalDocumentService.get(req.organizationId!, String(req.params.id)) });
+  } catch (e: any) { fail(res, e); }
+});
+
 /** Cria o recebimento esperado a partir do documento (não movimenta estoque). */
 router.post("/documents/:id/create-receipt", requireRole("owner", "admin", "manager"), (req: AuthRequest, res): any => {
   try {

@@ -165,6 +165,24 @@ export class FiscalDocumentService {
     return doc;
   }
 
+  /**
+   * Atribui manualmente a loja de um documento (quando o CNPJ do destinatário
+   * não resolveu sozinho). Valida que a loja é ativa e da org. Só antes do
+   * recebimento existir; documento autorizado passa a `ready_for_receipt`.
+   */
+  static assignStore(orgId: string, id: string, storeId: string): { ok: boolean; reason?: string } {
+    const doc = db.prepare(`SELECT content_level, goods_receipt_id FROM fiscal_documents WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;
+    if (!doc) return { ok: false, reason: "documento inexistente" };
+    if (doc.goods_receipt_id) return { ok: false, reason: "recebimento já criado" };
+    const store = db.prepare(`SELECT id FROM retail_stores WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, storeId) as any;
+    if (!store) return { ok: false, reason: "loja inválida" };
+    const nextState = doc.content_level === "authorized_process" ? "ready_for_receipt" : null;
+    db.prepare(
+      `UPDATE fiscal_documents SET store_id = ?, processing_state = COALESCE(?, processing_state), updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(storeId, nextState, orgId, id);
+    return { ok: true };
+  }
+
   /** Documento (com itens) por id, ou null. */
   static get(orgId: string, id: string): any | null {
     const doc = db.prepare(`SELECT * FROM fiscal_documents WHERE organization_id = ? AND id = ?`).get(orgId, id) as any;

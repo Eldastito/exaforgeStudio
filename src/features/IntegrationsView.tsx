@@ -6,6 +6,7 @@ import { HardDrive, Webhook as WebhookIcon, Link2, Plus, Download, RefreshCw, X,
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast, confirmDialog } from '@/src/lib/toast';
+import { FiscalInboundConnectorPanel } from './FiscalInboundConnectorPanel';
 
 let app;
 try {
@@ -318,6 +319,8 @@ export function IntegrationsView() {
       </div>
 
       <AlterdataConnectorPanel />
+
+      <FiscalInboundConnectorPanel />
 
       {/* Segurança do Webhook do WhatsApp */}
       {waWebhook && (

@@ -47,7 +47,10 @@ async function main() {
   check("persist completo → created", r1.status === "created", r1.status);
   const doc1 = FiscalDocumentService.getByAccessKey(ORG_A, KEY);
   check("documento gravado com content_level authorized_process", doc1?.content_level === "authorized_process");
-  check("processing_state ready_for_receipt", doc1?.processing_state === "ready_for_receipt");
+  // Sem loja cadastrada para o CNPJ do destinatário (ADR-200 Fase 2), um
+  // documento autorizado fica store_assignment_required (nenhum estoque sai
+  // sem loja determinística). A resolução de loja tem teste próprio.
+  check("processing_state store_assignment_required (sem loja)", doc1?.processing_state === "store_assignment_required", doc1?.processing_state);
   check("2 itens persistidos", doc1?.items?.length === 2);
   check("xProd não truncado no banco", doc1?.items?.[0]?.fiscal_description === "CAMISETA BASICA GOLA CARECA PRETA TAM M");
 

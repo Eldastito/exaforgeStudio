@@ -34,6 +34,7 @@ import { OrgGroupView } from '@/src/features/orggroup/OrgGroupView';
 import { OrgSwitcher } from '@/src/features/orggroup/OrgSwitcher';
 import { AgendaView } from '@/src/features/AgendaView';
 import { CatalogView } from '@/src/features/CatalogView';
+import { NotasEntradaView } from '@/src/features/NotasEntradaView';
 import { SalesView } from '@/src/features/SalesView';
 import { CampaignsView } from '@/src/features/CampaignsView';
 import { CadencesView } from '@/src/features/CadencesView';
@@ -454,6 +455,7 @@ export default function App() {
              {viewMode === 'kanban' && 'Atendimento'}
              {viewMode === 'agenda' && 'Agenda'}
              {viewMode === 'catalog' && 'Catálogo'}
+             {viewMode === 'notas_entrada' && 'Notas de Entrada'}
              {viewMode === 'vendas' && 'Vendas'}
              {viewMode === 'storefront' && 'Loja Virtual'}
              {viewMode === 'campanhas' && 'Campanhas'}
@@ -585,6 +587,7 @@ export default function App() {
           )}
           {viewMode === 'agenda' && <AgendaView />}
           {viewMode === 'catalog' && <CatalogView />}
+          {viewMode === 'notas_entrada' && <NotasEntradaView />}
           {viewMode === 'vendas' && <SalesView />}
           {viewMode === 'storefront' && <StorefrontSettingsView />}
           {viewMode === 'campanhas' && <CampaignsView />}

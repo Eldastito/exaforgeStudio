@@ -91,6 +91,7 @@ export function Sidebar() {
              {mod('catalogo') && <NavItem icon={<ShoppingBag />} label="Catálogo" active={viewMode === 'catalog'} onClick={() => setViewMode('catalog')} />}
              {mod('vendas') && <NavItem icon={<ShoppingCart />} label="Vendas" active={viewMode === 'vendas'} onClick={() => setViewMode('vendas')} />}
              {mod('retail') && <NavItem icon={<Gauge />} label="Operação da Rede" active={viewMode === 'retailops'} onClick={() => setViewMode('retailops')} />}
+             {mod('retail') && <NavItem icon={<PackageCheck />} label="Notas de Entrada" active={viewMode === 'notas_entrada'} onClick={() => setViewMode('notas_entrada')} />}
              {mod('retail_floor') && <NavItem icon={<Users />} label="Atendimento de Loja" active={viewMode === 'retailfloor'} onClick={() => setViewMode('retailfloor')} />}
              {coachAvailable && <NavItem icon={<GraduationCap />} label="Coach de Vendas" active={viewMode === 'sales_coach'} onClick={() => setViewMode('sales_coach')} />}
              {mod('compras') && <NavItem icon={<PackageCheck />} label="Compras" active={viewMode === 'compras'} onClick={() => setViewMode('compras')} variant="supply" />}

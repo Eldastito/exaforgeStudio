@@ -707,6 +707,7 @@
     "test:fiscal-assign-store": "tsx scripts/test-fiscal-assign-store.ts",
     "test:fiscal-connection": "tsx scripts/test-fiscal-connection.ts",
     "test:nuvemfiscal-adapter": "tsx scripts/test-nuvemfiscal-adapter.ts",
+    "test:fiscal-inbound-sync": "tsx scripts/test-fiscal-inbound-sync.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "test:backlog-inventory": "tsx scripts/test-backlog-inventory.ts",
     "test:backlog-radar-panel": "tsx scripts/test-backlog-radar-panel.ts",

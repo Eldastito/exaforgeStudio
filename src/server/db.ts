@@ -1940,6 +1940,46 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar fiscal_inbound_connections', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 3 PR 3) — sync por provedor.
+  // O XML bruto NÃO fica no banco (nem é servido publicamente): guardamos só o
+  // SHA-256 (content-addressed) e a referência do arquivo cifrado em disco
+  // (FiscalXmlStorage). Manifestação (Ciência da Operação) é rastreada por
+  // estado — o XML completo chega num NSU posterior, então a pendência fica
+  // registrada no próprio documento. Tudo aditivo (ALTER em try/catch).
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN xml_sha256 TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN xml_ref TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN xml_stored_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN source_nsu TEXT`); } catch(e){}
+  // manifestation_state: none | awareness_requested | awareness_confirmed | failed | skipped
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN manifestation_state TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN manifestation_event TEXT`); } catch(e){} // tpEvento (210210…)
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN manifestation_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE fiscal_documents ADD COLUMN cancelled_at DATETIME`); } catch(e){}
+
+  // Eventos (procEventoNFe) por chave — cancelamento/ciência etc. Um evento pode
+  // chegar ANTES do documento existir (só o resumo veio); o registro aqui é a
+  // fonte da verdade da situação fiscal, e é aplicado ao documento quando ele
+  // existe. Idempotente por (org, chave, tpEvento, sequência).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_document_events (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        access_key TEXT NOT NULL,
+        event_type TEXT,                   -- tpEvento (110111 cancelamento, 210210 ciência…)
+        event_sequence INTEGER DEFAULT 1,
+        protocol_status TEXT,              -- cStat do retorno
+        fiscal_status TEXT,                -- derivado (cancelled…)
+        nsu TEXT,
+        xml_sha256 TEXT,
+        applied_to_document INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, access_key, event_type, event_sequence)
+      );
+      CREATE INDEX IF NOT EXISTS idx_fiscal_doc_events_key ON fiscal_document_events (organization_id, access_key);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fiscal_document_events', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

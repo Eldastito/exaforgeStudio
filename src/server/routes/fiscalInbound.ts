@@ -14,6 +14,9 @@ import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { FiscalInboundFlagService } from "../FiscalInboundFlagService.js";
 import { FiscalDocumentService } from "../FiscalDocumentService.js";
 import { FiscalReceivingService } from "../FiscalReceivingService.js";
+import { FiscalInboundConnectionService } from "../FiscalInboundConnectionService.js";
+import { FiscalInboundSyncService } from "../FiscalInboundSyncService.js";
+import { JobQueueService } from "../JobQueueService.js";
 
 const router = Router();
 const actor = (req: any) => req.user?.userId || req.user?.id;
@@ -114,6 +117,57 @@ router.post("/receipts/:id/confirm", requireRole("owner", "admin", "manager"), (
     const r = FiscalReceivingService.confirm(req.organizationId!, String(req.params.id), actor(req));
     if (r.status === "blocked") return res.status(409).json(r);
     res.json({ ...r, receipt: FiscalReceivingService.getReceipt(req.organizationId!, String(req.params.id)) });
+  } catch (e: any) { fail(res, e); }
+});
+
+// ===========================================================================
+// CONEXÃO FISCAL POR PROVEDOR (ADR-200, Fase 3 PR 3) — captura automática.
+// A visão pública NUNCA traz segredo (só a leitura interna do adapter decifra).
+// ===========================================================================
+
+/** Lista as conexões fiscais da org (sem segredos). */
+router.get("/connections", requireRole("owner", "admin", "manager"), (req: AuthRequest, res): any => {
+  try {
+    res.json({ connections: FiscalInboundConnectionService.list(req.organizationId!) });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Cria uma conexão (credenciais cifradas; nasce DESLIGADA até um probe real). */
+router.post("/connections", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const { environment, cnpj, storeId, clientId, clientSecret, scope, manifestationPolicy } = req.body || {};
+    const r = FiscalInboundConnectionService.create(req.organizationId!, {
+      environment, cnpj, storeId: storeId || null, clientId, clientSecret, scope, manifestationPolicy,
+    }, actor(req));
+    if (!r.ok) return res.status(400).json(r);
+    res.json({ ok: true, connection: r.connection });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Testa a conexão (probe real) — só um probe OK a liga. */
+router.post("/connections/:id/probe", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const r = await FiscalInboundSyncService.probeConnection(req.organizationId!, String(req.params.id));
+    res.json({ ...r, connection: FiscalInboundConnectionService.get(req.organizationId!, String(req.params.id)) });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Dispara um sync manual (enfileira; roda em background). */
+router.post("/connections/:id/sync", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const conn = FiscalInboundConnectionService.get(req.organizationId!, String(req.params.id));
+    if (!conn) return res.status(404).json({ error: "not_found" });
+    const jobId = JobQueueService.enqueue("fiscal_inbound_sync", { orgId: req.organizationId, connectionId: conn.id, manual: true }, { organizationId: req.organizationId });
+    res.json({ ok: true, jobId });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Desconecta: desliga o sync e preserva o cursor/histórico. */
+router.post("/connections/:id/disconnect", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const r = FiscalInboundConnectionService.disconnect(req.organizationId!, String(req.params.id), actor(req));
+    if (!r.ok) return res.status(409).json(r);
+    res.json({ ok: true, connection: FiscalInboundConnectionService.get(req.organizationId!, String(req.params.id)) });
   } catch (e: any) { fail(res, e); }
 });
 

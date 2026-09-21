@@ -1823,6 +1823,32 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar fiscal_documents', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 2) — memória de equivalência entre
+  // item do fornecedor (supplier_cnpj + cProd) e produto/variante do catálogo.
+  // Depois de UMA associação confirmada, o mesmo item do mesmo fornecedor
+  // resolve sozinho. IA só sugere (status 'suggested'); confirmação é humana.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS supplier_product_mappings (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        supplier_cnpj TEXT NOT NULL,          -- normalizado (14 dígitos)
+        supplier_product_code TEXT NOT NULL,  -- cProd do fornecedor
+        ean TEXT,                             -- complemento opcional
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        status TEXT DEFAULT 'confirmed',      -- suggested | confirmed | rejected | disabled
+        source TEXT,                          -- ean | external_ref | user | ai_suggestion
+        confirmed_by TEXT,
+        confirmed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, supplier_cnpj, supplier_product_code)
+      );
+      CREATE INDEX IF NOT EXISTS idx_supplier_map_lookup ON supplier_product_mappings (organization_id, supplier_cnpj, supplier_product_code);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar supplier_product_mappings', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

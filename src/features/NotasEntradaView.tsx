@@ -57,6 +57,9 @@ export function NotasEntradaView() {
   const [fStore, setFStore] = useState('');
   const [fFrom, setFFrom] = useState('');
   const [fTo, setFTo] = useState('');
+  // Atribuição manual de loja (documento cujo CNPJ não resolveu)
+  const [assignDocId, setAssignDocId] = useState<string | null>(null);
+  const [assignStoreVal, setAssignStoreVal] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [busy, setBusy] = useState(false);
   // Picker de produto (associação de item sem mapeamento)
@@ -109,6 +112,26 @@ export function NotasEntradaView() {
       setReceipt(d.receipt);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao abrir recebimento.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function assignStore(docId: string, storeId: string) {
+    if (!storeId) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/fiscal/inbound/documents/${docId}/assign-store`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.reason || 'Falha ao definir loja.');
+      setAssignDocId(null); setAssignStoreVal('');
+      await loadDocs();
+      toast.success('Loja definida.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao definir loja.');
     } finally {
       setBusy(false);
     }
@@ -396,7 +419,18 @@ export function NotasEntradaView() {
                       </Button>
                     ) : d.content_level === 'authorized_process' ? (
                       d.processing_state === 'store_assignment_required'
-                        ? <span className="text-amber-400 text-xs">definir loja</span>
+                        ? (assignDocId === d.id ? (
+                            <div className="flex items-center gap-1 justify-end">
+                              <select autoFocus value={assignStoreVal} onChange={(e) => setAssignStoreVal(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100">
+                                <option value="">Escolher loja…</option>
+                                {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" disabled={busy || !assignStoreVal} onClick={() => assignStore(d.id, assignStoreVal)}>OK</Button>
+                              <button className="text-zinc-400 hover:text-zinc-200" onClick={() => { setAssignDocId(null); setAssignStoreVal(''); }}><X className="w-4 h-4" /></button>
+                            </div>
+                          ) : (
+                            <button className="text-amber-400 hover:text-amber-300 text-xs" onClick={() => { setAssignDocId(d.id); setAssignStoreVal(''); }}>definir loja</button>
+                          ))
                         : <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" disabled={busy} onClick={() => createReceipt(d)}>
                             <PackageCheck className="w-4 h-4 mr-1" /> Criar recebimento
                           </Button>

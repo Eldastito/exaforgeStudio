@@ -208,6 +208,96 @@ export class FiscalDocumentService {
       `SELECT * FROM fiscal_documents WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT ?`
     ).all(...params) as any[];
   }
+
+  /**
+   * Anexa a referência do XML bruto (guardado cifrado fora do banco pelo
+   * FiscalXmlStorage) ao documento. Só grava se o documento existir; idempotente
+   * (mesmo sha reescreve os mesmos campos). NÃO guarda o XML no banco.
+   */
+  static attachXml(orgId: string, documentId: string, stored: { sha256: string; ref: string }, nsu?: string | null): void {
+    db.prepare(
+      `UPDATE fiscal_documents SET xml_sha256 = ?, xml_ref = ?, xml_stored_at = CURRENT_TIMESTAMP,
+         source_nsu = COALESCE(?, source_nsu), updated_at = CURRENT_TIMESTAMP
+       WHERE organization_id = ? AND id = ?`
+    ).run(stored.sha256, stored.ref, nsu ?? null, orgId, documentId);
+  }
+
+  /** Registra o estado da manifestação do destinatário (Ciência da Operação). */
+  static markManifestation(orgId: string, accessKey: string, state: string, event?: string | null): void {
+    db.prepare(
+      `UPDATE fiscal_documents SET manifestation_state = ?, manifestation_event = COALESCE(?, manifestation_event),
+         manifestation_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE organization_id = ? AND access_key = ?`
+    ).run(state, event ?? null, orgId, accessKey);
+  }
+
+  /**
+   * Ingere um evento fiscal (procEventoNFe): grava o evento (idempotente por
+   * org+chave+tpEvento+seq) e, se for CANCELAMENTO registrado, aplica ao
+   * documento — situação fiscal `cancelled`. Um documento cancelado que JÁ tinha
+   * recebimento vira `cancelled_after_receipt` (exceção operacional: entrou
+   * estoque de uma nota depois cancelada — some visível pra tela decidir estorno).
+   *
+   * O evento pode chegar ANTES do documento (só o resumo veio): fica gravado e
+   * é aplicado quando o documento existir (reprocessar o evento reaplica).
+   */
+  static ingestEvent(orgId: string, parsed: ParsedNFeDocument, opts: { nsu?: string | null; xmlSha256?: string | null } = {}): { status: string; cancelled: boolean; afterReceipt: boolean; documentId: string | null } {
+    if (parsed.contentLevel !== "event_only" || !parsed.accessKey) {
+      return { status: "skipped", cancelled: false, afterReceipt: false, documentId: null };
+    }
+    const seq = parsed.eventSequence || 1;
+    // Registro do evento (idempotente). INSERT OR IGNORE no UNIQUE.
+    db.prepare(
+      `INSERT OR IGNORE INTO fiscal_document_events
+         (id, organization_id, access_key, event_type, event_sequence, protocol_status, fiscal_status, nsu, xml_sha256)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(randomUUID(), orgId, parsed.accessKey, parsed.eventType, seq, parsed.protocolStatus, parsed.fiscalStatus, opts.nsu ?? null, opts.xmlSha256 ?? null);
+
+    const isCancellation = parsed.fiscalStatus === "cancelled";
+    if (!isCancellation) {
+      return { status: "recorded", cancelled: false, afterReceipt: false, documentId: null };
+    }
+
+    const doc = db.prepare(
+      `SELECT id, goods_receipt_id FROM fiscal_documents WHERE organization_id = ? AND access_key = ?`
+    ).get(orgId, parsed.accessKey) as any;
+    if (!doc) {
+      // Documento ainda não existe — o evento fica gravado e será aplicado
+      // quando o procNFe/resumo chegar (persist consulta o evento).
+      return { status: "recorded_pending_document", cancelled: true, afterReceipt: false, documentId: null };
+    }
+    const afterReceipt = !!doc.goods_receipt_id;
+    const nextState = afterReceipt ? "cancelled_after_receipt" : "cancelled";
+    db.prepare(
+      `UPDATE fiscal_documents SET fiscal_status = 'cancelled', processing_state = ?, cancelled_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(nextState, orgId, doc.id);
+    db.prepare(
+      `UPDATE fiscal_document_events SET applied_to_document = 1 WHERE organization_id = ? AND access_key = ? AND event_type = ? AND event_sequence = ?`
+    ).run(orgId, parsed.accessKey, parsed.eventType, seq);
+    return { status: "cancelled", cancelled: true, afterReceipt, documentId: doc.id };
+  }
+
+  /**
+   * Se já existe um evento de cancelamento gravado para esta chave, aplica ao
+   * documento (usado logo após persistir um documento cujo cancelamento chegou
+   * antes). Idempotente.
+   */
+  static applyPendingCancellation(orgId: string, accessKey: string): boolean {
+    const ev = db.prepare(
+      `SELECT 1 FROM fiscal_document_events WHERE organization_id = ? AND access_key = ? AND fiscal_status = 'cancelled' LIMIT 1`
+    ).get(orgId, accessKey);
+    if (!ev) return false;
+    const doc = db.prepare(`SELECT id, goods_receipt_id FROM fiscal_documents WHERE organization_id = ? AND access_key = ?`).get(orgId, accessKey) as any;
+    if (!doc) return false;
+    const nextState = doc.goods_receipt_id ? "cancelled_after_receipt" : "cancelled";
+    db.prepare(
+      `UPDATE fiscal_documents SET fiscal_status = 'cancelled', processing_state = ?, cancelled_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`
+    ).run(nextState, orgId, doc.id);
+    db.prepare(`UPDATE fiscal_document_events SET applied_to_document = 1 WHERE organization_id = ? AND access_key = ? AND fiscal_status = 'cancelled'`).run(orgId, accessKey);
+    return true;
+  }
 }
 
 export default FiscalDocumentService;

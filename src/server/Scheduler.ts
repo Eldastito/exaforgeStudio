@@ -62,6 +62,7 @@ import { PlatformTelemetryService } from "./PlatformTelemetryService.js";
 import { PlatformBaselineService } from "./PlatformBaselineService.js";
 import { VerticalIntelligenceResearchService } from "./VerticalIntelligenceResearchService.js";
 import { AlterdataSyncRunner } from "./AlterdataSyncRunner.js";
+import { FiscalInboundSyncService } from "./FiscalInboundSyncService.js";
 import { ChannelProvisioningService } from "./ChannelProvisioningService.js";
 import { BackupService } from "./BackupService.js";
 
@@ -1063,6 +1064,9 @@ export class Scheduler {
     try { this.runtimeAlertsPass(); } catch (e: any) { console.error('[Scheduler] runtimeAlertsPass error', e.message); }
     await this.retailPatternLearnPass().catch(e => console.error('[Scheduler] aprendizado de padrões falhou', e));
     try { AlterdataSyncRunner.alterdataSyncPass(); } catch (e: any) { console.error('[Scheduler] alterdataSyncPass error', e.message); }
+    // Entrada Automática de NF-e (ADR-200, Fase 3): captura por provedor das
+    // conexões ligadas (gate de ~15 min por conexão dentro do syncPass).
+    try { FiscalInboundSyncService.syncPass(); } catch (e: any) { console.error('[Scheduler] fiscalInboundSyncPass error', e.message); }
     // F3 do PRD Conexão WhatsApp: reconciliação periódica dos canais com o
     // provedor — LEAK-AWARE (só leitura de estado /instance/all + reparo de
     // webhook; nunca GetQr/StartInstance, que vaza pool de Postgres no

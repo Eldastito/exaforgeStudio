@@ -1905,6 +1905,41 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar fiscal_receipt_movements', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 3) — conexão fiscal por CNPJ com o
+  // PROVEDOR (Nuvem Fiscal). Credenciais (client_id/secret/scope) vivem cifradas
+  // em config_enc via EncryptionService; nunca voltam pela API. O cursor de
+  // distribuição (ult_nsu/max_nsu) fica na própria linha (um cursor por conexão).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_inbound_connections (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        provider TEXT NOT NULL,                 -- nuvemfiscal
+        environment TEXT NOT NULL,              -- production | homologation
+        cnpj TEXT NOT NULL,                     -- 14 dígitos (normalizado)
+        store_id TEXT,                          -- loja padrão opcional
+        config_enc TEXT,                        -- JSON cifrado {clientId, clientSecret, scope}
+        state TEXT DEFAULT 'not_configured',    -- not_configured|validating|connected|error|disabled|disconnected
+        manifestation_policy TEXT DEFAULT 'manual_only', -- manual_only|auto_awareness|provider_managed
+        capabilities_json TEXT,                 -- capacidades comprovadas pelo probe
+        last_probe_at DATETIME,
+        last_success_at DATETIME,
+        last_error_code TEXT,                   -- código sanitizado (sem segredo)
+        ult_nsu TEXT DEFAULT '0',               -- cursor confirmado
+        max_nsu TEXT,                           -- último máximo informado
+        last_batch_at DATETIME,
+        blocked_until DATETIME,                 -- backoff do provedor
+        consecutive_failures INTEGER DEFAULT 0,
+        cursor_version INTEGER DEFAULT 0,       -- compare-and-set contra corrida
+        enabled INTEGER DEFAULT 0,              -- opt-in; só liga após probe real
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, provider, environment, cnpj)
+      );
+      CREATE INDEX IF NOT EXISTS idx_fiscal_conn_org ON fiscal_inbound_connections (organization_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fiscal_inbound_connections', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

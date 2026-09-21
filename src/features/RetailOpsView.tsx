@@ -4069,6 +4069,8 @@ function SicrediBucketTable({ title, tone, rows, showGap = false }: { title: str
 // ---- Recebíveis de cartão (parcelasCartao do PDV) ---------------------------
 type CardMode = 'aggregated' | 'detailed' | 'sicredi';
 function CardReceivablesTab() {
+  const { user } = useAuth();
+  const isOwnerAdmin = ['owner', 'admin'].includes((user as any)?.role || '');
   const firstOfMonth = todayStr().slice(0, 8) + '01';
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr().slice(0, 8) + '28');
@@ -4076,6 +4078,10 @@ function CardReceivablesTab() {
   const [recon, setRecon] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<CardMode>('aggregated');
+  // Modo de RECEBIMENTO da org (distinto do modo de VISÃO acima): parcelas do
+  // cliente × D+1 valor inteiro. Vem no payload dos recebíveis (data.mode).
+  const [recMode, setRecMode] = useState<'installments' | 'dplus1'>('installments');
+  const dplus1 = recMode === 'dplus1';
   const detailed = mode === 'detailed';
   const load = () => {
     setLoading(true);
@@ -4089,11 +4095,18 @@ function CardReceivablesTab() {
     }
     apiFetch(`/api/retailops/pdv-card-receivables?start=${start}&end=${end}${detailed ? '&detailed=1' : ''}`)
       .then(r => r.json())
-      .then(d => setData(d && !d.error ? d : null))
+      .then(d => { setData(d && !d.error ? d : null); if (d?.mode) setRecMode(d.mode); })
       .catch(() => toast.error('Falha ao carregar os recebíveis.'))
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [mode]);
+  // Liga/desliga o modo D+1 (owner/admin) e recarrega.
+  const toggleRecMode = async (next: 'installments' | 'dplus1') => {
+    if (next === recMode) return;
+    const res = await apiFetch('/api/retailops/card-receivable-mode', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dplus1: next === 'dplus1' }) });
+    if (res.ok) { const d = await res.json().catch(() => ({})); setRecMode(d.mode || next); toast.success(next === 'dplus1' ? 'Modo D+1 ligado (valor inteiro na venda +1).' : 'Modo parcelas do cliente.'); load(); }
+    else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Sem permissão para mudar o modo.'); }
+  };
   const trySicrediSync = async () => {
     const res = await apiFetch('/api/retailops/card-acquirer/sync-sicredi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, end }) });
     const d = await res.json().catch(() => ({}));
@@ -4104,7 +4117,7 @@ function CardReceivablesTab() {
   return (
     <div>
       <div className="mb-3 flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-zinc-500">Vencimento de</span>
+        <span className="text-xs text-zinc-500">{dplus1 && mode !== 'sicredi' ? 'Recebimento de' : 'Vencimento de'}</span>
         <input type="date" value={start} onChange={e => setStart(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         <span className="text-xs text-zinc-500">até</span>
         <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
@@ -4120,9 +4133,20 @@ function CardReceivablesTab() {
           </button>
         )}
       </div>
+      {/* Modo de recebimento da org: parcelas do cliente × D+1 valor inteiro. */}
+      {mode !== 'sicredi' && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-zinc-500">Como a loja recebe:</span>
+          <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
+            <button onClick={() => toggleRecMode('installments')} disabled={!isOwnerAdmin} className={`px-2.5 py-1 rounded ${!dplus1 ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'} disabled:opacity-60`} title="Cada parcela do cliente no seu vencimento (mês a mês)">Parcelas do cliente</button>
+            <button onClick={() => toggleRecMode('dplus1')} disabled={!isOwnerAdmin} className={`px-2.5 py-1 rounded ${dplus1 ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200'} disabled:opacity-60`} title="Valor inteiro da venda 1 dia depois (adquirente antecipa)">D+1 (valor inteiro)</button>
+          </div>
+          {dplus1 && <span className="text-[11px] text-emerald-300/90">Recebível = valor inteiro da venda no dia seguinte (venda + 1). O parcelamento do cliente é ignorado — é assim que a loja recebe.</span>}
+        </div>
+      )}
       {mode !== 'sicredi' && t && (
         <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Parcelas</p><p className="text-lg font-semibold text-zinc-100">{t.parcelas}</p></div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">{dplus1 ? 'Vendas' : 'Parcelas'}</p><p className="text-lg font-semibold text-zinc-100">{t.parcelas}</p></div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Bruto</p><p className="text-lg font-semibold text-zinc-100">{brl(t.bruto)}</p></div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3"><p className="text-[11px] uppercase tracking-wider text-zinc-500">Taxa retida</p><p className="text-lg font-semibold text-rose-300">{brl(t.taxa)}</p></div>
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3"><p className="text-[11px] uppercase tracking-wider text-emerald-400/80">Líquido a receber</p><p className="text-lg font-semibold text-emerald-300">{brl(t.liquido)}</p></div>
@@ -4143,7 +4167,7 @@ function CardReceivablesTab() {
             {data.byBrand.map((b: any, i: number) => (
               <div key={`${b.raw}-${i}`} className={`rounded-lg border p-2 ${b.matched ? 'border-zinc-800 bg-zinc-900/40' : 'border-amber-500/30 bg-amber-500/5'}`}>
                 <div className={`text-xs font-medium ${b.matched ? 'text-zinc-200' : 'text-amber-300'}`} title={!b.matched ? `Código cru do Alterdata: ${b.raw}` : ''}>{b.brand || 'Sem bandeira'}</div>
-                <div className="text-[10px] text-zinc-500">{b.parcelas} parc. · bruto {brl(b.bruto)}</div>
+                <div className="text-[10px] text-zinc-500">{b.parcelas} {dplus1 ? 'vendas' : 'parc.'} · bruto {brl(b.bruto)}</div>
                 <div className="text-[11px] text-emerald-300">{brl(b.liquido)}</div>
               </div>
             ))}
@@ -4162,11 +4186,11 @@ function CardReceivablesTab() {
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">Nenhum recebível de cartão no período. As parcelas entram pela sincronização das vendas do PDV.</div>
       ) : detailed ? (
         <div>
-          {data.itemsTruncated && <p className="mb-2 text-[11px] text-amber-300">Mostrando as 1.000 primeiras parcelas — reduza o período pra ver o restante.</p>}
+          {data.itemsTruncated && <p className="mb-2 text-[11px] text-amber-300">Mostrando {dplus1 ? 'as 1.000 primeiras vendas' : 'as 1.000 primeiras parcelas'} — reduza o período pra ver o restante.</p>}
           <div className="overflow-x-auto rounded-xl border border-zinc-800">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900/60 text-zinc-400"><tr>
-                <th className="px-3 py-2 text-left font-medium">Vencimento</th>
+                <th className="px-3 py-2 text-left font-medium">{dplus1 ? 'Recebimento' : 'Vencimento'}</th>
                 <th className="px-3 py-2 text-left font-medium">Filial</th>
                 <th className="px-3 py-2 text-left font-medium">Bandeira</th>
                 <th className="px-3 py-2 text-left font-medium">Parcela</th>
@@ -4196,8 +4220,8 @@ function CardReceivablesTab() {
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-sm">
             <thead className="bg-zinc-900/60 text-zinc-400"><tr>
-              <th className="px-3 py-2 text-left font-medium">Vencimento</th>
-              <th className="px-3 py-2 text-right font-medium">Parcelas</th>
+              <th className="px-3 py-2 text-left font-medium">{dplus1 ? 'Recebimento' : 'Vencimento'}</th>
+              <th className="px-3 py-2 text-right font-medium">{dplus1 ? 'Vendas' : 'Parcelas'}</th>
               <th className="px-3 py-2 text-right font-medium">Bruto</th>
               <th className="px-3 py-2 text-right font-medium">Líquido</th>
             </tr></thead>

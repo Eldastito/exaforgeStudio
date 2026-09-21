@@ -190,6 +190,23 @@ export class RetailCommissionService {
   }
 
   /**
+   * Fonte do bloco "Comissão total do período": 'race' (espelha a Corrida —
+   * flag `retail_commission_from_race_enabled`) ou 'rules' (Regras de comissão).
+   * Default 'rules' = 0-regressão. O espelhamento da corrida vive em
+   * `RetailCommissionRaceService.reportView` (que já tem a apuração), pra não
+   * criar ciclo de import — a rota ramifica por esta flag.
+   */
+  static reportSource(orgId: string): "race" | "rules" {
+    const r = db.prepare(`SELECT retail_commission_from_race_enabled AS f FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+    return Number(r?.f) === 1 ? "race" : "rules";
+  }
+  static setReportSource(orgId: string, fromRace: boolean, actorId?: string): "race" | "rules" {
+    db.prepare(`UPDATE organization_settings SET retail_commission_from_race_enabled = ? WHERE organization_id = ?`).run(fromRace ? 1 : 0, orgId);
+    try { logAuthEvent(orgId, actorId || "system", "commission", "RETAIL_COMMISSION_REPORT_SOURCE_SET", { fromRace: !!fromRace }); } catch { /* noop */ }
+    return this.reportSource(orgId);
+  }
+
+  /**
    * RELATÓRIO do período (só leitura, não persiste): comissão consolidada por
    * VENDEDOR, por PRODUTO e por LOJA, aplicando as regras ATIVAS. Serve para o
    * gestor ver quanto cada um recebe antes de aprovar a apuração.

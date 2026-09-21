@@ -1865,7 +1865,26 @@ router.get("/commission/report", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || ""), end = String(req.query.end || "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return res.status(400).json({ error: "start e end (YYYY-MM-DD) obrigatórios" });
+  // Fonte 'race' → espelha a Corrida (apuração mensal do "Configurar a corrida"),
+  // usando o mês de `start`; senão, o relatório clássico pelas Regras de comissão.
+  if (RetailCommissionService.reportSource(orgId) === "race") {
+    return res.json(RetailCommissionRaceService.reportView(orgId, start.slice(0, 7)));
+  }
   res.json(RetailCommissionService.report(orgId, start, end));
+});
+
+// Fonte do bloco "Comissão total do período": 'race' (espelha a Corrida) ou
+// 'rules' (Regras de comissão). Owner/admin liga.
+router.get("/commission/report-source", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ source: RetailCommissionService.reportSource(orgId) });
+});
+router.put("/commission/report-source", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const fromRace = req.body?.fromRace === true || String(req.body?.fromRace) === "true";
+  res.json({ source: RetailCommissionService.setReportSource(orgId, fromRace, req.user?.userId) });
 });
 
 // Extrato por LOJA e por VENDEDOR ("rodar o comando" do dono da rede): loja e

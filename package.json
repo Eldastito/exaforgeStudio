@@ -125,6 +125,7 @@
     "test:retail-cash-withdrawal": "tsx scripts/test-retail-cash-withdrawal.ts",
     "test:retail-network-top-sellers": "tsx scripts/test-retail-network-top-sellers.ts",
     "test:retail-card-dplus1": "tsx scripts/test-retail-card-dplus1.ts",
+    "test:retail-commission-report-source": "tsx scripts/test-retail-commission-report-source.ts",
     "test:retail-monthly-quota": "tsx scripts/test-retail-monthly-quota.ts",
     "test:alterdata-catalog-grade": "tsx scripts/test-alterdata-catalog-grade.ts",
     "test:pdv-filial-scope": "tsx scripts/test-pdv-filial-scope.ts",

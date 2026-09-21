@@ -11828,6 +11828,12 @@ const initDb = () => {
   // antecipa. Ligado → a aba Recebíveis projeta o total da venda em (venda+1),
   // em vez de repetir as parcelas do cliente mês a mês. Default 0 = 0-regressão.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_card_dplus1_enabled INTEGER DEFAULT 0`); } catch(e){}
+
+  // Comissão — "Comissão total do período" espelha a CORRIDA (opt-in). Ligado →
+  // o relatório usa a apuração do "Configurar a corrida" (faixas/P.A/semanal/
+  // desvio) como fonte única, em vez das "Regras de comissão" separadas. Default
+  // 0 = 0-regressão (segue nas regras).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_commission_from_race_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

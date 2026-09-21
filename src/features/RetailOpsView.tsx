@@ -5461,8 +5461,11 @@ function MonthlyQuotaDistributePanel({ storeId, month, onApplied }: { storeId: s
 }
 
 function CommissionTab() {
+  const { user } = useAuth();
+  const isOwnerAdmin = ['owner', 'admin'].includes((user as any)?.role || '');
   const [runs, setRuns] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
+  const [reportSource, setReportSource] = useState<'rules' | 'race'>('rules'); // fonte do "Comissão total do período"
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<any | null>(null);
   const [creating, setCreating] = useState(false);
@@ -5531,13 +5534,19 @@ function CommissionTab() {
     setLoadingReport(true);
     try {
       const d = await apiFetch(`/api/retailops/commission/report?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
-      if (d && !d.error) setReport(d); else toast.error(d?.error || 'Falha ao gerar o relatório.');
+      if (d && !d.error) { setReport(d); setReportSource(d.mode === 'race' ? 'race' : 'rules'); } else toast.error(d?.error || 'Falha ao gerar o relatório.');
       // Vendas por VENDEDOR direto do PDV (Fase 4 — VendaMalote sincronizado).
       const pv = await apiFetch(`/api/retailops/pdv-sellers?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
       setPdvSellers(Array.isArray(pv?.sellers) ? pv.sellers : []);
       setPdvPct(pv?.commissionPercent ?? null);
       await loadSellerSales();
     } finally { setLoadingReport(false); }
+  };
+  const toggleReportSource = async (next: 'rules' | 'race') => {
+    if (next === reportSource) return;
+    const res = await apiFetch('/api/retailops/commission/report-source', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromRace: next === 'race' }) });
+    if (res.ok) { const d = await res.json().catch(() => ({})); setReportSource(d.source || next); toast.success(next === 'race' ? 'Relatório passa a espelhar a Corrida.' : 'Relatório volta às Regras de comissão.'); loadReport(); }
+    else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Sem permissão para mudar a base.'); }
   };
   const loadSellerSales = async () => {
     const d = await apiFetch(`/api/retailops/seller-sales?start=${start}&end=${end}`).then(r => r.json()).catch(() => null);
@@ -5566,14 +5575,16 @@ function CommissionTab() {
   const load = async () => {
     setLoading(true);
     try {
-      const [r, ru, st] = await Promise.all([
+      const [r, ru, st, rs] = await Promise.all([
         apiFetch('/api/retailops/commission/runs').then(x => x.json()).catch(() => ({})),
         apiFetch('/api/retailops/commission/rules').then(x => x.json()).catch(() => ({})),
         apiFetch('/api/retailops/stores').then(x => x.json()).catch(() => ({})),
+        apiFetch('/api/retailops/commission/report-source').then(x => x.json()).catch(() => ({})),
       ]);
       setRuns(Array.isArray(r?.runs) ? r.runs : (Array.isArray(r) ? r : []));
       setRules(Array.isArray(ru?.rules) ? ru.rules : (Array.isArray(ru) ? ru : []));
       setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
+      if (rs?.source) setReportSource(rs.source);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
@@ -5667,6 +5678,10 @@ function CommissionTab() {
       <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Calculator className="w-4 h-4 text-emerald-400" /> Relatório de comissão</div>
+          <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5 text-[11px]" title="De onde vêm os valores da comissão">
+            <button onClick={() => toggleReportSource('rules')} disabled={!isOwnerAdmin} className={`px-2 py-0.5 rounded ${reportSource === 'rules' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'} disabled:opacity-60`} title="Usa as Regras de comissão (percentual/faixas simples)">Regras</button>
+            <button onClick={() => toggleReportSource('race')} disabled={!isOwnerAdmin} className={`px-2 py-0.5 rounded ${reportSource === 'race' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-200'} disabled:opacity-60`} title="Espelha a apuração da Corrida (Configurar a corrida)">Corrida</button>
+          </div>
           <label className="text-[11px] text-zinc-400 ml-2">De <input type="date" value={start} onChange={e => setStart(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
           <label className="text-[11px] text-zinc-400">até <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="ml-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" /></label>
           <button onClick={loadReport} disabled={loadingReport} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{loadingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Gerar</button>
@@ -5677,9 +5692,20 @@ function CommissionTab() {
 
         {report && (
           <div className="mt-3 space-y-4">
-            <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{brl(report.totals?.totalCommission)}</span>
-              <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}{report.storeIsReference ? ' (referência)' : ''}</span>
-            </div>
+            {report.mode === 'race' ? (
+              <>
+                <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-200">
+                  Espelhando a <strong>Corrida</strong> do mês <strong>{report.raceMonth}</strong> — os valores vêm do <strong>Configurar a corrida</strong> (faixas + P.A + semanal + desvio) e batem com a apuração acima. Produto/loja não se aplicam à corrida.
+                </p>
+                <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{brl(report.totals?.totalCommission)}</span>
+                  <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · gerentes {brl(report.totals?.managerCommission)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{brl(report.totals?.totalCommission)}</span>
+                <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}{report.storeIsReference ? ' (referência)' : ''}</span>
+              </div>
+            )}
 
             {report.pendingIdentityCount > 0 && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
@@ -5687,11 +5713,11 @@ function CommissionTab() {
                 {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <strong>Vendedores da loja</strong> antes de aprovar a apuração.
               </p>
             )}
-            <ReportBlock title="Por vendedor" empty={report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.'} rows={report.bySeller} cols={[['sellerName', 'Vendedor'], ['source', 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
+            <ReportBlock title={report.mode === 'race' ? 'Por vendedor e gerente' : 'Por vendedor'} empty={report.mode === 'race' ? 'Nenhum vendedor com venda ou comissão na corrida deste mês.' : (report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.')} rows={report.bySeller} cols={[['sellerName', report.mode === 'race' ? 'Nome' : 'Vendedor'], ['source', report.mode === 'race' ? 'Papel' : 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
             {report.sellerCommissionSource === 'store_fallback' && report.sellerCommissionPercent != null && <p className="text-[11px] text-zinc-500 -mt-2">Comissão por vendedor calculada por <strong className="text-zinc-300">{report.sellerCommissionPercent}%</strong> (regra da loja) sobre o que <strong className="text-zinc-300">cada vendedor</strong> vendeu (PDV/CAI_USUARIO + ZappFlow + lançamentos). Como sai da mesma regra da loja, a linha “Por loja” abaixo vira só <strong className="text-zinc-300">referência</strong> e não soma no total. Para pagar as duas juntas, crie uma regra com escopo “Cada vendedor”.</p>}
             {report.hasErpSellerSales && <p className="text-[11px] text-zinc-500 -mt-2">“Comissão” é a nossa apuração (pelas regras); “Comissão ERP” é a que o próprio ERP calculou — compare para conferir divergências.</p>}
-            <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />
-            <ReportBlock title={report.storeIsReference ? 'Por loja (fechamentos) — referência, não soma no total' : 'Por loja (fechamentos)'} empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />
+            {report.mode !== 'race' && <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />}
+            {report.mode !== 'race' && <ReportBlock title={report.storeIsReference ? 'Por loja (fechamentos) — referência, não soma no total' : 'Por loja (fechamentos)'} empty={!report.hasRules?.store ? 'Sem regra por loja ativa.' : 'Sem fechamentos no período.'} rows={report.byStore} cols={[['storeName', 'Loja'], ['sales', 'Vendas', true], ['commission', 'Comissão', true]]} />}
 
             {/* Lançamentos por vendedor do período (manual/foto — Cenário B).
                 Já entram somados na tabela "Por vendedor" acima; esta lista

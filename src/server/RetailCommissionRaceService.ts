@@ -812,6 +812,50 @@ export class RetailCommissionRaceService {
   }
 
   /**
+   * ESPELHO da corrida no formato do bloco "Comissão total do período"
+   * (RetailCommissionService.report): o relatório passa a usar as MESMAS
+   * faixas/percentuais do "Configurar a corrida" como fonte ÚNICA. Só leitura.
+   * Vendedores e gerentes viram linhas de `bySeller` (o total já é o da corrida:
+   * faixa + P.A + semanal + desvio); produto/loja não existem na corrida (a UI
+   * oculta esses blocos no modo corrida). Assim o número aqui BATE com a Corrida.
+   */
+  static reportView(orgId: string, month: string): any {
+    const race = this.raceMonth(orgId, month);
+    const bySeller: any[] = [];
+    for (const sr of race.stores) {
+      for (const s of sr.monthly) {
+        if (!(s.sales > 0) && !(s.total > 0)) continue; // não polui com quem não vendeu nem recebe
+        bySeller.push({
+          sellerName: s.sellerName, matricula: s.matricula || null, storeName: sr.storeName,
+          source: "vendedor", sales: round2(s.sales), pecas: Number(s.pecas || 0), orders: 0,
+          commission: round2(s.total), erpCommission: 0, pendingIdentity: false,
+        });
+      }
+      if (sr.manager && (sr.manager.total > 0 || sr.manager.storeSales > 0)) {
+        bySeller.push({
+          sellerName: `${sr.manager.name} (gerente)`, matricula: null, storeName: sr.storeName,
+          source: "gerente", sales: round2(sr.manager.storeSales), pecas: 0, orders: 0,
+          commission: round2(sr.manager.total), erpCommission: 0, pendingIdentity: false,
+        });
+      }
+    }
+    bySeller.sort((a, b) => b.commission - a.commission);
+    const { start, end } = this.monthRange(month);
+    return {
+      period: { start, end }, mode: "race", raceMonth: month,
+      bySeller, byProduct: [], byStore: [],
+      pendingIdentityCount: 0,
+      totals: {
+        sellerCommission: race.totals.sellers, managerCommission: race.totals.managers,
+        productCommission: 0, storeCommission: 0, totalCommission: race.totals.grand, sellerErpCommission: 0,
+      },
+      hasRules: { seller: false, product: false, store: false, global: false },
+      sellerCommissionSource: "race", sellerCommissionPercent: null,
+      storeIsReference: false, hasErpSellerSales: false,
+    };
+  }
+
+  /**
    * PLACAR POR VENDEDOR (pedido do lojista): por vendedor da loja, o REALIZADO
    * vs a COTA em quatro janelas — DIA / SEMANA / QUINZENA / MÊS — com a cota
    * SEMANAL como BASE (decisão do dono):

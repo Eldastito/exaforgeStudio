@@ -9,7 +9,9 @@ import { logAuthEvent } from "../auditLog.js";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { InventoryService } from "../InventoryService.js";
 import { chat, isAIConfigured, extractProductFromImage, extractInvoiceItems } from "../llm.js";
-import { parseNFeXml } from "../nfeParser.js";
+import { parseNFeXml, parseNFeDocument } from "../nfeParser.js";
+import { FiscalDocumentService } from "../FiscalDocumentService.js";
+import { FiscalInboundFlagService } from "../FiscalInboundFlagService.js";
 import { suggestSalePrice } from "../pricing.js";
 import { findBestProductMatch, nameSimilarity } from "../productMatcher.js";
 import { uniqueProductSlug } from "../productSlug.js";
@@ -416,6 +418,16 @@ router.post("/invoice-scan/xml", (req: AuthRequest, res): any => {
            VALUES (?, ?, ?, ?, ?, 100, 'pending', ?)`
         ).run(draftId, orgId, userId || null, "", JSON.stringify({ supplierName: parsed.supplierName, supplierContactId: supplierContact?.id || null, items, source: "xml", signature }), parsed.accessKey);
         logAuthEvent(orgId, userId, draftId, "INVOICE_SCAN_EXTRACTED", { confidenceScore: 100, itemCount: items.length, source: "xml" });
+
+        // Entrada Automática de NF-e (ADR-200): com o flag da org ligado, o mesmo
+        // XML alimenta ADITIVAMENTE o pipeline fiscal (documento + itens, dedupe
+        // por chave), sem alterar o importador legado. Best-effort: falha aqui
+        // nunca derruba o upload.
+        if (FiscalInboundFlagService.isEnabled(orgId)) {
+          try {
+            FiscalDocumentService.persist(orgId, parseNFeDocument(xmlText), { source: "manual_upload", invoiceScanDraftId: draftId });
+          } catch { /* pipeline fiscal é best-effort no upload legado */ }
+        }
 
         const enriched = attachCatalogMatches(orgId, items).map((it: any) => ({ ...it, suggestedSalePrice: suggestSalePrice(it.unitCost, markup) }));
         drafts.push({ draftId, imageUrl: "", fileName, supplierName: parsed.supplierName, supplierContact, items: enriched, confidenceScore: 100, truncated, signature });

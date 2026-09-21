@@ -1744,6 +1744,79 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_goods_receipts', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 1) — documento fiscal de entrada e
+  // seus itens. UM registro por (organization_id, access_key): upload manual,
+  // sincronização por provedor e consulta por chave enriquecem o MESMO registro
+  // (dedupe multiorigem), nunca duplicam. store_id fica nulo até a Fase 2
+  // resolver a loja. Não movimenta estoque — isso é do recebimento (ADR-086).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_documents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        connection_id TEXT,               -- provedor (Fase 3); nulo no upload manual
+        store_id TEXT,                    -- resolvido na Fase 2
+        document_type TEXT DEFAULT 'nfe',
+        access_key TEXT NOT NULL,
+        model TEXT,
+        number TEXT,
+        series TEXT,
+        issue_at TEXT,
+        issuer_cnpj TEXT,
+        issuer_name TEXT,
+        recipient_cnpj TEXT,
+        recipient_name TEXT,
+        total_products REAL,
+        total_invoice REAL,
+        freight REAL,
+        discount REAL,
+        other_expenses REAL,
+        fiscal_status TEXT DEFAULT 'unknown',    -- unknown | authorized | cancelled | denied
+        content_level TEXT DEFAULT 'invalid',    -- authorized_process | signed_only | summary_only | event_only | invalid
+        protocol_number TEXT,
+        protocol_status TEXT,
+        authorization_at TEXT,
+        source TEXT,                       -- manual_upload | provider
+        processing_state TEXT DEFAULT 'discovered',
+        invoice_scan_draft_id TEXT,
+        goods_receipt_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fiscal_docs_org_key ON fiscal_documents (organization_id, access_key);
+      CREATE INDEX IF NOT EXISTS idx_fiscal_docs_org_issuer ON fiscal_documents (organization_id, issuer_cnpj, issue_at);
+      CREATE INDEX IF NOT EXISTS idx_fiscal_docs_org_state ON fiscal_documents (organization_id, processing_state);
+
+      CREATE TABLE IF NOT EXISTS fiscal_document_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        fiscal_document_id TEXT NOT NULL,
+        item_number INTEGER NOT NULL,
+        supplier_product_code TEXT,        -- cProd
+        fiscal_description TEXT,           -- xProd (NÃO truncado)
+        ean TEXT,
+        ean_tax TEXT,
+        ncm TEXT,
+        cfop TEXT,
+        commercial_unit TEXT,
+        commercial_qty REAL,              -- decimal preservado
+        commercial_unit_value REAL,
+        tax_unit TEXT,
+        tax_qty REAL,
+        tax_unit_value REAL,
+        gross_value REAL,
+        discount_value REAL,
+        freight_value REAL,
+        other_value REAL,
+        insurance_value REAL,
+        tax_json TEXT,
+        traceability_json TEXT,
+        UNIQUE(fiscal_document_id, item_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_fiscal_doc_items_doc ON fiscal_document_items (fiscal_document_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fiscal_documents', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

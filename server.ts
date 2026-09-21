@@ -63,6 +63,7 @@ import retailOpsRoutes from "./src/server/routes/retailops.js";
 import retailFloorRoutes from "./src/server/routes/retailFloor.js";
 import finRoutes from "./src/server/routes/fin.js";
 import fiscalRoutes from "./src/server/routes/fiscal.js";
+import fiscalInboundRoutes from "./src/server/routes/fiscalInbound.js";
 import comigoRoutes from "./src/server/routes/comigo.js";
 import lossRoutes from "./src/server/routes/loss.js";
 import legalRoutes from "./src/server/routes/legal.js";
@@ -694,6 +695,7 @@ async function startServer() {
   protectedApi.use("/retailops", retailOpsRoutes);
   protectedApi.use("/retail-floor", retailFloorRoutes);
   protectedApi.use("/fin", finRoutes);
+  protectedApi.use("/fiscal/inbound", fiscalInboundRoutes); // ADR-200 — antes de /fiscal (path mais específico)
   protectedApi.use("/fiscal", fiscalRoutes);
   protectedApi.use("/comigo", comigoRoutes);
   protectedApi.use("/loss", lossRoutes);

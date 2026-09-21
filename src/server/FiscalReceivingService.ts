@@ -162,6 +162,39 @@ export class FiscalReceivingService {
     return { status: "confirmed", credited, skipped };
   }
 
+  /**
+   * Associa manualmente um item do recebimento a um produto/variante (revisão
+   * humana). Atualiza o item e MEMORIZA a equivalência fornecedor+cProd
+   * (confirmMapping) para as próximas notas. Só em recebimento aberto.
+   */
+  static mapReceiptItem(orgId: string, receiptId: string, itemId: string, productServiceId: string, variantId: string | null, actorId?: string): { ok: boolean; reason?: string } {
+    const receipt = db.prepare(`SELECT status, fiscal_document_id FROM retail_goods_receipts WHERE organization_id = ? AND id = ?`).get(orgId, receiptId) as any;
+    if (!receipt) return { ok: false, reason: "receipt_not_found" };
+    if (receipt.status !== "open") return { ok: false, reason: "receipt_not_open" };
+    const item = db.prepare(`SELECT fiscal_document_item_id FROM fiscal_goods_receipt_items WHERE organization_id = ? AND receipt_id = ? AND id = ?`).get(orgId, receiptId, itemId) as any;
+    if (!item) return { ok: false, reason: "item_not_found" };
+    const prod = db.prepare(`SELECT id FROM products_services WHERE organization_id = ? AND id = ?`).get(orgId, productServiceId) as any;
+    if (!prod) return { ok: false, reason: "produto inexistente" };
+
+    const doc = db.prepare(`SELECT issuer_cnpj FROM fiscal_documents WHERE organization_id = ? AND id = ?`).get(orgId, receipt.fiscal_document_id) as any;
+    const fdi = db.prepare(`SELECT supplier_product_code, ean FROM fiscal_document_items WHERE id = ?`).get(item.fiscal_document_item_id) as any;
+
+    const tx = db.transaction(() => {
+      db.prepare(`UPDATE fiscal_goods_receipt_items SET product_service_id = ?, variant_id = ?, mapping_status = 'confirmed', mapping_source = 'user', updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .run(productServiceId, variantId || null, itemId);
+      // Memoriza fornecedor+cProd quando houver código (best-effort; sem código
+      // não dá pra memorizar, mas a associação do item vale mesmo assim).
+      if (doc?.issuer_cnpj && fdi?.supplier_product_code) {
+        FiscalProductMappingService.confirmMapping(orgId, {
+          supplierCnpj: doc.issuer_cnpj, supplierProductCode: fdi.supplier_product_code,
+          productServiceId, variantId: variantId || null, ean: fdi.ean, source: "user",
+        }, actorId);
+      }
+    });
+    tx();
+    return { ok: true };
+  }
+
   /** Recebimento fiscal (cabeçalho + itens + divergência calculada), ou null. */
   static getReceipt(orgId: string, receiptId: string): any | null {
     const receipt = db.prepare(`SELECT * FROM retail_goods_receipts WHERE organization_id = ? AND id = ?`).get(orgId, receiptId) as any;

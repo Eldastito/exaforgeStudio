@@ -9,6 +9,7 @@
  * ligado (routes/products.ts).
  */
 import { Router } from "express";
+import db from "../db.js";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { FiscalInboundFlagService } from "../FiscalInboundFlagService.js";
 import { FiscalDocumentService } from "../FiscalDocumentService.js";
@@ -27,11 +28,24 @@ router.use((req: AuthRequest, res, next): any => {
   next();
 });
 
-/** Lista documentos fiscais de entrada da org (sem itens). */
+/** Lojas ativas da org (para o filtro da tela). */
+router.get("/stores", requireRole("owner", "admin", "manager"), (req: AuthRequest, res): any => {
+  try {
+    const stores = db.prepare(
+      `SELECT id, name, cnpj FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`
+    ).all(req.organizationId!);
+    res.json({ stores });
+  } catch (e: any) { fail(res, e); }
+});
+
+/** Lista documentos fiscais de entrada da org (sem itens), com filtros opcionais. */
 router.get("/documents", requireRole("owner", "admin", "manager"), (req: AuthRequest, res): any => {
   try {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
-    res.json({ documents: FiscalDocumentService.list(req.organizationId!, limit) });
+    const storeId = typeof req.query.storeId === "string" ? req.query.storeId : null;
+    const from = typeof req.query.from === "string" ? req.query.from : null;
+    const to = typeof req.query.to === "string" ? req.query.to : null;
+    res.json({ documents: FiscalDocumentService.list(req.organizationId!, { storeId, from, to, limit }) });
   } catch (e: any) { fail(res, e); }
 });
 

@@ -173,11 +173,22 @@ export class FiscalDocumentService {
     return doc;
   }
 
-  /** Lista documentos da org (sem itens), mais recentes primeiro. */
-  static list(orgId: string, limit = 100): any[] {
+  /**
+   * Lista documentos da org (sem itens), mais recentes primeiro, com filtros
+   * opcionais de loja e período (por data de emissão). `from`/`to` são datas
+   * `YYYY-MM-DD` comparadas contra a porção de data de `issue_at`, ambas inclusivas.
+   */
+  static list(orgId: string, opts: { storeId?: string | null; from?: string | null; to?: string | null; limit?: number } = {}): any[] {
+    const where = ["organization_id = ?"];
+    const params: any[] = [orgId];
+    if (opts.storeId) { where.push("store_id = ?"); params.push(opts.storeId); }
+    if (opts.from && /^\d{4}-\d{2}-\d{2}$/.test(opts.from)) { where.push("substr(issue_at, 1, 10) >= ?"); params.push(opts.from); }
+    if (opts.to && /^\d{4}-\d{2}-\d{2}$/.test(opts.to)) { where.push("substr(issue_at, 1, 10) <= ?"); params.push(opts.to); } // dia inclusivo
+    const limit = Math.max(1, Math.min(500, opts.limit || 100));
+    params.push(limit);
     return db.prepare(
-      `SELECT * FROM fiscal_documents WHERE organization_id = ? ORDER BY created_at DESC LIMIT ?`
-    ).all(orgId, Math.max(1, Math.min(500, limit))) as any[];
+      `SELECT * FROM fiscal_documents WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT ?`
+    ).all(...params) as any[];
   }
 }
 

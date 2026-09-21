@@ -52,6 +52,11 @@ export function NotasEntradaView() {
   const [docs, setDocs] = useState<FiscalDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [disabled, setDisabled] = useState(false);
+  // Filtros por loja e período
+  const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
+  const [fStore, setFStore] = useState('');
+  const [fFrom, setFFrom] = useState('');
+  const [fTo, setFTo] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [busy, setBusy] = useState(false);
   // Picker de produto (associação de item sem mapeamento)
@@ -63,7 +68,11 @@ export function NotasEntradaView() {
   const loadDocs = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await apiFetch('/api/fiscal/inbound/documents');
+      const qs = new URLSearchParams();
+      if (fStore) qs.set('storeId', fStore);
+      if (fFrom) qs.set('from', fFrom);
+      if (fTo) qs.set('to', fTo);
+      const r = await apiFetch(`/api/fiscal/inbound/documents${qs.toString() ? `?${qs}` : ''}`);
       if (r.status === 404) { setDisabled(true); setDocs([]); return; }
       if (!r.ok) throw new Error('Falha ao carregar notas.');
       const d = await r.json();
@@ -73,9 +82,23 @@ export function NotasEntradaView() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fStore, fFrom, fTo]);
 
   useEffect(() => { loadDocs(); }, [loadDocs]);
+
+  // Carrega as lojas (para o filtro) uma vez.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await apiFetch('/api/fiscal/inbound/stores');
+        if (!r.ok) return;
+        const d = await r.json();
+        setStores(Array.isArray(d.stores) ? d.stores : []);
+      } catch { /* filtro de loja fica vazio */ }
+    })();
+  }, []);
+
+  const storeName = useCallback((id?: string | null) => stores.find((s) => s.id === id)?.name || '—', [stores]);
 
   async function openReceipt(receiptId: string) {
     setBusy(true);
@@ -316,6 +339,27 @@ export function NotasEntradaView() {
         </Button>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Loja</label>
+          <select value={fStore} onChange={(e) => setFStore(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-100 min-w-[10rem]">
+            <option value="">Todas</option>
+            {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">De</label>
+          <input type="date" value={fFrom} onChange={(e) => setFFrom(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-100" />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Até</label>
+          <input type="date" value={fTo} onChange={(e) => setFTo(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm text-zinc-100" />
+        </div>
+        {(fStore || fFrom || fTo) && (
+          <button className="text-zinc-400 hover:text-zinc-200 text-sm py-1.5" onClick={() => { setFStore(''); setFFrom(''); setFTo(''); }}>Limpar filtros</button>
+        )}
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-16 text-zinc-500"><Loader2 className="w-6 h-6 animate-spin" /></div>
       ) : docs.length === 0 ? (
@@ -328,6 +372,7 @@ export function NotasEntradaView() {
                 <th className="text-left p-3">Nota</th>
                 <th className="text-left p-3">Emissão</th>
                 <th className="text-left p-3">Fornecedor</th>
+                <th className="text-left p-3">Loja</th>
                 <th className="text-left p-3">Completude</th>
                 <th className="text-left p-3">Situação</th>
                 <th className="text-right p-3">Total</th>
@@ -340,6 +385,7 @@ export function NotasEntradaView() {
                   <td className="p-3 text-zinc-200">{d.number || '—'}{d.series ? `/${d.series}` : ''}</td>
                   <td className="p-3 text-zinc-300">{fmtDate(d.issue_at)}</td>
                   <td className="p-3 text-zinc-300 max-w-xs truncate" title={d.issuer_name || ''}>{d.issuer_name || '—'}</td>
+                  <td className="p-3 text-zinc-300">{storeName(d.store_id)}</td>
                   <td className="p-3 text-zinc-300">{CONTENT_LABEL[d.content_level] || d.content_level}</td>
                   <td className="p-3 text-zinc-300">{FISCAL_LABEL[d.fiscal_status] || d.fiscal_status}</td>
                   <td className="p-3 text-right text-zinc-300">{d.total_invoice != null ? num(d.total_invoice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>

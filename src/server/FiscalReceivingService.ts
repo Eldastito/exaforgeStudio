@@ -17,6 +17,9 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { FiscalProductMappingService } from "./FiscalProductMappingService.js";
+import { RetailStockModeService } from "./RetailStockModeService.js";
+import { InventoryService } from "./InventoryService.js";
+import { RetailInventoryService } from "./RetailInventoryService.js";
 import { logAuthEvent } from "./auditLog.js";
 
 export interface CreateExpectedResult {
@@ -79,6 +82,84 @@ export class FiscalReceivingService {
 
     try { logAuthEvent(orgId, actorId || "system", receiptId, "FISCAL_RECEIPT_CREATED", { fiscalDocumentId, storeId: doc.store_id, items: items.length }); } catch { /* noop */ }
     return { status: "created", receiptId };
+  }
+
+  /**
+   * Registra a quantidade CONFERIDA (decimal) de um item, num recebimento aberto.
+   * Aceita quantidade recebida e, opcionalmente, avaria. Não movimenta estoque.
+   */
+  static setReceived(orgId: string, receiptId: string, itemId: string, receivedQty: number, opts: { damageQty?: number; divergenceReason?: string } = {}): { ok: boolean; reason?: string } {
+    const receipt = db.prepare(`SELECT status FROM retail_goods_receipts WHERE organization_id = ? AND id = ?`).get(orgId, receiptId) as any;
+    if (!receipt) return { ok: false, reason: "receipt_not_found" };
+    if (receipt.status !== "open") return { ok: false, reason: "receipt_not_open" };
+    const item = db.prepare(`SELECT id FROM fiscal_goods_receipt_items WHERE organization_id = ? AND receipt_id = ? AND id = ?`).get(orgId, receiptId, itemId) as any;
+    if (!item) return { ok: false, reason: "item_not_found" };
+    const received = Math.max(0, Number(receivedQty) || 0);        // decimal preservado
+    const damage = Math.max(0, Number(opts.damageQty) || 0);
+    db.prepare(`UPDATE fiscal_goods_receipt_items SET received_qty = ?, damage_qty = ?, divergence_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(received, damage, opts.divergenceReason || null, itemId);
+    return { ok: true };
+  }
+
+  /**
+   * Confirma o recebimento: credita SÓ o recebido no ledger AUTORITATIVO
+   * (RetailStockModeService: core em native, shadow em supervised), em transação
+   * e idempotente por chave de movimento (receipt_id + item_id + kind).
+   *
+   * Decisão de produto (ledgers são inteiros): credita apenas quantidade INTEIRA.
+   * Quantidade FRACIONADA não é creditada — vira exceção sinalizada
+   * (ledger_status = 'fractional_pending'), nunca truncada em silêncio. Itens sem
+   * produto (unmapped) e não-estocáveis são pulados e sinalizados.
+   */
+  static confirm(orgId: string, receiptId: string, actorId?: string): { status: "confirmed" | "already" | "blocked"; reason?: string; credited?: number; skipped?: number } {
+    const receipt = db.prepare(`SELECT * FROM retail_goods_receipts WHERE organization_id = ? AND id = ?`).get(orgId, receiptId) as any;
+    if (!receipt) return { status: "blocked", reason: "receipt_not_found" };
+    if (receipt.status === "confirmed") return { status: "already" };          // idempotente
+    if (receipt.status !== "open") return { status: "blocked", reason: "receipt_not_open" };
+
+    const ledger = RetailStockModeService.authoritativeLedger(orgId, receipt.store_id);
+    if (ledger === "shadow" && !receipt.store_id) return { status: "blocked", reason: "store_required" };
+
+    const items = db.prepare(`SELECT * FROM fiscal_goods_receipt_items WHERE receipt_id = ?`).all(receiptId) as any[];
+    let credited = 0, skipped = 0;
+
+    const tx = db.transaction(() => {
+      for (const it of items) {
+        const received = Number(it.received_qty || 0);
+        let status: string;
+        if (!it.product_service_id) status = "unmapped";
+        else if (!it.is_stockable) status = "not_stockable";
+        else if (received <= 0) status = "zero";
+        else if (!Number.isInteger(received)) status = "fractional_pending"; // não credita fração
+        else {
+          // Chave de movimento idempotente: se já existe, não credita de novo.
+          const key = db.prepare(`SELECT id FROM fiscal_receipt_movements WHERE receipt_id = ? AND receipt_item_id = ? AND movement_kind = 'entrada'`).get(receiptId, it.id) as any;
+          if (key) { status = "credited"; }
+          else {
+            const qty = received; // inteiro validado acima
+            if (ledger === "shadow") {
+              RetailInventoryService.applyMovement(orgId, receipt.store_id, it.product_service_id, it.variant_id || null, qty, actorId);
+            } else {
+              InventoryService.recordMovement(orgId, { productId: it.product_service_id, variantId: it.variant_id || null, type: "entrada", quantity: qty, origin: "nfe_receipt", createdBy: actorId });
+            }
+            db.prepare(`INSERT INTO fiscal_receipt_movements (id, organization_id, receipt_id, receipt_item_id, movement_kind, ledger, quantity) VALUES (?, ?, ?, ?, 'entrada', ?, ?)`)
+              .run(randomUUID(), orgId, receiptId, it.id, ledger, qty);
+            status = "credited";
+          }
+          credited++;
+        }
+        if (status !== "credited") skipped++;
+        db.prepare(`UPDATE fiscal_goods_receipt_items SET ledger_status = ? WHERE id = ?`).run(status, it.id);
+      }
+      db.prepare(`UPDATE retail_goods_receipts SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, receiptId);
+      if (receipt.fiscal_document_id) {
+        db.prepare(`UPDATE fiscal_documents SET processing_state = 'completed', updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, receipt.fiscal_document_id);
+      }
+    });
+    tx();
+
+    try { logAuthEvent(orgId, actorId || "system", receiptId, "FISCAL_RECEIPT_CONFIRMED", { ledger, credited, skipped }); } catch { /* noop */ }
+    return { status: "confirmed", credited, skipped };
   }
 
   /** Recebimento fiscal (cabeçalho + itens + divergência calculada), ou null. */

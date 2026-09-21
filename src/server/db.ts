@@ -1884,6 +1884,27 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar fiscal_goods_receipt_items', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 2 PR C2) — resultado do crédito por
+  // item na confirmação e a CHAVE DE MOVIMENTO idempotente. O UNIQUE por
+  // (receipt_id, receipt_item_id, movement_kind) garante que confirmar/reprocessar
+  // o mesmo recebimento NÃO credita estoque duas vezes.
+  try { db.exec(`ALTER TABLE fiscal_goods_receipt_items ADD COLUMN ledger_status TEXT DEFAULT 'pending'`); } catch(e){} // pending|credited|fractional_pending|not_stockable|unmapped|zero
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_receipt_movements (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        receipt_id TEXT NOT NULL,
+        receipt_item_id TEXT NOT NULL,
+        movement_kind TEXT NOT NULL,        -- 'entrada'
+        ledger TEXT NOT NULL,               -- core | shadow
+        quantity INTEGER NOT NULL,          -- inteiro creditado
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(receipt_id, receipt_item_id, movement_kind)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fiscal_receipt_movements', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

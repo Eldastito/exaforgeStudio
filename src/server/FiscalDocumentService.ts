@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import type { ParsedNFeDocument, NFeContentLevel } from "./nfeParser.js";
+import { FiscalStoreResolverService } from "./FiscalStoreResolverService.js";
 
 // Quanto MAIOR o rank, mais completo o documento. Só sobe, nunca desce.
 const CONTENT_RANK: Record<NFeContentLevel, number> = {
@@ -30,10 +31,19 @@ const CONTENT_RANK: Record<NFeContentLevel, number> = {
 // Níveis que geram/atualizam um documento persistido nesta fase.
 const PERSISTABLE: NFeContentLevel[] = ["summary_only", "signed_only", "authorized_process"];
 
-function processingStateFor(level: NFeContentLevel): string {
-  if (level === "authorized_process") return "ready_for_receipt";
-  if (level === "summary_only") return "awaiting_full_xml";
-  return "parsing"; // signed_only: tem itens mas sem protocolo — revisão manual
+/**
+ * Loja + estado de processamento a partir do parse (ADR-200 Fase 2).
+ * Só `authorized_process` tenta resolver loja: sem loja determinística o
+ * documento fica `store_assignment_required` (nenhum estoque sai sem loja).
+ * `summary_only` (resNFe) não tem destinatário → aguarda o XML completo.
+ */
+function storeContext(orgId: string, p: ParsedNFeDocument): { storeId: string | null; processingState: string } {
+  if (p.contentLevel === "summary_only") return { storeId: null, processingState: "awaiting_full_xml" };
+  if (p.contentLevel === "signed_only") return { storeId: null, processingState: "parsing" };
+  // authorized_process
+  const res = FiscalStoreResolverService.resolve(orgId, p.recipientCnpj);
+  if (res.status === "resolved") return { storeId: res.storeId, processingState: "ready_for_receipt" };
+  return { storeId: null, processingState: "store_assignment_required" };
 }
 
 export interface PersistOptions {
@@ -72,43 +82,45 @@ export class FiscalDocumentService {
       if (newRank <= oldRank) {
         return { status: "unchanged", documentId: existing.id, reason: "versão não é mais completa" };
       }
-      this.writeDocument(orgId, existing.id, parsed, opts);
+      this.writeDocument(orgId, existing.id, parsed, opts, storeContext(orgId, parsed));
       this.replaceItems(orgId, existing.id, parsed);
       return { status: "enriched", documentId: existing.id };
     }
 
     const id = randomUUID();
-    this.insertDocument(orgId, id, parsed, opts);
+    this.insertDocument(orgId, id, parsed, opts, storeContext(orgId, parsed));
     this.replaceItems(orgId, id, parsed);
     return { status: "created", documentId: id };
   }
 
-  private static insertDocument(orgId: string, id: string, p: ParsedNFeDocument, opts: PersistOptions): void {
+  private static insertDocument(orgId: string, id: string, p: ParsedNFeDocument, opts: PersistOptions, ctx: { storeId: string | null; processingState: string }): void {
     db.prepare(
       `INSERT INTO fiscal_documents (
-         id, organization_id, connection_id, document_type, access_key, model, number, series, issue_at,
+         id, organization_id, connection_id, store_id, document_type, access_key, model, number, series, issue_at,
          issuer_cnpj, issuer_name, recipient_cnpj, recipient_name,
          total_products, total_invoice, freight, discount, other_expenses,
          fiscal_status, content_level, protocol_number, protocol_status, authorization_at,
          source, processing_state, invoice_scan_draft_id
-       ) VALUES (?, ?, ?, 'nfe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, 'nfe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      id, orgId, opts.connectionId || null, p.accessKey, p.model, p.number, p.series, p.issueAt,
+      id, orgId, opts.connectionId || null, ctx.storeId, p.accessKey, p.model, p.number, p.series, p.issueAt,
       p.issuerCnpj, p.issuerName, p.recipientCnpj, p.recipientName,
       p.totalProducts, p.totalInvoice, p.freight, p.discount, p.otherExpenses,
       p.fiscalStatus, p.contentLevel, p.protocolNumber, p.protocolStatus, p.authorizationAt,
-      opts.source, processingStateFor(p.contentLevel), opts.invoiceScanDraftId || null
+      opts.source, ctx.processingState, opts.invoiceScanDraftId || null
     );
   }
 
-  private static writeDocument(orgId: string, id: string, p: ParsedNFeDocument, opts: PersistOptions): void {
+  private static writeDocument(orgId: string, id: string, p: ParsedNFeDocument, opts: PersistOptions, ctx: { storeId: string | null; processingState: string }): void {
+    // store_id via COALESCE: uma loja já atribuída (auto ou manual) não é
+    // apagada por uma reavaliação que não conseguiu resolver.
     db.prepare(
       `UPDATE fiscal_documents SET
          model = ?, number = ?, series = ?, issue_at = ?,
          issuer_cnpj = ?, issuer_name = ?, recipient_cnpj = ?, recipient_name = ?,
          total_products = ?, total_invoice = ?, freight = ?, discount = ?, other_expenses = ?,
          fiscal_status = ?, content_level = ?, protocol_number = ?, protocol_status = ?, authorization_at = ?,
-         processing_state = ?, connection_id = COALESCE(?, connection_id),
+         store_id = COALESCE(?, store_id), processing_state = ?, connection_id = COALESCE(?, connection_id),
          invoice_scan_draft_id = COALESCE(?, invoice_scan_draft_id),
          updated_at = CURRENT_TIMESTAMP
        WHERE organization_id = ? AND id = ?`
@@ -117,7 +129,7 @@ export class FiscalDocumentService {
       p.issuerCnpj, p.issuerName, p.recipientCnpj, p.recipientName,
       p.totalProducts, p.totalInvoice, p.freight, p.discount, p.otherExpenses,
       p.fiscalStatus, p.contentLevel, p.protocolNumber, p.protocolStatus, p.authorizationAt,
-      processingStateFor(p.contentLevel), opts.connectionId || null,
+      ctx.storeId, ctx.processingState, opts.connectionId || null,
       opts.invoiceScanDraftId || null, orgId, id
     );
   }

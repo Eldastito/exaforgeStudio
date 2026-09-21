@@ -1691,9 +1691,15 @@ const initDb = () => {
     try { db.exec(`ALTER TABLE retail_stores ADD COLUMN city TEXT`); } catch(e){}
     try { db.exec(`ALTER TABLE retail_stores ADD COLUMN latitude REAL`); } catch(e){}
     try { db.exec(`ALTER TABLE retail_stores ADD COLUMN longitude REAL`); } catch(e){}
+    // Entrada Automática de NF-e (ADR-200, Fase 2): CNPJ e IE da loja, para
+    // resolver o destinatário da NF-e (dest/CNPJ) na loja correta. CNPJ
+    // normalizado para 14 dígitos; índice por org para a resolução determinística.
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN cnpj TEXT`); } catch(e){}
+    try { db.exec(`ALTER TABLE retail_stores ADD COLUMN state_registration TEXT`); } catch(e){}
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_retail_stores_org ON retail_stores (organization_id);
       CREATE INDEX IF NOT EXISTS idx_retail_stores_wa ON retail_stores (organization_id, whatsapp_identifier);
+      CREATE INDEX IF NOT EXISTS idx_retail_stores_cnpj ON retail_stores (organization_id, cnpj);
     `);
     // ADR-108 (Bloco B / pedido TOULON): responsáveis por loja — quem recebe a
     // cobranca de cada tipo de pendencia (fechamento/malote/escala) e pode dar

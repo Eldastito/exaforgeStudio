@@ -11822,6 +11822,12 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE retail_cash_deposits ADD COLUMN kind TEXT DEFAULT 'deposito'`); } catch(e){}
   // Snapshot da RETIRADA no fecho de semana (espelha total_deposited).
   try { db.exec(`ALTER TABLE retail_cash_week_closings ADD COLUMN total_withdrawn REAL NOT NULL DEFAULT 0`); } catch(e){}
+
+  // Recebíveis de cartão — modo D+1 (opt-in). Algumas lojas recebem D+1 o VALOR
+  // INTEIRO da venda à vista (mesmo venda parcelada pelo cliente); o adquirente
+  // antecipa. Ligado → a aba Recebíveis projeta o total da venda em (venda+1),
+  // em vez de repetir as parcelas do cliente mês a mês. Default 0 = 0-regressão.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_card_dplus1_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

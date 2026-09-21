@@ -29,6 +29,7 @@ import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.
 import { RetailScheduleImportService } from "../RetailScheduleImportService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
 import { RetailCardAcquirerService } from "../RetailCardAcquirerService.js";
+import { RetailCardReceivableService } from "../RetailCardReceivableService.js";
 import { RetailPdvCustomerService } from "../RetailPdvCustomerService.js";
 import { RetailStockPolicyService } from "../RetailStockPolicyService.js";
 import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
@@ -923,21 +924,30 @@ router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
   const args: any[] = [orgId, start, end];
   let filialClause = "";
   if (filial) { filialClause = "AND filial = ?"; args.push(filial); }
+  // Modo D+1 (opt-in): recebível = valor INTEIRO da venda em (venda+1), 1 linha
+  // por transação; senão, modo parcelas (uma linha por parcela no vencimento).
+  const mode = RetailCardReceivableService.getMode(orgId);
   try {
-    // Bloco AGREGADO — sempre devolve (topo da tela, tiles + tabela por dia).
-    const byDayRows = db.prepare(
-      `SELECT vencimento, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
-         FROM retail_pdv_card_installments
-        WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
-        GROUP BY vencimento ORDER BY vencimento`
-    ).all(...args) as any[];
-    // Breakdown por BANDEIRA no período — pra mostrar "quanto Visa vs Master".
-    const byBrandRows = db.prepare(
-      `SELECT codigo_cartao, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
-         FROM retail_pdv_card_installments
-        WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
-        GROUP BY codigo_cartao ORDER BY SUM(valor) DESC`
-    ).all(...args) as any[];
+    let byDayRows: any[], byBrandRows: any[], dRows: any[] | undefined;
+    if (mode === "dplus1") {
+      const raw = RetailCardReceivableService.dplus1Rows(orgId, start, end, { filial, detailed });
+      byDayRows = raw.byDayRows; byBrandRows = raw.byBrandRows; dRows = raw.rowsD;
+    } else {
+      // Bloco AGREGADO — sempre devolve (topo da tela, tiles + tabela por dia).
+      byDayRows = db.prepare(
+        `SELECT vencimento, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
+           FROM retail_pdv_card_installments
+          WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
+          GROUP BY vencimento ORDER BY vencimento`
+      ).all(...args) as any[];
+      // Breakdown por BANDEIRA no período — pra mostrar "quanto Visa vs Master".
+      byBrandRows = db.prepare(
+        `SELECT codigo_cartao, COUNT(*) AS parcelas, SUM(valor) AS bruto, SUM(liquido) AS liquido
+           FROM retail_pdv_card_installments
+          WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
+          GROUP BY codigo_cartao ORDER BY SUM(valor) DESC`
+      ).all(...args) as any[];
+    }
     const totals = byDayRows.reduce((a, r) => ({
       parcelas: a.parcelas + Number(r.parcelas || 0),
       bruto: a.bruto + Number(r.bruto || 0),
@@ -952,7 +962,7 @@ router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
     // Bloco DETALHADO — só se pedido; até 1000 linhas pra não travar a tela.
     let items: any[] | undefined;
     if (detailed) {
-      const rowsD = db.prepare(
+      const rowsD = mode === "dplus1" ? (dRows || []) : db.prepare(
         `SELECT filial, vencimento, parcela, seq, numero, boleta, codigo_cartao, valor, liquido, taxa, sale_date
            FROM retail_pdv_card_installments
           WHERE organization_id = ? AND vencimento BETWEEN ? AND ? ${filialClause}
@@ -972,12 +982,26 @@ router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
       });
     }
     res.json({
-      start, end,
+      start, end, mode,
       byDay: byDayRows.map((r) => ({ vencimento: r.vencimento, parcelas: Number(r.parcelas), bruto: Math.round(Number(r.bruto) * 100) / 100, liquido: Math.round(Number(r.liquido) * 100) / 100 })),
       byBrand, unknownBrands, totals,
       items, itemsTruncated: detailed && (items?.length || 0) === 1000,
     });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Modo de recebíveis de cartão da org: 'installments' (parcelas do cliente) ou
+// 'dplus1' (valor inteiro em venda+1, adquirente antecipa). Owner/admin liga.
+router.get("/card-receivable-mode", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ mode: RetailCardReceivableService.getMode(orgId) });
+});
+router.put("/card-receivable-mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const dplus1 = req.body?.dplus1 === true || String(req.body?.dplus1) === "true";
+  res.json({ mode: RetailCardReceivableService.setDplus1(orgId, dplus1, req.user?.userId) });
 });
 
 // DIAGNÓSTICO da anomalia do vendedor: por matrícula do CAIXA, mostra em quantas

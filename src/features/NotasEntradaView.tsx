@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from '@/src/lib/toast';
-import { FileText, Loader2, PackageCheck, ClipboardCheck, ArrowLeft, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { FileText, Loader2, PackageCheck, ClipboardCheck, ArrowLeft, AlertTriangle, CheckCircle2, Search, X } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
@@ -54,6 +54,11 @@ export function NotasEntradaView() {
   const [disabled, setDisabled] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [busy, setBusy] = useState(false);
+  // Picker de produto (associação de item sem mapeamento)
+  const [mapItemId, setMapItemId] = useState<string | null>(null);
+  const [mapQuery, setMapQuery] = useState('');
+  const [mapResults, setMapResults] = useState<Array<{ id: string; name: string; ean?: string | null }>>([]);
+  const [mapSearching, setMapSearching] = useState(false);
 
   const loadDocs = useCallback(async () => {
     setLoading(true);
@@ -115,6 +120,46 @@ export function NotasEntradaView() {
       if (d.receipt) setReceipt(d.receipt);
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao salvar quantidade.');
+    }
+  }
+
+  // Busca produtos do catálogo (reutiliza /api/products) com debounce simples.
+  useEffect(() => {
+    if (!mapItemId) return;
+    const q = mapQuery.trim();
+    let alive = true;
+    setMapSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await apiFetch(`/api/products?limit=20&offset=0&q=${encodeURIComponent(q)}`);
+        const list = r.ok ? await r.json() : [];
+        if (alive) setMapResults(Array.isArray(list) ? list : []);
+      } catch {
+        if (alive) setMapResults([]);
+      } finally {
+        if (alive) setMapSearching(false);
+      }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [mapItemId, mapQuery]);
+
+  function openPicker(itemId: string) { setMapItemId(itemId); setMapQuery(''); setMapResults([]); }
+  function closePicker() { setMapItemId(null); setMapQuery(''); setMapResults([]); }
+
+  async function mapItem(itemId: string, productServiceId: string) {
+    if (!receipt) return;
+    try {
+      const r = await apiFetch(`/api/fiscal/inbound/receipts/${receipt.id}/items/${itemId}/map`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productServiceId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.reason || 'Falha ao associar produto.');
+      if (d.receipt) setReceipt(d.receipt);
+      closePicker();
+      toast.success('Produto associado.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao associar produto.');
     }
   }
 
@@ -186,12 +231,15 @@ export function NotasEntradaView() {
             </thead>
             <tbody>
               {receipt.items.map((it) => (
-                <tr key={it.id} className="border-t border-zinc-800">
+                <React.Fragment key={it.id}>
+                <tr className="border-t border-zinc-800">
                   <td className="p-3 text-zinc-200 max-w-xs truncate" title={it.fiscal_description || ''}>{it.fiscal_description || '—'}<div className="text-xs text-zinc-500">{it.ean || 'sem EAN'}</div></td>
                   <td className="p-3">
                     {it.product_service_id
                       ? <span className="text-emerald-300 text-xs">associado</span>
-                      : <span className="inline-flex items-center gap-1 text-amber-400 text-xs"><AlertTriangle className="w-3 h-3" /> sem produto</span>}
+                      : (done
+                          ? <span className="inline-flex items-center gap-1 text-amber-400 text-xs"><AlertTriangle className="w-3 h-3" /> sem produto</span>
+                          : <button className="inline-flex items-center gap-1 text-amber-400 hover:text-amber-300 text-xs" onClick={() => (mapItemId === it.id ? closePicker() : openPicker(it.id))}><Search className="w-3 h-3" /> associar</button>)}
                   </td>
                   <td className="p-3 text-right text-zinc-300">{fmt(it.expected_qty)}</td>
                   <td className="p-3 text-right">
@@ -213,6 +261,36 @@ export function NotasEntradaView() {
                     {it.ledger_status === 'fractional_pending' && <div className="text-xs text-amber-400">fração não creditada</div>}
                   </td>
                 </tr>
+                {mapItemId === it.id && (
+                  <tr className="border-t border-zinc-800 bg-zinc-900/50">
+                    <td colSpan={6} className="p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Search className="w-4 h-4 text-zinc-400" />
+                        <input
+                          autoFocus type="text" value={mapQuery} onChange={(e) => setMapQuery(e.target.value)}
+                          placeholder="Buscar produto do catálogo por nome ou código…"
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-zinc-100 text-sm"
+                        />
+                        <button className="text-zinc-400 hover:text-zinc-200" onClick={closePicker}><X className="w-4 h-4" /></button>
+                      </div>
+                      {mapSearching ? (
+                        <div className="text-zinc-500 text-xs py-2 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> buscando…</div>
+                      ) : mapResults.length === 0 ? (
+                        <div className="text-zinc-500 text-xs py-2">{mapQuery.trim() ? 'Nenhum produto encontrado.' : 'Digite para buscar no catálogo.'}</div>
+                      ) : (
+                        <div className="max-h-48 overflow-auto divide-y divide-zinc-800 rounded border border-zinc-800">
+                          {mapResults.map((p) => (
+                            <button key={p.id} className="w-full text-left px-3 py-2 hover:bg-zinc-800 flex justify-between items-center" onClick={() => mapItem(it.id, p.id)}>
+                              <span className="text-zinc-200 text-sm">{p.name}</span>
+                              <span className="text-zinc-500 text-xs">{p.ean || ''}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>

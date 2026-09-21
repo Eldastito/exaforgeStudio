@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIXTURE SANITIZADA (ADR-200, Fase 0). Dados fictícios. Item vendido por PESO
+     com QUANTIDADE FRACIONADA (qCom=2.5000, uCom=KG). O parser/recebimento deve
+     preservar o decimal ponta a ponta — proibido parseInt/Math.trunc em qCom. -->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240612345678000199550010000007891000000127" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>789</nNF>
+        <dhEmi>2026-06-11T16:30:00-03:00</dhEmi>
+        <tpNF>1</tpNF>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>Distribuidora Exemplo LTDA</xNome>
+      </emit>
+      <dest>
+        <CNPJ>98765432000155</CNPJ>
+        <xNome>Loja Toulon Exemplo LTDA</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>FORN-KG-01</cProd>
+          <cEAN>7890000000017</cEAN>
+          <xProd>TECIDO ALGODAO CRU A GRANEL (KG)</xProd>
+          <NCM>52081100</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>KG</uCom>
+          <qCom>2.5000</qCom>
+          <vUnCom>18.4000000000</vUnCom>
+          <vProd>46.00</vProd>
+          <cEANTrib>7890000000017</cEANTrib>
+          <uTrib>KG</uTrib>
+          <qTrib>2.5000</qTrib>
+          <vUnTrib>18.4000000000</vUnTrib>
+          <indTot>1</indTot>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>46.00</vProd>
+          <vNF>46.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <chNFe>35240612345678000199550010000007891000000127</chNFe>
+      <nProt>135240000078912</nProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

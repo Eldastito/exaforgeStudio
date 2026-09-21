@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIXTURE SANITIZADA (ADR-200, Fase 0). Dados fictícios. Item com
+     cEAN="SEM GTIN" (comum quando o fornecedor não cadastra código de barras).
+     O parser NÃO deve tratar "SEM GTIN" como EAN válido; o mapeamento cai em
+     fornecedor+cProd (Fase 2). -->
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35240612345678000199550010000004561000000120" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>456</nNF>
+        <dhEmi>2026-06-11T10:00:00-03:00</dhEmi>
+        <tpNF>1</tpNF>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>Atacadista Exemplo LTDA</xNome>
+      </emit>
+      <dest>
+        <CNPJ>98765432000155</CNPJ>
+        <xNome>Loja Toulon Exemplo LTDA</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>FORN-777</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>MEIA CANO ALTO CINZA PACOTE C/3</xProd>
+          <NCM>61159600</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>PC</uCom>
+          <qCom>30.0000</qCom>
+          <vUnCom>7.5000000000</vUnCom>
+          <vProd>225.00</vProd>
+          <cEANTrib>SEM GTIN</cEANTrib>
+          <uTrib>PC</uTrib>
+          <qTrib>30.0000</qTrib>
+          <indTot>1</indTot>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>225.00</vProd>
+          <vNF>225.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <chNFe>35240612345678000199550010000004561000000120</chNFe>
+      <nProt>135240000045678</nProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

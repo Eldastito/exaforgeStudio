@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FIXTURE SANITIZADA (ADR-200, Fase 0). Dados fictícios. Mesmo conteúdo do
+     procNFe-autorizado (1 item) mas com PREFIXO de namespace (nfe:) — schemas
+     variam por emissor/Sefaz; o parser deve ignorar o prefixo. -->
+<nfe:nfeProc xmlns:nfe="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <nfe:NFe>
+    <nfe:infNFe Id="NFe35240612345678000199550010000001231000000122" versao="4.00">
+      <nfe:ide>
+        <nfe:cUF>35</nfe:cUF>
+        <nfe:mod>55</nfe:mod>
+        <nfe:serie>1</nfe:serie>
+        <nfe:nNF>123</nfe:nNF>
+        <nfe:dhEmi>2026-06-10T09:15:00-03:00</nfe:dhEmi>
+        <nfe:tpNF>1</nfe:tpNF>
+      </nfe:ide>
+      <nfe:emit>
+        <nfe:CNPJ>12345678000199</nfe:CNPJ>
+        <nfe:xNome>Atacadista Exemplo LTDA</nfe:xNome>
+      </nfe:emit>
+      <nfe:dest>
+        <nfe:CNPJ>98765432000155</nfe:CNPJ>
+        <nfe:xNome>Loja Toulon Exemplo LTDA</nfe:xNome>
+      </nfe:dest>
+      <nfe:det nItem="1">
+        <nfe:prod>
+          <nfe:cProd>FORN-001</nfe:cProd>
+          <nfe:cEAN>7891234567895</nfe:cEAN>
+          <nfe:xProd>CAMISETA BASICA GOLA CARECA PRETA TAM M</nfe:xProd>
+          <nfe:NCM>61091000</nfe:NCM>
+          <nfe:CFOP>5102</nfe:CFOP>
+          <nfe:uCom>UN</nfe:uCom>
+          <nfe:qCom>12.0000</nfe:qCom>
+          <nfe:vUnCom>29.9000000000</nfe:vUnCom>
+          <nfe:vProd>358.80</nfe:vProd>
+          <nfe:cEANTrib>7891234567895</nfe:cEANTrib>
+          <nfe:uTrib>UN</nfe:uTrib>
+          <nfe:qTrib>12.0000</nfe:qTrib>
+          <nfe:indTot>1</nfe:indTot>
+        </nfe:prod>
+      </nfe:det>
+      <nfe:total>
+        <nfe:ICMSTot>
+          <nfe:vProd>358.80</nfe:vProd>
+          <nfe:vNF>358.80</nfe:vNF>
+        </nfe:ICMSTot>
+      </nfe:total>
+    </nfe:infNFe>
+  </nfe:NFe>
+  <nfe:protNFe versao="4.00">
+    <nfe:infProt>
+      <nfe:chNFe>35240612345678000199550010000001231000000122</nfe:chNFe>
+      <nfe:nProt>135240000012345</nfe:nProt>
+      <nfe:cStat>100</nfe:cStat>
+      <nfe:xMotivo>Autorizado o uso da NF-e</nfe:xMotivo>
+    </nfe:infProt>
+  </nfe:protNFe>
+</nfe:nfeProc>

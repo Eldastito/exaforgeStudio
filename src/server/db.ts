@@ -1849,6 +1849,41 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar supplier_product_mappings', e); }
 
+  // Entrada Automática de NF-e (ADR-200, Fase 2 PR C1) — recebimento ESPERADO a
+  // partir do procNFe. Cabeçalho reaproveita retail_goods_receipts (só ganha o
+  // vínculo com o documento fiscal). Os itens esperados ficam numa tabela
+  // PRÓPRIA — o retail_goods_receipt_items legado exige produto (NOT NULL) e usa
+  // INTEGER; aqui o item pode NÃO ter produto resolvido (não é descartado) e a
+  // quantidade esperada é DECIMAL (fiel ao XML). NÃO movimenta estoque: a
+  // confirmação (PR C2) credita só o recebido no ledger de RetailStockModeService.
+  try { db.exec(`ALTER TABLE retail_goods_receipts ADD COLUMN fiscal_document_id TEXT`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS fiscal_goods_receipt_items (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        receipt_id TEXT NOT NULL,
+        fiscal_document_id TEXT NOT NULL,
+        fiscal_document_item_id TEXT NOT NULL,
+        product_service_id TEXT,            -- NULL quando ainda não mapeado (não descartado)
+        variant_id TEXT,
+        fiscal_description TEXT,            -- xProd, para exibir mesmo sem produto
+        ean TEXT,
+        expected_qty REAL DEFAULT 0,        -- decimal (qCom) — fiel ao XML
+        received_qty REAL DEFAULT 0,        -- decimal — conferência física
+        damage_qty REAL DEFAULT 0,
+        mapping_status TEXT DEFAULT 'unresolved',  -- resolved | confirmed | unresolved
+        mapping_source TEXT,
+        is_stockable INTEGER DEFAULT 1,
+        divergence_reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(receipt_id, fiscal_document_item_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_fiscal_receipt_items_receipt ON fiscal_goods_receipt_items (receipt_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar fiscal_goods_receipt_items', e); }
+
   // Retail Ops (ADR-085) — baseline do dia 0: retrato do estado no momento em
   // que o Retail Ops foi ativado, para mostrar o "antes → depois". Um por org.
   try {

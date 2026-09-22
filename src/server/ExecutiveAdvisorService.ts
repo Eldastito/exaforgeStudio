@@ -385,9 +385,26 @@ ${lines.join("\n")}`;
    * LLM — pergunta aberta deixa de ser um contorno do gate de dinheiro. Default
    * (undefined) = mostra tudo (0-regressão para as rotas owner/admin já gated).
    */
-  static async ask(orgId: string, question: string, opts: { canSeeMoney?: boolean } = {}): Promise<string> {
+  static async ask(orgId: string, question: string, opts: { canSeeMoney?: boolean; userId?: string } = {}): Promise<string> {
     const q = String(question || "").trim();
     if (!q) return "Faça uma pergunta sobre o seu negócio (ex.: \"por que minhas vendas caíram?\").";
+    const answer = await this.computeAnswer(orgId, q, opts);
+    if (answer === null) return "Não consegui analisar agora. Tente novamente em instantes.";
+    // Persiste a Q&A no RAG do perfil (opt-in falatu_rag_enabled, só com userId).
+    // Best-effort: memória NUNCA derruba a resposta ao usuário.
+    if (opts.userId) {
+      try {
+        const { DiretorMemoryService } = await import("./DiretorMemoryService.js");
+        DiretorMemoryService.remember(orgId, opts.userId, { question: q, answer });
+      } catch (e) {
+        console.error("[DiretorIA] Falha ao memorizar Q&A no RAG (best-effort):", e);
+      }
+    }
+    return answer;
+  }
+
+  /** Computa a resposta (ferramenta aterrada → panorama). null = falha do LLM. */
+  private static async computeAnswer(orgId: string, q: string, opts: { canSeeMoney?: boolean }): Promise<string | null> {
     // F2 (Diretor IA com ferramentas): pergunta de CONSULTA tenta primeiro o
     // roteador de ferramentas aterradas — número vem do sistema, não da
     // memória do modelo. Sem ferramenta que responda → segue o fluxo do
@@ -414,7 +431,7 @@ Sua resposta (com números do panorama + ações priorizadas):`;
       return (await chat(prompt, { temperature: 0.3 })).trim();
     } catch (e) {
       console.error("[DiretorIA] Falha ao responder:", e);
-      return "Não consegui analisar agora. Tente novamente em instantes.";
+      return null;
     }
   }
 

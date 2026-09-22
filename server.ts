@@ -158,6 +158,8 @@ import "./src/server/SalesRecoveryPlaybook.js";
 // ADR-154 F5.1 — registra handlers falatu_embed_entity / falatu_embed_note na
 // JobQueue (embedding assíncrono da memória do FalaTu no confirm).
 import "./src/server/FalaTuMemoryEmbeddingsService.js";
+// Registra o handler diretor_embed_qa (memória de Q&A do Diretor no RAG do perfil).
+import "./src/server/DiretorMemoryService.js";
 import { Scheduler } from "./src/server/Scheduler.js";
 import { NotificationService } from "./src/server/NotificationService.js";
 import { MessageDeliveryService } from "./src/server/MessageDeliveryService.js";

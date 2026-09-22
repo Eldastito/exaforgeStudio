@@ -52,7 +52,7 @@ import { JobQueueService, JobQueueError } from "./JobQueueService.js";
 import { setUsageContext } from "./usageContext.js";
 import { cosineSimilarity, topKBySimilarity } from "./vectorSimilarity.js";
 
-export type EmbeddingSourceType = "entity" | "note";
+export type EmbeddingSourceType = "entity" | "note" | "advisor_qa";
 
 export interface EmbeddingRow {
   id: string;

@@ -168,6 +168,23 @@ export function AdminMasterView() {
     }
   };
 
+  const handleToggleFiscalInbound = async (id: string, enabled: boolean) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/fiscal-inbound`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) { toast.success(enabled ? 'Entrada Automática de NF-e liberada para a empresa.' : 'Entrada Automática de NF-e desligada para a empresa.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao alterar a Entrada de NF-e.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
   const handleSoftDelete = async (id: string) => {
     if (!(await confirmDialog('Tem certeza que deseja remover esta empresa (Soft Delete)?', { danger: true, confirmText: 'Remover' }))) return;
     setLoadingId(id);
@@ -244,6 +261,7 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">Billing Status</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">FalaTu</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Coach de Vendas</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">NF-e Entrada</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Vertical</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
@@ -359,6 +377,30 @@ export function AdminMasterView() {
                           <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.sales_coach_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
                         </span>
                         {Number(org.sales_coach_enabled) ? 'Ligado' : 'Ligar'}
+                      </button>
+                  </td>
+                  <td className="px-6 py-4">
+                      {/* Rollout opt-in da Entrada Automática de NF-e (ADR-200 Fase 0): kill
+                          switch por org, default OFF. Mesmo switch, cor cyan pra distinguir.
+                          Libera a tela Notas de Entrada e o painel de conexão em Integrações. */}
+                      <button
+                        onClick={() => handleToggleFiscalInbound(org.organization_id, !Number(org.fiscal_inbound_enabled))}
+                        disabled={loadingId === org.organization_id}
+                        role="switch"
+                        aria-checked={!!Number(org.fiscal_inbound_enabled)}
+                        title={Number(org.fiscal_inbound_enabled)
+                          ? 'Entrada Automática de NF-e liberada para esta empresa — clique para desligar'
+                          : 'Clique para liberar a Entrada Automática de NF-e para esta empresa'}
+                        className={`inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                          Number(org.fiscal_inbound_enabled)
+                            ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/40 hover:bg-cyan-500/25'
+                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:border-cyan-500/50 hover:text-cyan-200'
+                        }`}
+                      >
+                        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${Number(org.fiscal_inbound_enabled) ? 'bg-cyan-500' : 'bg-zinc-500'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.fiscal_inbound_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
+                        </span>
+                        {Number(org.fiscal_inbound_enabled) ? 'Ligado' : 'Ligar'}
                       </button>
                   </td>
                   <td className="px-6 py-4">

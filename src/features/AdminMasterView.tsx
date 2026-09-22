@@ -185,6 +185,40 @@ export function AdminMasterView() {
     }
   };
 
+  const handleToggleFalatuRag = async (id: string, enabled: boolean) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/falatu-rag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) { toast.success(enabled ? 'Memória (RAG do perfil) ligada para a empresa.' : 'Memória (RAG do perfil) desligada para a empresa.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao alterar a Memória.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const handleToggleWaGestor = async (id: string, enabled: boolean) => {
+    setLoadingId(id);
+    try {
+      const res = await fetch(`/api/admin/organizations/${id}/wa-gestor`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) { toast.success(enabled ? 'WhatsApp de Gestão liberado para a empresa.' : 'WhatsApp de Gestão desligado para a empresa.'); loadData(); }
+      else { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Falha ao alterar o WhatsApp de Gestão.'); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
   const handleSoftDelete = async (id: string) => {
     if (!(await confirmDialog('Tem certeza que deseja remover esta empresa (Soft Delete)?', { danger: true, confirmText: 'Remover' }))) return;
     setLoadingId(id);
@@ -262,6 +296,8 @@ export function AdminMasterView() {
                 <th className="px-6 py-4 font-semibold text-zinc-300">FalaTu</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Coach de Vendas</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">NF-e Entrada</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">Memória (RAG)</th>
+                <th className="px-6 py-4 font-semibold text-zinc-300">WhatsApp Gestão</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300">Vertical</th>
                 <th className="px-6 py-4 font-semibold text-zinc-300 text-right">Ações de Risco</th>
               </tr>
@@ -401,6 +437,52 @@ export function AdminMasterView() {
                           <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.fiscal_inbound_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
                         </span>
                         {Number(org.fiscal_inbound_enabled) ? 'Ligado' : 'Ligar'}
+                      </button>
+                  </td>
+                  <td className="px-6 py-4">
+                      {/* RAG do perfil (falatu_rag_enabled): liga a MEMÓRIA — o Fala Tu
+                          lembra do que foi dito e o Diretor IA salva as Q&A. Cor indigo. */}
+                      <button
+                        onClick={() => handleToggleFalatuRag(org.organization_id, !Number(org.falatu_rag_enabled))}
+                        disabled={loadingId === org.organization_id}
+                        role="switch"
+                        aria-checked={!!Number(org.falatu_rag_enabled)}
+                        title={Number(org.falatu_rag_enabled)
+                          ? 'Memória (RAG do perfil) ligada — clique para desligar'
+                          : 'Clique para ligar a Memória (RAG do perfil) desta empresa'}
+                        className={`inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                          Number(org.falatu_rag_enabled)
+                            ? 'bg-indigo-500/15 text-indigo-200 border-indigo-500/40 hover:bg-indigo-500/25'
+                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:border-indigo-500/50 hover:text-indigo-200'
+                        }`}
+                      >
+                        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${Number(org.falatu_rag_enabled) ? 'bg-indigo-500' : 'bg-zinc-500'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.falatu_rag_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
+                        </span>
+                        {Number(org.falatu_rag_enabled) ? 'Ligado' : 'Ligar'}
+                      </button>
+                  </td>
+                  <td className="px-6 py-4">
+                      {/* WhatsApp de Gestão (wa_gestor_enabled): o dono consulta o
+                          negócio pelo WhatsApp (Controller Financeiro IA). Cor green. */}
+                      <button
+                        onClick={() => handleToggleWaGestor(org.organization_id, !Number(org.wa_gestor_enabled))}
+                        disabled={loadingId === org.organization_id}
+                        role="switch"
+                        aria-checked={!!Number(org.wa_gestor_enabled)}
+                        title={Number(org.wa_gestor_enabled)
+                          ? 'WhatsApp de Gestão liberado — clique para desligar'
+                          : 'Clique para liberar o WhatsApp de Gestão desta empresa'}
+                        className={`inline-flex items-center gap-2 rounded-full border pl-1 pr-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50 ${
+                          Number(org.wa_gestor_enabled)
+                            ? 'bg-green-500/15 text-green-200 border-green-500/40 hover:bg-green-500/25'
+                            : 'bg-zinc-700/40 text-zinc-300 border-zinc-600/50 hover:border-green-500/50 hover:text-green-200'
+                        }`}
+                      >
+                        <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${Number(org.wa_gestor_enabled) ? 'bg-green-500' : 'bg-zinc-500'}`}>
+                          <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${Number(org.wa_gestor_enabled) ? 'left-[14px]' : 'left-0.5'}`} />
+                        </span>
+                        {Number(org.wa_gestor_enabled) ? 'Ligado' : 'Ligar'}
                       </button>
                   </td>
                   <td className="px-6 py-4">

@@ -398,7 +398,7 @@ export class FalaTuAskService {
         if (RecoveryAssessmentService.isEnabled(orgId)) {
           return this.answerRecovery(orgId, this.canSeeMoney(orgId, user));
         }
-        const off = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user) });
+        const off = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user), userId: user?.userId || user?.id });
         return { kind: "open_question", answer: off, date: cls.date, grounded: false, moneyRestricted: false };
       }
       case "open_question":
@@ -408,7 +408,7 @@ export class FalaTuAskService {
         // pelo gate acima — mas o panorama do Diretor carrega financeiro. Projeta
         // por usuário: quem não pode ver dinheiro recebe o panorama redigido, em
         // vez de o faturamento vazar por "como estão minhas finanças?".
-        const text = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user) });
+        const text = await ExecutiveAdvisorService.ask(orgId, q, { canSeeMoney: this.canSeeMoney(orgId, user), userId: user?.userId || user?.id });
         return { kind: "open_question", answer: text, date: cls.date, grounded: false, moneyRestricted: false };
       }
     }

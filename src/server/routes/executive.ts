@@ -39,7 +39,7 @@ router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
     const canSeeMoney = FalaTuAskService.canSeeMoney(orgId, req.user);
-    res.json({ text: await ExecutiveAdvisorService.ask(orgId, req.body?.question, { canSeeMoney }) });
+    res.json({ text: await ExecutiveAdvisorService.ask(orgId, req.body?.question, { canSeeMoney, userId: req.user?.userId || req.user?.id }) });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

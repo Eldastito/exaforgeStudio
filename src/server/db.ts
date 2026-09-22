@@ -8171,6 +8171,28 @@ const initDb = () => {
       ON falatu_memory_embeddings(organization_id, user_id, source_type);
   `);
 
+  // Diretor IA — memória de Q&A no RAG do perfil (PR: persiste pergunta+resposta
+  // do ExecutiveAdvisorService.ask). Guarda o texto (fonte da verdade + re-embed
+  // futuro); o embedding em si vive em falatu_memory_embeddings com
+  // source_type='advisor_qa' (mesmo store do RAG do perfil, então a recuperação
+  // já existente o encontra). Opt-in pelo MESMO flag falatu_rag_enabled. Por
+  // (org, user). NÃO grava resposta de erro — só respostas reais.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS diretor_qa_memory (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        tool TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_diretor_qa_memory_user
+        ON diretor_qa_memory(organization_id, user_id, created_at);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar diretor_qa_memory', e); }
+
   // ADR-154 F8.4 — tokens pessoais de captura (API aberta write-only da
   // Fase 8: Atalho Siri, Share Target, NFC, Zapier/n8n). Guarda-se APENAS o
   // sha256 do token (nunca o claro): dump do banco não vira credencial. O

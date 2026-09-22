@@ -1069,6 +1069,7 @@
     "test:diretor-retail-block": "tsx scripts/test-diretor-retail-block.ts",
     "test:diretor-tools": "tsx scripts/test-diretor-tools.ts",
     "test:diretor-metas-abaixo-cota": "tsx scripts/test-diretor-metas-abaixo-cota.ts",
+    "test:diretor-rag-memoria": "tsx scripts/test-diretor-rag-memoria.ts",
     "test:diretor-router": "tsx scripts/test-diretor-router.ts",
     "test:diretor-entrypoints": "tsx scripts/test-diretor-entrypoints.ts",
     "test:diretor-tools-finance": "tsx scripts/test-diretor-tools-finance.ts",

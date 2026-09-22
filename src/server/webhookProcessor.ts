@@ -168,7 +168,7 @@ async function runInternalInbound(orgId: string, channel: any, payload: { sender
         await MessageProviderService.sendMessage(channel.id, payload.senderId, 'Deixa eu ver isso pra você… 💭');
         // CA-04: 'pergunta_negocio' só sai com isManager (owner/admin) →
         // pode ver dinheiro; passamos explícito p/ o panorama não ser redigido.
-        const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '', { canSeeMoney: true });
+        const answer = await ExecutiveAdvisorService.ask(orgId, payload.text || '', { canSeeMoney: true, userId: g.user?.id });
         await MessageProviderService.sendMessage(channel.id, payload.senderId, answer);
         return;
       }

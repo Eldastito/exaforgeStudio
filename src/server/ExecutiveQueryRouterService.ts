@@ -76,6 +76,11 @@ export class ExecutiveQueryRouterService {
     const store = this.findStoreInText(orgId, question);
     const storeTerm = store?.name || this.extractStoreTerm(question);
 
+    // Abaixo da cota/meta: relatório de dias negativos por loja (default mês).
+    // Vem ANTES de metas_progresso senão "abaixo da meta" cairia lá.
+    if (/(cota|meta|quota)/.test(ql) && /(abaixo|fora|deficit|d[eé]ficit|negativ|nao? bat|não bat|nao? atin|não atin|nao? bateu|não bateu|faltou|furou)/.test(ql)) {
+      return { tool: "metas_abaixo_cota", args: { store: storeTerm, period: period || "mes" } };
+    }
     if (/\bmetas?\b/.test(ql)) return { tool: "metas_progresso", args: {} };
     // F4: finanças / comissão / catálogo.
     if (/(a\s*receber|receb[ií]ve|vencid|fiado)/.test(ql)) return { tool: "a_receber", args: {} };

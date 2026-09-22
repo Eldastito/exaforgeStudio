@@ -32,6 +32,7 @@ import { CapacityEnvelopeService } from "../CapacityEnvelopeService.js";
 import { AiQuotaSignalService } from "../AiQuotaSignalService.js";
 import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
+import { FiscalInboundFlagService } from "../FiscalInboundFlagService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { RuntimePilotService } from "../RuntimePilotService.js";
 import { HelpKnowledgeService } from "../HelpKnowledgeService.js";
@@ -471,6 +472,23 @@ router.post("/organizations/:id/sales-coach", async (req: AuthRequest, res): Pro
     SalesCoachService.setOrgEnabled(orgId, enabled);
     logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_SALES_COACH_TOGGLE', { enabled });
     res.json({ success: true, enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Master Admin - Liga/desliga a Entrada Automática de NF-e de uma organização
+// (ADR-200 Fase 0 — kill switch por org, default OFF). O gate real é o flag
+// fiscal_inbound_enabled lido pelo router /api/fiscal/inbound (404 com off), pela
+// tela Notas de Entrada e pelo painel de conexão em Integrações; aqui é só a
+// porta de administração do rollout. Auditado.
+router.post("/organizations/:id/fiscal-inbound", (req: AuthRequest, res): any => {
+  const enabled = !!req.body?.enabled;
+  const orgId = req.params.id;
+  try {
+    const state = FiscalInboundFlagService.set(orgId, enabled);
+    logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_FISCAL_INBOUND_TOGGLE', { enabled: state });
+    res.json({ success: true, enabled: state });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

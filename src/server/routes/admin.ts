@@ -494,6 +494,37 @@ router.post("/organizations/:id/fiscal-inbound", (req: AuthRequest, res): any =>
   }
 });
 
+// Master Admin - Liga/desliga o RAG do perfil (memória do Fala Tu + Q&A do
+// Diretor IA, ADR-154 F5 / PR do RAG do Diretor). O gate real é falatu_rag_enabled
+// (opt-in, default 0); aqui é só a porta de administração do rollout.
+router.post("/organizations/:id/falatu-rag", async (req: AuthRequest, res): Promise<any> => {
+  const enabled = !!req.body?.enabled;
+  const orgId = req.params.id;
+  try {
+    const { FalaTuMemoryEmbeddingsService } = await import("../FalaTuMemoryEmbeddingsService.js");
+    FalaTuMemoryEmbeddingsService.setEnabled(orgId, enabled);
+    logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_FALATU_RAG_TOGGLE', { enabled });
+    res.json({ success: true, enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Master Admin - Liga/desliga o WhatsApp como interface de GESTÃO (Controller
+// Financeiro IA, ADR-139 / GestorCommandService). O gate real é wa_gestor_enabled
+// (opt-in, default 0); aqui é só a porta de administração do rollout.
+router.post("/organizations/:id/wa-gestor", (req: AuthRequest, res): any => {
+  const enabled = !!req.body?.enabled;
+  const orgId = req.params.id;
+  try {
+    db.prepare(`UPDATE organization_settings SET wa_gestor_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+    logAuthEvent(req.organizationId, req.user?.userId, orgId, 'ADMIN_WA_GESTOR_TOGGLE', { enabled });
+    res.json({ success: true, enabled });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Master Admin - Atribui/troca o plano de uma organização (libera o teto de
 // módulos do plano). Preenche o gap de "liberar a conta": até aqui o admin
 // mudava status/billing, mas não conseguia dar um plano a uma org existente.

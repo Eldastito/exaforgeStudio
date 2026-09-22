@@ -82,6 +82,16 @@ export class ExecutiveQueryToolsService {
       args: [],
     },
     {
+      name: "metas_abaixo_cota", money: true,
+      description: "Lojas que ficaram ABAIXO DA COTA diária no período: por loja, os dias em que ficou abaixo, quanto faltou por dia, o total de dias negativos e o saldo do mês (realizado − cota). Só conta dias com cota lançada E fechamento real (pending/rejeitado/futuro não entram). Período default: mês atual. Aceita hoje|ontem|semana|mes|mes_passado ou {from,to}.",
+      args: [
+        { name: "store", description: "Nome (ou parte) da loja; vazio = todas as lojas" },
+        { name: "period", description: "mes|mes_passado|semana ou {from,to} (default: mês atual)" },
+        { name: "from", description: "Data inicial YYYY-MM-DD (alternativa a period)" },
+        { name: "to", description: "Data final YYYY-MM-DD (alternativa a period)" },
+      ],
+    },
+    {
       name: "caixa_resumo", money: true,
       description: "Resumo financeiro do negócio agora: caixa atual, total a receber e total a pagar.",
       args: [],
@@ -120,6 +130,7 @@ export class ExecutiveQueryToolsService {
         case "fechamentos_status": return this.fechamentosStatus(orgId, args);
         case "estoque_loja": return this.estoqueLoja(orgId, args);
         case "metas_progresso": return this.metasProgresso(orgId, { canSeeMoney: money });
+        case "metas_abaixo_cota": return this.metasAbaixoCota(orgId, args);
         case "caixa_resumo": return this.caixaResumo(orgId);
         case "a_receber": return this.aReceber(orgId);
         case "comissao_estimada": return this.comissaoEstimada(orgId, args);
@@ -289,6 +300,70 @@ export class ExecutiveQueryToolsService {
       return `- ${g.label}: meta ${fmt(g.target, g.unit)} · realizado ${fmt(g.current, g.unit)} (${g.attainmentPct}%) · falta ${fmt(g.remaining, g.unit)} → ${pace}`;
     });
     return { ok: true, tool: "metas_progresso", data: { goals: visible }, summary: `Metas do mês:\n${lines.join("\n")}` };
+  }
+
+  /**
+   * Lojas ABAIXO DA COTA diária no período (RN-DIR-4: honesto, nunca inventa).
+   * Só considera dias com cota lançada (`quota_amount > 0`) E fechamento REAL
+   * (pending/rejeitado/futuro não entram — são "desconhecidos", não "negativos").
+   * Por loja: os dias negativos, quanto faltou por dia, a soma dos dias negativos
+   * e o saldo do mês (realizado − cota acumulado — dias bons compensam os ruins).
+   * As duas leituras são reportadas separadas de propósito: confundi-las é o erro
+   * clássico de "quanto estou fora da meta".
+   */
+  private static metasAbaixoCota(orgId: string, args: Record<string, any>): ExecutiveToolResult {
+    const period = this.resolvePeriod(args.period || args.from || args.to ? args : { period: "mes" });
+    if ("error" in period) return { ok: false, tool: "metas_abaixo_cota", error: "invalid_period" };
+    const st = this.resolveStore(orgId, args.store);
+    if (st?.clarify) return { ok: true, tool: "metas_abaixo_cota", clarify: st.clarify };
+
+    const where = st?.store ? `AND c.store_id = ?` : "";
+    const params: any[] = [orgId, period.from, period.to, ...(st?.store ? [st.store.id] : [])];
+    const rows = db.prepare(
+      `SELECT c.store_id, s.name AS store_name, c.closing_date AS date,
+              c.quota_amount AS quota, COALESCE(c.informed_total,0) AS realized
+         FROM retail_daily_closings c JOIN retail_stores s ON s.id = c.store_id
+        WHERE c.organization_id = ? AND c.closing_date BETWEEN ? AND ?
+          AND c.${REAL} AND c.quota_amount > 0 ${where}
+        ORDER BY s.name, c.closing_date`
+    ).all(...params) as any[];
+
+    if (!rows.length) {
+      return { ok: true, tool: "metas_abaixo_cota", data: { period, stores: [] },
+        summary: `Nenhum dia com COTA lançada e fechamento real em ${period.label}. Sem cota registrada não dá pra dizer quem ficou abaixo — nada a inventar.` };
+    }
+
+    // Agrupa por loja; calcula dias negativos + saldo do mês.
+    const byStore = new Map<string, { name: string; considered: number; belowDays: { date: string; quota: number; realized: number; diff: number }[]; net: number }>();
+    for (const r of rows) {
+      const quota = Number(r.quota || 0), realized = Number(r.realized || 0);
+      const diff = realized - quota; // negativo = abaixo da cota
+      const g = byStore.get(r.store_id) || { name: r.store_name, considered: 0, belowDays: [], net: 0 };
+      g.considered++; g.net += diff;
+      if (diff < 0) g.belowDays.push({ date: r.date, quota, realized, diff });
+      byStore.set(r.store_id, g);
+    }
+
+    // Foco do pedido: só lojas com pelo menos um dia abaixo. Pior saldo primeiro.
+    const stores = [...byStore.values()].filter((g) => g.belowDays.length > 0).sort((a, b) => a.net - b.net);
+    if (!stores.length) {
+      return { ok: true, tool: "metas_abaixo_cota", data: { period, stores: [] },
+        summary: `Nenhuma loja ficou abaixo da cota em ${period.label} (nos dias com cota lançada e fechamento real).` };
+    }
+
+    const lines: string[] = [];
+    const out: any[] = [];
+    for (const g of stores) {
+      const sumBelow = g.belowDays.reduce((a, d) => a + d.diff, 0); // negativo
+      lines.push(`\n▸ ${g.name} — ${g.belowDays.length} de ${g.considered} dia(s) abaixo da cota:`);
+      for (const d of g.belowDays) lines.push(`   ${d.date}: cota ${brl(d.quota)} · vendeu ${brl(d.realized)} · faltou ${brl(-d.diff)}`);
+      const netTxt = g.net < 0 ? `NEGATIVO ${brl(g.net)} (faltam ${brl(-g.net)} pra fechar a meta acumulada)` : `positivo +${brl(g.net)} (os dias bons compensaram)`;
+      lines.push(`   → Soma só dos dias negativos: ${brl(sumBelow)}. Saldo do mês (realizado − cota): ${netTxt}.`);
+      out.push({ name: g.name, consideredDays: g.considered, belowDays: g.belowDays, sumBelow, netMonth: g.net });
+    }
+    const header = `Lojas abaixo da cota — ${period.label} (só dias com cota lançada e fechamento real):`;
+    const note = `\n\nObs.: dias sem cota lançada ou sem fechamento enviado NÃO entram — são desconhecidos, não "negativos".`;
+    return { ok: true, tool: "metas_abaixo_cota", data: { period, stores: out }, summary: header + lines.join("\n") + note };
   }
 
   // ── F4: finanças/comissão/catálogo (todas money — §73 já barra no run) ────

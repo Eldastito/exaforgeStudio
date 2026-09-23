@@ -112,6 +112,18 @@ async function main() {
   check("2.7 sobreposição PDV × manual sinalizada", row.issues.includes("fontes_fisicas_sobrepostas"));
   check("2.8 cota do dia na linha", row.closing.quota === 5200);
   check("2.9 filial órfã 999 listada com o valor", audit.orphanFiliais.length === 1 && audit.orphanFiliais[0].filial === "999" && audit.orphanFiliais[0].total === 111.11, JSON.stringify(audit.orphanFiliais));
+  check("2.10 boletas do dia abertas venda a venda", row.sources.pdv.boletas.length === 2 && row.sources.pdv.boletas[0].boleta === "1" && row.sources.pdv.boletas[0].valor === 3000 && row.sources.pdv.boletas[1].valor === 2476.70, JSON.stringify(row.sources.pdv.boletas));
+  check("2.11 dia antigo NÃO é marcado como leitura parcial de TEF", !row.issues.includes("possivel_leitura_parcial_tef"), row.issues.join(","));
+  check("2.12 sem falha de credenciais → connector.authError null", audit.connector.authError === null, JSON.stringify(audit.connector));
+
+  // Dia DENTRO da janela de TEF (hoje): a mesma divergência vem marcada como
+  // possível leitura parcial — orienta "reler" antes de acusar erro.
+  const hoje = new Date().toISOString().slice(0, 10);
+  const lojaHoje = RetailStoreService.create(A, { name: "Grande Rio", code: "170" });
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total, system_turnos_json) VALUES (?, ?, ?, ?, 'received', 5000, 2000, ?)`)
+    .run(randomUUID(), A, lojaHoje.id, hoje, JSON.stringify({ "1": 2000 }));
+  const rowHoje = RetailMoneyAuditService.day(A, hoje).stores.find((s: any) => s.storeId === lojaHoje.id);
+  check("2.13 divergência de HOJE marcada como possível TEF tardio", rowHoje.issues.includes("fechamento_vs_alterdata") && rowHoje.issues.includes("possivel_leitura_parcial_tef"), rowHoje.issues.join(","));
 
   // ── 3. Diferença de exatamente R$ 0,01 também gera indício ──
   const loja2 = RetailStoreService.create(A, { name: "Carioca", code: "159" });

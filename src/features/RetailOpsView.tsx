@@ -2391,6 +2391,21 @@ function ClosingsTab() {
     } finally { setAuditing(false); }
   };
 
+  // Releitura sob demanda do resumo da Alterdata deste dia (TEF que entrou
+  // horas depois deixa o dia "congelado" parcial até alguém reler).
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAlterdata = async () => {
+    setRefreshing(true);
+    try {
+      const res = await apiFetch('/api/retailops/dashboard/money-audit/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Falha ao reler a Alterdata.'); return; }
+      const applied = (d.stores || []).filter((r: any) => r.applied).length;
+      toast.success(applied ? `Resumo relido: ${applied} loja(s) atualizadas.` : `Nenhum caixa fechado devolvido pela Alterdata neste dia${d.errors ? ` (${d.errors} erro(s) — veja o banner de credenciais)` : ''}.`);
+      await auditMoney();
+    } finally { setRefreshing(false); }
+  };
+
   const toggleBridge = async () => {
     const next = !bridge;
     const res = await apiFetch('/api/retailops/revenue-bridge', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
@@ -2499,7 +2514,17 @@ function ClosingsTab() {
 
       {moneyAudit && (
         <div className="mb-4 overflow-x-auto rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-zinc-300">
-          <p className="mb-1 font-semibold text-amber-200">Conferência de {date.split('-').reverse().join('/')} · valores em R$</p>
+          {moneyAudit.connector?.authError && (
+            <p className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 p-2 font-semibold text-red-300">
+              Integração Alterdata SEM AUTENTICAÇÃO desde {moneyAudit.connector.authError.at ? new Date(moneyAudit.connector.authError.at).toLocaleString('pt-BR') : '—'}: {moneyAudit.connector.authError.message}. Nenhum fechamento novo recebe o total do sistema até recadastrar as credenciais em Integrações → AlterData.
+            </p>
+          )}
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="font-semibold text-amber-200">Conferência de {date.split('-').reverse().join('/')} · valores em R$</p>
+            <button onClick={refreshAlterdata} disabled={refreshing} className="rounded-lg border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50" title="Re-lê o resumo de caixa da Alterdata deste dia para todas as lojas (repara dia lido parcial por TEF tardio). Releitura com turno zerado não apaga valor bom.">
+              {refreshing ? 'Relendo…' : 'Reler Alterdata'}
+            </button>
+          </div>
           <p className="mb-2 text-zinc-400">Informado = formulário do fechamento · Sistema = resumo de caixa da Alterdata (pode chegar PARCIAL: cartão/TEF consolida horas depois) · PDV = soma das boletas importadas. A linha do ERP pode representar o mês inteiro numa única data — não compare como total diário.</p>
           <table className="min-w-[1100px] w-full text-left tabular-nums">
             <thead><tr className="border-b border-zinc-700 text-zinc-400"><th className="py-1">Loja</th><th>Cota</th><th>Informado</th><th>Sistema</th><th>PDV</th><th>Manual</th><th>Ranking folha</th><th>Δ inform./sistema</th><th>Δ PDV/sistema</th><th>Indícios</th></tr></thead>
@@ -2510,7 +2535,14 @@ function ClosingsTab() {
                   <td>{brl(r.closing.quota)}</td>
                   <td>{r.closing.informed == null ? '—' : brl(r.closing.informed)}</td>
                   <td>{r.closing.system == null ? '—' : brl(r.closing.system)}</td>
-                  <td>{r.sources.pdv.count ? brl(r.sources.pdv.total) : '—'}</td>
+                  <td>{r.sources.pdv.count ? (
+                    <details>
+                      <summary className="cursor-pointer">{brl(r.sources.pdv.total)} <span className="text-zinc-500">({r.sources.pdv.count} boleta{r.sources.pdv.count > 1 ? 's' : ''})</span></summary>
+                      <ul className="mt-1 max-h-40 overflow-y-auto text-zinc-400">
+                        {(r.sources.pdv.boletas || []).map((b: any) => <li key={b.boleta}>#{b.boleta} · {brl(b.valor)}{b.status && b.status !== 'N' ? ` · ${b.status}` : ''}</li>)}
+                      </ul>
+                    </details>
+                  ) : '—'}</td>
                   <td>{r.sources.manual.count ? brl(r.sources.manual.total) : '—'}</td>
                   <td>{r.closing.ranking == null ? '—' : brl(r.closing.ranking)}</td>
                   <td>{r.differences.informedVsSystem == null ? '—' : brl(r.differences.informedVsSystem)}</td>

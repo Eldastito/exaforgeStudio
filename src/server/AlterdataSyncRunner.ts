@@ -965,7 +965,11 @@ export class AlterdataSyncRunner {
    * chamadas de resumo por dia sem necessidade (o TEF consolida em horas).
    */
   private static async recheckRecentClosings(orgId: string, ledger: LedgerRunHandle): Promise<void> {
-    const RECHECK_DAYS = 3;                       // hoje + 2 dias — janela em que o TEF ainda "engorda" o caixa
+    // 19/09/2026 (Toulon): o dia foi lido parcial (R$ 2.368,60 sem o débito de
+    // R$ 3.108,10) e ficou congelado até releitura manual — 3 dias eram pouco
+    // quando ninguém olha o painel no fim de semana. 7 dias cobre a semana
+    // inteira por ~8 chamadas extras/loja/dia (custo irrelevante).
+    const RECHECK_DAYS = 7;                       // janela em que o TEF ainda "engorda" o caixa
     const RECHECK_INTERVAL_MS = 6 * 60 * 60_000;  // 4x/dia
     const now = Date.now();
     const last = Number(AlterdataConnectorService.getCursor(orgId, "_meta", "lastRecheck", "")) || 0;
@@ -1013,6 +1017,87 @@ export class AlterdataSyncRunner {
    * ao delta, então não atrapalha nem é atrapalhada pela sincronização normal.
    * Isolado por org (a loja é resolvida por `organization_id` + código da filial).
    */
+  /**
+   * Lê o ResumoFecharMovimento de UMA filial em UM dia (turnos 1-2) e aplica
+   * por turno (applyPdvTurnoTotals) — corpo compartilhado entre o backfill e a
+   * releitura sob demanda. 19/09/2026 — POR TURNO (mesma correção do delta):
+   * gravar por turno torna isto a FERRAMENTA DE REPARO dos dias que o delta
+   * gravou pela metade (turno perdido ou TEF que entrou horas depois).
+   * Turno inexistente devolve 0 / erro → sem dado, sem derrubar a varredura.
+   */
+  private static async readAndApplyFilialDay(orgId: string, storeId: string, f: string, date: string, autoClosing: boolean): Promise<{ got: boolean; errors: number; total: number }> {
+    const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "pix": "pix", "outros": "outros" };
+    const turnoTotals: Record<string, number> = {};
+    let got = false, errors = 0;
+    const pay = new Map<string, number>();
+    for (const turno of [1, 2]) {
+      try {
+        const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${date}/${turno}`);
+        for (const r of items as any[]) {
+          const titulo = String(r?.titulo || "").trim().toLowerCase();
+          const valor = Number(r?.valor || 0);
+          if (titulo === "total de vendas") { turnoTotals[String(turno)] = (turnoTotals[String(turno)] || 0) + valor; if (valor > 0) got = true; }
+          else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
+        }
+      } catch { errors++; }
+    }
+    if (!got) return { got: false, errors, total: 0 };
+    const totalR = Math.round(Object.values(turnoTotals).reduce((a, v) => a + Number(v || 0), 0) * 100) / 100;
+    if (totalR <= 0) return { got: false, errors, total: 0 };
+    if (autoClosing) {
+      // Preenche o fechamento pendente com o PDV (loja não digita). Quem já
+      // informou à mão continua valendo. Try/catch: dia de FOLGA GERAL faz o
+      // setInformed lançar (CLOSE-002) — nesse caso só o system_total abaixo é
+      // gravado, sem abortar a varredura.
+      try {
+        const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
+        const informedCents = Math.round(Number(closing?.informed_total || 0) * 100);
+        const fillEmpty = closing?.status === "pending" && informedCents === 0;
+        // 19/09/2026 (caso Toulon): informado que é ESPELHO do PDV
+        // (source='pdv', ainda não aprovado) ACOMPANHA o total novo quando o
+        // TEF entra tarde no caixa — aqui o dia inteiro foi relido, então
+        // total e formas estão completos. Informado humano (manual/OCR/
+        // WhatsApp) e fechamento aprovado NUNCA são tocados.
+        const refreshPdvMirror = closing?.source === "pdv" && closing?.status === "received"
+          && informedCents !== Math.round(totalR * 100);
+        if (fillEmpty || refreshPdvMirror) {
+          RetailClosingService.setInformed(orgId, closing.id, {
+            informedTotal: totalR,
+            items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),
+            source: "pdv",
+          });
+        }
+      } catch { /* folga geral etc — system_total ainda é aplicado abaixo */ }
+    }
+    // Por turno: além de somar o dia inteiro, REESCREVE as chaves de turno —
+    // repara dias que o delta gravou pela metade (turno perdido).
+    RetailReconciliationService.applyPdvTurnoTotals(orgId, storeId, date, turnoTotals);
+    return { got: true, errors, total: totalR };
+  }
+
+  /**
+   * RELEITURA SOB DEMANDA de um dia (botão "Reler Alterdata" da conferência de
+   * valores): re-lê o resumo de TODAS as lojas ativas com filial naquele dia e
+   * regrava os turnos. É o antídoto imediato do dia lido parcial (TEF tardio)
+   * sem esperar a reconferência automática. Guard-rail herdado do merge por
+   * turno: releitura que devolve 0 num turno NÃO apaga o valor bom já gravado.
+   */
+  static async refreshDayClosings(orgId: string, date: string): Promise<{ date: string; stores: Array<{ storeId: string; storeName: string; filial: string; applied: boolean; total: number; errors: number }>; errors: number }> {
+    const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
+    const stores = db.prepare(`SELECT id, name, code FROM retail_stores WHERE organization_id = ? AND active = 1 AND COALESCE(code, '') != '' ORDER BY name`).all(orgId) as any[];
+    const out = { date, stores: [] as Array<{ storeId: string; storeName: string; filial: string; applied: boolean; total: number; errors: number }>, errors: 0 };
+    for (const st of stores) {
+      const r = await this.readAndApplyFilialDay(orgId, st.id, String(st.code), date, autoClosing);
+      out.errors += r.errors;
+      out.stores.push({ storeId: st.id, storeName: st.name, filial: String(st.code), applied: r.got, total: r.total, errors: r.errors });
+      // Autenticação morta: TODAS as chamadas falham igual — para na primeira
+      // loja com erro puro pra não martelar o Guardian com credencial ruim.
+      if (!r.got && r.errors >= 2 && AlterdataConnectorService.getAuthFailure(orgId)) break;
+    }
+    try { logAuthEvent(orgId, "system", date, "ALTERDATA_REFRESH_DAY", { date, stores: out.stores.length, errors: out.errors }); } catch { /* noop */ }
+    return out;
+  }
+
   static async backfillFilialClosings(orgId: string, filial: string, days = 90): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; errors: number; storeId: string | null; storeName: string | null; persisted: number; sample: Array<{ date: string; total: number }> }> {
     const f = str(filial);
     const out = { filial: f, days, applied: 0, skippedNoStore: 0, errors: 0, storeId: null as string | null, storeName: null as string | null, persisted: 0, sample: [] as Array<{ date: string; total: number }> };
@@ -1027,60 +1112,12 @@ export class AlterdataSyncRunner {
     out.storeId = storeId;
     out.storeName = store?.name || null;
     const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
-    const PAY_TITLES: Record<string, string> = { "dinheiro": "dinheiro", "cheque": "cheque", "cartão": "cartao", "cartao": "cartao", "pix": "pix", "outros": "outros" };
     for (let i = 0; i < days; i++) {
       const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-      // 19/09/2026 — POR TURNO (mesma correção do delta): o backfill consulta os
-      // dois turnos do dia de uma vez, então já somava certo; gravar por turno
-      // (applyPdvTurnoTotals) o torna a FERRAMENTA DE REPARO dos dias que o
-      // delta gravou pela metade (turno perdido) — reescreve as duas chaves.
-      const turnoTotals: Record<string, number> = {};
-      let got = false;
-      const pay = new Map<string, number>();
-      // Turno inexistente devolve 0 / erro → sem dado, sem derrubar a varredura.
-      for (const turno of [1, 2]) {
-        try {
-          const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${date}/${turno}`);
-          for (const r of items as any[]) {
-            const titulo = String(r?.titulo || "").trim().toLowerCase();
-            const valor = Number(r?.valor || 0);
-            if (titulo === "total de vendas") { turnoTotals[String(turno)] = (turnoTotals[String(turno)] || 0) + valor; if (valor > 0) got = true; }
-            else if (PAY_TITLES[titulo] && valor > 0) pay.set(PAY_TITLES[titulo], (pay.get(PAY_TITLES[titulo]) || 0) + valor);
-          }
-        } catch { out.errors++; }
-      }
-      if (!got) continue; // dia sem caixa fechado (total 0) → não inventa fechamento
-      const totalR = Math.round(Object.values(turnoTotals).reduce((a, v) => a + Number(v || 0), 0) * 100) / 100;
-      if (totalR <= 0) continue;
-      if (autoClosing) {
-        // Preenche o fechamento pendente com o PDV (loja não digita). Quem já
-        // informou à mão continua valendo. Try/catch: dia de FOLGA GERAL faz o
-        // setInformed lançar (CLOSE-002) — nesse caso só o system_total abaixo é
-        // gravado, sem abortar o backfill.
-        try {
-          const closing = RetailClosingService.getOrCreate(orgId, storeId, date);
-          const informedCents = Math.round(Number(closing?.informed_total || 0) * 100);
-          const fillEmpty = closing?.status === "pending" && informedCents === 0;
-          // 19/09/2026 (caso Toulon): informado que é ESPELHO do PDV
-          // (source='pdv', ainda não aprovado) ACOMPANHA o total novo quando o
-          // TEF entra tarde no caixa — aqui o dia inteiro foi relido, então
-          // total e formas estão completos. Informado humano (manual/OCR/
-          // WhatsApp) e fechamento aprovado NUNCA são tocados.
-          const refreshPdvMirror = closing?.source === "pdv" && closing?.status === "received"
-            && informedCents !== Math.round(totalR * 100);
-          if (fillEmpty || refreshPdvMirror) {
-            RetailClosingService.setInformed(orgId, closing.id, {
-              informedTotal: totalR,
-              items: Array.from(pay.entries()).map(([paymentMethod, v]) => ({ paymentMethod, informedAmount: Math.round(v * 100) / 100 })),
-              source: "pdv",
-            });
-          }
-        } catch { /* folga geral etc — system_total ainda é aplicado abaixo */ }
-      }
-      // Por turno: além de somar o dia inteiro, REESCREVE as chaves de turno —
-      // repara dias que o delta gravou pela metade (turno perdido).
-      RetailReconciliationService.applyPdvTurnoTotals(orgId, storeId, date, turnoTotals);
-      if (out.sample.length < 5) out.sample.push({ date, total: totalR }); // amostra p/ cruzar com a grade
+      const r = await this.readAndApplyFilialDay(orgId, storeId, f, date, autoClosing);
+      out.errors += r.errors;
+      if (!r.got) continue; // dia sem caixa fechado (total 0) → não inventa fechamento
+      if (out.sample.length < 5) out.sample.push({ date, total: r.total }); // amostra p/ cruzar com a grade
       out.applied++;
     }
     // Verdade-de-campo: RE-LÊ do banco quantos fechamentos DESTA loja ficaram com

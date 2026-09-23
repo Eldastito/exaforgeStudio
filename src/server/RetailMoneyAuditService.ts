@@ -13,12 +13,23 @@
 import db from "./db.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { isRankingTotalLine } from "./RetailOpsService.js";
+import { AlterdataConnectorService } from "./AlterdataConnectorService.js";
 
 const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
 const money = (value: number) => value / 100;
 
 export class RetailMoneyAuditService {
   static day(orgId: string, date: string) {
+    // Dia ainda dentro da janela em que o TEF "engorda" o caixa da Alterdata
+    // (caso 19/09: resumo lido cedo veio sem o bloco de débito): diferença
+    // informado × sistema aqui é PROVAVELMENTE leitura parcial, não erro.
+    const tefWindow = (() => {
+      const today = Date.parse(new Date().toISOString().slice(0, 10));
+      const target = Date.parse(date);
+      if (Number.isNaN(target)) return false;
+      const daysAgo = Math.round((today - target) / 86_400_000);
+      return daysAgo >= 0 && daysAgo <= 2;
+    })();
     const sellerRows = RetailCommissionService.salesBySellerStore(orgId, date, date);
     const stores = db.prepare(`SELECT id, name, code, COALESCE(seller_source, 'pdv') AS seller_source
       FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
@@ -31,6 +42,11 @@ export class RetailMoneyAuditService {
         COUNT(DISTINCT COALESCE(NULLIF(vendedor_codigo, ''), vendedor)) AS seller_codes
         FROM retail_pdv_sales WHERE organization_id = ? AND filial = ? AND sale_date = ?
           AND COALESCE(status, 'N') <> 'C'`).get(orgId, s.code, date) as any;
+      // Boletas do dia (a fonte granular): abrir venda a venda é o que permite
+      // achar os R$ que faltam/sobram (troca, devolução, boleta cancelada).
+      const boletas = db.prepare(`SELECT boleta, valor, status FROM retail_pdv_sales
+        WHERE organization_id = ? AND filial = ? AND sale_date = ? AND COALESCE(status, 'N') <> 'C'
+        ORDER BY CAST(boleta AS INTEGER), boleta LIMIT 60`).all(orgId, s.code, date) as any[];
       const manual = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(valor),0) AS total
         FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ?`).get(orgId, s.id, date) as any;
       const erp = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(valor),0) AS total
@@ -47,7 +63,10 @@ export class RetailMoneyAuditService {
         ? details.ranking.filter((r: any) => !isRankingTotalLine(r?.sellerName ?? r?.nome)) : [];
       const rankingTotal = ranking.length ? ranking.reduce((sum: number, r: any) => sum + cents(r.valor), 0) : null;
       const issues: string[] = [];
-      if (informed !== null && system !== null && Math.abs(informed - system) >= 1) issues.push("fechamento_vs_alterdata");
+      if (informed !== null && system !== null && Math.abs(informed - system) >= 1) {
+        issues.push("fechamento_vs_alterdata");
+        if (tefWindow) issues.push("possivel_leitura_parcial_tef");
+      }
       if (rankingTotal !== null && informed !== null && Math.abs(rankingTotal - informed) >= 1) issues.push("ranking_vs_fechamento");
       if (pdv.n && system !== null && Math.abs(pdvTotal - system) >= 1) issues.push("vendas_pdv_vs_resumo_caixa");
       if (pdv.n && manual.n) issues.push("fontes_fisicas_sobrepostas");
@@ -68,7 +87,7 @@ export class RetailMoneyAuditService {
         },
         sources: {
           sellerBase: money(sellerBase),
-          pdv: { count: pdv.n, total: money(pdvTotal), sellerCodes: pdv.seller_codes },
+          pdv: { count: pdv.n, total: money(pdvTotal), sellerCodes: pdv.seller_codes, boletas: boletas.map((b) => ({ boleta: String(b.boleta), valor: Math.round((Number(b.valor) || 0) * 100) / 100, status: b.status || null })) },
           manual: { count: manual.n, total: money(manualTotal) },
           // O relatório ERP pode ser agregado MENSAL numa data representativa —
           // a linha nunca deve ser lida como venda daquele dia específico.
@@ -88,6 +107,9 @@ export class RetailMoneyAuditService {
         ON s.organization_id = p.organization_id AND s.code = p.filial AND s.active = 1
       WHERE p.organization_id = ? AND p.sale_date = ? AND COALESCE(p.status, 'N') <> 'C'
         AND s.id IS NULL GROUP BY p.filial`).all(orgId, date) as any[];
-    return { date, stores: rows, orphanFiliais };
+    // Autenticação da Alterdata morta = nenhum dia novo recebe system_total.
+    // O banner na conferência é onde o dono descobre ANTES de divergir tudo.
+    const connector = { authError: AlterdataConnectorService.getAuthFailure(orgId) };
+    return { date, stores: rows, orphanFiliais, connector };
   }
 }

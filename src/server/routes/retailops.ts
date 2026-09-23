@@ -2251,6 +2251,21 @@ router.get("/dashboard/money-audit", requireRole("owner", "admin"), (req: AuthRe
   catch (e: any) { res.status(500).json({ error: e?.message || "money_audit_failed" }); }
 });
 
+// Releitura SOB DEMANDA do resumo da Alterdata para um dia (antídoto do dia
+// lido parcial pelo TEF tardio — caso 19/09). Regrava turnos de todas as lojas
+// ativas com filial; releitura com turno 0 não apaga valor bom já gravado.
+router.post("/dashboard/money-audit/refresh", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.body?.date || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)))
+    return res.status(400).json({ error: "date (YYYY-MM-DD) inválida" });
+  try {
+    const { AlterdataSyncRunner } = await import("../AlterdataSyncRunner.js");
+    res.json(await AlterdataSyncRunner.refreshDayClosings(orgId, date));
+  } catch (e: any) { res.status(500).json({ error: e?.message || "refresh_failed" }); }
+});
+
 // Informe diário da rede: por loja + total da empresa (aberto por forma de
 // pagamento). date opcional (default = hoje).
 router.get("/dashboard/informe", (req: AuthRequest, res): any => {

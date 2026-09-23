@@ -329,9 +329,13 @@ export class AlterdataConnectorService {
       body,
     });
     if (!res.ok) {
+      // O corpo da resposta do Guardian pode carregar detalhe sensível e a
+      // exceção pode ir parar em log fora do Radar: não embutir o corpo cru.
+      // Extrai só o CÓDIGO OAuth (`error`), whitelist [a-z_], e descarta o resto.
       const txt = await res.text().catch(() => "");
-      this.recordAuthFailure(orgId, `falha ao emitir token (HTTP ${res.status})`);
-      throw new Error(`Alterdata Guardian: falha ao emitir token (HTTP ${res.status}). ${String(txt).slice(0, 300)}`);
+      const oauthErr = (txt.match(/"error"\s*:\s*"([a-z_]{1,40})"/i)?.[1] || "").toLowerCase();
+      this.recordAuthFailure(orgId, `falha ao emitir token (HTTP ${res.status}${oauthErr ? `, ${oauthErr}` : ""})`);
+      throw new Error(`Alterdata Guardian: falha ao emitir token (HTTP ${res.status}${oauthErr ? `, ${oauthErr}` : ""}).`);
     }
     const data: any = await res.json();
     const accessToken = data?.access_token;

@@ -85,27 +85,31 @@ async function main() {
   const outB = await AlterdataSyncRunner.refreshDayClosings(B, DATE);
   check("3.2 org B sem lojas → releitura vazia", outB.stores.length === 0);
 
-  // ── 4. Recheck pula dia consolidado (aprovado + system_total) ──
-  // Reconta as chamadas ao resumo: com o dia consolidado dentro da janela,
-  // backfill({skipConsolidated}) não deve bater na API para ele.
+  // ── 4. REGRESSÃO: dia APROVADO parcial DEVE ser relido e reparado ──────────
+  // Aprovação é assinatura humana e pode acontecer com o TEF ainda parcial (o
+  // próprio 19/09 foi aprovado em 2.368,60). O recheck NÃO pode pular o dia
+  // aprovado — senão o valor parcial recongela. Este teste prova que o backfill
+  // (que o recheck usa) relê o aprovado e atualiza o system_total, sem tocar o
+  // informado humano.
   const cariocaCode = "1005";
   let calls = 0;
+  const hoje = new Date().toISOString().slice(0, 10);
+  // Carioca APROVADA HOJE com valor PARCIAL (2.368,60) — o TEF ainda não caiu.
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total, system_turnos_json) VALUES (?, ?, ?, ?, 'approved', 5476.70, 2368.60, ?)`)
+    .run(randomUUID(), A, carioca.id, hoje, JSON.stringify({ "1": 2368.60 }));
+  // A AlterData agora devolve o valor CHEIO (TEF consolidou depois da aprovação).
   __setAlterdataSyncHttpForTests(async (url: string) => {
     if (url.includes("/ResumoFecharMovimento/")) calls++;
+    if (url.includes(`/ResumoFecharMovimento/1005/${hoje}/1`))
+      return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 5476.8 }] }) as any;
     return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 0 }] }) as any;
   });
-  const hoje = new Date().toISOString().slice(0, 10);
-  // Carioca (1005) tem HOJE aprovado com system_total > 0 → consolidado.
-  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total, system_turnos_json) VALUES (?, ?, ?, ?, 'approved', 1500, 1500, ?)`)
-    .run(randomUUID(), A, carioca.id, hoje, JSON.stringify({ "1": 1500 }));
-  const withSkip = await AlterdataSyncRunner.backfillFilialClosings(A, cariocaCode, 1, { skipConsolidated: true });
-  check("4.1 dia consolidado é pulado (0 chamadas à API)", calls === 0 && withSkip.skippedConsolidated === 1, JSON.stringify({ calls, skip: withSkip.skippedConsolidated }));
-  const cariocaRow = () => db.prepare(`SELECT system_total FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(A, carioca.id, hoje) as any;
-  check("4.2 valor consolidado intocado", Number(cariocaRow()?.system_total) === 1500);
-  // O backfill MANUAL (sem skip) relê mesmo o dia aprovado — é ferramenta de reparo.
-  calls = 0;
   await AlterdataSyncRunner.backfillFilialClosings(A, cariocaCode, 1);
-  check("4.3 backfill manual relê o dia aprovado (2 turnos)", calls === 2, `calls=${calls}`);
+  const cariocaRow = () => db.prepare(`SELECT status, system_total, informed_total FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(A, carioca.id, hoje) as any;
+  check("4.1 dia aprovado NÃO é pulado — a API é consultada", calls >= 1, `calls=${calls}`);
+  check("4.2 valor parcial do aprovado é REPARADO para o cheio (5.476,80)", Number(cariocaRow()?.system_total) === 5476.8, JSON.stringify(cariocaRow()));
+  check("4.3 informado humano do aprovado permanece intocado", Number(cariocaRow()?.informed_total) === 5476.70);
+  check("4.4 status aprovado preservado", cariocaRow()?.status === "approved");
 
   __setAlterdataSyncHttpForTests(null);
   __setAlterdataTokenHttpForTests(null);

@@ -854,6 +854,13 @@ export class AlterdataSyncRunner {
     resumoTotais: Record<string, number>;
     boletas: { count: number; cancelled: number; total: number; byBoleta: Array<{ boleta: string; valor: number; status: string | null }> };
     closing: { systemTotal: number | null; systemTurnos: Record<string, number> | null; informedTotal: number | null; status: string | null } | null;
+    // Estado da CONSULTA AO VIVO (não confundir "não consegui consultar" com
+    // "não houve movimento"): success_with_rows | success_empty | auth_error |
+    // request_error | partial_success. `turnos` traz o estado de cada turno.
+    queryState: "success_with_rows" | "success_empty" | "auth_error" | "request_error" | "partial_success";
+    turnos: Array<{ turno: number; state: "rows" | "empty" | "auth" | "error"; detail?: string }>;
+    authError: { message: string; at: string } | null;
+    lastSystemDataAt: string | null;   // última vez que a AlterData entregou system_total p/ esta filial
     errors: string[];
   }> {
     const f = str(filial);
@@ -864,23 +871,48 @@ export class AlterdataSyncRunner {
       resumoTotais: {} as Record<string, number>,
       boletas: { count: 0, cancelled: 0, total: 0, byBoleta: [] as Array<{ boleta: string; valor: number; status: string | null }> },
       closing: null as any,
+      queryState: "success_empty" as "success_with_rows" | "success_empty" | "auth_error" | "request_error" | "partial_success",
+      turnos: [] as Array<{ turno: number; state: "rows" | "empty" | "auth" | "error"; detail?: string }>,
+      authError: null as { message: string; at: string } | null,
+      lastSystemDataAt: null as string | null,
       errors: [] as string[],
     };
-    if (!f || !/^\d{4}-\d{2}-\d{2}$/.test(d)) { out.errors.push("filial e data (YYYY-MM-DD) são obrigatórias"); return out; }
+    if (!f || !/^\d{4}-\d{2}-\d{2}$/.test(d)) { out.errors.push("filial e data (YYYY-MM-DD) são obrigatórias"); out.queryState = "request_error"; return out; }
     // 1) Linhas CRUAS do resumo, turnos 1..3 (o 3º é raro; barato no diagnóstico).
     for (const turno of [1, 2, 3]) {
       try {
         const { items } = await AlterdataSyncService.apiGet(orgId, "sales", `/api/v1/DataCaixa/ResumoFecharMovimento/${encodeURIComponent(f)}/${d}/${turno}`);
+        let rowsHere = 0;
         for (const r of items as any[]) {
           const titulo = String(r?.titulo || "").trim();
           const valor = Math.round(Number(r?.valor || 0) * 100) / 100;
           if (!titulo && !valor) continue;
           out.resumo.push({ turno, titulo, valor });
+          rowsHere++;
           const k = titulo.toLowerCase();
           out.resumoTotais[k] = Math.round(((out.resumoTotais[k] || 0) + valor) * 100) / 100;
         }
-      } catch (e: any) { out.errors.push(`turno ${turno}: ${String(e?.message || e).slice(0, 120)}`); }
+        // Resposta OK: com linhas (movimento) ou vazia de verdade (sem caixa).
+        out.turnos.push({ turno, state: rowsHere > 0 ? "rows" : "empty" });
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        // Falha de AUTENTICAÇÃO ≠ "sem movimento": distingue explicitamente.
+        const isAuth = /credenciais ausentes|guardian/i.test(msg);
+        out.turnos.push({ turno, state: isAuth ? "auth" : "error", detail: msg.slice(0, 120) });
+        out.errors.push(`turno ${turno}: ${msg.slice(0, 120)}`);
+      }
     }
+    // Agrega o estado da consulta ao vivo (auth domina o "vazio" — nunca deixa
+    // uma falha de credencial parecer dia sem movimento).
+    const st = out.turnos.map((t) => t.state);
+    const anyRows = st.includes("rows"), anyAuth = st.includes("auth"), anyErr = st.includes("error");
+    if (anyRows) out.queryState = (anyAuth || anyErr) ? "partial_success" : "success_with_rows";
+    else if (anyAuth) out.queryState = "auth_error";
+    else if (anyErr) out.queryState = "request_error";
+    else out.queryState = "success_empty";
+    // Lido DEPOIS dos turnos: a falha de credencial só é registrada quando o
+    // acquireToken roda no meio da consulta acima.
+    out.authError = AlterdataConnectorService.getAuthFailure(orgId);
     // 2) Boletas do VendaMalote já no banco (fonte granular do MESMO dia).
     const rows = db.prepare(
       `SELECT boleta, valor, status FROM retail_pdv_sales WHERE organization_id = ? AND filial = ? AND sale_date = ? ORDER BY boleta`
@@ -901,6 +933,10 @@ export class AlterdataSyncRunner {
         try { turnos = JSON.parse(c.system_turnos_json || "null"); } catch { turnos = null; }
         out.closing = { systemTotal: c.system_total != null ? Number(c.system_total) : null, systemTurnos: turnos, informedTotal: c.informed_total != null ? Number(c.informed_total) : null, status: c.status || null };
       }
+      try {
+        const last = db.prepare(`SELECT MAX(updated_at) AS at FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0`).get(orgId, store.id) as any;
+        out.lastSystemDataAt = last?.at || null;
+      } catch { /* coluna updated_at pode faltar em base antiga */ }
     }
     return out;
   }

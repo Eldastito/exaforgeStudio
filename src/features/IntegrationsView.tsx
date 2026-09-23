@@ -1425,10 +1425,25 @@ function AlterdataConnectorPanel() {
       {xray && (
         <div className="mt-2 rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs">
           <div className="font-semibold text-cyan-200 mb-2">Raio-X do dia — filial {xray.filial} · {xray.date}</div>
+          {(xray.queryState === 'auth_error' || xray.queryState === 'request_error') && (
+            <p className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 p-2 font-semibold text-red-300">
+              Consulta ao vivo à AlterData FALHOU {xray.queryState === 'auth_error' ? '(credenciais ausentes)' : '(erro de requisição)'}. Os valores abaixo são dados HISTÓRICOS já gravados no ZapFlow — NÃO representam uma consulta atual. Diagnóstico inconclusivo até restabelecer a conexão.
+              {xray.lastSystemDataAt ? <span className="block font-normal">Última vez que a AlterData entregou dados p/ esta filial: {new Date(xray.lastSystemDataAt.replace(' ', 'T') + 'Z').toLocaleString('pt-BR')}.</span> : null}
+            </p>
+          )}
+          {xray.queryState === 'partial_success' && (
+            <p className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-amber-200">
+              Consulta PARCIAL: responderam os turnos {(xray.turnos || []).filter((t: any) => t.state === 'rows' || t.state === 'empty').map((t: any) => t.turno).join(', ') || '—'}; falharam {(xray.turnos || []).filter((t: any) => t.state === 'auth' || t.state === 'error').map((t: any) => t.turno).join(', ') || '—'}. O total pode estar incompleto.
+            </p>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Resumo do caixa (linhas cruas, por turno)</div>
-              {(xray.resumo || []).length === 0 && <p className="text-zinc-500">Nenhuma linha devolvida (caixa não fechado / dia sem movimento).</p>}
+              {(xray.resumo || []).length === 0 && (
+                xray.queryState === 'success_empty'
+                  ? <p className="text-zinc-500">Nenhuma linha devolvida — a AlterData respondeu, mas o caixa do dia não tem movimento fechado.</p>
+                  : <p className="text-red-300">Sem linhas porque a consulta ao vivo não completou (veja o aviso acima). Isto NÃO quer dizer "dia sem movimento".</p>
+              )}
               <div className="space-y-0.5">
                 {(xray.resumo || []).map((r: any, i: number) => (
                   <div key={i} className={/total de vendas/i.test(r.titulo) ? 'text-cyan-200 font-semibold' : 'text-zinc-300'}>
@@ -1441,10 +1456,31 @@ function AlterdataConnectorPanel() {
               <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Boletas do dia (VendaMalote no banco)</div>
               <p className="text-zinc-200">{xray.boletas?.count || 0} boleta(s) válidas · total <span className="font-semibold">{Number(xray.boletas?.total || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>{xray.boletas?.cancelled ? ` · ${xray.boletas.cancelled} cancelada(s)` : ''}</p>
               {xray.closing && (
-                <p className="mt-2 text-zinc-400">Fechamento gravado: sistema {xray.closing.systemTotal != null ? Number(xray.closing.systemTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}
+                <p className="mt-2 text-zinc-400"><span className="text-zinc-500">(dado histórico do banco)</span> Fechamento gravado: sistema {xray.closing.systemTotal != null ? Number(xray.closing.systemTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}
                   {xray.closing.systemTurnos ? ` (turnos ${JSON.stringify(xray.closing.systemTurnos)})` : ''} · informado {xray.closing.informedTotal != null ? Number(xray.closing.informedTotal).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'} · {xray.closing.status || '—'}</p>
               )}
-              <p className="mt-2 text-[11px] text-zinc-500">Leitura: se as BOLETAS somam o valor da folha e o "Total de Vendas" do resumo vem menor, o valor que falta está em OUTRA linha do resumo (mande o print deste quadro). Se as boletas também vêm menores, as vendas não passaram no caixa da Alterdata — divergência real da operação.</p>
+              {/* Orientação CALCULADA com os valores reais (não afirma que as
+                  boletas somam a folha quando não somam). */}
+              {(() => {
+                const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+                const bol = Number(xray.boletas?.total || 0);
+                const sys = xray.closing?.systemTotal, inf = xray.closing?.informedTotal;
+                const live = xray.queryState === 'success_with_rows' || xray.queryState === 'partial_success';
+                const dSys = sys != null ? Math.round((bol - sys) * 100) / 100 : null;
+                const dInf = inf != null ? Math.round((bol - inf) * 100) / 100 : null;
+                const dSysInf = sys != null && inf != null ? Math.round((sys - inf) * 100) / 100 : null;
+                return (
+                  <div className="mt-2 text-[11px] text-zinc-500">
+                    <p className="font-medium text-zinc-400">Diferenças (não misture as três):</p>
+                    <p>Boletas {brl(bol)} × sistema {sys != null ? brl(sys) : '—'} = {dSys != null ? brl(dSys) : '—'}</p>
+                    <p>Boletas {brl(bol)} × informado {inf != null ? brl(inf) : '—'} = {dInf != null ? brl(dInf) : '—'}</p>
+                    <p>Sistema × informado = {dSysInf != null ? brl(dSysInf) : '—'}</p>
+                    <p className="mt-1">{live
+                      ? 'Sistema e boletas vêm de consulta AO VIVO. Se as boletas cobrem o dia e o "Total de Vendas" vem menor, o valor que falta está em OUTRA linha do resumo (mande o print). Se as boletas também vêm menores, as vendas não passaram no caixa — divergência real.'
+                      : 'Sistema e boletas são dados HISTÓRICOS do banco. Sem consulta ao vivo (credenciais), a diferença não pode ser atribuída a nenhuma origem — restabeleça a conexão e rode de novo. Para achar a diferença das boletas, abra o quadro de boletas e reconcilie uma a uma (troca/devolução/cancelamento/data).'}</p>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {Array.isArray(xray.errors) && xray.errors.length > 0 && <p className="mt-2 text-[11px] text-amber-300">{xray.errors.join(' · ')}</p>}

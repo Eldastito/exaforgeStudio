@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { EncryptionService } from "./EncryptionService.js";
 import { AlterdataProfileService, type AlterdataEnvironment } from "./AlterdataProfileService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 /**
  * Conector Alterdata/ModaUp — FACHADA legada (ADR-105 + ADR-198).
@@ -305,6 +306,11 @@ export class AlterdataConnectorService {
     const clientId = auth?.clientId || auth?.client_id;
     const clientSecret = auth?.clientSecret || auth?.client_secret;
     if (!clientId || !clientSecret) {
+      // Sem credencial o sync inteiro morre em silêncio e TODO fechamento novo
+      // fica sem system_total (caso Toulon 19-23/09: senha da retaguarda
+      // trocada e ninguém percebeu até os números divergirem). Registra a
+      // falha ANTES de lançar pra ela aparecer no Radar e na conferência.
+      this.recordAuthFailure(orgId, "credenciais ausentes (client_id/client_secret de usuário de retaguarda)");
       throw new Error("Alterdata Guardian: credenciais ausentes. Informe client_id (e-mail) e client_secret (senha) de um usuário de retaguarda com acesso total.");
     }
     const tokenUrl = auth?.tokenUrl || auth?.token_url || GUARDIAN_TOKEN_URL;
@@ -324,15 +330,52 @@ export class AlterdataConnectorService {
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
+      this.recordAuthFailure(orgId, `falha ao emitir token (HTTP ${res.status})`);
       throw new Error(`Alterdata Guardian: falha ao emitir token (HTTP ${res.status}). ${String(txt).slice(0, 300)}`);
     }
     const data: any = await res.json();
     const accessToken = data?.access_token;
-    if (!accessToken) throw new Error("Alterdata Guardian: resposta sem access_token.");
+    if (!accessToken) { this.recordAuthFailure(orgId, "resposta do Guardian sem access_token"); throw new Error("Alterdata Guardian: resposta sem access_token."); }
     const expiresIn = Number(data?.expires_in || 3600);
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
     this.setAccessToken(orgId, accessToken, expiresAt);
+    this.clearAuthFailure(orgId);
     return { accessToken, expiresAt };
+  }
+
+  /**
+   * FALHA DE AUTENTICAÇÃO visível (caso Toulon): grava a última falha no
+   * cursor `_meta`/`lastAuthError` (a conferência de valores lê e mostra o
+   * banner) e publica um sinal deduplicado no Radar. Best-effort: registrar a
+   * falha nunca pode quebrar o fluxo que já vai lançar o erro real.
+   */
+  static recordAuthFailure(orgId: string, message: string): void {
+    const at = new Date().toISOString();
+    try { this.setCursor(orgId, "_meta", "lastAuthError", "", JSON.stringify({ message, at })); } catch { /* noop */ }
+    try {
+      BusinessSignalService.publish(orgId, {
+        domain: "retail_ops", signalType: "alterdata_auth_falha", severity: "critical",
+        basis: "fact", confidence: 1, sourceService: "alterdata_sync",
+        sourceEntityType: "integration", sourceEntityId: "alterdata",
+        evidence: { summary: `Integração Alterdata sem autenticação: ${message}. Fechamentos novos ficam sem total do sistema até corrigir as credenciais.`, message, at },
+        dedupeKey: `alterdata:auth:${orgId}`,
+      } as any);
+    } catch { /* radar indisponível não pode derrubar o sync */ }
+  }
+
+  /** Autenticação voltou: limpa o marcador (o sinal do Radar segue o próprio ciclo). */
+  static clearAuthFailure(orgId: string): void {
+    try { this.setCursor(orgId, "_meta", "lastAuthError", "", ""); } catch { /* noop */ }
+  }
+
+  /** Última falha de autenticação registrada (ou null). Leitura barata, sem rede. */
+  static getAuthFailure(orgId: string): { message: string; at: string } | null {
+    try {
+      const raw = this.getCursor(orgId, "_meta", "lastAuthError", "");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.message ? { message: String(parsed.message), at: String(parsed.at || "") } : null;
+    } catch { return null; }
   }
 
   /** Token válido, renovando pelo Guardian se ausente/expirado (uso na Fase 1). */

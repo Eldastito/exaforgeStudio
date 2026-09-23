@@ -968,7 +968,10 @@ export class AlterdataSyncRunner {
     // 19/09/2026 (Toulon): o dia foi lido parcial (R$ 2.368,60 sem o débito de
     // R$ 3.108,10) e ficou congelado até releitura manual — 3 dias eram pouco
     // quando ninguém olha o painel no fim de semana. 7 dias cobre a semana
-    // inteira por ~8 chamadas extras/loja/dia (custo irrelevante).
+    // inteira. Custo bruto: 7 dias × 2 turnos × 4 execuções/dia = 56 chamadas/
+    // loja/dia (era 24). Mas `skipConsolidated` abaixo pula o dia já aprovado
+    // com system_total, então na prática só os dias AINDA não consolidados são
+    // relidos — o custo tende a cair para a cauda de dias abertos.
     const RECHECK_DAYS = 7;                       // janela em que o TEF ainda "engorda" o caixa
     const RECHECK_INTERVAL_MS = 6 * 60 * 60_000;  // 4x/dia
     const now = Date.now();
@@ -987,7 +990,7 @@ export class AlterdataSyncRunner {
     let applied = 0, errors = 0, fullFail = 0;
     for (const s of stores) {
       try {
-        const r = await AlterdataSyncRunner.backfillFilialClosings(orgId, String(s.code), RECHECK_DAYS);
+        const r = await AlterdataSyncRunner.backfillFilialClosings(orgId, String(s.code), RECHECK_DAYS, { skipConsolidated: true });
         applied += r.applied; errors += r.errors;
         // Módulo fora do ar: toda chamada da loja falhou. Duas lojas seguidas
         // assim → para de martelar; a próxima janela tenta de novo.
@@ -1098,9 +1101,9 @@ export class AlterdataSyncRunner {
     return out;
   }
 
-  static async backfillFilialClosings(orgId: string, filial: string, days = 90): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; errors: number; storeId: string | null; storeName: string | null; persisted: number; sample: Array<{ date: string; total: number }> }> {
+  static async backfillFilialClosings(orgId: string, filial: string, days = 90, opts: { skipConsolidated?: boolean } = {}): Promise<{ filial: string; days: number; applied: number; skippedNoStore: number; skippedConsolidated: number; errors: number; storeId: string | null; storeName: string | null; persisted: number; sample: Array<{ date: string; total: number }> }> {
     const f = str(filial);
-    const out = { filial: f, days, applied: 0, skippedNoStore: 0, errors: 0, storeId: null as string | null, storeName: null as string | null, persisted: 0, sample: [] as Array<{ date: string; total: number }> };
+    const out = { filial: f, days, applied: 0, skippedNoStore: 0, skippedConsolidated: 0, errors: 0, storeId: null as string | null, storeName: null as string | null, persisted: 0, sample: [] as Array<{ date: string; total: number }> };
     if (!f) return out;
     // Casamento filial→loja: mesma regra do sync (código OU id, loja ativa).
     // Guarda o NOME e o id resolvidos no resultado — é a verdade-de-campo pra
@@ -1114,6 +1117,14 @@ export class AlterdataSyncRunner {
     const autoClosing = AlterdataConnectorService.isPdvAutoClosing(orgId);
     for (let i = 0; i < days; i++) {
       const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+      // RECHECK: dia já APROVADO com system_total > 0 está consolidado (o TEF
+      // caiu e um humano assinou — comissão pode já ter sido paga). Reler é
+      // gasto de chamada à toa. O backfill MANUAL (skipConsolidated ausente)
+      // continua relendo tudo — é ferramenta de reparo, precisa forçar.
+      if (opts.skipConsolidated) {
+        const cur = db.prepare(`SELECT status, system_total FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(orgId, storeId, date) as any;
+        if (cur && cur.status === "approved" && Number(cur.system_total || 0) > 0) { out.skippedConsolidated++; continue; }
+      }
       const r = await this.readAndApplyFilialDay(orgId, storeId, f, date, autoClosing);
       out.errors += r.errors;
       if (!r.got) continue; // dia sem caixa fechado (total 0) → não inventa fechamento

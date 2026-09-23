@@ -113,6 +113,7 @@ async function main() {
   check("2.8 cota do dia na linha", row.closing.quota === 5200);
   check("2.9 filial órfã 999 listada com o valor", audit.orphanFiliais.length === 1 && audit.orphanFiliais[0].filial === "999" && audit.orphanFiliais[0].total === 111.11, JSON.stringify(audit.orphanFiliais));
   check("2.10 boletas do dia abertas venda a venda", row.sources.pdv.boletas.length === 2 && row.sources.pdv.boletas[0].boleta === "1" && row.sources.pdv.boletas[0].valor === 3000 && row.sources.pdv.boletas[1].valor === 2476.70, JSON.stringify(row.sources.pdv.boletas));
+  check("2.10b 2 boletas não é truncado", row.sources.pdv.boletasTruncated === false && row.sources.pdv.boletasShown === 2, JSON.stringify({ t: row.sources.pdv.boletasTruncated, s: row.sources.pdv.boletasShown }));
   check("2.11 dia antigo NÃO é marcado como leitura parcial de TEF", !row.issues.includes("possivel_leitura_parcial_tef"), row.issues.join(","));
   check("2.12 sem falha de credenciais → connector.authError null", audit.connector.authError === null, JSON.stringify(audit.connector));
 
@@ -131,6 +132,15 @@ async function main() {
     .run(randomUUID(), A, loja2.id, DATE, JSON.stringify({ "1": 100.00 }));
   const row2 = RetailMoneyAuditService.day(A, DATE).stores.find((s: any) => s.storeId === loja2.id);
   check("3.1 R$ 0,01 de diferença não passa em branco", row2.differences.informedVsSystem === 0.01 && row2.issues.includes("fechamento_vs_alterdata"), JSON.stringify(row2.differences));
+
+  // ── 3b. Truncamento de boletas: total soma todas, lista corta em 60 ──
+  const lojaBig = RetailStoreService.create(A, { name: "Movimentada", code: "700" });
+  let bigTotal = 0;
+  for (let i = 1; i <= 65; i++) { bigTotal += 10 + i; db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, vendedor_codigo, valor, status) VALUES (?, ?, '700', ?, ?, 'V1', ?, 'N')`).run(randomUUID(), A, String(i), DATE, 10 + i); }
+  const big = RetailMoneyAuditService.day(A, DATE).stores.find((s: any) => s.storeId === lojaBig.id);
+  check("3b.1 lista trunca em 60 mas count é 65", big.sources.pdv.count === 65 && big.sources.pdv.boletas.length === 60 && big.sources.pdv.boletasShown === 60, JSON.stringify({ c: big.sources.pdv.count, l: big.sources.pdv.boletas.length }));
+  check("3b.2 truncamento sinalizado", big.sources.pdv.boletasTruncated === true);
+  check("3b.3 total soma as 65 boletas, não só as exibidas", Math.round(big.sources.pdv.total * 100) === Math.round(bigTotal * 100), JSON.stringify({ total: big.sources.pdv.total, esperado: bigTotal }));
 
   // ── 4. Isolamento ──
   const auditB = RetailMoneyAuditService.day(B, DATE);

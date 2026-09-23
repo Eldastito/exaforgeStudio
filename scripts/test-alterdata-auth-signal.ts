@@ -64,12 +64,14 @@ async function main() {
   const fail3 = AlterdataConnectorService.getAuthFailure(A);
   check("3.1 falha de emissão de token também registra", threw && !!fail3 && /HTTP 400/.test(fail3.message), JSON.stringify(fail3));
 
-  // ── 4. Token emitido com sucesso LIMPA o marcador ──
+  // ── 4. Token emitido com sucesso LIMPA o marcador E resolve o sinal ──
   __setAlterdataTokenHttpForTests(async () => resp(200, { access_token: "tok-ok", expires_in: 3600 }) as any);
   const tok = await AlterdataConnectorService.acquireToken(A);
   check("4.1 token emitido", tok.accessToken === "tok-ok");
   check("4.2 lastAuthError limpo — banner some", AlterdataConnectorService.getAuthFailure(A) === null, JSON.stringify(AlterdataConnectorService.getAuthFailure(A)));
   check("4.3 conferência sem authError após recuperar", RetailMoneyAuditService.day(A, "2026-09-19").connector.authError === null);
+  // O sinal do Radar não pode ficar preso "open" depois que a auth volta.
+  check("4.4 sinal alterdata_auth_falha resolvido (não fica preso no Radar)", signal(A)?.status === "resolved", JSON.stringify(signal(A)));
 
   // ── 5. Isolamento ──
   check("5.1 org B não herda a falha da A", AlterdataConnectorService.getAuthFailure(B) === null && !signal(B));

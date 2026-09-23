@@ -2541,6 +2541,7 @@ function ClosingsTab() {
                       <ul className="mt-1 max-h-40 overflow-y-auto text-zinc-400">
                         {(r.sources.pdv.boletas || []).map((b: any) => <li key={b.boleta}>#{b.boleta} · {brl(b.valor)}{b.status && b.status !== 'N' ? ` · ${b.status}` : ''}</li>)}
                       </ul>
+                      {r.sources.pdv.boletasTruncated && <p className="mt-1 text-[10px] text-amber-300/80">exibindo {r.sources.pdv.boletasShown} de {r.sources.pdv.count} boletas — o total acima soma todas.</p>}
                     </details>
                   ) : '—'}</td>
                   <td>{r.sources.manual.count ? brl(r.sources.manual.total) : '—'}</td>

@@ -12,30 +12,41 @@ import { RetailCommissionService } from "./RetailCommissionService.js";
 function num(v: any): number { return Number(v || 0); }
 
 export class RetailDashboardService {
-  /** Painel do DIA. */
-  static daily(orgId: string, date: string): any {
-    const quotaTotal = num((db.prepare(`SELECT COALESCE(SUM(quota_amount),0) AS s FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?`).get(orgId, date) as any)?.s);
-    const realized = num((db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'`).get(orgId, date) as any)?.s);
+  /**
+   * Painel do DIA. `storeId` opcional filtra TODOS os números pra uma loja —
+   * antes, o header de Insights filtrado por loja seguia mostrando cota/venda/
+   * pendências da REDE inteira (só o título mudava), contradizendo o ranking.
+   */
+  static daily(orgId: string, date: string, storeId: string | null = null): any {
+    const filter = storeId ? " AND store_id = ?" : "";
+    const args = storeId ? [orgId, date, storeId] : [orgId, date];
+    const quotaTotal = num((db.prepare(`SELECT COALESCE(SUM(quota_amount),0) AS s FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?${filter}`).get(...args) as any)?.s);
+    const realized = num((db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'${filter}`).get(...args) as any)?.s);
 
     // Lojas acima/abaixo da cota (compara o fechamento do dia com a cota do dia).
     const cmp = db.prepare(
       `SELECT c.store_id, c.informed_total, COALESCE(q.quota_amount,0) AS quota
          FROM retail_daily_closings c
     LEFT JOIN retail_store_quotas q ON q.organization_id = c.organization_id AND q.store_id = c.store_id AND q.quota_date = c.closing_date
-        WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'`
-    ).all(orgId, date) as any[];
+        WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${storeId ? " AND c.store_id = ?" : ""}`
+    ).all(...args) as any[];
     let storesAbove = 0, storesBelow = 0;
-    for (const r of cmp) { if (num(r.informed_total) >= num(r.quota)) storesAbove++; else storesBelow++; }
+    for (const r of cmp) {
+      // Fechamento SEM cota não é "loja na cota" (0 ≥ 0 contava como acima e o
+      // card inflava): só entra na conta quem tem cota do dia cadastrada.
+      if (num(r.quota) <= 0) continue;
+      if (num(r.informed_total) >= num(r.quota)) storesAbove++; else storesBelow++;
+    }
 
     const pend = db.prepare(
-      `SELECT task_type, COUNT(*) AS c FROM retail_store_daily_tasks WHERE organization_id = ? AND task_date = ? AND status IN ('pending','late') GROUP BY task_type`
-    ).all(orgId, date) as any[];
+      `SELECT task_type, COUNT(*) AS c FROM retail_store_daily_tasks WHERE organization_id = ? AND task_date = ? AND status IN ('pending','late')${filter} GROUP BY task_type`
+    ).all(...args) as any[];
     const pendBy: Record<string, number> = { fechamento: 0, malote: 0, escala: 0 };
     for (const p of pend) pendBy[p.task_type] = p.c;
 
-    const divergences = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND divergence_status = 'divergent'`).get(orgId, date) as any)?.c);
-    const negativeStock = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_store_inventory WHERE organization_id = ? AND quantity_available < 0`).get(orgId) as any)?.c);
-    const activeStores = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND active = 1`).get(orgId) as any)?.c);
+    const divergences = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND divergence_status = 'divergent'${filter}`).get(...args) as any)?.c);
+    const negativeStock = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_store_inventory WHERE organization_id = ? AND quantity_available < 0${filter}`).get(...(storeId ? [orgId, storeId] : [orgId])) as any)?.c);
+    const activeStores = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND active = 1${storeId ? " AND id = ?" : ""}`).get(...(storeId ? [orgId, storeId] : [orgId])) as any)?.c);
 
     return {
       date,

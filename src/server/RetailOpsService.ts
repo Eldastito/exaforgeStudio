@@ -90,6 +90,15 @@ export class RetailQuotaService {
         if (apply) { this.set(orgId, { storeId: s.id, quotaDate: date, quotaAmount: 0, source: "pdv_suggest" }, actorId); updateClosingSnapshot(s.id, 0); }
         continue;
       }
+      // A média do PDV é SUGESTÃO: nunca sobrescreve a cota real digitada pelo
+      // dono ('manual') nem a importada da planilha — só substitui um palpite
+      // anterior do próprio PDV ('pdv_suggest'). Caso Toulon: um clique em
+      // "Sugerir cotas" trocava a cota da folha e mudava desvio/prêmio do dia.
+      const current = this.get(orgId, s.id, date);
+      if (current && current.source !== "pdv_suggest") {
+        suggestions.push({ storeId: s.id, storeName: s.name, suggested: Number(current.quota_amount) || 0, samples: 0, basis: `cota ${current.source || "manual"} existente preservada`, skipped: true });
+        continue;
+      }
       const sameDow = db.prepare(
         `SELECT AVG(system_total) avg, COUNT(*) n FROM retail_daily_closings
           WHERE organization_id = ? AND store_id = ? AND COALESCE(system_total, 0) > 0
@@ -589,7 +598,10 @@ export class RetailClosingService {
       .filter((d: any) => d.descricao && d.valor > 0);
     const ranking = (Array.isArray(details?.ranking) ? details.ranking : [])
       .map((r: any) => ({ sellerName: String(r?.sellerName || "").trim(), valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0, produtos: Number(r?.produtos || 0) || 0 }))
-      .filter((r: any) => r.sellerName && (r.valor > 0 || r.pecas > 0 || r.atendimentos > 0 || r.produtos > 0));
+      // A linha "LOJA"/"TOTAL" da folha não é vendedor: entrar aqui dobrava o
+      // rankingTotal e o rankingGap acusava divergência falsa (o sync p/ vendas
+      // já filtrava; o derived não — caso Av. Brasil 19/09).
+      .filter((r: any) => r.sellerName && !isRankingTotalLine(r.sellerName) && (r.valor > 0 || r.pecas > 0 || r.atendimentos > 0 || r.produtos > 0));
 
     const totalCredito = num(sumMap(credito));
     const totalDebito = num(sumMap(debito));
@@ -625,6 +637,15 @@ export class RetailClosingService {
         // Comprovante do POS grampeado: cartões informados × cartões do POS.
         posGapCredito: pos ? num(totalCredito - pos.creditoValor) : null,
         posGapDebito: pos ? num(totalDebito - pos.debitoValor) : null,
+        // Crédito e débito TROCADOS na folha (caso real Av. Brasil 19/09/26: as
+        // bandeiras de débito do comprovante foram lançadas como crédito e
+        // vice-versa — total igual, conferência por bandeira sempre "divergente").
+        // Suspeita quando cada lado bate com o lado OPOSTO do POS (±R$ 0,01) e
+        // os lados de fato diferem entre si. Flag pra conferência (D4), não trava.
+        posSwapSuspect: !!(pos && totalCredito > 0 && totalDebito > 0
+          && Math.abs(totalCredito - pos.debitoValor) <= 0.01
+          && Math.abs(totalDebito - pos.creditoValor) <= 0.01
+          && Math.abs(pos.creditoValor - pos.debitoValor) > 0.01),
         // Fase C3: range de boletas da folha × cliques registrados no dia.
         boleta: (() => {
           try { return RetailBoletaService.closingCheck(orgId, storeId, date, details?.boletaInicial, details?.boletaFinal); }

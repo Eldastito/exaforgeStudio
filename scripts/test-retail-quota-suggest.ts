@@ -42,10 +42,11 @@ async function main() {
   const fechada = mkStore(A, "Av Brasil");   // escala no dia, todos de folga
   const aberta = mkStore(A, "Carioca");      // alguém trabalha no dia
   const semEscala = mkStore(A, "Grande Rio"); // sem escala lançada no dia
+  const protegida = mkStore(A, "Cota real");  // cota manual do dono já gravada
 
   // Histórico do PDV (system_total nos domingos passados) — todas com média > 0.
   const hist = db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, system_total) VALUES (?, ?, ?, ?, 'approved', ?)`);
-  for (const st of [fechada, aberta, semEscala]) for (const d of PAST_SUNDAYS) hist.run(randomUUID(), A, st, d, 5000);
+  for (const st of [fechada, aberta, semEscala, protegida]) for (const d of PAST_SUNDAYS) hist.run(randomUUID(), A, st, d, 5000);
 
   // Escala do dia-alvo: Av Brasil todos de folga; Carioca com 1 trabalhando.
   const sch = db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -56,6 +57,8 @@ async function main() {
 
   // Cota ERRADA já gravada na loja fechada (o 4990 da tela) + fechamento com snapshot.
   RetailQuotaService.set(A, { storeId: fechada, quotaDate: DATE, quotaAmount: 4990.5, source: "pdv_suggest" });
+  // Cota REAL digitada pelo dono: a sugestão do PDV nunca pode sobrescrever.
+  RetailQuotaService.set(A, { storeId: protegida, quotaDate: DATE, quotaAmount: 3800, source: "manual" });
   db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, quota_amount) VALUES (?, ?, ?, ?, 'pending', ?)`).run(randomUUID(), A, fechada, DATE, 4990.5);
 
   // ===== dry-run (apply=false) =====
@@ -75,6 +78,7 @@ async function main() {
   check("2.2 loja FECHADA: snapshot do fechamento zerado", Number(snap?.quota_amount) === 0, `${snap?.quota_amount}`);
   check("2.3 loja ABERTA: cota gravada > 0", Number(RetailQuotaService.get(A, aberta, DATE)?.quota_amount) > 0, `${RetailQuotaService.get(A, aberta, DATE)?.quota_amount}`);
   check("2.4 loja SEM escala: cota gravada > 0", Number(RetailQuotaService.get(A, semEscala, DATE)?.quota_amount) > 0);
+  check("2.5 cota MANUAL do dono preservada (3.800, não a média do PDV)", Number(RetailQuotaService.get(A, protegida, DATE)?.quota_amount) === 3800 && RetailQuotaService.get(A, protegida, DATE)?.source === "manual", `${JSON.stringify(RetailQuotaService.get(A, protegida, DATE))}`);
 
   // ===== isolamento =====
   const isoB = RetailQuotaService.suggestForDate(B, DATE, { apply: false });

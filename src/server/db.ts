@@ -7127,6 +7127,21 @@ const initDb = () => {
         UNIQUE (organization_id, store_id)
       );
 
+      -- Plano da corrida POR COMPETÊNCIA (YYYY-MM): a regra de setembro (ex.:
+      -- P.A mínimo 3,50) não pode recalcular agosto (2,50). Resolução por mês:
+      -- loja+mês > rede+mês > plano legado (tabela acima) > default CARIOCA.
+      CREATE TABLE IF NOT EXISTS retail_commission_plan_months (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL DEFAULT '*',      -- '*' = rede; senão retail_stores.id
+        year_month TEXT NOT NULL,                -- 'YYYY-MM' da competência
+        config_json TEXT NOT NULL,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME,
+        UNIQUE (organization_id, store_id, year_month)
+      );
+
       -- Cota individual do vendedor POR SEMANA da corrida (a planilha cadastra
       -- cota semanal por vendedor; a mensal é a soma das semanas). Sem linha
       -- aqui, a cota do vendedor é DERIVADA: cota diária da loja ÷ nº de

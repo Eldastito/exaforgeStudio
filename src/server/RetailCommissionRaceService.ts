@@ -46,7 +46,7 @@ import { RetailMonthWeeksService } from "./RetailMonthWeeksService.js";
 
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 const norm = (s: any) => String(s || "").trim().toLowerCase();
-function safeParse(s: any): any { try { return JSON.parse(s ?? "null"); } catch { return null; } }
+function safeParse<T = any>(s: any): T | null { try { return JSON.parse(s ?? "null"); } catch { return null; } }
 
 export type Tier = { min: number; percent: number };
 /**
@@ -194,8 +194,23 @@ export class RetailCommissionRaceService {
   }
 
   // ── Plano ──────────────────────────────────────────────────────────────────
-  /** Plano efetivo: loja específica > rede ('*') > default CARIOCA. */
-  static getPlan(orgId: string, storeId?: string | null): { plan: RacePlan; source: "store" | "network" | "default" } {
+  /**
+   * Plano efetivo. Sem `month`: loja específica > rede ('*') > default CARIOCA
+   * (comportamento legado intocado). Com `month` (YYYY-MM), a COMPETÊNCIA tem
+   * precedência sobre o legado: loja+mês > rede+mês > loja legada > rede legada
+   * > default — assim o plano cadastrado "para setembro" vale em setembro mesmo
+   * quando uma loja tem plano antigo sem competência (o legado vira fallback dos
+   * meses não configurados; caso Toulon: P.A 3,50 em set/26 sem recalcular ago).
+   */
+  static getPlan(orgId: string, storeId?: string | null, month?: string | null): { plan: RacePlan; source: "store" | "network" | "default"; effectiveMonth?: string | null } {
+    if (month && !/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    if (month) {
+      for (const sid of storeId ? [storeId, "*"] : ["*"]) {
+        const row = db.prepare(`SELECT config_json FROM retail_commission_plan_months WHERE organization_id = ? AND store_id = ? AND year_month = ?`).get(orgId, sid, month) as any;
+        const cfg = safeParse<RacePlan>(row?.config_json);
+        if (cfg) return { plan: cfg, source: sid === "*" ? "network" : "store", effectiveMonth: month };
+      }
+    }
     if (storeId) {
       const sp = db.prepare(`SELECT config_json FROM retail_commission_plans WHERE organization_id = ? AND store_id = ? AND active = 1`).get(orgId, storeId) as any;
       const cfg = safeParse(sp?.config_json);
@@ -207,11 +222,23 @@ export class RetailCommissionRaceService {
     return { plan: DEFAULT_RACE_PLAN, source: "default" };
   }
 
-  static savePlan(orgId: string, storeId: string | null, config: RacePlan, actorId?: string): any {
+  static savePlan(orgId: string, storeId: string | null, config: RacePlan, actorId?: string, month?: string | null): any {
     const sid = storeId || "*";
     // Validação de forma mínima: precisa das duas metades; números viram Number.
     if (!config || typeof config !== "object" || !config.seller || !config.manager) {
       throw new Error("config inválida: precisa de { seller, manager }");
+    }
+    if (month && !/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    if (month) {
+      // Plano da COMPETÊNCIA: não toca no legado — meses sem linha própria
+      // continuam caindo no plano antigo (fallback), nada é recalculado.
+      db.prepare(
+        `INSERT INTO retail_commission_plan_months (id, organization_id, store_id, year_month, config_json, created_by)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(organization_id, store_id, year_month) DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP`
+      ).run(randomUUID(), orgId, sid, month, JSON.stringify(config), actorId || null);
+      try { logAuthEvent(orgId, actorId || "system", sid, "RETAIL_COMMISSION_PLAN_MONTH_SAVED", { storeId: sid, month }); } catch { /* noop */ }
+      return this.getPlan(orgId, storeId, month);
     }
     db.prepare(
       `INSERT INTO retail_commission_plans (id, organization_id, store_id, config_json, active, created_by)
@@ -421,7 +448,7 @@ export class RetailCommissionRaceService {
 
     const storeReports: any[] = [];
     for (const st of stores) {
-      const { plan } = this.getPlan(orgId, st.id);
+      const { plan } = this.getPlan(orgId, st.id, month);
       const sPlan = plan.seller || DEFAULT_RACE_PLAN.seller;
       const mPlan = plan.manager || DEFAULT_RACE_PLAN.manager;
       const schedule = this.getSchedule(orgId, st.id, mStart, mEnd);
@@ -631,7 +658,7 @@ export class RetailCommissionRaceService {
     }
 
     // ── Desvio de cota da REDE (sempre considera todas as lojas) ──
-    const netPlan = this.getPlan(orgId, null).plan;
+    const netPlan = this.getPlan(orgId, null, month).plan;
     const sellerPrizes = (netPlan.seller?.networkDeviationPrizes || []).map(Number);
     const eligibleSellers = storeReports
       .flatMap((sr) => sr.monthly.map((s: any) => ({ ...s, storeId: sr.storeId, storeName: sr.storeName })))

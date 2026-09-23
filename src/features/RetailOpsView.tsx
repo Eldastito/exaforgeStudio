@@ -2367,6 +2367,8 @@ function WeeklyClosingsCard() {
 }
 
 function ClosingsTab() {
+  const { user } = useAuth();
+  const isOwnerAdmin = ['owner', 'admin'].includes((user as any)?.role || '');
   const [date, setDate] = useState(todayStr());
   const [stores, setStores] = useState<any[]>([]);
   const [closings, setClosings] = useState<any[]>([]);
@@ -2374,6 +2376,20 @@ function ClosingsTab() {
   const [informing, setInforming] = useState<any | null>(null);
   const [storeModal, setStoreModal] = useState<null | { store: any | null }>(null);
   const [bridge, setBridge] = useState<boolean | null>(null);
+  const [moneyAudit, setMoneyAudit] = useState<any | null>(null);
+  const [auditing, setAuditing] = useState(false);
+
+  // Conferência de valores da data: abre lado a lado informado × Alterdata ×
+  // PDV × manual × ranking, com deltas e indícios (só dono/admin — é dinheiro).
+  const auditMoney = async () => {
+    setAuditing(true);
+    try {
+      const res = await apiFetch(`/api/retailops/dashboard/money-audit?date=${date}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setMoneyAudit(data);
+      else toast.error(data.message || data.error || 'Falha ao conferir os valores.');
+    } finally { setAuditing(false); }
+  };
 
   const toggleBridge = async () => {
     const next = !bridge;
@@ -2390,6 +2406,7 @@ function ClosingsTab() {
   };
 
   const load = async () => {
+    setMoneyAudit(null); // conferência é da data carregada — trocar a data limpa
     setLoading(true);
     try {
       const [st, cl, br] = await Promise.all([
@@ -2440,7 +2457,14 @@ function ClosingsTab() {
           onClick={async () => {
             const res = await apiFetch('/api/retailops/quotas/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, apply: true }) });
             const d = await res.json().catch(() => ({}));
-            if (res.ok) { toast.success(d.suggestions?.length ? `Cotas sugeridas pelo PDV aplicadas a ${d.suggestions.length} loja(s).` : 'Sem histórico do PDV suficiente para sugerir cotas ainda.'); load(); }
+            if (res.ok) {
+              const applied = (d.suggestions || []).filter((s: any) => !s.skipped).length;
+              const preserved = (d.suggestions || []).filter((s: any) => s.skipped && /preservada/.test(String(s.basis || ''))).length;
+              toast.success(applied
+                ? `Cotas do PDV aplicadas a ${applied} loja(s).${preserved ? ` ${preserved} cota(s) manual(is) preservada(s).` : ''}`
+                : preserved ? `Nenhuma cota alterada — ${preserved} cota(s) manual(is) preservada(s).` : 'Sem histórico do PDV suficiente para sugerir cotas ainda.');
+              load();
+            }
             else toast.error(d.error || 'Falha ao sugerir cotas.');
           }}
           title="Calcula a cota de cada loja pela média do MESMO dia da semana nas últimas 8 semanas (vendas reais do PDV via Alterdata) e aplica na data selecionada."
@@ -2448,6 +2472,16 @@ function ClosingsTab() {
         >
           Sugerir cotas (PDV)
         </button>
+        {isOwnerAdmin && (
+          <button
+            onClick={auditMoney}
+            disabled={auditing}
+            title="Abre, por loja, o informado × resumo Alterdata × boletas PDV × lançamento manual × ranking da folha, com as diferenças em R$ e os indícios do que conferir."
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            {auditing ? 'Conferindo…' : 'Conferir números'}
+          </button>
+        )}
         {bridge !== null && (
           <button
             onClick={toggleBridge}
@@ -2462,6 +2496,35 @@ function ClosingsTab() {
         )}
         <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
       </div>
+
+      {moneyAudit && (
+        <div className="mb-4 overflow-x-auto rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-zinc-300">
+          <p className="mb-1 font-semibold text-amber-200">Conferência de {date.split('-').reverse().join('/')} · valores em R$</p>
+          <p className="mb-2 text-zinc-400">Informado = formulário do fechamento · Sistema = resumo de caixa da Alterdata (pode chegar PARCIAL: cartão/TEF consolida horas depois) · PDV = soma das boletas importadas. A linha do ERP pode representar o mês inteiro numa única data — não compare como total diário.</p>
+          <table className="min-w-[1100px] w-full text-left tabular-nums">
+            <thead><tr className="border-b border-zinc-700 text-zinc-400"><th className="py-1">Loja</th><th>Cota</th><th>Informado</th><th>Sistema</th><th>PDV</th><th>Manual</th><th>Ranking folha</th><th>Δ inform./sistema</th><th>Δ PDV/sistema</th><th>Indícios</th></tr></thead>
+            <tbody>
+              {(moneyAudit.stores || []).map((r: any) => (
+                <tr key={r.storeId} className="border-b border-zinc-800/70 align-top">
+                  <td className="py-1.5">{r.storeName}<span className="block text-zinc-500">{r.filial || 'sem filial'}</span></td>
+                  <td>{brl(r.closing.quota)}</td>
+                  <td>{r.closing.informed == null ? '—' : brl(r.closing.informed)}</td>
+                  <td>{r.closing.system == null ? '—' : brl(r.closing.system)}</td>
+                  <td>{r.sources.pdv.count ? brl(r.sources.pdv.total) : '—'}</td>
+                  <td>{r.sources.manual.count ? brl(r.sources.manual.total) : '—'}</td>
+                  <td>{r.closing.ranking == null ? '—' : brl(r.closing.ranking)}</td>
+                  <td>{r.differences.informedVsSystem == null ? '—' : brl(r.differences.informedVsSystem)}</td>
+                  <td>{r.differences.pdvVsSystem == null ? '—' : brl(r.differences.pdvVsSystem)}</td>
+                  <td className="max-w-56 text-amber-200">{r.issues.length ? r.issues.join(', ').replaceAll('_', ' ') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!!moneyAudit.orphanFiliais?.length && (
+            <p className="mt-2 text-amber-200">Filiais do PDV sem loja ativa cadastrada: {moneyAudit.orphanFiliais.map((r: any) => `${r.filial} (${brl(r.total)})`).join(' · ')}</p>
+          )}
+        </div>
+      )}
 
       <WhoIsOffCard className="mb-3" />
       <WeeklyClosingsCard />
@@ -3007,10 +3070,20 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const totalDebito = useMemo(() => sumBandeiras(debito, brands?.debito || [], n), [debito, brands]);
   const totalVendas = useMemo(() => n(dinheiro) + n(pix) + totalCredito + totalDebito + n(voucher) + n(troca) + n(outros), [dinheiro, pix, totalCredito, totalDebito, voucher, troca, outros]);
   const totalDespesas = useMemo(() => despesas.reduce((a, d) => a + n(d.valor), 0), [despesas]);
-  const rankingTotal = useMemo(() => ranking.reduce((a, r) => a + n(r.valor), 0), [ranking]);
-  const rankingGap = ranking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
+  // A linha "LOJA"/"TOTAL" da folha é o total do dia, não um vendedor — somá-la
+  // dobrava o rankingTotal e o aviso de conferência acusava divergência falsa.
+  const sellerRanking = useMemo(() => ranking.filter(r => !/^(loja|total|total loja|total geral|loja total)$/i.test(String(r.sellerName || '').trim())), [ranking]);
+  const rankingTotal = useMemo(() => sellerRanking.reduce((a, r) => a + n(r.valor), 0), [sellerRanking]);
+  const rankingGap = sellerRanking.some(r => n(r.valor) > 0) ? Math.round((totalVendas - rankingTotal) * 100) / 100 : null;
   const posGapCred = n(posCred) > 0 ? Math.round((totalCredito - n(posCred)) * 100) / 100 : null;
   const posGapDeb = n(posDeb) > 0 ? Math.round((totalDebito - n(posDeb)) * 100) / 100 : null;
+  // Crédito e débito TROCADOS (caso Av. Brasil 19/09: bandeiras de débito do
+  // comprovante lançadas como crédito e vice-versa — o total fecha, a
+  // conferência por tipo nunca fecha). Cada lado batendo com o lado OPOSTO
+  // do POS = quase certeza de troca de coluna na digitação.
+  const posSwapSuspect = n(posCred) > 0 && n(posDeb) > 0 && totalCredito > 0 && totalDebito > 0
+    && Math.abs(totalCredito - n(posDeb)) <= 0.01 && Math.abs(totalDebito - n(posCred)) <= 0.01
+    && Math.abs(n(posCred) - n(posDeb)) > 0.01;
   // MAL-001: a conta automática do malote = dinheiro − despesas do dia.
   const maloteEsperado = useMemo(() => Math.round((n(dinheiro) - totalDespesas) * 100) / 100, [dinheiro, totalDespesas]);
   useEffect(() => {
@@ -3219,7 +3292,11 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
               <input inputMode="numeric" value={posDebQtd} onChange={e => setPosDebQtd(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" className={inp} />
             </label>
           </div>
-          {(posGapCred != null || posGapDeb != null) && (
+          {posSwapSuspect ? (
+            <p className="mt-2 text-[11px] font-semibold text-red-300">
+              Crédito e débito parecem TROCADOS: o crédito lançado ({brl(totalCredito)}) bate com o DÉBITO do POS e o débito lançado ({brl(totalDebito)}) bate com o CRÉDITO do POS. Confira o comprovante — as bandeiras foram digitadas nas colunas invertidas.
+            </p>
+          ) : (posGapCred != null || posGapDeb != null) && (
             <p className={`mt-2 text-[11px] ${Math.abs(posGapCred || 0) > 0.01 || Math.abs(posGapDeb || 0) > 0.01 ? 'text-amber-300' : 'text-emerald-300'}`}>
               {Math.abs(posGapCred || 0) <= 0.01 && Math.abs(posGapDeb || 0) <= 0.01
                 ? 'Cartões batem com o POS.'
@@ -4425,13 +4502,16 @@ function TierEditor({ label, tiers, onChange, minLabel }: { label: string; tiers
   );
 }
 
-function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void }) {
+function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: string; onClose: () => void }) {
   const [storeId, setStoreId] = useState('');
   const [plan, setPlan] = useState<any | null>(null);
   const [source, setSource] = useState('');
+  const [effectiveMonth, setEffectiveMonth] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const load = async (sid: string) => {
-    const d = await apiFetch(`/api/retailops/commission/plan${sid ? `?storeId=${sid}` : ''}`).then(r => r.json()).catch(() => null);
+    const params = new URLSearchParams({ month });
+    if (sid) params.set('storeId', sid);
+    const d = await apiFetch(`/api/retailops/commission/plan?${params}`).then(r => r.json()).catch(() => null);
     if (d?.plan) {
       // Plano antigo salvo antes da Fase G3 não tem `networkChampions` — normaliza
       // aqui pra evitar leituras em objeto undefined nos inputs.
@@ -4444,15 +4524,18 @@ function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void
         while (nc[k].length < 3) nc[k].push(0);
       }
       if (nc.minAttendancesForPa == null) nc.minAttendancesForPa = 20;
-      setPlan(p); setSource(d.source);
+      setPlan(p); setSource(d.source); setEffectiveMonth(d.effectiveMonth || null);
     }
   };
-  useEffect(() => { load(storeId); /* eslint-disable-next-line */ }, [storeId]);
+  useEffect(() => { load(storeId); /* eslint-disable-next-line */ }, [storeId, month]);
   const save = async () => {
     setSaving(true);
     try {
-      const res = await apiFetch('/api/retailops/commission/plan', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: storeId || null, config: plan }) });
-      if (res.ok) { toast.success(storeId ? 'Plano da loja salvo.' : 'Plano da rede salvo.'); onClose(); }
+      // Salva POR COMPETÊNCIA: a regra vale só pro mês selecionado na corrida
+      // (setembro com P.A novo não recalcula agosto). Meses sem regra própria
+      // continuam no plano legado/padrão.
+      const res = await apiFetch('/api/retailops/commission/plan', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: storeId || null, month, config: plan }) });
+      if (res.ok) { toast.success(`Plano de ${month} salvo para ${storeId ? 'a loja' : 'a rede toda'}.`); onClose(); }
       else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar o plano.'); }
     } finally { setSaving(false); }
   };
@@ -4474,7 +4557,7 @@ function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-zinc-100">Configurar a corrida</h3>
+          <h3 className="font-semibold text-zinc-100">Configurar a corrida de {month}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
         <div className="mb-3 flex items-center gap-2">
@@ -4482,7 +4565,7 @@ function RacePlanModal({ stores, onClose }: { stores: any[]; onClose: () => void
             <option value="">Rede toda (padrão)</option>
             {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <span className="text-[11px] text-zinc-500">plano em uso: {source === 'store' ? 'próprio da loja' : source === 'network' ? 'da rede' : 'padrão (planilha CARIOCA)'}</span>
+          <span className="text-[11px] text-zinc-500">plano em uso: {source === 'store' ? 'próprio da loja' : source === 'network' ? 'da rede' : 'padrão (planilha CARIOCA)'}{effectiveMonth ? ` · competência ${effectiveMonth}` : ' · sem competência (vale todo mês)'} — salvar grava a regra SÓ de {month}.</span>
         </div>
         {!plan ? <div className="text-sm text-zinc-500">Carregando…</div> : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -4774,7 +4857,7 @@ function RaceSection({ stores }: { stores: any[] }) {
         </div>
       )}
       {race && <div className="mt-2 text-right text-sm text-zinc-300">Total da corrida: <span className="font-semibold text-emerald-300">{brl(race.totals.grand)}</span> <span className="text-zinc-500">(vendedores {brl(race.totals.sellers)} · gerentes {brl(race.totals.managers)})</span></div>}
-      {planModal && <RacePlanModal stores={stores} onClose={() => setPlanModal(false)} />}
+      {planModal && <RacePlanModal stores={stores} month={month} onClose={() => setPlanModal(false)} />}
     </div>
   );
 }

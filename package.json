@@ -115,6 +115,8 @@
     "test:retail-quota-for-date": "tsx scripts/test-retail-quota-for-date.ts",
     "test:retail-day-roster-infer": "tsx scripts/test-retail-day-roster-infer.ts",
     "test:retail-quota-suggest": "tsx scripts/test-retail-quota-suggest.ts",
+    "test:retail-money-audit": "tsx scripts/test-retail-money-audit.ts",
+    "test:retail-commission-plan-months": "tsx scripts/test-retail-commission-plan-months.ts",
     "test:retail-schedule-import": "tsx scripts/test-retail-schedule-import.ts",
     "test:retail-boleta-line-audit": "tsx scripts/test-retail-boleta-line-audit.ts",
     "test:retail-ocr-roster-hint": "tsx scripts/test-retail-ocr-roster-hint.ts",

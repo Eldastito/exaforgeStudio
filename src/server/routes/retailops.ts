@@ -44,6 +44,7 @@ import { RetailStockModeService } from "../RetailStockModeService.js";
 import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
+import { RetailMoneyAuditService } from "../RetailMoneyAuditService.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { RetailPdvSaleLinesService } from "../RetailPdvSaleLinesService.js";
 import { RetailScanService } from "../RetailScanService.js";
@@ -192,7 +193,10 @@ router.get("/insights/header", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.query.date || today(req)).slice(0, 10);
   const storeId = req.query.storeId ? String(req.query.storeId) : null;
-  const daily = RetailDashboardService.daily(orgId, date);
+  // Com storeId, os quatro cards passam a ser DA LOJA (antes o filtro só
+  // trocava o título e os números seguiam da rede — os cards contradiziam
+  // o ranking da mesma tela).
+  const daily = RetailDashboardService.daily(orgId, date, storeId);
   // Ranking de lojas do dia (só loja com fechamento não-rejeitado e com cota).
   const rows = db.prepare(
     `SELECT c.store_id, s.name AS store_name, c.informed_total AS realized,
@@ -200,8 +204,8 @@ router.get("/insights/header", (req: AuthRequest, res): any => {
        FROM retail_daily_closings c
        JOIN retail_stores s ON s.id = c.store_id AND s.organization_id = c.organization_id
   LEFT JOIN retail_store_quotas q ON q.organization_id = c.organization_id AND q.store_id = c.store_id AND q.quota_date = c.closing_date
-      WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'`
-  ).all(orgId, date) as any[];
+      WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${storeId ? " AND c.store_id = ?" : ""}`
+  ).all(...(storeId ? [orgId, date, storeId] : [orgId, date])) as any[];
   const scored = rows
     .filter((r) => Number(r.quota) > 0)
     .map((r) => ({
@@ -1978,16 +1982,19 @@ router.get("/commission/plan", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const storeId = req.query.storeId ? String(req.query.storeId) : null;
-  res.json(RetailCommissionRaceService.getPlan(orgId, storeId));
+  try { res.json(RetailCommissionRaceService.getPlan(orgId, storeId, req.query.month ? String(req.query.month) : null)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.put("/commission/plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const { storeId, config } = req.body || {};
+  // `month` (YYYY-MM) grava o plano POR COMPETÊNCIA: muda só aquele mês; sem
+  // month, mantém o comportamento legado (plano vigente, todos os meses).
+  const { storeId, config, month } = req.body || {};
   if (storeId && !RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   try {
-    res.json(RetailCommissionRaceService.savePlan(orgId, storeId ? String(storeId) : null, config, req.user?.userId));
+    res.json(RetailCommissionRaceService.savePlan(orgId, storeId ? String(storeId) : null, config, req.user?.userId, month ? String(month) : null));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
@@ -2229,6 +2236,19 @@ router.get("/dashboard/daily", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailDashboardService.daily(orgId, today(req)));
+});
+
+// Conferência de valores por loja/data (dono/admin): abre lado a lado o
+// informado, o resumo da Alterdata, as boletas do PDV, o lançamento manual e
+// o ranking da folha, com deltas e indícios nomeados. Só leitura.
+router.get("/dashboard/money-audit", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)))
+    return res.status(400).json({ error: "date (YYYY-MM-DD) inválida" });
+  try { res.json(RetailMoneyAuditService.day(orgId, date)); }
+  catch (e: any) { res.status(500).json({ error: e?.message || "money_audit_failed" }); }
 });
 
 // Informe diário da rede: por loja + total da empresa (aberto por forma de

@@ -61,6 +61,11 @@ async function main() {
   check("Lojas acima/abaixo da cota", d.storesAbove === 1 && d.storesBelow === 1);
   check("Fechamentos pendentes (checklist)", d.pendingClosings === 2);
   check("Estoque negativo contabilizado", d.negativeStock === 1);
+  // Filtro por LOJA: o header de Insights filtrado precisa isolar TODOS os
+  // números (antes só o título mudava e os cards seguiam com a rede toda).
+  const f = RetailDashboardService.daily(A, DAY, s1.id);
+  check("Filtro de loja isola cota/venda/desvio", f.quotaTotal === 8000 && f.realized === 9000 && f.variance === 1000, JSON.stringify({ q: f.quotaTotal, r: f.realized }));
+  check("Filtro de loja isola acima/abaixo e pendências", f.storesAbove === 1 && f.storesBelow === 0 && f.pendingClosings === 1 && f.activeStores === 1, JSON.stringify({ a: f.storesAbove, b: f.storesBelow, p: f.pendingClosings }));
 
   // ---- 2. Acumulado do mês ----
   const m = RetailDashboardService.monthly(A, "2026-07");
@@ -71,6 +76,13 @@ async function main() {
   // ---- 3. Export do mês ----
   const rows = RetailDashboardService.monthlyClosingRows(A, "2026-07");
   check("Export traz header + 3 fechamentos", rows.length === 4 && rows[0][0] === "Data");
+
+  // Fechamento SEM cota não conta como "loja na cota" (0 ≥ 0 inflava o card).
+  // Depois das checagens do mês, pra não mexer nos totais acima.
+  const s3 = RetailStoreService.create(A, { name: "Loja 3" });
+  closing(s3.id, DAY, 0, 1000);
+  const d2 = RetailDashboardService.daily(A, DAY);
+  check("Fechamento sem cota fica fora do acima/abaixo", d2.storesAbove === 1 && d2.storesBelow === 1, JSON.stringify({ a: d2.storesAbove, b: d2.storesBelow }));
 
   // ---- 4. Isolamento ----
   const B = `org_B_${randomUUID().slice(0, 6)}`;

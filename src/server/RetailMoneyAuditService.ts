@@ -72,7 +72,17 @@ export class RetailMoneyAuditService {
         if (tefWindow) issues.push("possivel_leitura_parcial_tef");
       }
       if (rankingTotal !== null && informed !== null && Math.abs(rankingTotal - informed) >= 1) issues.push("ranking_vs_fechamento");
-      if (pdv.n && system !== null && Math.abs(pdvTotal - system) >= 1) issues.push("vendas_pdv_vs_resumo_caixa");
+      if (pdv.n && system !== null && Math.abs(pdvTotal - system) >= 1) {
+        issues.push("vendas_pdv_vs_resumo_caixa");
+        // DIREÇÃO da divergência boletas × caixa (a causa provável muda com o
+        // sinal, NÃO com um chute): boletas > caixa = nossa cópia conta a mais
+        // → provável boleta cancelada/estornada que o delta ainda não
+        // propagou; boletas < caixa = o caixa registrou venda que não está nas
+        // boletas → possível venda fora do VendaMalote. Nenhuma correção
+        // automática: só nomeia pro humano conferir boleta a boleta.
+        if (pdvTotal - system >= 1) issues.push("boletas_acima_do_caixa");
+        else if (pdvTotal - system <= -1) issues.push("boletas_abaixo_do_caixa");
+      }
       if (pdv.n && manual.n) issues.push("fontes_fisicas_sobrepostas");
       if (erp.n && (pdv.n || manual.n)) issues.push("erp_agregado_vs_outros");
       if (pdv.n > 5 && pdv.seller_codes <= 1) issues.push("codigo_vendedor_compartilhado");
@@ -100,6 +110,7 @@ export class RetailMoneyAuditService {
         differences: {
           informedVsSystem: informed === null || system === null ? null : money(informed - system),
           pdvVsSystem: !pdv.n || system === null ? null : money(pdvTotal - system),
+          boletasVsSystem: !pdv.n || system === null ? null : money(pdvTotal - system),
           rankingVsInformed: rankingTotal === null || informed === null ? null : money(rankingTotal - informed),
         },
         issues,

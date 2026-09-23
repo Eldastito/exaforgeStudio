@@ -58,11 +58,15 @@ async function main() {
 
   // ── 3. Guardian devolve HTTP 400 → registra a falha de token ──
   AlterdataConnectorService.saveSettings(A, { enabled: true, environment: "homolog", rede: "T", filiais: ["1"], basePattern: "t-{module}.x.br", authConfig: { clientId: "u@t", clientSecret: "errada" } });
-  __setAlterdataTokenHttpForTests(async () => resp(400, { error: "invalid_client" }) as any);
-  threw = false;
-  try { await AlterdataConnectorService.acquireToken(A); } catch { threw = true; }
+  // O corpo devolve um segredo simulado — não pode vazar na mensagem gravada
+  // nem na exceção lançada (só o código OAuth `error`, whitelist).
+  __setAlterdataTokenHttpForTests(async () => resp(400, { error: "invalid_client", error_description: "senha=SUPERSECRETO123 token=abc.def" }) as any);
+  threw = false; let thrownMsg = "";
+  try { await AlterdataConnectorService.acquireToken(A); } catch (e: any) { threw = true; thrownMsg = String(e?.message || ""); }
   const fail3 = AlterdataConnectorService.getAuthFailure(A);
   check("3.1 falha de emissão de token também registra", threw && !!fail3 && /HTTP 400/.test(fail3.message), JSON.stringify(fail3));
+  check("3.2 mensagem gravada traz só o código OAuth, sem corpo sensível", /invalid_client/.test(fail3!.message) && !/SUPERSECRETO|token=abc/.test(fail3!.message), fail3!.message);
+  check("3.3 exceção lançada não vaza corpo sensível", /HTTP 400/.test(thrownMsg) && !/SUPERSECRETO|token=abc|error_description/.test(thrownMsg), thrownMsg);
 
   // ── 4. Token emitido com sucesso LIMPA o marcador E resolve o sinal ──
   __setAlterdataTokenHttpForTests(async () => resp(200, { access_token: "tok-ok", expires_in: 3600 }) as any);

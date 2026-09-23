@@ -119,6 +119,7 @@
     "test:retail-commission-plan-months": "tsx scripts/test-retail-commission-plan-months.ts",
     "test:alterdata-auth-signal": "tsx scripts/test-alterdata-auth-signal.ts",
     "test:alterdata-xray-states": "tsx scripts/test-alterdata-xray-states.ts",
+    "test:alterdata-boleta-cancel": "tsx scripts/test-alterdata-boleta-cancel.ts",
     "test:alterdata-refresh-day": "tsx scripts/test-alterdata-refresh-day.ts",
     "test:retail-schedule-import": "tsx scripts/test-retail-schedule-import.ts",
     "test:retail-boleta-line-audit": "tsx scripts/test-retail-boleta-line-audit.ts",

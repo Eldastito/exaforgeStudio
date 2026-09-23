@@ -107,6 +107,7 @@ async function main() {
   check("2.2 delta informado−sistema = 3.108,10 (o débito ausente do resumo)", row.differences.informedVsSystem === 3108.10, `${row.differences.informedVsSystem}`);
   check("2.3 indício fechamento_vs_alterdata presente", row.issues.includes("fechamento_vs_alterdata"), row.issues.join(","));
   check("2.4 indício vendas_pdv_vs_resumo_caixa (boletas 5.476,70 ≠ resumo 2.368,60)", row.issues.includes("vendas_pdv_vs_resumo_caixa") && row.sources.pdv.total === 5476.70, JSON.stringify(row.sources.pdv));
+  check("2.4b direção: boletas > caixa → boletas_acima_do_caixa + boletasVsSystem positivo", row.issues.includes("boletas_acima_do_caixa") && !row.issues.includes("boletas_abaixo_do_caixa") && row.differences.boletasVsSystem === 3108.10, JSON.stringify({ i: row.issues, d: row.differences.boletasVsSystem }));
   check("2.5 ranking da folha sem a linha LOJA e a R$ 0,10 do informado", row.closing.ranking === 5476.80 && row.differences.rankingVsInformed === 0.10 && row.issues.includes("ranking_vs_fechamento"), JSON.stringify({ r: row.closing.ranking, d: row.differences.rankingVsInformed }));
   check("2.6 indício credito_debito_trocados vindo do derived", row.issues.includes("credito_debito_trocados"), row.issues.join(","));
   check("2.7 sobreposição PDV × manual sinalizada", row.issues.includes("fontes_fisicas_sobrepostas"));

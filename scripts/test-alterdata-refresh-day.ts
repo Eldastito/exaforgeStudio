@@ -85,6 +85,28 @@ async function main() {
   const outB = await AlterdataSyncRunner.refreshDayClosings(B, DATE);
   check("3.2 org B sem lojas → releitura vazia", outB.stores.length === 0);
 
+  // ── 4. Recheck pula dia consolidado (aprovado + system_total) ──
+  // Reconta as chamadas ao resumo: com o dia consolidado dentro da janela,
+  // backfill({skipConsolidated}) não deve bater na API para ele.
+  const cariocaCode = "1005";
+  let calls = 0;
+  __setAlterdataSyncHttpForTests(async (url: string) => {
+    if (url.includes("/ResumoFecharMovimento/")) calls++;
+    return resp(200, { success: true, data: [{ titulo: "Total de Vendas", valor: 0 }] }) as any;
+  });
+  const hoje = new Date().toISOString().slice(0, 10);
+  // Carioca (1005) tem HOJE aprovado com system_total > 0 → consolidado.
+  db.prepare(`INSERT INTO retail_daily_closings (id, organization_id, store_id, closing_date, status, informed_total, system_total, system_turnos_json) VALUES (?, ?, ?, ?, 'approved', 1500, 1500, ?)`)
+    .run(randomUUID(), A, carioca.id, hoje, JSON.stringify({ "1": 1500 }));
+  const withSkip = await AlterdataSyncRunner.backfillFilialClosings(A, cariocaCode, 1, { skipConsolidated: true });
+  check("4.1 dia consolidado é pulado (0 chamadas à API)", calls === 0 && withSkip.skippedConsolidated === 1, JSON.stringify({ calls, skip: withSkip.skippedConsolidated }));
+  const cariocaRow = () => db.prepare(`SELECT system_total FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(A, carioca.id, hoje) as any;
+  check("4.2 valor consolidado intocado", Number(cariocaRow()?.system_total) === 1500);
+  // O backfill MANUAL (sem skip) relê mesmo o dia aprovado — é ferramenta de reparo.
+  calls = 0;
+  await AlterdataSyncRunner.backfillFilialClosings(A, cariocaCode, 1);
+  check("4.3 backfill manual relê o dia aprovado (2 turnos)", calls === 2, `calls=${calls}`);
+
   __setAlterdataSyncHttpForTests(null);
   __setAlterdataTokenHttpForTests(null);
   const passed = results.filter((x) => x.ok).length;

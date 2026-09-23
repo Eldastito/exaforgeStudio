@@ -363,9 +363,15 @@ export class AlterdataConnectorService {
     } catch { /* radar indisponível não pode derrubar o sync */ }
   }
 
-  /** Autenticação voltou: limpa o marcador (o sinal do Radar segue o próprio ciclo). */
+  /**
+   * Autenticação voltou: limpa o marcador E resolve o sinal aberto no Radar —
+   * senão o alerta crítico vermelho ficava preso depois da integração voltar
+   * (o banner sumia, mas o Radar continuava acusando). resolveByDedupe só toca
+   * o sinal 'open' desta org; se já estava resolvido, é no-op.
+   */
   static clearAuthFailure(orgId: string): void {
     try { this.setCursor(orgId, "_meta", "lastAuthError", "", ""); } catch { /* noop */ }
+    try { BusinessSignalService.resolveByDedupe(orgId, `alterdata:auth:${orgId}`); } catch { /* radar indisponível não bloqueia a recuperação */ }
   }
 
   /** Última falha de autenticação registrada (ou null). Leitura barata, sem rede. */

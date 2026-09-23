@@ -43,10 +43,14 @@ export class RetailMoneyAuditService {
         FROM retail_pdv_sales WHERE organization_id = ? AND filial = ? AND sale_date = ?
           AND COALESCE(status, 'N') <> 'C'`).get(orgId, s.code, date) as any;
       // Boletas do dia (a fonte granular): abrir venda a venda é o que permite
-      // achar os R$ que faltam/sobram (troca, devolução, boleta cancelada).
+      // achar os R$ que faltam/sobram (troca, devolução, boleta cancelada). A
+      // lista é truncada em BOLETAS_LIMIT; o total (pdv.total acima) soma TODAS,
+      // então a UI precisa avisar "exibindo N de <pdv.count>" pra não parecer
+      // que a soma ignora boletas fora da lista.
+      const BOLETAS_LIMIT = 60;
       const boletas = db.prepare(`SELECT boleta, valor, status FROM retail_pdv_sales
         WHERE organization_id = ? AND filial = ? AND sale_date = ? AND COALESCE(status, 'N') <> 'C'
-        ORDER BY CAST(boleta AS INTEGER), boleta LIMIT 60`).all(orgId, s.code, date) as any[];
+        ORDER BY CAST(boleta AS INTEGER), boleta LIMIT ?`).all(orgId, s.code, date, BOLETAS_LIMIT) as any[];
       const manual = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(valor),0) AS total
         FROM retail_seller_sales WHERE organization_id = ? AND store_id = ? AND sale_date = ?`).get(orgId, s.id, date) as any;
       const erp = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(valor),0) AS total
@@ -87,7 +91,7 @@ export class RetailMoneyAuditService {
         },
         sources: {
           sellerBase: money(sellerBase),
-          pdv: { count: pdv.n, total: money(pdvTotal), sellerCodes: pdv.seller_codes, boletas: boletas.map((b) => ({ boleta: String(b.boleta), valor: Math.round((Number(b.valor) || 0) * 100) / 100, status: b.status || null })) },
+          pdv: { count: pdv.n, total: money(pdvTotal), sellerCodes: pdv.seller_codes, boletasShown: boletas.length, boletasTruncated: pdv.n > boletas.length, boletas: boletas.map((b) => ({ boleta: String(b.boleta), valor: Math.round((Number(b.valor) || 0) * 100) / 100, status: b.status || null })) },
           manual: { count: manual.n, total: money(manualTotal) },
           // O relatório ERP pode ser agregado MENSAL numa data representativa —
           // a linha nunca deve ser lida como venda daquele dia específico.

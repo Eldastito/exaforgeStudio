@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { SecurityAuditService } from "../SecurityAuditService.js";
 import { SecurityConfigurationService } from "../SecurityConfigurationService.js";
 import { AuthRequest } from "../middleware/auth.js";
+import { PerfMonitor } from "../PerfMonitorService.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
 import { MessageProviderService } from "../MessageProviderService.js";
 import { PlanService } from "../PlanService.js";
@@ -42,6 +43,14 @@ import { EdgeSyncService } from "../EdgeSyncService.js";
 import productEvolutionRoutes from "./productEvolution.js";
 
 const router = Router();
+
+// PERF — leitura da instrumentação de instabilidade (lag do event-loop +
+// requests lentas capturadas em memória). Read-only, herda requireMasterAdmin
+// do mount /api/admin. Serve pra achar QUAL tarefa síncrona trava a API sem
+// precisar de acesso ao host.
+router.get("/perf", (_req: AuthRequest, res): any => {
+  return res.json(PerfMonitor.snapshot());
+});
 
 // ADR-193 F1 — Product Evolution Ledger montado como sub-router. Herda
 // `requireMasterAdmin` do mount `/api/admin` em server.ts. GLOBAL (sem org).

@@ -39,6 +39,7 @@ setEvolutionWebhookSecretProvider((instanceName?: string) => {
 });
 import analyticsRoutes from "./src/server/routes/analytics.js";
 import adminRoutes from "./src/server/routes/admin.js";
+import { PerfMonitor, perfNow } from "./src/server/PerfMonitorService.js";
 import notificationsRoutes from "./src/server/routes/notifications.js";
 import authRoutes from "./src/server/routes/auth.js";
 import onboardingSoloRoutes from "./src/server/routes/onboardingSolo.js";
@@ -275,6 +276,19 @@ async function transcribeEvolutionAudio(
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+
+  // PERF (instrumentação da instabilidade) — mede lag do event-loop + requests
+  // lentas pra achar QUAL tarefa síncrona trava a API. Só observa: anexa um
+  // listener de 'finish' e cronometra; não altera nenhuma resposta. Kill-switch
+  // PERF_MONITOR_DISABLED=1. Primeiro middleware pra cronometrar a cadeia toda.
+  PerfMonitor.start();
+  app.use((req, res, next) => {
+    const t0 = perfNow.now();
+    res.on("finish", () => {
+      try { PerfMonitor.recordRequest(req.method, req.path, perfNow.now() - t0); } catch { /* noop */ }
+    });
+    next();
+  });
 
   // --- SECURITY CONFIG VALIDATION (SEC-F2 / SEC-04) ---
   // Fail-closed OPT-IN: valida os segredos críticos no boot. Em produção AVISA + marca degradado;

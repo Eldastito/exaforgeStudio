@@ -14,6 +14,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailSellerSalesService } from "./RetailSellerSalesService.js";
 import { RetailErpSellerSalesService } from "./RetailErpSellerSalesService.js";
+import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 
 export type CommissionRuleInput = {
   name: string;
@@ -95,11 +96,11 @@ export class RetailCommissionService {
 
   // ── Bases do período ────────────────────────────────────────────────────────
   private static periodSales(orgId: string, storeId: string | null, start: string, end: string): number {
-    // Base de cálculo = venda REAL do PDV quando existe (system_total, da
-    // Alterdata), com fallback ao informado pela loja — igual ao faturamento do
-    // Diretor IA (AlterdataRevenueBridge). Antes usava só o informado, então
-    // quando a loja lançava valor diferente do PDV, meta/comissão não batiam.
-    const VAL = "COALESCE(NULLIF(system_total,0), informed_total)";
+    // Fase 4 (Toulon): a base de meta/comissão segue a FONTE OFICIAL da org.
+    // Default 'system' = caixa da AlterData primeiro (comportamento legado);
+    // 'folha' = o total informado no fechamento manda. Configurável por org
+    // para não mudar o cálculo dos demais tenants (RetailSalesPolicy).
+    const VAL = officialSaleSql(officialSaleSourceOf(orgId));
     const q = storeId
       ? db.prepare(`SELECT COALESCE(SUM(${VAL}),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end)
       : db.prepare(`SELECT COALESCE(SUM(${VAL}),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, start, end);

@@ -43,6 +43,7 @@ import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailMonthWeeksService } from "./RetailMonthWeeksService.js";
+import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 const norm = (s: any) => String(s || "").trim().toLowerCase();
@@ -331,10 +332,11 @@ export class RetailCommissionRaceService {
    * `informed_total` preenchido (fechamento PENDENTE, nunca informado, não conta).
    */
   private static storeSalesInfo(orgId: string, storeId: string, start: string, end: string): { sales: number; hasData: boolean } {
-    // Base = venda REAL do PDV quando existe (system_total), fallback ao informado
-    // — mesma regra da comissão e do faturamento do Diretor IA, para meta e
-    // realizado baterem. `hasData` continua = existe fechamento não-rejeitado.
-    const q = db.prepare(`SELECT COALESCE(SUM(COALESCE(NULLIF(system_total,0), informed_total)),0) AS s, COUNT(CASE WHEN informed_total IS NOT NULL THEN 1 END) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
+    // Fase 4 (Toulon): meta e realizado seguem a FONTE OFICIAL da org (folha ou
+    // caixa), a MESMA da comissão — para os dois baterem. `hasData` continua =
+    // existe fechamento não-rejeitado.
+    const VAL = officialSaleSql(officialSaleSourceOf(orgId));
+    const q = db.prepare(`SELECT COALESCE(SUM(${VAL}),0) AS s, COUNT(CASE WHEN informed_total IS NOT NULL THEN 1 END) AS n FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, storeId, start, end) as any;
     return { sales: Number(q?.s || 0), hasData: Number(q?.n || 0) > 0 };
   }
 

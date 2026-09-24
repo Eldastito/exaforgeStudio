@@ -1652,6 +1652,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_stock_negative_alert_enabled INTEGER DEFAULT 0`); } catch(e){} // alerta de estoque negativo
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_commission_enabled INTEGER DEFAULT 0`); } catch(e){}        // premiação/comissão
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_monthly_close_enabled INTEGER DEFAULT 0`); } catch(e){}     // fechamento mensal acumulado
+  // Fase 4 (Toulon): FONTE OFICIAL da venda da loja p/ meta e comissão.
+  // 'system' (padrão, comportamento legado): caixa da AlterData (system_total)
+  // primeiro, folha como fallback. 'folha': o total INFORMADO no fechamento
+  // manda (a rede que confirmou por escrito que a folha é a verdade), caixa só
+  // como fallback quando não há folha. Não mexe em faturamento/DRE (decisão à
+  // parte). Default preserva os demais tenants.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_official_sale_source TEXT DEFAULT 'system'`); } catch(e){}
   // ADR-084 D4: modo de estoque / fonte da verdade (native | supervised | hybrid).
   // Default 'native' = ZappFlow como sistema principal. Invariante: um único ledger
   // autoritativo por (loja, produto) — o modo decide quem manda.

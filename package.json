@@ -117,6 +117,7 @@
     "test:retail-quota-suggest": "tsx scripts/test-retail-quota-suggest.ts",
     "test:retail-money-audit": "tsx scripts/test-retail-money-audit.ts",
     "test:retail-commission-plan-months": "tsx scripts/test-retail-commission-plan-months.ts",
+    "test:retail-official-sale-source": "tsx scripts/test-retail-official-sale-source.ts",
     "test:alterdata-auth-signal": "tsx scripts/test-alterdata-auth-signal.ts",
     "test:alterdata-xray-states": "tsx scripts/test-alterdata-xray-states.ts",
     "test:alterdata-boleta-cancel": "tsx scripts/test-alterdata-boleta-cancel.ts",

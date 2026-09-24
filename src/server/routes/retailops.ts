@@ -45,6 +45,8 @@ import { RetailGraduationService } from "../RetailGraduationService.js";
 import { RetailAdoptionService } from "../RetailAdoptionService.js";
 import { RetailDiagnosticService } from "../RetailDiagnosticService.js";
 import { RetailMoneyAuditService } from "../RetailMoneyAuditService.js";
+import { officialSaleSourceOf } from "../RetailSalesPolicy.js";
+import { logAuthEvent } from "../auditLog.js";
 import { RetailReconciliationService } from "../RetailReconciliationService.js";
 import { RetailPdvSaleLinesService } from "../RetailPdvSaleLinesService.js";
 import { RetailScanService } from "../RetailScanService.js";
@@ -125,6 +127,25 @@ router.put("/revenue-bridge", requireRole("owner", "admin"), (req: AuthRequest, 
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const enabled = RetailRevenueBridgeService.setEnabled(orgId, !!req.body?.enabled);
   res.json({ ok: true, enabled });
+});
+
+// Fase 4 (Toulon): FONTE OFICIAL da venda da loja para meta e comissão.
+// 'system' (padrão) = caixa da AlterData primeiro; 'folha' = o informado no
+// fechamento manda. Não muda faturamento/DRE. Só dono/admin.
+router.get("/official-sale-source", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ source: officialSaleSourceOf(orgId) });
+});
+
+router.put("/official-sale-source", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const source = String(req.body?.source || "");
+  if (source !== "system" && source !== "folha") return res.status(400).json({ error: "source deve ser 'system' ou 'folha'" });
+  db.prepare(`UPDATE organization_settings SET retail_official_sale_source = ? WHERE organization_id = ?`).run(source, orgId);
+  try { logAuthEvent(orgId, req.user?.userId || "system", "official_sale_source", "RETAIL_OFFICIAL_SALE_SOURCE_SET", { source }); } catch { /* noop */ }
+  res.json({ ok: true, source: officialSaleSourceOf(orgId) });
 });
 
 // --- Memória de Padrões do Varejo (ADR-142 Fatia 1): estado + lista + passe ---

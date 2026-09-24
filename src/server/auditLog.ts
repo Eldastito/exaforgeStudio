@@ -35,18 +35,29 @@ export function maskIdentifier(id: string | null | undefined): string | null {
 // users.ts e managers.ts faziam INSERT direto na tabela (sem passar por
 // nenhum helper) e tinham mutações sem NENHUM registro (troca de papel de
 // usuário, remoção de gestor) — corrigido ao migrarem para este helper.
+/**
+ * Contexto de ORIGEM da requisição (opcional). Passado só nos eventos onde a
+ * origem importa para forense (login/auth). Callers antigos não passam nada —
+ * `source_ip`/`user_agent` ficam null e o comportamento é idêntico ao de antes.
+ */
+export type AuthEventContext = { ip?: string | null; userAgent?: string | null };
+
 export function logAuthEvent(
   orgId: string | null | undefined,
   actorId: string | null | undefined,
   targetId: string | null | undefined,
   eventType: string,
-  meta: Record<string, any> = {}
+  meta: Record<string, any> = {},
+  ctx?: AuthEventContext
 ) {
   try {
+    const ip = ctx?.ip ? String(ctx.ip).slice(0, 100) : null;
+    // User-agent é atacante-controlado e pode ser enorme; limita pra não inflar a linha.
+    const ua = ctx?.userAgent ? String(ctx.userAgent).slice(0, 400) : null;
     db.prepare(`
-      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(randomUUID(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta));
+      INSERT INTO auth_audit_logs (id, organization_id, actor_user_id, target_user_id, event_type, metadata_json, source_ip, user_agent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), orgId || null, actorId || null, targetId || null, eventType, JSON.stringify(meta), ip, ua);
   } catch (e) {
     console.error("[Audit] Falha ao registrar evento", eventType, e);
   }

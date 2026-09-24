@@ -1659,6 +1659,13 @@ const initDb = () => {
   // como fallback quando não há folha. Não mexe em faturamento/DRE (decisão à
   // parte). Default preserva os demais tenants.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_official_sale_source TEXT DEFAULT 'system'`); } catch(e){}
+  // SEC — trilha forense de login: guarda IP e user-agent de origem nos eventos
+  // de auth (LOGIN_SUCCESS/FAILED/LOCKED/BLOCKED/MFA_FAILED). Antes a trilha só
+  // tinha email + timestamp, então uma investigação de "login suspeito" não
+  // conseguia recuperar a ORIGEM. Colunas nullable, aditivas, não mudam nada do
+  // fluxo de auth; base legítima = segurança da própria conta do dono.
+  try { db.exec(`ALTER TABLE auth_audit_logs ADD COLUMN source_ip TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE auth_audit_logs ADD COLUMN user_agent TEXT`); } catch(e){}
   // ADR-084 D4: modo de estoque / fonte da verdade (native | supervised | hybrid).
   // Default 'native' = ZappFlow como sistema principal. Invariante: um único ledger
   // autoritativo por (loja, produto) — o modo decide quem manda.

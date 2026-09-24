@@ -19,6 +19,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test:auth-audit-context": "tsx scripts/test-auth-audit-context.ts",
+    "test:webhook-enforce-guard": "tsx scripts/test-webhook-enforce-guard.ts",
     "test:perf-monitor": "tsx scripts/test-perf-monitor.ts",
     "test:skillos-contracts": "tsx scripts/test-skillos-contracts.ts",
     "test:skillos-registry": "tsx scripts/test-skillos-registry.ts",

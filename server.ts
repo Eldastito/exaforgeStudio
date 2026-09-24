@@ -23,7 +23,7 @@ import recoveryRoutes from "./src/server/routes/recovery.js";
 import bigIdeaRoutes from "./src/server/routes/bigIdea.js";
 import recognitionRoutes from "./src/server/routes/recognition.js";
 import philosophyAuditRoutes from "./src/server/routes/philosophyAudit.js";
-import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent, checkWebhookSecret } from "./src/server/webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, recordWebhookHit, claimWebhookEvent, checkWebhookSecret, noteValidSecretSeen } from "./src/server/webhookSecurity.js";
 import { setEvolutionWebhookSecretProvider } from "./src/server/EvolutionService.js";
 import { ChannelWebhookCredentialService } from "./src/server/ChannelWebhookCredentialService.js";
 // 17/09/2026 — injeta o segredo do webhook no registro feito pelo EvolutionService:
@@ -363,22 +363,26 @@ async function startServer() {
   // quebrar antes de você atualizar a URL na Evolution.
   let warnedNoWebhookSecret = false;
   const verifyWebhookSecret = (req: express.Request, res: express.Response): boolean => {
+    // Lê e valida o segredo SEMPRE — inclusive com enforcement desligado — pra
+    // alimentar o sinal de prontidão (noteValidSecretSeen) que o guard anti-
+    // lockout usa. Sem isso, o "aceita tudo" mascarava se o provedor já manda o
+    // segredo, e ligar o enforcement viraria um tiro no escuro.
+    // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
+    // corrompendo o query (ex.: secret=ABC/MESSAGES_UPSERT) — normalizamos
+    // pegando só o trecho antes de uma eventual barra.
+    const rawProvided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
+    const provided = String(rawProvided).split('/')[0].trim();
+    // F6: validação única — segredo GLOBAL (legado) OU credencial POR CANAL
+    // (whc_..., com janela de rotação). Tempo constante nos dois caminhos.
+    const ok = provided ? checkWebhookSecret(provided).ok : false;
+    if (ok) noteValidSecretSeen(); // prontidão p/ o guard do enforce (em memória)
     if (!isWebhookEnforced()) {
       if (!warnedNoWebhookSecret) {
         console.warn("[SECURITY] Webhook do WhatsApp ABERTO (segredo não exigido). Ative em Integrações > Segurança do WhatsApp depois de colar a URL com ?secret=... na Evolution.");
         warnedNoWebhookSecret = true;
       }
-      return true;
+      return true; // não enforçado: aceita mesmo sem segredo (comportamento atual)
     }
-    // Aceita o segredo via header (x-webhook-secret) OU query (?secret=).
-    // Caso "Webhook by Events" da Evolution: ela anexa /EVENTO ao fim da URL,
-    // o que pode corromper o valor do query (ex.: secret=ABC/MESSAGES_UPSERT).
-    // Por isso, normalizamos pegando só o trecho antes de uma eventual barra.
-    const rawProvided = (req.headers['x-webhook-secret'] as string) || (req.query.secret as string) || '';
-    const provided = String(rawProvided).split('/')[0].trim();
-    // F6: validação única — segredo GLOBAL (legado) OU credencial POR CANAL
-    // (whc_..., com janela de rotação). Tempo constante nos dois caminhos.
-    const ok = checkWebhookSecret(provided).ok;
     if (!ok) {
       console.warn(`[SECURITY] Webhook rejeitado (segredo ausente/incorreto). path=${req.path}`);
       res.status(401).json({ error: "Unauthorized webhook" });

@@ -18,6 +18,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test:auth-audit-context": "tsx scripts/test-auth-audit-context.ts",
     "test:skillos-contracts": "tsx scripts/test-skillos-contracts.ts",
     "test:skillos-registry": "tsx scripts/test-skillos-registry.ts",
     "test:skillos-resolver": "tsx scripts/test-skillos-resolver.ts",

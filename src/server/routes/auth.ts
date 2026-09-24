@@ -194,10 +194,12 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
   const attemptKey = String(email).toLowerCase();
   const ipKey = LOGIN_BY_IP ? loginClientIp(req) : null;
+  // Origem para a trilha forense (independente do rate-limit por IP estar ligado).
+  const authCtx = { ip: loginClientIp(req) || null, userAgent: (req.headers["user-agent"] as string) || null };
   const registerFail = async () => { await emailLoginLimiter.registerFailure(attemptKey); if (ipKey) await ipLoginLimiter.registerFailure(ipKey); };
   const lockMs = Math.max(await emailLoginLimiter.remainingMs(attemptKey), ipKey ? await ipLoginLimiter.remainingMs(ipKey) : 0);
   if (lockMs > 0) {
-    logAuthEvent(null, null, null, 'LOGIN_LOCKED', { email });
+    logAuthEvent(null, null, null, 'LOGIN_LOCKED', { email }, authCtx);
     return res.status(429).json({
       error: `Muitas tentativas. Tente novamente em ${Math.ceil(lockMs / 60000)} minuto(s).`,
     });
@@ -214,19 +216,19 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
     if (!rec || !user || !cred?.password_hash) {
       // Don't reveal if user exists
       await registerFail();
-      logAuthEvent(null, null, null, 'LOGIN_FAILED', { email });
+      logAuthEvent(null, null, null, 'LOGIN_FAILED', { email }, authCtx);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
     if (user.global_status === 'blocked') {
-      logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_BLOCKED', { email });
+      logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_BLOCKED', { email }, authCtx);
       return res.status(403).json({ error: "Account blocked." });
     }
 
     const match = await bcrypt.compare(password, cred.password_hash);
     if (!match) {
       await registerFail();
-      logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email });
+      logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_FAILED', { email }, authCtx);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -255,7 +257,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
       }
       if (!ok) {
         await registerFail();
-        logAuthEvent(user.organization_id, user.id, user.id, 'MFA_FAILED', { email });
+        logAuthEvent(user.organization_id, user.id, user.id, 'MFA_FAILED', { email }, authCtx);
         return res.status(401).json({ mfaRequired: true, error: "Código 2FA inválido." });
       }
     }
@@ -265,7 +267,7 @@ router.post("/login", async (req: Request, res: Response): Promise<any> => {
 
     // Update last login — best-effort (não pode derrubar o login por falha de escrita)
     try { db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?').run(user.id); } catch {}
-    logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email });
+    logAuthEvent(user.organization_id, user.id, user.id, 'LOGIN_SUCCESS', { email }, authCtx);
 
     const token = jwt.sign(
       { userId: user.id, organizationId: user.organization_id, role: user.role, role_profile_id: user.role_profile_id || null, email: user.email, name: user.name, platform_role: user.platform_role || null, sv: user.security_version ?? 1 },

@@ -7,7 +7,7 @@ import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { BackupService } from "../BackupService.js";
 import { StorageService } from "../StorageService.js";
 import { NotificationService } from "../NotificationService.js";
-import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit } from "../webhookSecurity.js";
+import { effectiveWebhookSecret, isWebhookEnforced, setWebhookEnforced, rotateStoredWebhookSecret, usingEnvSecret, getLastWebhookHit, enforcementReadiness, getLastValidSecretAt } from "../webhookSecurity.js";
 import { GoogleOAuthService } from "../GoogleOAuthService.js";
 import { GoogleAutomationService } from "../GoogleAutomationService.js";
 import { ReportsService } from "../ReportsService.js";
@@ -181,20 +181,38 @@ router.get("/whatsapp-webhook", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   const secret = effectiveWebhookSecret();
   const base = APP_BASE || `${req.protocol}://${req.headers.host}`;
+  const readiness = enforcementReadiness();
   res.json({
     url: `${base}/api/webhooks/evolution?secret=${secret}`,
     enforced: isWebhookEnforced(),
     usingEnv: usingEnvSecret(),
     lastHit: getLastWebhookHit(),
+    // Prontidão anti-lockout: o dono só deve ligar quando canEnable=true.
+    validSecretSeenAt: getLastValidSecretAt(),
+    canEnable: readiness.canEnable,
   });
 });
 
 // POST /api/integrations/whatsapp-webhook/enforce { enabled }
+// GUARD ANTI-LOCKOUT: só deixa LIGAR se o provedor já mandou um segredo válido
+// recentemente (senão ligar derrubaria o WhatsApp de entrada de TODOS os
+// tenants — a config é global). Desligar é sempre permitido (rollback).
 router.post("/whatsapp-webhook/enforce", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   if (usingEnvSecret()) return res.status(400).json({ error: "O segredo está definido por variável de ambiente (sempre exigido)." });
-  setWebhookEnforced(!!req.body?.enabled);
-  logAuthEvent(req.organizationId, req.user?.userId, undefined, 'WHATSAPP_WEBHOOK_ENFORCE', { enabled: !!req.body?.enabled });
+  const enabling = !!req.body?.enabled;
+  if (enabling) {
+    const r = enforcementReadiness();
+    if (!r.canEnable) {
+      return res.status(409).json({
+        error: "Antes de exigir o segredo, confirme que a Evolution já chama o webhook COM o segredo válido: registre a URL (Sincronizar cada canal) e mande uma mensagem de teste. Nenhuma chamada recente trouxe o segredo — ligar agora derrubaria o WhatsApp de entrada.",
+        code: "no_recent_valid_secret",
+        validSecretSeenAt: r.validSecretSeenAt,
+      });
+    }
+  }
+  setWebhookEnforced(enabling);
+  logAuthEvent(req.organizationId, req.user?.userId, undefined, 'WHATSAPP_WEBHOOK_ENFORCE', { enabled: enabling });
   res.json({ success: true, enforced: isWebhookEnforced() });
 });
 

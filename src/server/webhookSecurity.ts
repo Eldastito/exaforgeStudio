@@ -77,6 +77,29 @@ export function usingEnvSecret(): boolean {
 export function recordWebhookHit(ok: boolean, reason: string) {
   try { setConfig("webhook_last", JSON.stringify({ at: Date.now(), ok, reason })); } catch (e) { /* noop */ }
 }
+
+// PRONTIDÃO PARA ENFORCEMENT (anti-lockout) — quando a última vez que o
+// provedor mandou um segredo VÁLIDO. Fica EM MEMÓRIA de propósito: adicionar
+// uma escrita no banco por webhook agravaria a instabilidade (writes síncronos
+// travam o event-loop). Reset a cada restart é aceitável — basta uma mensagem
+// de teste pra rearmar. Alimenta o guard que impede ligar o enforcement às
+// cegas e derrubar o WhatsApp de entrada.
+let lastValidSecretAt = 0;
+export function noteValidSecretSeen(now: number = Date.now()): void { lastValidSecretAt = now; }
+export function getLastValidSecretAt(): number | null { return lastValidSecretAt > 0 ? lastValidSecretAt : null; }
+
+/** Só liga se ele é seguro. Idempotente quando já está enforçado. */
+export function enforcementReadiness(windowMs = 30 * 60 * 1000, now: number = Date.now()): {
+  enforced: boolean; usingEnv: boolean; validSecretSeenAt: number | null; recentValid: boolean; canEnable: boolean;
+} {
+  const enforced = isWebhookEnforced();
+  const usingEnv = usingEnvSecret();
+  const validSecretSeenAt = getLastValidSecretAt();
+  const recentValid = validSecretSeenAt != null && (now - validSecretSeenAt) <= windowMs;
+  // Pode ligar se já está enforçado (não muda nada) OU se viu segredo válido recente.
+  const canEnable = enforced || recentValid;
+  return { enforced, usingEnv, validSecretSeenAt, recentValid, canEnable };
+}
 export function getLastWebhookHit(): { at: number; ok: boolean; reason: string } | null {
   try { const v = getConfig("webhook_last"); return v ? JSON.parse(v) : null; } catch { return null; }
 }

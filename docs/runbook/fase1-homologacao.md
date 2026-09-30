@@ -81,12 +81,12 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 ## 3. Decisões e riscos em aberto (não escondidos)
 
 1. ~~Duas mensagens de fim de dia~~ — **resolvido (F1.6d):** fechamento por loja ligado substitui o "Fim do dia" do Tutor.
-2. **Horários 19:30 / 22:30** foram definidos pelo horário de fechamento das lojas (19h / 22h) — confirmar com o Bruno se 30 min bastam pra a folha chegar.
-3. **Alterdata intradia** (Passo 4): sem venda intradia/forma de pagamento a parcial das 16h e o "dinheiro" ficam vazios.
+2. **Horários 19:30 / 22:30** (30 min após o fechamento das lojas, 19h / 22h) — **confirmado pelo dono em 30/09/2026: 30 min bastam pra a folha chegar.**
+3. **Alterdata intradia** (Passo 4) — **o dono confirmou em 30/09/2026 que a Alterdata publica a venda do dia antes do fechamento.** É confirmação verbal, não conferida em dado: no 1º dia real, abrir `GET /api/retailops/afternoon-brief` e conferir "Vendido" e "Dinheiro" preenchidos. Se vierem vazios, a mensagem mostra "—" (nunca inventa número) e o Passo 4 não serve ao Bruno até resolver.
 4. **Fechamento com valor 0** é tratado como "aguardando" (loja fechada de verdade aparece assim).
 5. **`dailyInforme` (Informe Diário antigo)** ainda mostra `0` quando não há fechamento — contradiz a regra nova; não alterado.
 6. **Recebimento** (`RetailScanService.lookupByEan`) ainda não usa o leitor novo (F1.2) — só o Chão de loja usa.
-7. **Kleyton/Cleiton** e **matrículas desconhecidas**: aguardam o Bruno.
+7. **Kleyton/Cleiton** e **matrículas desconhecidas**: **decisão do dono em 30/09/2026 — ficam com o Bruno/equipe resolver.** Enquanto isso seguem como "Vendedor não identificado"; nada é unido sem resposta (cartão "são a mesma pessoa?" ou `POST /sellers/:id/merge`).
 8. Nada disto foi validado em navegador com dado real da TOULON; os testes usam dado de teste.
 
 ## 4. Como provar que nada quebrou

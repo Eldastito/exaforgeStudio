@@ -22,6 +22,7 @@ import db from "./db.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
+import { RetailQuestionTools } from "./RetailQuestionTools.js";
 
 export interface ExecutiveToolDef {
   name: string;
@@ -106,6 +107,37 @@ export class ExecutiveQueryToolsService {
       description: "Comissão estimada da equipe de varejo num período (mês atual por default).",
       args: [{ name: "period", description: "mes|mes_passado ou {from,to} (default: mês atual)" }],
     },
+    // F1.7b (PRD Fase 1) — perguntas simples do varejo (código em RetailQuestionTools; sem motor novo).
+    {
+      name: "meta_do_dia", money: true,
+      description: "Meta (cota) do DIA por loja: quanto vendeu até agora (fechamento se já lançado; senão parcial do caixa, rotulado), quanto falta ou se bateu. Serve: 'quanto falta pra <loja> bater a meta', 'quais lojas estão abaixo da meta hoje', 'como estão minhas lojas hoje'.",
+      args: [{ name: "store", description: "Nome (ou parte) da loja; vazio = todas" }, { name: "date", description: "YYYY-MM-DD (default: hoje)" }],
+    },
+    {
+      name: "dinheiro_do_dia", money: true,
+      description: "Venda em DINHEIRO do dia por loja e total (fechamento se já lançado; senão caixa parcial). Serve: 'quanto vendemos em dinheiro hoje'.",
+      args: [{ name: "store", description: "Nome (ou parte) da loja; vazio = todas" }, { name: "date", description: "YYYY-MM-DD (default: hoje)" }],
+    },
+    {
+      name: "vendedores_abaixo_meta", money: true,
+      description: "Vendedores há 2+ meses seguidos abaixo da meta (só meses fechados; férias/afastamento não contam contra). Serve: 'quem está há dois meses sem bater meta'.",
+      args: [],
+    },
+    {
+      name: "ranking_vendedores", money: true,
+      description: "Vendedores que mais venderam no período (default: últimos 7 dias). Serve: 'qual vendedor vendeu mais esta semana'.",
+      args: [{ name: "period", description: "hoje|ontem|semana|semana_passada|mes|mes_passado (default: semana)" }],
+    },
+    {
+      name: "divergencia_estoque", money: false,
+      description: "Divergência de estoque (saldo negativo) agrupada por causa provável e loja. Serve: 'tenho alguma divergência de estoque'.",
+      args: [],
+    },
+    {
+      name: "simular_compra", money: true,
+      description: "Simula comprar estoque de R$ X: cobertura em dias e capital que tende a empatar. Serve: 'posso comprar R$ 180 mil'. Só o valor total entra na conta (entrada/prazo não).",
+      args: [{ name: "amount", description: "Valor da compra em R$ (número)", required: true }, { name: "ignored", description: "Lista do que a pergunta citou e não é modelado (entrada, prazo)" }],
+    },
     {
       name: "catalogo_produto", money: true,
       description: "Preço e (quando controlado) estoque geral de um produto do catálogo.",
@@ -135,6 +167,20 @@ export class ExecutiveQueryToolsService {
         case "a_receber": return this.aReceber(orgId);
         case "comissao_estimada": return this.comissaoEstimada(orgId, args);
         case "catalogo_produto": return this.catalogoProduto(orgId, args);
+        case "meta_do_dia": case "dinheiro_do_dia": {
+          const st = this.resolveStore(orgId, args.store);
+          if (st?.clarify) return { ok: true, tool: def.name, clarify: st.clarify };
+          const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.date || "")) ? String(args.date) : hojeTz();
+          return def.name === "meta_do_dia" ? RetailQuestionTools.metaDoDia(orgId, date, st?.store) : RetailQuestionTools.dinheiroDoDia(orgId, date, st?.store);
+        }
+        case "vendedores_abaixo_meta": return RetailQuestionTools.vendedoresAbaixoMeta(orgId, hojeTz());
+        case "ranking_vendedores": {
+          const p = this.resolvePeriod({ period: args.period || "semana" });
+          if ("error" in p) return { ok: false, tool: def.name, error: "invalid_period" };
+          return RetailQuestionTools.rankingVendedores(orgId, p.from, p.to, p.label);
+        }
+        case "divergencia_estoque": return RetailQuestionTools.divergenciaEstoque(orgId);
+        case "simular_compra": return RetailQuestionTools.simularCompra(orgId, Number(args.amount) || null, Array.isArray(args.ignored) ? args.ignored : []);
       }
     } catch (e) {
       console.error(`[DiretorTools] Falha em ${tool}:`, e);

@@ -201,7 +201,7 @@ Estrutura pronta pro fluxo diagnóstico: `retail_daily_closings` (`informed_tota
 | F1.5 metas por pessoa | Entregue | alerta opt-in |
 | F1.6 briefings (manhã · 16h · noite) | Entregue | manhã = bloco no resumo do Tutor; 16h e noite opt-in |
 | F1.7a linguagem empresarial | Entregue | |
-| F1.7b FalaTu ("por que caiu?") | **Pendente** | |
+| F1.7b FalaTu — perguntas simples + "posso comprar?" | Entregue | 6 ferramentas no Diretor IA (`RetailQuestionTools`); "por que caiu?" segue no panorama |
 | F1.8 homologação | Entregue | `docs/runbook/fase1-homologacao.md` + `test:fase1-homologacao` |
 
 Validação com dado real da TOULON: **pendente** (roteiro no runbook).

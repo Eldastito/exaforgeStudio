@@ -23,6 +23,7 @@ import db from "./db.js";
 import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ExecutiveQueryToolsService, type ExecutiveToolResult } from "./ExecutiveQueryToolsService.js";
+import { parseMoneyPt } from "./RetailQuestionTools.js";
 
 const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const clean = (s: string) => norm(s).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -75,6 +76,21 @@ export class ExecutiveQueryRouterService {
     // vai pra ferramenta (que resolve — ou devolve clarify, nunca chuta).
     const store = this.findStoreInText(orgId, question);
     const storeTerm = store?.name || this.extractStoreTerm(question);
+
+    // F1.7b — perguntas simples do varejo (ferramentas em RetailQuestionTools). ANTES das regras genéricas de
+    // meta/estoque/vendas/caixa, que as engoliriam ("dinheiro" → caixa, "estoque" → produto, "meta" → progresso).
+    if (/(posso|da pra|d[aá] pra|devo|vale a pena|consigo).{0,25}compr/.test(ql)) {
+      const ignored = [/entrada/.test(ql) ? "a entrada" : "", /(\d+\s*dias|prazo|parcel)/.test(ql) ? "o prazo/parcelamento" : ""].filter(Boolean);
+      return { tool: "simular_compra", args: { amount: parseMoneyPt(question) ?? undefined, ignored } };
+    }
+    if (/diverg/.test(ql) && /estoque/.test(ql) || /(estoque|saldo) negativ/.test(ql)) return { tool: "divergencia_estoque", args: {} };
+    if (/dinheiro/.test(ql) && /(vend|fatur|entrou|hoje)/.test(ql) && !/(em caixa|saldo|quanto tenho)/.test(ql)) return { tool: "dinheiro_do_dia", args: { store: storeTerm, date: undefined } };
+    if (/(vendedor|vendedora|quem)/.test(ql) && /(sem bater|abaixo da meta|nao bateu|n[aã]o bateu|n[aã]o bat)/.test(ql) && /(mes|meses|seguid)/.test(ql)) return { tool: "vendedores_abaixo_meta", args: {} };
+    if (/(qual|quem|melhor|top|ranking)/.test(ql) && /vendedor/.test(ql) && /(vendeu mais|mais vendeu|melhor|top|ranking|mais vend)/.test(ql)) return { tool: "ranking_vendedores", args: { period: period || "semana" } };
+    // "quanto falta pra <loja> bater a meta" = cota do DIA da loja; sem loja/sem "hoje" (ex.: "…meta do mês?") segue na meta de negócio.
+    if (/quanto falta/.test(ql) && /(meta|cota)/.test(ql) && (period === "hoje" || (!period && storeTerm))) return { tool: "meta_do_dia", args: { store: storeTerm } };
+    if ((/como (estao|esta|vao|vai) .{0,20}lojas?/.test(ql) || /lojas? (hoje|agora)/.test(ql)) && (period === "hoje" || /agora/.test(ql))) return { tool: "meta_do_dia", args: {} };
+    if (/(cota|meta|quota)/.test(ql) && /(abaixo|nao bateu|n[aã]o bateu)/.test(ql) && period === "hoje") return { tool: "meta_do_dia", args: { store: storeTerm } };
 
     // Abaixo da cota/meta: relatório de dias negativos por loja (default mês).
     // Vem ANTES de metas_progresso senão "abaixo da meta" cairia lá.

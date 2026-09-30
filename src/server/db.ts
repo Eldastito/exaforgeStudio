@@ -12224,6 +12224,29 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_afternoon_brief_deliveries', e); }
+  // F1.5 (PRD Fase 1) — ausências do vendedor (férias/afastamento) para a ELEGIBILIDADE da meta: mês
+  // coberto por ausência não conta como "meta não batida". Lançamento humano (owner/admin); cancelar é
+  // UPDATE (nunca DELETE). A escala só distingue work/off (férias entra como 'off'), então não serve de fonte.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_seller_absences (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,                  -- retail_sellers.id
+        type TEXT NOT NULL,                       -- ferias | afastamento
+        start_date TEXT NOT NULL,                 -- YYYY-MM-DD
+        end_date TEXT NOT NULL,                   -- YYYY-MM-DD (inclusive)
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        cancelled_at DATETIME,
+        cancelled_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_seller_absences ON retail_seller_absences (organization_id, seller_id, start_date);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_seller_absences', e); }
+  // Alerta proativo (business_signals) de meses consecutivos abaixo da meta: opt-in por org (nomeia PESSOAS).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_seller_goal_streak_enabled INTEGER DEFAULT 0`); } catch(e){}
 
 };
 

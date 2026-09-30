@@ -919,6 +919,12 @@ export class Scheduler {
       import("./ProfessionalDemandService.js").then((m) => m.ProfessionalDemandService.pass())
         .catch((e) => console.error('[Scheduler] gap de demanda da rede falhou', e));
     } catch (e) { console.error('[Scheduler] pass de gap de demanda falhou', e); }
+    // Varejo — meses consecutivos abaixo da meta por PESSOA (PRD Fase 1, F1.5): sinal nominal no
+    // `business_signals`, 1x/dia, só orgs que ligaram o alerta (opt-in — nomeia pessoas). Best-effort.
+    try {
+      import("./SellerGoalStreakService.js").then((m) => m.SellerGoalStreakService.pass())
+        .catch((e) => console.error('[Scheduler] sinal de meta por vendedor falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de meta por vendedor falhou', e); }
     // Reconciliação de P&L — sinal advisory de sobreposição de receita (ADR-182 F4): só orgs
     // com a ponte Fechamento→Faturamento ligada; hipótese, nunca inventa dinheiro. Best-effort.
     try {

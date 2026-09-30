@@ -4,6 +4,8 @@ import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { onlyDigits } from "./phoneMatch.js";
+import { RetailDayBriefService } from "./RetailDayBriefService.js";
+import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 
 /**
  * Tutor de Gestão no WhatsApp (ADR-131, Fatia 1: resumo da manhã).
@@ -91,6 +93,12 @@ export class BusinessTutorService {
       lines.push("");
       lines.push("Nenhuma urgência hoje — caixa e prioridades sob controle. 👍");
     }
+
+    // F1.6a: varejo com cota do dia cadastrada recebe "quanto cada loja tem que vender hoje" (sem cota → nada muda).
+    try {
+      const cota = RetailDayBriefService.morningLines(orgId, FalaTuBriefingDigestService.spParts(new Date()).dateSP);
+      if (cota.length) lines.push("", ...cota);
+    } catch { /* best-effort: o resumo da manhã não cai por causa da cota */ }
 
     // Sinais da operação (ADR-136): leva o Pareto de TODOS os domínios ao briefing
     // (produção, compras, pessoas, varejo, estoque, vendas…). Exclui "finance"

@@ -31,6 +31,7 @@ import { RetailDayBriefService } from "../RetailDayBriefService.js";
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
 import { RetailReplenishmentStrategyService } from "../RetailReplenishmentStrategyService.js";
+import { RetailCommissionImportService } from "../RetailCommissionImportService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
 import { RetailSellerAbsenceService } from "../RetailSellerAbsenceService.js";
@@ -2148,6 +2149,15 @@ router.post("/commission/policies/proposals", requireRole("owner", "admin"), (re
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.status(201).json(RetailCommissionPolicyService.propose(orgId, { storeId: req.body?.storeId ?? null, month: req.body?.month ?? null, config: req.body?.config, source: req.body?.source, sourceRef: req.body?.sourceRef ?? null, note: req.body?.note ?? null, submit: !!req.body?.submit }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+// F1.4b — importação por IA de regras coladas em texto: SÓ cria PROPOSTA (draft). Nunca ativa/paga; confirmar é gesto do dono.
+router.post("/commission/policies/import", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = await RetailCommissionImportService.interpret(orgId, { text: String(req.body?.text ?? ""), storeId: req.body?.storeId ?? null, month: req.body?.month ?? null, sourceRef: req.body?.sourceRef ?? null }, req.user?.userId);
+    res.status(r.created === true ? 201 : (r.error === "llm_unavailable" ? 503 : 422)).json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 router.post("/commission/policies/proposals/:id/submit", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

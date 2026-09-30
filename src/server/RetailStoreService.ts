@@ -36,9 +36,11 @@ export type StoreInput = {
    * sem cobrança de pendência. A escala lançada no dia sempre vence (abre um
    * domingo excepcional). null/[] = abre todos os dias. */
   closedWeekdays?: number[] | null;
+  /** F1.6d — HH:MM (São Paulo) em que o gestor recebe o resumo de fechamento DESTA loja. null = padrão da rede (22:30). */
+  closingBriefTime?: string | null;
 };
 
-const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays, created_at, updated_at`;
+const STORE_COLS = `id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays, closing_brief_time, created_at, updated_at`;
 const numOrNull = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const sellerSourceOrNull = (v: any): string | null => (v === "manual" ? "manual" : null);
 // Margem em %: aceita 0..100; fora disso (ou vazio) vira null (não informada).
@@ -49,6 +51,13 @@ const marginOrNull = (v: any): number | null => {
 };
 // Dias fechados: só inteiros 0..6, únicos e ordenados; vazio vira null. Todos
 // os 7 dias fechados é cadastro sem sentido (loja que nunca abre) — rejeita.
+// HH:MM 00:00–23:59 (hora de SP); vazio = null (usa o padrão da rede). Formato inválido é recusado, não adivinhado.
+const briefTimeOrNull = (v: any): string | null => {
+  if (v === null || v === undefined || String(v).trim() === "") return null;
+  const m = String(v).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) throw new Error("Horário do resumo inválido — use HH:MM (ex.: 19:30).");
+  return `${m[1].padStart(2, "0")}:${m[2]}`;
+};
 const closedWeekdaysOrNull = (v: any): string | null => {
   if (v === null || v === undefined) return null;
   const arr = Array.isArray(v) ? v : [];
@@ -96,8 +105,8 @@ export class RetailStoreService {
     this.assertCodeFree(orgId, input.code);
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO retail_stores (id, organization_id, name, code, whatsapp_identifier, manager_user_id, manager_contact_id, active, address, city, latitude, longitude, seller_source, gross_margin_percent, closed_weekdays, closing_brief_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, orgId, name,
       input.code ? String(input.code).trim() : null,
@@ -111,7 +120,8 @@ export class RetailStoreService {
       numOrNull(input.longitude),
       sellerSourceOrNull(input.sellerSource),
       marginOrNull(input.grossMarginPercent),
-      closedWeekdaysOrNull(input.closedWeekdays)
+      closedWeekdaysOrNull(input.closedWeekdays),
+      briefTimeOrNull(input.closingBriefTime)
     );
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_STORE_CREATED", { name }); } catch { /* noop */ }
     return this.get(orgId, id);
@@ -321,6 +331,7 @@ export class RetailStoreService {
       seller_source: patch.sellerSource !== undefined ? sellerSourceOrNull(patch.sellerSource) : undefined,
       gross_margin_percent: patch.grossMarginPercent !== undefined ? marginOrNull(patch.grossMarginPercent) : undefined,
       closed_weekdays: patch.closedWeekdays !== undefined ? closedWeekdaysOrNull(patch.closedWeekdays) : undefined,
+      closing_brief_time: patch.closingBriefTime !== undefined ? briefTimeOrNull(patch.closingBriefTime) : undefined,
     };
     // Guarda de código único entre lojas ATIVAS: cobre troca de código e
     // REATIVAÇÃO de loja cujo código já está em uso por outra ativa.

@@ -12224,6 +12224,9 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_afternoon_brief_deliveries', e); }
+  // F1.6d (PRD Fase 1) — horário do resumo de FECHAMENTO por loja (HH:MM, hora de São Paulo). NULL = padrão da rede (22:30).
+  // Lojas de shopping fecham em horários diferentes (Avenida Brasil 19h, demais 22h): cada loja recebe o resumo depois do SEU fechamento.
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN closing_brief_time TEXT`); } catch(e){}
   // F1.3 (PRD Fase 1) — estratégia de reposição da empresa: NULL/continuous_replenishment = comportamento de sempre
   // (0-regressão); collection_sellout = produto que zera no fim da coleção NÃO gera sugestão de recompra.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_replenishment_strategy TEXT`); } catch(e){}

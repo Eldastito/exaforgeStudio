@@ -47,12 +47,18 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
   `payments_json.dinheiro` vêm preenchidos? Se não, a parcial sai `—` (honesto), não erra — mas não serve ao Bruno.
   O texto rotula "caixa (PDV) — parcial, não é o fechamento" e avisa dados desatualizados (>90 min sem sync).
 
-### Passo 5 — Fechamento da noite (F1.6c)
-- `PUT /api/retailops/night-brief/enabled {"enabled":true}`; prévia em `GET /api/retailops/day-brief`.
-- Janela **21h–23h (SP)** — chute, **confirmar com o Bruno a hora em que os fechamentos chegam**; antes disso as lojas saem
-  "aguardando fechamento".
-- Conferir: por loja venda (folha), cota, atingimento, dinheiro, semana (seg–dom) e mês; dia sem fechamento = acumulado **parcial**.
-- **Reverter:** `PUT .../night-brief/enabled {"enabled":false}`.
+### Passo 5 — Fechamento da noite, no horário de cada loja (F1.6c/F1.6d)
+1. **Definir o horário de cada loja** (uma vez): em **Lojas → editar a loja → "Resumo de fechamento no WhatsApp às"**.
+   TOULON (lojas de shopping): **Avenida Brasil = 19:30** (fecha às 19h) · **as demais = 22:30** (fecham às 22h — é o padrão da rede, pode deixar vazio).
+   Sem preencher, a Avenida Brasil cairia no resumo das 22:30 junto com as outras (não quebra nada, só chega mais tarde).
+2. Ligar: `PUT /api/retailops/night-brief/enabled {"enabled":true}`; prévia em `GET /api/retailops/day-brief`.
+3. Como sai: **19:30 só a Avenida Brasil** (sem "Rede") · **22:30 as demais + o bloco "Rede"** (o último horário do dia fecha a rede toda).
+   Domingo a Avenida Brasil não abre (`closed_weekdays`) — sai do dia e não trava o total da rede. O passe roda a cada 5 min;
+   se o servidor estiver fora do ar, ainda envia até 3h depois do horário.
+4. Conferir: por loja venda (folha), cota, atingimento, dinheiro, semana (seg–dom) e mês; loja sem fechamento = "aguardando";
+   dia sem fechamento = acumulado **parcial**. Confirme com o Bruno se 30 min depois do fechamento é suficiente pra folha chegar.
+5. **Sem mensagem dupla:** com o fechamento por loja ligado, o "Fim do dia" genérico do Tutor **deixa de sair** (manhã e meio-dia continuam).
+- **Reverter:** `PUT .../night-brief/enabled {"enabled":false}` — o "Fim do dia" do Tutor volta sozinho.
 
 ### Passo 6 — Metas por pessoa (F1.5) — só depois do Passo 1
 1. Lançar **ausências** (férias/afastamento): `POST /sellers/:sellerId/absences` — sem isso o mês de férias conta como "meta não batida".
@@ -74,10 +80,8 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 
 ## 3. Decisões e riscos em aberto (não escondidos)
 
-1. **Duas mensagens de fim de dia?** O Tutor já tem um resumo "Fim do dia" (18h–22h, genérico, por empresa) sob o mesmo botão
-   da manhã. Com o fechamento da noite (21h–23h, por loja) ligado, o Bruno pode receber **duas**. Decidir: manter as duas,
-   ou separar o botão do Tutor (hoje um só liga manhã+meio-dia+fim do dia).
-2. **Janela 21h–23h** e a hora real dos fechamentos (Passo 5).
+1. ~~Duas mensagens de fim de dia~~ — **resolvido (F1.6d):** fechamento por loja ligado substitui o "Fim do dia" do Tutor.
+2. **Horários 19:30 / 22:30** foram definidos pelo horário de fechamento das lojas (19h / 22h) — confirmar com o Bruno se 30 min bastam pra a folha chegar.
 3. **Alterdata intradia** (Passo 4): sem venda intradia/forma de pagamento a parcial das 16h e o "dinheiro" ficam vazios.
 4. **Fechamento com valor 0** é tratado como "aguardando" (loja fechada de verdade aparece assim).
 5. **`dailyInforme` (Informe Diário antigo)** ainda mostra `0` quando não há fechamento — contradiz a regra nova; não alterado.

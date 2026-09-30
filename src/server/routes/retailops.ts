@@ -27,6 +27,7 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
+import { RetailDayBriefService } from "../RetailDayBriefService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
 import { RetailSellerAbsenceService } from "../RetailSellerAbsenceService.js";
@@ -2181,6 +2182,22 @@ router.put("/afternoon-brief/enabled", requireRole("owner", "admin"), (req: Auth
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ enabled: RetailAfternoonBriefService.setEnabled(orgId, !!req.body?.enabled) });
+});
+
+// F1.6a/c — cota da manhã e fechamento da noite por loja. Preview do que o gestor recebe. owner/admin (dinheiro §73).
+router.get("/day-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  try {
+    const night = RetailDayBriefService.nightSnapshot(orgId, date);
+    res.json({ morning: RetailDayBriefService.morningQuotas(orgId, date), night, nightText: RetailDayBriefService.nightText(night), nightEnabled: RetailDayBriefService.enabled(orgId) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.put("/night-brief/enabled", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: RetailDayBriefService.setEnabled(orgId, !!req.body?.enabled) });
 });
 
 // F1.5 — meses CONSECUTIVOS abaixo da meta por PESSOA (rede toda, identidade canônica). owner/admin

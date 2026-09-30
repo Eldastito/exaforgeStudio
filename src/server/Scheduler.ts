@@ -679,6 +679,24 @@ export class Scheduler {
     }
   }
 
+  /** Varejo — FECHAMENTO DA NOITE por WhatsApp (PRD Fase 1, F1.6c): mesmo molde da parcial das 16h, janela 21h–23h (SP). */
+  static async retailNightBriefPass() {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE retail_night_brief_enabled = 1`).all() as any[]; } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
+        if (!channel) continue;
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        const { RetailDayBriefService } = await import("./RetailDayBriefService.js");
+        await RetailDayBriefService.runPass(orgId, { now, send });
+      } catch (e) { console.error("[Retail] fechamento da noite falhou", orgId, e); }
+    }
+  }
+
   static async falatuBriefingDigestPass() {
     let orgs: any[] = [];
     try {
@@ -1121,6 +1139,7 @@ export class Scheduler {
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     await this.retailAfternoonBriefPass().catch(e => console.error('[Scheduler] parcial das 16h falhou', e));
+    await this.retailNightBriefPass().catch(e => console.error('[Scheduler] fechamento da noite falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
     await this.falatuProactiveAlertPass().catch(e => console.error('[Scheduler] alerta proativo FalaTu falhou', e));
     await this.falatuEmailDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por e-mail falhou', e));

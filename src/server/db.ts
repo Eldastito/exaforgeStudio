@@ -12224,6 +12224,21 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_afternoon_brief_deliveries', e); }
+  // F1.6c (PRD Fase 1) — fechamento da noite por WhatsApp pro gestor: mesmo molde da parcial das 16h
+  // (opt-in por org + dedupe de entrega por (org, usuário, dia)). Best-effort (conv. nº 7).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_night_brief_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_night_brief_deliveries (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        brief_date TEXT NOT NULL,                 -- YYYY-MM-DD (São Paulo)
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, user_id, brief_date)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_night_brief_deliveries', e); }
   // F1.5 (PRD Fase 1) — ausências do vendedor (férias/afastamento) para a ELEGIBILIDADE da meta: mês
   // coberto por ausência não conta como "meta não batida". Lançamento humano (owner/admin); cancelar é
   // UPDATE (nunca DELETE). A escala só distingue work/off (férias entra como 'off'), então não serve de fonte.

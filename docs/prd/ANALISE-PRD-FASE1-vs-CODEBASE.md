@@ -187,3 +187,21 @@ Estrutura pronta pro fluxo diagnóstico: `retail_daily_closings` (`informed_tota
 - Não criar 2º scheduler pros 3 momentos — passes no `Scheduler.tick`.
 - Não `DELETE`/reordenar em `db.ts` — CREATE-then-ALTER aditivo no fim; `policy_status` com default que preserva linhas atuais.
 - Não somar `fact` com `estimate` nos totais do briefing.
+
+## Status de entrega (F1.8 — atualizado)
+
+| Fatia | Estado | Observação |
+| --- | --- | --- |
+| F1.0 estados semânticos | Entregue | `src/lib/metric.ts` |
+| F1.1 identidade de vendedor (a+b+c) | Entregue | c = cartão contextual, sem tela nova (`RetailSellerDuplicateService`) |
+| F1.2 leitor de código | Entregue | só o Chão de loja; recebimento ainda no leitor antigo |
+| F1.3 política de estoque | Entregue | estratégia de reposição + diagnóstico do negativo |
+| F1.4a política de comissão (status) | Entregue | proposta ≠ pagamento |
+| F1.4b importação por IA das regras | **Pendente** | só criaria proposta |
+| F1.5 metas por pessoa | Entregue | alerta opt-in |
+| F1.6 briefings (manhã · 16h · noite) | Entregue | manhã = bloco no resumo do Tutor; 16h e noite opt-in |
+| F1.7a linguagem empresarial | Entregue | |
+| F1.7b FalaTu ("por que caiu?") | **Pendente** | |
+| F1.8 homologação | Entregue | `docs/runbook/fase1-homologacao.md` + `test:fase1-homologacao` |
+
+Validação com dado real da TOULON: **pendente** (roteiro no runbook).

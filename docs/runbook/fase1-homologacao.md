@@ -97,3 +97,61 @@ npm run test:retail-day-brief test:seller-duplicates test:retail-replenishment-s
 ```
 **Reversão geral:** cada fatia é um PR isolado e os dados são só `ALTER`/`CREATE` aditivos — reverter o código não perde dado.
 As chaves acima desligam o comportamento por organização sem deploy.
+
+## 5. Checklist do primeiro dia real (TOULON)
+
+> Vale para as lojas de shopping. Ligue **uma chave por vez** e confira antes de passar à próxima.
+> Este dia só homologa se alguém **compara com a folha** — "o Bruno não reclamou" não é validação.
+
+### Véspera (sem o Bruno)
+- [ ] **Lojas → Avenida Brasil → editar:** "Resumo de fechamento no WhatsApp às" = **19:30**. As demais ficam vazias (= 22:30).
+- [ ] **Cotas** de cada loja cadastradas para o dia (`retail_store_quotas`). Sem cota o bloco da manhã não aparece.
+- [ ] `retail_official_sale_source = 'folha'`.
+- [ ] Cartão "são a mesma pessoa?" respondido (Lohan, Eduardo → Eduardo Lázaro com cobertura de férias, Vinícius Romão ≠ Nascimento). Kleyton/Cleiton ficam com o Bruno e seguem "não identificado".
+- [ ] Telefone do Bruno cadastrado para receber o WhatsApp.
+- [ ] **Não ligar neste dia** o alerta de metas por vendedor (Passo 6) nem a estratégia de reposição (Passo 8).
+
+### Manhã
+- [ ] Ligar **Central de Saúde → "Receber este resumo no WhatsApp toda manhã"**; conferir a prévia em `GET /api/health-center/tutor`.
+- [ ] "Cota de hoje por loja" com o valor certo de cada loja; loja sem cota em "Sem cota cadastrada"; Rede só com total se toda loja tem cota.
+- [ ] Bruno recebeu no WhatsApp e confirma que as cotas batem.
+
+### Antes das 16h — maior risco do dia
+- [ ] Abrir `GET /api/retailops/afternoon-brief`: **"Vendido" e "Dinheiro" preenchidos** por loja? Se vierem `—`, a Alterdata não publica a venda antes do fechamento → **não ligar** a parcial.
+- [ ] Se preenchidos, comparar 2–3 lojas com o caixa que o Bruno enxerga.
+- [ ] Só então: `PUT /api/retailops/afternoon-brief/enabled {"enabled":true}`.
+- [ ] Após as 16h: texto diz "caixa (PDV) — parcial, não é o fechamento"; o aviso de dado desatualizado (>90 min sem sync) não apareceu por engano.
+
+### Antes de ligar o fechamento
+- [ ] `GET /api/retailops/day-brief` comparado, valor por valor, com a folha de uma loja: venda (folha), cota, atingimento, dinheiro, semana (seg–dom) e mês.
+- [ ] Loja sem fechamento = "aguardando"; dia sem fechamento = acumulado "parcial".
+- [ ] Ligar: `PUT /api/retailops/night-brief/enabled {"enabled":true}`.
+
+### 19:30 — Avenida Brasil
+- [ ] Chegou **só a Avenida Brasil**, sem bloco "Rede".
+- [ ] A folha já tinha chegado. Se veio "aguardando", anotar a hora real em que a folha chega.
+- [ ] Números conferem com o que o Bruno vê.
+
+### 22:30 — demais lojas + Rede
+- [ ] Chegaram as demais lojas + bloco **"Rede"**; o total da Rede fecha com a soma das lojas.
+- [ ] Nenhuma loja com `R$ 0,00` no lugar de "aguardando".
+- [ ] **Não** chegou o "Fim do dia" genérico do Tutor (a mensagem dupla); manhã e meio-dia do Tutor seguem normais.
+
+### Critério de aceite (com o Bruno, no dia seguinte)
+- [ ] Números das 19:30 e 22:30 bateram com a folha dele.
+- [ ] A parcial das 16h trouxe "Vendido" e "Dinheiro" — ou foi decidido que ela não serve.
+- [ ] Nenhuma mensagem duplicada.
+- [ ] 30 min após o fechamento foram suficientes para a folha chegar.
+- [ ] O Bruno disse com as próprias palavras que serve.
+
+### Se algo vier errado
+| Sintoma | O que fazer |
+| --- | --- |
+| Parcial com `—` | Desligar (`afternoon-brief/enabled false`). Nada quebra, só não serve ainda. |
+| Fechamento diverge da folha | Desligar (`night-brief/enabled false`; o "Fim do dia" do Tutor volta sozinho). Registrar dia, loja, valor da mensagem e valor da folha. |
+| Avenida Brasil chegou às 22:30 | O horário 19:30 não foi salvo na loja. |
+| Loja "aguardando" com folha já enviada | Registrar loja e hora em que a folha chegou. |
+| Mensagem dupla de fim de dia | Não deveria acontecer — reportar. |
+
+### Pontos cegos
+- Este dia só exercita um caso. **Domingo** a Avenida Brasil não abre (`closed_weekdays`) e ninguém conferiu o total da Rede nesse cenário — olhar no primeiro domingo.

@@ -12224,6 +12224,9 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_afternoon_brief_deliveries', e); }
+  // F1.3 (PRD Fase 1) — estratégia de reposição da empresa: NULL/continuous_replenishment = comportamento de sempre
+  // (0-regressão); collection_sellout = produto que zera no fim da coleção NÃO gera sugestão de recompra.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_replenishment_strategy TEXT`); } catch(e){}
   // F1.1c (PRD Fase 1) — "pessoas diferentes": o dono disse que dois nomes parecidos NÃO são a mesma pessoa
   // (Vinícius Romão ≠ Vinícius Nascimento); o par é memorizado e nunca mais sugerido. Par ordenado (a < b).
   try {

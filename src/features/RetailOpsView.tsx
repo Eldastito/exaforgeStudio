@@ -6393,6 +6393,21 @@ function NegativeStockTab() {
   const [storeId, setStoreId] = useState('');
   const [q, setQ] = useState('');
   const [policyRow, setPolicyRow] = useState<any | null>(null);
+  // F1.3: diagnóstico por causa provável (agrupado) + estratégia de reposição da empresa — tudo nesta mesma aba.
+  const { user: authUser } = useAuth();
+  const canSetStrategy = authUser?.role === 'owner' || authUser?.role === 'admin';
+  const [diag, setDiag] = useState<any | null>(null);
+  const [strategy, setStrategy] = useState<string>('continuous_replenishment');
+  useEffect(() => {
+    apiFetch(`/api/retailops/stock/negative/diagnosis?storeId=${storeId}`).then(r => (r.ok ? r.json() : null)).then(d => setDiag(d && Array.isArray(d.byCause) ? d : null)).catch(() => setDiag(null));
+  }, [storeId]);
+  useEffect(() => { apiFetch('/api/retailops/stock/replenishment-strategy').then(r => (r.ok ? r.json() : null)).then(d => { if (d?.strategy) setStrategy(d.strategy); }).catch(() => {}); }, []);
+  const changeStrategy = async (v: string) => {
+    const prev = strategy; setStrategy(v);
+    const res = await apiFetch('/api/retailops/stock/replenishment-strategy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ strategy: v }) });
+    if (res.ok) toast.success(v === 'collection_sellout' ? 'Fim de coleção: produto que zera não gera mais sugestão de recompra (exceto peça com meta de estoque).' : 'Reposição contínua: voltou a sugerir recompra do que zera.');
+    else { setStrategy(prev); toast.error('Não foi possível trocar a estratégia.'); }
+  };
   const load = (offset: number, append: boolean) => {
     append ? setLoadingMore(true) : setLoading(true);
     apiFetch(`/api/retailops/stock/negative?storeId=${storeId}&q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${offset}`)
@@ -6413,6 +6428,27 @@ function NegativeStockTab() {
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[12px] text-zinc-400">Itens com saldo <strong className="text-red-300">negativo</strong> por loja — normalmente venda lançada sem entrada correspondente. Corrija a entrada no estoque. <span className="text-zinc-500">Busque por nome, referência ou código de barras.</span></p>
         <button onClick={() => load(0, false)} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
+      </div>
+      {diag && diag.total > 0 && (
+        <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="text-sm font-medium text-zinc-200">{diag.headline}</div>
+          <div className="mt-2 space-y-1">
+            {diag.byCause.map((c: any) => (
+              <div key={c.cause} className="text-[12px] text-zinc-300">
+                <span className={c.cause === 'unknown' ? 'text-zinc-500' : 'text-amber-200'}>{c.count}× {c.label}</span>
+                <span className="text-zinc-500"> — {c.stores.map((x: any) => `${x.storeName} (${x.count})`).join(', ')}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-zinc-500">Só classifico o que os dados provam; o resto fica como "causa não identificada". Saldo negativo é divergência de dado, não fim de coleção.</p>
+        </div>
+      )}
+      <div className="mb-3 flex items-center gap-2 flex-wrap text-xs text-zinc-400">
+        <span>Reposição da empresa:</span>
+        <select value={strategy} disabled={!canSetStrategy} onChange={e => changeStrategy(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100 disabled:opacity-60">
+          <option value="continuous_replenishment">Contínua — sugerir recompra do que zera</option>
+          <option value="collection_sellout">Fim de coleção — zerar é normal (só repor peça com meta de estoque)</option>
+        </select>
       </div>
       {(total > 0 || filtered) && (
         <div className="mb-3 flex items-center gap-2 flex-wrap">

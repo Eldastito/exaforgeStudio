@@ -7,6 +7,7 @@ import { OwnerDrawService } from "./OwnerDrawService.js";
 import { QuoteService } from "./QuoteService.js";
 import { RetailImpactService } from "./RetailImpactService.js";
 import db from "./db.js";
+import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 
 /**
  * Central de Saúde e Decisão (ADR-126 Fatia 1) — camada de SÍNTESE.
@@ -295,6 +296,31 @@ export class BusinessHealthService {
     return CashActionService.ledger(orgId);
   }
 
+  /**
+   * F1.7a — "o que precisa de atenção" vindo da MESMA fonte da lista de prioridades (o ledger de sinais), pra
+   * a síntese e a lista nunca se contradizerem ("Sem alertas hoje" + 3 assuntos). Conta só o que pede a
+   * atenção do dono: severidade ≥ atenção; sinal TÉCNICO só entra se for risco/crítico (automação que já se
+   * corrigiu nem chega aqui — sinal resolvido não está aberto). Nada inventado: se a leitura falhar, 0 itens
+   * e a síntese cai no comportamento anterior.
+   */
+  static attention(orgId: string): { count: number; items: Array<{ signalId: string; title: string; actionLabel: string; severity: string; domainLabel: string }>; technicalHidden: number } {
+    try {
+      const global: any[] = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 200, perDomain: 200, skipGoals: true })?.global || [];
+      const OWNER_SEV = new Set(["attention", "risk", "critical"]);
+      let technicalHidden = 0;
+      const rel = global.filter((p) => {
+        if (!OWNER_SEV.has(String(p.severity))) return false;                                   // info = acompanhamento, não grita
+        if (p.presentation?.audience === "technical" && p.severity === "attention") { technicalHidden += 1; return false; } // técnico só se risco/crítico
+        return true;
+      });
+      return {
+        count: rel.length,
+        items: rel.slice(0, 5).map((p) => ({ signalId: p.signalId, title: p.presentation?.title || "Ponto de atenção", actionLabel: p.presentation?.actionLabel || "Ver detalhes e decidir", severity: String(p.severity), domainLabel: p.presentation?.domainLabel || "Seu negócio" })),
+        technicalHidden,
+      };
+    } catch { return { count: 0, items: [], technicalHidden: 0 }; }
+  }
+
   /** Payload da tela: status + gatilhos + frase-síntese + top-3 + Impact Ledger. */
   static overview(orgId: string, minCash = 0) {
     const st = this.status(orgId, minCash);
@@ -302,7 +328,11 @@ export class BusinessHealthService {
     const open = this.openTitles(orgId);
     const label: Record<StatusLevel, string> = { saudavel: "Saudável", atencao: "Atenção", risco: "Risco", critico: "Crítico" };
     let synthesis: string;
-    if (st.status === "saudavel") synthesis = "Sem alertas hoje. Siga cuidando do caixa e das vendas.";
+    const attention = this.attention(orgId);
+    // Saudável só no caixa NÃO é "sem alertas": a síntese lê a mesma fonte da lista de atenção (F1.7a).
+    if (st.status === "saudavel") synthesis = attention.count === 0
+      ? "Nenhuma ação humana necessária. Operação sob controle."
+      : `${attention.count} ${attention.count === 1 ? "assunto precisa" : "assuntos precisam"} de atenção.`;
     else if (priorities[0]) synthesis = `${st.triggers[0]?.label || "Há pontos de atenção."} Comece por: ${priorities[0].title.toLowerCase()}.`;
     else synthesis = st.triggers[0]?.label || "Há pontos de atenção.";
     const statusLabel = label[st.status];
@@ -311,6 +341,7 @@ export class BusinessHealthService {
     return {
       status: st.status,
       statusLabel,
+      attention,
       triggers: st.triggers,
       synthesis,
       narrative,

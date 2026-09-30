@@ -86,7 +86,8 @@ export class BusinessTutorService {
         const imp = Number(p?.impact) > 0 ? ` (impacto ~${brl(p.impact)})` : "";
         lines.push(`${i + 1}. ${p.title}${imp}`);
       });
-    } else {
+    } else if (!(ov?.attention?.count > 0)) {
+      // F1.7a: só diz "nenhuma urgência" quando a MESMA fonte da síntese também não tem assunto aberto
       lines.push("");
       lines.push("Nenhuma urgência hoje — caixa e prioridades sob controle. 👍");
     }
@@ -107,7 +108,9 @@ export class BusinessTutorService {
             else if (p.impact.unit === "units") imp = ` (${p.impact.amount} un)`;
             else imp = ` (${p.impact.amount}${p.impact.unit ? ` ${p.impact.unit}` : ""})`;
           }
-          lines.push(`• ${p.recommendedAction || p.interpretation || p.fact}${imp}`);
+          // F1.7a: linguagem empresarial (antes vazava "Sinal 'x' no domínio y…" quando não havia ação mapeada)
+          const action = p.presentation?.actionLabel ? ` → ${p.presentation.actionLabel}` : "";
+          lines.push(`• ${p.presentation?.title || p.recommendedAction || "Ponto de atenção no seu negócio"}${imp}${action}`);
         });
       }
     } catch { /* noop */ }

@@ -4716,6 +4716,8 @@ function RaceSection({ stores }: { stores: any[] }) {
       </div>
       <p className="mt-1 text-[11px] text-zinc-500">O padrão da sua planilha: bateu a cota 1% · +10% 1,5% · +20% 2% · +30% 3% (vale a maior) · P.A ≥ 2,50 com cota · 1º/2º da semana · desvio de cota da rede · bloco do gerente. Cota individual vem do cadastro semanal ou da escala (cota da loja ÷ escalados). Ajuste tudo em “Configurar corrida”.</p>
 
+      <div className="mt-2"><SellerDuplicatesCard /></div>
+
       {/* Vendas SEM loja atribuída — não entram na corrida (por que "não confere"). */}
       {race && race.unassigned && (
         <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-200">
@@ -6724,6 +6726,63 @@ function SellerScoreboardTab() {
 
 // `embedStoreId`: quando presente, o diretório roda EMBUTIDO (ex.: dentro da aba
 // Metas) — segue a loja de fora e esconde o próprio seletor/título.
+// F1.1c — "esses dois são a mesma pessoa?": cartão contextual (sem tela/menu novo). Só aparece quando o
+// sistema vê nome parecido entre vendedores e some quando o dono responde. Nunca funde sozinho.
+function SellerDuplicatesCard() {
+  const [items, setItems] = useState<any[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [cover, setCover] = useState<{ key: string; start: string; end: string } | null>(null);
+  const load = useCallback(() => {
+    apiFetch('/api/retailops/sellers/identity/suggestions').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.suggestions) ? d.suggestions : [])).catch(() => setItems([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!items.length) return null;
+  const post = async (key: string, url: string, body: any, okMsg: string) => {
+    setBusy(key);
+    try {
+      const res = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(okMsg); setCover(null); load(); } else toast.error(d.error || 'Não foi possível concluir.');
+    } finally { setBusy(null); }
+  };
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Users className="w-4 h-4 text-amber-400" /> Confirme os nomes de vendedores <span className="text-[11px] font-normal text-zinc-500">— nada é unido sem a sua resposta</span></div>
+      <div className="mt-2 space-y-2">
+        {items.map((s: any) => {
+          const key = `${s.a.id}:${s.b.id}`;
+          const loja = (x: any) => (x.stores?.length ? x.stores.join(', ') : 'sem loja');
+          return (
+            <div key={key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+              <div className="text-sm text-zinc-100">{s.question}</div>
+              <div className="mt-0.5 text-[11px] text-zinc-500">{s.a.name} ({loja(s.a)}) · {s.b.name} ({loja(s.b)})</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {s.kind === 'likely' ? (<>
+                  <button disabled={busy === key} onClick={() => post(key, '/api/retailops/sellers/identity/confirm-same', { aId: s.a.id, bId: s.b.id, intoId: s.suggestedIntoId }, 'Unidos — dá pra desfazer depois.')} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Sim, é a mesma pessoa</button>
+                  <button disabled={busy === key} onClick={() => setCover(cover?.key === key ? null : { key, start: '', end: '' })} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Sim, está cobrindo férias em outra loja</button>
+                  <button disabled={busy === key} onClick={() => post(key, '/api/retailops/sellers/identity/not-same', { aId: s.a.id, bId: s.b.id }, 'Ok, são pessoas diferentes — não pergunto de novo.')} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Não, são pessoas diferentes</button>
+                </>) : (<>
+                  <button disabled={busy === key} onClick={() => post(key, '/api/retailops/sellers/identity/not-same', { aId: s.a.id, bId: s.b.id }, 'Ok, são pessoas diferentes — não pergunto de novo.')} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Pessoas diferentes</button>
+                  <button disabled={busy === key} onClick={() => post(key, '/api/retailops/sellers/identity/confirm-same', { aId: s.a.id, bId: s.b.id, intoId: s.suggestedIntoId }, 'Unidos — dá pra desfazer depois.')} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">É a mesma pessoa</button>
+                </>)}
+              </div>
+              {cover?.key === key && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+                  <span>Cobrindo de</span>
+                  <input type="date" value={cover.start} onChange={e => setCover({ ...cover, start: e.target.value })} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+                  <span>até</span>
+                  <input type="date" value={cover.end} onChange={e => setCover({ ...cover, end: e.target.value })} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
+                  <button disabled={busy === key || !cover.start || !cover.end} onClick={() => post(key, '/api/retailops/sellers/identity/confirm-same', { aId: s.a.id, bId: s.b.id, intoId: s.suggestedIntoId, coverage: { startDate: cover.start, endDate: cover.end } }, 'Unidos, com a cobertura de férias registrada.')} className="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">Confirmar cobertura</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
   const [stores, setStores] = useState<any[]>([]);
   const [storeIdInternal, setStoreId] = useState('');
@@ -6743,6 +6802,7 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
 
   return (
     <div>
+      {!embedStoreId && <SellerDuplicatesCard />}
       <div className="mb-3 flex items-center gap-2 flex-wrap">
         {!embedStoreId && <span className="text-sm text-zinc-300">Vendedores da loja</span>}
         {!embedStoreId && (

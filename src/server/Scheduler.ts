@@ -657,6 +657,28 @@ export class Scheduler {
    * com sinais abertos (não varre tenant sem uso). Canal resolvido como no
    * teacherAgendaPass; best-effort por-org. NUNCA cria/edita nada.
    */
+  /**
+   * Varejo — PARCIAL DAS 16h por WhatsApp pro gestor (PRD Fase 1, F1.6b): meta/vendido/atingimento/falta/
+   * dinheiro por loja e rede. Só orgs que ligaram (opt-in, mensagem proativa), janela 16h–18h (SP),
+   * dedupe por dia, owner/admin com telefone. O texto e a janela vivem no service (testável sem rede).
+   */
+  static async retailAfternoonBriefPass() {
+    let orgs: any[] = [];
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE retail_afternoon_brief_enabled = 1`).all() as any[]; } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      const orgId = o.organization_id;
+      try {
+        const channel = ChannelBindingService.selectOutboundChannel(orgId, "gestao");
+        if (!channel) continue;
+        const send = (target: string, message: string) => MessageProviderService.sendMessage(channel.id, target, message);
+        const { RetailAfternoonBriefService } = await import("./RetailAfternoonBriefService.js");
+        await RetailAfternoonBriefService.runPass(orgId, { now, send });
+      } catch (e) { console.error("[Retail] parcial das 16h falhou", orgId, e); }
+    }
+  }
+
   static async falatuBriefingDigestPass() {
     let orgs: any[] = [];
     try {
@@ -1098,6 +1120,7 @@ export class Scheduler {
     try { this.professionalHoldSweepPass(); } catch (e: any) { console.error('[Scheduler] sweep de holds da Agenda Federada falhou', e?.message); }
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
+    await this.retailAfternoonBriefPass().catch(e => console.error('[Scheduler] parcial das 16h falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
     await this.falatuProactiveAlertPass().catch(e => console.error('[Scheduler] alerta proativo FalaTu falhou', e));
     await this.falatuEmailDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por e-mail falhou', e));

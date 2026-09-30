@@ -554,6 +554,7 @@
     "test:retail-code-resolver": "tsx scripts/test-retail-code-resolver.ts",
     "test:semantic-metric": "tsx scripts/test-semantic-metric.ts",
     "test:retail-seller-identity": "tsx scripts/test-retail-seller-identity.ts",
+    "test:retail-seller-identity-aggregation": "tsx scripts/test-retail-seller-identity-aggregation.ts",
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
     "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",
     "test:retail-floor-analytics": "tsx scripts/test-retail-floor-analytics.ts",

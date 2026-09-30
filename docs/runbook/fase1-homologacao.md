@@ -18,6 +18,7 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 | **F1.2** leitor de código (EAN/ref/SKU) | `/floor/scan` (Chão de loja) | bipar EAN e referência do catálogo Alterdata resolve sem cadastro; código ambíguo pede escolha |
 | **F1.7a** linguagem empresarial | Central de Saúde, Insights, Retail Ops, resumo da manhã | sem "stockout"/"Sinal 'x' no domínio y"; botão diz a ação ("Investigar divergência"), nunca "Agir"; "Saudável" não aparece com assunto aberto |
 | **F1.1c** cartão "são a mesma pessoa?" | topo de **Retail Ops → Vendedores** e da **Corrida** | aparece só com nome parecido; some ao responder. **Nada é unido sem o toque do dono** |
+| **F1.7b** perguntas simples do gestor | Diretor IA / Fala Tu | "Quanto falta pra Grande Rio bater a meta?", "quanto vendemos em dinheiro hoje?", "quem está 2 meses sem bater meta?", "qual vendedor vendeu mais esta semana?", "tenho divergência de estoque?", "posso comprar R$ 180 mil?" respondem com o número do sistema; sem dado = "aguardando"/"não sei", nunca R$ 0. "Por que caiu?" continua no panorama (por desenho) |
 | **F1.3** diagnóstico do estoque negativo | **Retail Ops → Estoque negativo** | "N ocorrências em M lojas · K causas"; causa não provada = "causa não identificada" |
 
 ## 2. Roteiro de ativação (na ordem; cada passo tem conferência e reversão)

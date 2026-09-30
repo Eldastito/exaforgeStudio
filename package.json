@@ -562,6 +562,7 @@
     "test:seller-duplicates": "tsx scripts/test-seller-duplicates.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",
+    "test:retail-questions": "tsx scripts/test-retail-questions.ts",
     "test:seller-goal-streak": "tsx scripts/test-seller-goal-streak.ts",
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
     "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",

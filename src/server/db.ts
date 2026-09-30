@@ -12174,6 +12174,41 @@ const initDb = () => {
   // RetailSellerIdentityService.assignmentsOn/storeOn, com effective_from/effective_to como janela.
   try { db.exec(`ALTER TABLE retail_seller_store_assignments ADD COLUMN assignment_type TEXT`); } catch(e){}
 
+  // F1.4a (PRD Fase 1) — STATUS DE POLÍTICA de comissão: regra pendente nunca vira pagamento.
+  // Só `active`/`confirmed` alimentam a comissão consolidada e o run de pagamento. Linhas
+  // existentes ficam `active` (DEFAULT) → 0-regressão. Proposta (ex.: interpretação de planilha por
+  // IA) NÃO sobrescreve o plano vigente: vive em tabela própria até um humano confirmar.
+  try { db.exec(`ALTER TABLE retail_commission_plans ADD COLUMN policy_status TEXT DEFAULT 'active'`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_commission_plans ADD COLUMN confirmed_by TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_commission_plans ADD COLUMN confirmed_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_commission_plan_months ADD COLUMN policy_status TEXT DEFAULT 'active'`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_commission_plan_months ADD COLUMN confirmed_by TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_commission_plan_months ADD COLUMN confirmed_at DATETIME`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_commission_policy_proposals (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        store_id TEXT NOT NULL DEFAULT '*',       -- '*' = rede; senão retail_stores.id
+        year_month TEXT,                          -- competência (NULL = plano vigente sem mês)
+        config_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',     -- draft | pending_confirmation | confirmed | archived
+        source TEXT DEFAULT 'manual',             -- manual | ai_import
+        source_ref TEXT,                          -- ex.: nome/id da planilha interpretada
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        submitted_at DATETIME,
+        confirmed_by TEXT,
+        confirmed_at DATETIME,
+        archived_by TEXT,
+        archived_at DATETIME,
+        archive_reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_commission_proposals ON retail_commission_policy_proposals (organization_id, year_month, status);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_commission_policy_proposals', e); }
+
 };
 
 initDb();

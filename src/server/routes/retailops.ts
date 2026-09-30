@@ -26,6 +26,7 @@ import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
+import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailScheduleImportService } from "../RetailScheduleImportService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
@@ -2079,7 +2080,48 @@ router.get("/commission/race", (req: AuthRequest, res): any => {
   const month = String(req.query.month || "");
   if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "month (YYYY-MM) é obrigatório" });
   const storeId = req.query.storeId ? String(req.query.storeId) : null;
-  try { res.json(RetailCommissionRaceService.raceMonth(orgId, month, { storeId })); }
+  // F1.4a — `preview=1` inclui políticas PENDENTES (simulação, nunca paga). Só owner/admin.
+  const preview = String(req.query.preview || "") === "1";
+  if (preview && !["owner", "admin"].includes(String(req.user?.role || ""))) return res.status(403).json({ error: "forbidden" });
+  try { res.json(RetailCommissionRaceService.raceMonth(orgId, month, { storeId, preview })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F1.4a — ciclo de vida das políticas de comissão (owner/admin). Proposta ≠ plano vigente:
+// pendente NUNCA vira pagamento; só `confirm` (humano) promove.
+router.get("/commission/policies", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailCommissionPolicyService.list(orgId, { month: req.query.month ? String(req.query.month) : null, status: req.query.status ? String(req.query.status) : null }));
+});
+router.post("/commission/policies/proposals", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(RetailCommissionPolicyService.propose(orgId, { storeId: req.body?.storeId ?? null, month: req.body?.month ?? null, config: req.body?.config, source: req.body?.source, sourceRef: req.body?.sourceRef ?? null, note: req.body?.note ?? null, submit: !!req.body?.submit }, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/commission/policies/proposals/:id/submit", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailCommissionPolicyService.submit(orgId, req.params.id, req.user?.userId)); }
+  catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/commission/policies/proposals/:id/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailCommissionPolicyService.confirm(orgId, req.params.id, req.user?.userId || null)); }
+  catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/commission/policies/proposals/:id/archive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailCommissionPolicyService.archiveProposal(orgId, req.params.id, req.user?.userId, req.body?.reason ?? null)); }
+  catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/commission/policies/archive-live", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailCommissionPolicyService.archiveLive(orgId, { storeId: req.body?.storeId ?? null, month: req.body?.month ?? null }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

@@ -247,6 +247,24 @@ router.post("/attendances/:id/scan", (req: AuthRequest, res) => {
   } catch (e: any) { fail(res, e); }
 });
 
+// F1.2 — código não identificado: pesquisar catálogo / vincular a produto / reportar.
+router.get("/catalog-search", (req: AuthRequest, res) => {
+  try { res.json({ results: RetailFloorScanService.searchCatalog(req.organizationId!, String(req.query.q || "")) }); }
+  catch (e: any) { fail(res, e); }
+});
+router.post("/attendances/:id/link-code", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorScanService.linkCode(req.organizationId!, req.params.id, {
+      scanId: String(req.body?.scanId || ""), productId: String(req.body?.productId || ""), variantId: req.body?.variantId ?? null,
+    }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+router.post("/attendances/:id/report-code", (req: AuthRequest, res) => {
+  try {
+    res.json(RetailFloorScanService.reportCodeProblem(req.organizationId!, req.params.id, { scanId: String(req.body?.scanId || ""), note: req.body?.note ?? null }, req.user));
+  } catch (e: any) { fail(res, e); }
+});
+
 // Demanda por input do vendedor (faltou tamanho/cor/categoria) — exige scanId.
 router.post("/attendances/:id/unmet-demand", (req: AuthRequest, res) => {
   try {

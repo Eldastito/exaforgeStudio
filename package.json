@@ -551,6 +551,7 @@
     "test:retail-floor-attendance": "tsx scripts/test-retail-floor-attendance.ts",
     "test:retail-floor-outcomes": "tsx scripts/test-retail-floor-outcomes.ts",
     "test:retail-floor-scan": "tsx scripts/test-retail-floor-scan.ts",
+    "test:retail-code-resolver": "tsx scripts/test-retail-code-resolver.ts",
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
     "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",
     "test:retail-floor-analytics": "tsx scripts/test-retail-floor-analytics.ts",

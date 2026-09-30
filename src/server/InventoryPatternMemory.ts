@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { PatternMemoryService, PatternCandidate, Hypothesizer } from "./PatternMemoryService.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
  * InventoryPatternMemory — o domínio de ESTOQUE aprende sobre o motor genérico
@@ -53,6 +54,8 @@ export class InventoryPatternMemory {
     const out: PatternCandidate[] = [];
     for (const [pid, count] of events) {
       if (count < MIN_EVIDENCE) continue;
+      // F1.3: em "fim de coleção" produto que zera é FIM NORMAL — sem meta de estoque (exceção) não sugere recompra.
+      if (!RetailReplenishmentStrategyService.suggestsRepurchase(orgId, String(pid))) continue;
       const name = (db.prepare("SELECT name FROM products_services WHERE id = ? AND organization_id = ?").get(pid, orgId) as any)?.name || "produto";
       out.push({
         scopeId: String(pid), scopeName: name,

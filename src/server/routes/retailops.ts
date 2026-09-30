@@ -29,6 +29,8 @@ import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
 import { RetailDayBriefService } from "../RetailDayBriefService.js";
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
+import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
+import { RetailReplenishmentStrategyService } from "../RetailReplenishmentStrategyService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
 import { RetailSellerAbsenceService } from "../RetailSellerAbsenceService.js";
@@ -1822,6 +1824,28 @@ router.get("/stock/negative", (req: AuthRequest, res): any => {
     restrictStoreIds: scope.unrestricted ? undefined : scope.storeIds,
   });
   res.json({ total, items });
+});
+
+// F1.3 — diagnóstico do estoque negativo por ocorrência, agrupado por causa provável × loja. Respeita a trava de loja.
+router.get("/stock/negative/diagnosis", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role);
+  const reqStore = req.query.storeId ? String(req.query.storeId) : undefined;
+  if (reqStore && !scope.unrestricted && !scope.storeIds.includes(reqStore)) return res.status(403).json({ error: "store_out_of_scope" });
+  res.json(NegativeStockDiagnosisService.diagnose(orgId, { storeId: reqStore, restrictStoreIds: scope.unrestricted ? undefined : scope.storeIds }));
+});
+// F1.3 — estratégia de reposição (continuous_replenishment | collection_sellout). Leitura livre; troca só owner/admin.
+router.get("/stock/replenishment-strategy", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ strategy: RetailReplenishmentStrategyService.strategy(orgId) });
+});
+router.put("/stock/replenishment-strategy", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ strategy: RetailReplenishmentStrategyService.setStrategy(orgId, String(req.body?.strategy || ""), req.user?.userId) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.get("/stock/by-store/:storeId", (req: AuthRequest, res): any => {

@@ -12,7 +12,8 @@ import { BarcodeCameraScanner } from '@/src/components/BarcodeCameraScanner';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
-const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+import { formatBRL } from '@/src/lib/metric';
+const brl = (n: any) => formatBRL(n); // null/undefined → '—' (nunca 'R$ 0,00'); zero real segue 'R$ 0,00'
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const POLL_MS = 8000;
 // Loja fixa do aparelho (modo quiosque): a 1ª escolha persiste; trocar exige

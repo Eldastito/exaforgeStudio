@@ -17,6 +17,7 @@ import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResp
 import { RetailBoletaService } from "../RetailBoletaService.js";
 import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
+import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
@@ -1138,6 +1139,58 @@ router.put("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: Aut
   try {
     const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
     res.json({ stores: RetailSellerDirectoryService.setStores(orgId, req.params.sellerId, storeIds, req.body?.primaryStoreId ?? null, req.user?.userId) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F1.1 (PRD Fase 1) — identidade única de vendedor: aliases, fusão governada e alocação por
+// período. owner/admin (decisão de quem confirma a fusão segue com o dono do negócio).
+router.get("/sellers/identity/unidentified", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ unidentified: RetailSellerIdentityService.unidentified(orgId) });
+});
+router.get("/sellers/:sellerId/aliases", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ aliases: RetailSellerIdentityService.listAliases(orgId, req.params.sellerId) });
+});
+router.post("/sellers/:sellerId/aliases", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerIdentityService.addAlias(orgId, req.params.sellerId, { alias: String(req.body?.alias || ""), kind: req.body?.kind }, req.user?.userId)); }
+  catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.delete("/sellers/aliases/:aliasId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: RetailSellerIdentityService.removeAlias(orgId, req.params.aliasId, req.user?.userId) });
+});
+router.post("/sellers/:sellerId/merge", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerIdentityService.mergeSellers(orgId, req.params.sellerId, String(req.body?.intoSellerId || ""), req.user?.userId)); }
+  catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/sellers/:sellerId/unmerge", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerIdentityService.unmerge(orgId, req.params.sellerId, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.get("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+  res.json({ date, stores: RetailSellerIdentityService.assignmentsOn(orgId, req.params.sellerId, date), storeOn: RetailSellerIdentityService.storeOn(orgId, req.params.sellerId, date) });
+});
+router.post("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(RetailSellerIdentityService.addAssignment(orgId, {
+      sellerId: req.params.sellerId, storeId: String(req.body?.storeId || ""), type: req.body?.type,
+      startDate: String(req.body?.startDate || ""), endDate: req.body?.endDate ?? null,
+    }, req.user?.userId));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

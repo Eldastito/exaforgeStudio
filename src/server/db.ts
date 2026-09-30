@@ -12145,6 +12145,35 @@ const initDb = () => {
     `);
   } catch(e){ console.error('[DB] Falha ao criar product_code_aliases', e); }
 
+  // F1.1 (PRD Fase 1) — IDENTIDADE ÚNICA de vendedor: aliases (nome/matrícula/CAI_USUARIO)
+  // apontando pra UMA identidade canônica (`retail_sellers`) + fusão governada + tipo de
+  // alocação. Aditivo/0-regressão: nada aqui muda um vendedor existente sozinho — só o gesto
+  // humano (confirmar alias / fundir) cria vínculo. Um alias pertence a UM vendedor por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_seller_aliases (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        seller_id TEXT NOT NULL,                  -- retail_sellers.id (identidade canônica)
+        alias TEXT NOT NULL,                      -- como veio (exibição)
+        alias_norm TEXT NOT NULL,                 -- sem acento/caixa/espaço extra (chave de casamento)
+        kind TEXT NOT NULL DEFAULT 'name',        -- name | matricula | cai_usuario
+        source TEXT DEFAULT 'manual',             -- manual | merge
+        via_merge_of TEXT,                        -- seller fundido que originou o alias (permite desfazer)
+        confirmed_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, kind, alias_norm)
+      );
+      CREATE INDEX IF NOT EXISTS idx_seller_alias_seller ON retail_seller_aliases (organization_id, seller_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_seller_aliases', e); }
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN merged_into_seller_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_sellers ADD COLUMN merged_at DATETIME`); } catch(e){}
+  // NULL = lotação legada (tratada como principal). principal | temporaria | cobertura_ferias | transferencia_definitiva.
+  // Períodos temporários NÃO alimentam o roster legado (nascem active=0): são lidos só por
+  // RetailSellerIdentityService.assignmentsOn/storeOn, com effective_from/effective_to como janela.
+  try { db.exec(`ALTER TABLE retail_seller_store_assignments ADD COLUMN assignment_type TEXT`); } catch(e){}
+
 };
 
 initDb();

@@ -75,7 +75,7 @@ export class RetailSellerDirectoryService {
       for (const sid of wanted) {
         if (activeSellers.has(sid)) continue; // já lotado nesta loja
         // Reaproveita um vínculo inativo desta loja (voltou pra equipe) em vez de duplicar.
-        const inactive = db.prepare(`SELECT id FROM retail_seller_store_assignments WHERE organization_id = ? AND store_id = ? AND seller_id = ? AND active = 0 ORDER BY effective_to DESC LIMIT 1`).get(orgId, storeId, sid) as any;
+        const inactive = db.prepare(`SELECT id FROM retail_seller_store_assignments WHERE organization_id = ? AND store_id = ? AND seller_id = ? AND active = 0 AND assignment_type IS NULL ORDER BY effective_to DESC LIMIT 1`).get(orgId, storeId, sid) as any;
         if (inactive) {
           db.prepare(`UPDATE retail_seller_store_assignments SET active = 1, effective_to = NULL WHERE id = ?`).run(inactive.id);
         } else {

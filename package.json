@@ -556,6 +556,7 @@
     "test:retail-seller-identity": "tsx scripts/test-retail-seller-identity.ts",
     "test:retail-seller-identity-aggregation": "tsx scripts/test-retail-seller-identity-aggregation.ts",
     "test:retail-commission-policy-status": "tsx scripts/test-retail-commission-policy-status.ts",
+    "test:retail-afternoon-brief": "tsx scripts/test-retail-afternoon-brief.ts",
     "test:retail-floor-reconciliation": "tsx scripts/test-retail-floor-reconciliation.ts",
     "test:retail-floor-signals": "tsx scripts/test-retail-floor-signals.ts",
     "test:retail-floor-analytics": "tsx scripts/test-retail-floor-analytics.ts",

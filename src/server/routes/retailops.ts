@@ -26,6 +26,7 @@ import { RetailInventoryService } from "../RetailInventoryService.js";
 import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
+import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailScheduleImportService } from "../RetailScheduleImportService.js";
@@ -2164,6 +2165,20 @@ router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
   try { res.json(RetailCommissionRaceService.sellerGoalSignals(orgId, storeId, date)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F1.6b — parcial das 16h (loja e rede). Preview do que o gestor recebe. owner/admin (dinheiro §73).
+router.get("/afternoon-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  try { const snapshot = RetailAfternoonBriefService.snapshot(orgId, date); res.json({ snapshot, text: RetailAfternoonBriefService.text(snapshot), enabled: RetailAfternoonBriefService.enabled(orgId) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.put("/afternoon-brief/enabled", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: RetailAfternoonBriefService.setEnabled(orgId, !!req.body?.enabled) });
 });
 
 // Preferência da empresa p/ a aba Metas: mostrar/ocultar a coluna QUINZENA.

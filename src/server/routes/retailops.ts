@@ -28,6 +28,7 @@ import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
 import { RetailDayBriefService } from "../RetailDayBriefService.js";
+import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
 import { RetailSellerAbsenceService } from "../RetailSellerAbsenceService.js";
@@ -1153,6 +1154,26 @@ router.get("/sellers/identity/unidentified", requireRole("owner", "admin"), (req
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ unidentified: RetailSellerIdentityService.unidentified(orgId) });
+});
+// F1.1c — "são a mesma pessoa?": sugestões por nome + resposta de um toque. owner/admin.
+router.get("/sellers/identity/suggestions", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ suggestions: RetailSellerDuplicateService.suggestions(orgId) });
+});
+router.post("/sellers/identity/confirm-same", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const c = req.body?.coverage;
+    res.json(RetailSellerDuplicateService.confirmSame(orgId, String(req.body?.aId || ""), String(req.body?.bId || ""), { intoId: req.body?.intoId ? String(req.body.intoId) : undefined, coverage: c ? { startDate: String(c.startDate || ""), endDate: String(c.endDate || "") } : undefined }, req.user?.userId));
+  } catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/sellers/identity/not-same", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerDuplicateService.markDistinct(orgId, String(req.body?.aId || ""), String(req.body?.bId || ""), req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 router.get("/sellers/:sellerId/aliases", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

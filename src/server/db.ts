@@ -12224,6 +12224,21 @@ const initDb = () => {
       );
     `);
   } catch(e){ console.error('[DB] Falha ao criar retail_afternoon_brief_deliveries', e); }
+  // F1.1c (PRD Fase 1) — "pessoas diferentes": o dono disse que dois nomes parecidos NÃO são a mesma pessoa
+  // (Vinícius Romão ≠ Vinícius Nascimento); o par é memorizado e nunca mais sugerido. Par ordenado (a < b).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS retail_seller_distinct_pairs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        seller_a_id TEXT NOT NULL,
+        seller_b_id TEXT NOT NULL,
+        decided_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, seller_a_id, seller_b_id)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar retail_seller_distinct_pairs', e); }
   // F1.6c (PRD Fase 1) — fechamento da noite por WhatsApp pro gestor: mesmo molde da parcial das 16h
   // (opt-in por org + dedupe de entrega por (org, usuário, dia)). Best-effort (conv. nº 7).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_night_brief_enabled INTEGER DEFAULT 0`); } catch(e){}

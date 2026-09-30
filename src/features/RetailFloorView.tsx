@@ -465,7 +465,7 @@ export function RetailFloorView() {
           onClose={() => setFinishing(null)}
           onSubmit={(payload: any) => act(async () => { await api(`/attendances/${finishing.id}/finish`, payload); setFinishing(null); }, 'Atendimento encerrado.')} />
       )}
-      {scanFor && <ScanPanel attendance={scanFor} onClose={() => setScanFor(null)} />}
+      {scanFor && <ScanPanel attendance={scanFor} isManager={!!isManager} onClose={() => setScanFor(null)} />}
       {teamOpen && (
         <TeamModal allSellers={ctx.sellers || []} teamIds={teamIds} scoped={storeSellers.scoped}
           storeId={storeId} storeName={storeName}
@@ -1424,7 +1424,7 @@ function FinishModal({ attendance, taxonomy, onClose, onSubmit, busy }: any) {
 // Barcode scan panel
 // ============================================================================
 
-function ScanPanel({ attendance, onClose }: any) {
+function ScanPanel({ attendance, isManager, onClose }: any) {
   const [ean, setEan] = useState('');
   const [result, setResult] = useState<any>(null);
   const [busy, setBusy] = useState(false);
@@ -1436,7 +1436,7 @@ function ScanPanel({ attendance, onClose }: any) {
     const c = (code ?? ean).trim();
     if (!c) return;
     setBusy(true);
-    try { setResult(await api(`/attendances/${attendance.id}/scan`, { ean: c })); }
+    try { setReported(false); setResult(await api(`/attendances/${attendance.id}/scan`, { ean: c })); }
     catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
@@ -1450,6 +1450,36 @@ function ScanPanel({ attendance, onClose }: any) {
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
+  // F1.2 — código não identificado: pesquisar catálogo / vincular a produto / reportar.
+  const [searchQ, setSearchQ] = useState('');
+  const [searchRes, setSearchRes] = useState<any[] | null>(null);
+  const [reported, setReported] = useState(false);
+  const doSearch = async () => {
+    if (searchQ.trim().length < 2) return;
+    setBusy(true);
+    try { setSearchRes((await api(`/catalog-search?q=${encodeURIComponent(searchQ.trim())}`)).results || []); }
+    catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+  const doLink = async (productId: string, variantId?: string | null) => {
+    if (!result?.scanId) return;
+    setBusy(true);
+    try {
+      await api(`/attendances/${attendance.id}/link-code`, { scanId: result.scanId, productId, variantId: variantId ?? null });
+      toast.success('Código vinculado. Lendo de novo…');
+      setSearchRes(null); setSearchQ('');
+      await doScan(result.ean);
+    } catch (e: any) { toast.error(e.message === 'store_scope_denied' ? 'Só o gestor da loja pode vincular códigos.' : e.message); }
+    finally { setBusy(false); }
+  };
+  const doReport = async () => {
+    if (!result?.scanId) return;
+    setBusy(true);
+    try { await api(`/attendances/${attendance.id}/report-code`, { scanId: result.scanId }); setReported(true); toast.success('Problema reportado ao responsável.'); }
+    catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
   // Reposição na ruptura (ADR-176): pede transferência da loja doadora num toque.
   const [requested, setRequested] = useState<string | null>(null);
   const doReplenish = async (targetStoreId?: string) => {
@@ -1496,8 +1526,46 @@ function ScanPanel({ attendance, onClose }: any) {
             </div>
           )}
           {!result.found ? (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-center text-sm text-rose-300">
-              Peça fora do catálogo — demanda registrada automaticamente.
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-300">
+              <div className="text-center font-semibold">{result.unresolved?.message || 'Código não identificado'}</div>
+              <div className="mt-1 text-center text-xs">Código lido: <span className="font-mono">{result.ean}</span></div>
+              {result.candidates?.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  <div className="text-[10px] font-semibold uppercase">Pode ser</div>
+                  {result.candidates.map((c: any, i: number) => (
+                    <div key={i} className="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-xs text-[var(--color-text-strong)]">{c.productName}{c.variantName ? ` — ${c.variantName}` : ''}</div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 flex gap-2">
+                <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doSearch()}
+                  placeholder="Pesquisar catálogo (nome, ref, SKU)"
+                  className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-xs text-[var(--color-text-strong)] focus:outline-none" />
+                <button disabled={busy} onClick={doSearch} className="rounded-xl bg-zinc-700 px-3 py-2 text-xs font-semibold text-white">Pesquisar</button>
+              </div>
+              {searchRes && (
+                <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                  {searchRes.length === 0 && <div className="text-center text-xs text-[var(--color-text-muted)]">Nada encontrado.</div>}
+                  {searchRes.map((p: any) => (
+                    <div key={p.productId} className="rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--color-text-strong)]">
+                      <div className="font-semibold">{p.name}{p.reference ? ` · ${p.reference}` : ''}</div>
+                      {isManager ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {p.variants.length === 0 && <button disabled={busy} onClick={() => doLink(p.productId)} className="rounded-md border border-[var(--color-flow)]/40 px-2 py-0.5 text-[var(--color-flow)]">Vincular a este produto</button>}
+                          {p.variants.map((v: any) => (
+                            <button key={v.id} disabled={busy} onClick={() => doLink(p.productId, v.id)} className="rounded-md border border-[var(--color-flow)]/40 px-2 py-0.5 text-[var(--color-flow)]">Vincular: {v.name}</button>
+                          ))}
+                        </div>
+                      ) : <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">Peça ao gestor da loja para vincular o código.</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 text-center">
+                {reported
+                  ? <span className="inline-flex items-center gap-1 text-xs text-emerald-400"><Check className="h-3.5 w-3.5" /> Reportado ao responsável.</span>
+                  : <button disabled={busy} onClick={doReport} className="text-xs underline">Reportar problema</button>}
+              </div>
             </div>
           ) : (
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">

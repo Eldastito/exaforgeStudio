@@ -12125,6 +12125,26 @@ const initDb = () => {
   // desvio) como fonte única, em vez das "Regras de comissão" separadas. Default
   // 0 = 0-regressão (segue nas regras).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_commission_from_race_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // F1.2 (PRD Fase 1) — aliases de CÓDIGO lidos no Atendimento de Loja: quando o
+  // leitor traz um código que o catálogo não reconhece, o gestor VINCULA o código
+  // a um produto/variante uma vez e a próxima leitura já resolve. Vínculo humano
+  // (nunca inferido); um código aponta pra UM destino por org.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS product_code_aliases (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        code TEXT NOT NULL,                       -- código normalizado (ver RetailCodeResolverService.normalize)
+        product_service_id TEXT NOT NULL,
+        variant_id TEXT,
+        source TEXT DEFAULT 'floor_link',         -- floor_link | manual | erp
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, code)
+      );
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar product_code_aliases', e); }
+
 };
 
 initDb();

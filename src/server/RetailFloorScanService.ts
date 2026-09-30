@@ -6,9 +6,12 @@
  * foi visto no momento — estoque local, estoque da rede e o carimbo da última
  * sincronização (RN-150-007) — o histórico não muda quando o estoque muda.
  *
- * Lookup em 2 níveis (modelo Alterdata/ADR-105):
- *  1. variante por product_variants.external_ref = EAN (grade cor×tamanho);
- *  2. produto por products_services.ean (EAN do produto, sem grade).
+ * Lookup (F1.2 — `RetailCodeResolverService`, ordem: EAN/ref da variante → SKU da
+ * variante → EAN do produto → ref/ERP do produto → alias vinculado → prefixo):
+ * aceita código alfanumérico (SKU/referência) e tolera zeros à esquerda. Código
+ * NÃO identificado devolve `resolution: "unresolved"` + ações (pesquisar catálogo /
+ * vincular a produto / reportar) — nunca falha em silêncio; ambíguo devolve os
+ * candidatos e NÃO escolhe.
  *
  * Estoque: a SOMBRA por loja (retail_store_inventory, ADR-084) é a fonte —
  * local = saldo da loja do atendimento; rede = soma dos saldos POSITIVOS das
@@ -32,6 +35,8 @@ import { randomUUID } from "crypto";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailFloorService, PRODUCT_REASONS } from "./RetailFloorService.js";
 import { RetailFloorQueueService } from "./RetailFloorShiftService.js";
+import { RetailCodeResolverService } from "./RetailCodeResolverService.js";
+import { BusinessSignalService } from "./BusinessSignalService.js";
 
 const SCAN_ACTIONS = ["viewed", "reserved", "transfer_requested", "sold"];
 // Motivos de demanda que exigem input humano (variante desejada não bipável).
@@ -52,39 +57,15 @@ export class RetailFloorScanService {
     const action = opts.action == null ? "viewed" : String(opts.action);
     if (!SCAN_ACTIONS.includes(action)) throw new Error(`action inválida (${SCAN_ACTIONS.join("|")}).`);
 
-    // Código como vem do LEITOR (BarcodeDetector/ZXing) ou digitado à mão: só
-    // dígitos. NÃO exige dígito verificador GTIN — os códigos internos da ModaUp
-    // (etiqueta de prefixo 2, código do ERP de 13 díg.) NÃO fecham o checksum
-    // GS1 e mesmo assim são os códigos REAIS das peças (é o `produto` que Saldo/
-    // Preco/Venda usam, gravado em product_variants.external_ref). O sanitizeGtin
-    // (com checksum) existe pro fluxo de FOTO/IA — aqui o leitor já decodifica o
-    // código com exatidão, então bloquear pelo checksum recusava peça legítima.
-    const ean = String(rawEan ?? "").replace(/\D/g, "");
-    if (ean.length < 6) throw new Error("Código de barras inválido.");
-
-    // Lookup: variante (grade) primeiro, produto depois. Casa pelo código do ERP
-    // (external_ref) OU pelo EAN/sku — o que a etiqueta trouxer.
-    let product: any = null, variant: any = null;
-    const v = db.prepare(
-      `SELECT v.id, v.product_service_id, v.name, v.size, v.color, p.name AS product_name, p.price AS product_price, v.price AS variant_price
-         FROM product_variants v JOIN products_services p ON p.id = v.product_service_id AND p.organization_id = v.organization_id
-        WHERE v.organization_id = ? AND (v.external_ref = ? OR v.sku = ?) AND v.active = 1 LIMIT 1`
-    ).get(orgId, ean, ean) as any;
-    if (v) {
-      variant = { id: v.id, name: v.name, size: v.size || null, color: v.color || null };
-      product = { id: v.product_service_id, name: v.product_name, price: Number(v.variant_price ?? v.product_price ?? 0) };
-    } else {
-      // Produto por EAN ou pelo código do ERP (external_ref); por fim, o prefixo
-      // (EAN13 do caixa começa com o external_ref de 12 do catálogo — ADR-105).
-      let p = db.prepare(`SELECT id, name, price FROM products_services WHERE organization_id = ? AND (ean = ? OR external_ref = ?) LIMIT 1`).get(orgId, ean, ean) as any;
-      if (!p) {
-        const pref = db.prepare(
-          `SELECT id, name, price FROM products_services WHERE organization_id = ? AND external_ref IS NOT NULL AND length(external_ref) >= 4 AND ? LIKE external_ref || '%' ORDER BY length(external_ref) DESC LIMIT 2`
-        ).all(orgId, ean) as any[];
-        if (pref.length === 1) p = pref[0]; // só associa quando não é ambíguo
-      }
-      if (p) product = { id: p.id, name: p.name, price: Number(p.price || 0) };
-    }
+    // Código como vem do LEITOR (BarcodeDetector/ZXing) ou digitado à mão. NÃO exige
+    // dígito verificador GTIN — os códigos internos da ModaUp (prefixo 2, código do
+    // ERP de 13 díg.) não fecham o checksum GS1 e são os códigos REAIS das peças.
+    // Etiqueta alfanumérica (SKU/referência) é preservada (antes virava só dígitos).
+    const resolved = RetailCodeResolverService.resolve(orgId, rawEan);
+    const ean = resolved.code;
+    if (!RetailCodeResolverService.isValid(ean)) throw new Error("Código de barras inválido.");
+    const product: any = resolved.product ? { id: resolved.product.id, name: resolved.product.name, price: resolved.product.price } : null;
+    const variant: any = resolved.variant ? { id: resolved.variant.id, name: resolved.variant.name, size: resolved.variant.size, color: resolved.variant.color } : null;
 
     const syncedAt = this.lastSyncAt(orgId);
     const syncStale = syncedAt ? (Date.now() - new Date(syncedAt.replace(" ", "T") + "Z").getTime()) > SYNC_STALE_HOURS * 3600_000 : true;
@@ -105,15 +86,22 @@ export class RetailFloorScanService {
 
     // Ruptura detectável pela máquina → demanda não atendida (com dedupe).
     let unmetDemand: any = null;
-    if (!product) {
+    // Ambíguo NÃO é ausência de sortimento (existe no catálogo, só não dá pra escolher).
+    if (!product && resolved.status === "unresolved") {
       unmetDemand = this.upsertUnmet(orgId, att, scanId, null, ean, "no_assortment", null);
-    } else if ((localStock ?? 0) <= 0 && (networkStock ?? 0) <= 0) {
+    } else if (product && (localStock ?? 0) <= 0 && (networkStock ?? 0) <= 0) {
       unmetDemand = this.upsertUnmet(orgId, att, scanId, product.id, ean, "no_network_stock", null);
     }
 
     try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_SCAN", { attendanceId, scanId, ean, found: !!product, action, localStock, networkStock, unmet: unmetDemand?.reason || null }); } catch { /* noop */ }
     return {
       scanId, ean, found: !!product,
+      resolution: resolved.status, matchedBy: resolved.matchedBy, candidates: resolved.candidates,
+      // Código lido não reconhecido → o vendedor precisa de saída, não de silêncio.
+      unresolved: resolved.status === "found" ? null : {
+        code: ean, message: resolved.status === "ambiguous" ? "Código encontrado em mais de uma peça" : "Código não identificado",
+        actions: ["search_catalog", "link_product", "report_problem"],
+      },
       product, variant,
       localStock, networkStock, otherStores,
       syncedAt, syncStale,
@@ -140,6 +128,49 @@ export class RetailFloorScanService {
     const row = this.upsertUnmet(orgId, att, scan.id, scan.product_id, scan.ean, reason, detail);
     try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_UNMET_DEMAND", { attendanceId, scanId: scan.id, reason, detail }); } catch { /* noop */ }
     return row;
+  }
+
+  /** "Pesquisar catálogo" (nome/ref/EAN/SKU) pro vendedor achar a peça do código não identificado. */
+  static searchCatalog(orgId: string, q: string) {
+    return RetailCodeResolverService.search(orgId, q);
+  }
+
+  /**
+   * "Vincular a produto": grava o código do scan como alias da peça escolhida — a
+   * próxima leitura resolve sem cadastro manual. Gesto de GESTOR (mexe no catálogo
+   * da rede); o vendedor usa "Reportar problema". Exige o scan como evidência.
+   */
+  static linkCode(orgId: string, attendanceId: string, opts: { scanId: string; productId: string; variantId?: string | null }, user: UserRef): any {
+    const att = this.assertActiveAttendance(orgId, attendanceId, user);
+    RetailFloorService.assertStoreManager(orgId, user, att.store_id);
+    const scan = this.scanOf(orgId, attendanceId, opts.scanId);
+    // O scan gravado é histórico (congelado); o que vale é se o código JÁ resolve hoje.
+    if (scan.product_id || RetailCodeResolverService.resolve(orgId, scan.ean).status === "found") throw new Error("Este scan já foi identificado.");
+    const link = RetailCodeResolverService.linkAlias(orgId, scan.ean, { productId: opts.productId, variantId: opts.variantId ?? null }, uid(user));
+    return { linked: true, ...link, resolved: RetailCodeResolverService.resolve(orgId, scan.ean) };
+  }
+
+  /** "Reportar problema": sinal no ledger (dedupe por loja+código) pro responsável tratar o cadastro. */
+  static reportCodeProblem(orgId: string, attendanceId: string, opts: { scanId: string; note?: string | null }, user: UserRef): any {
+    const att = this.assertActiveAttendance(orgId, attendanceId, user);
+    const scan = this.scanOf(orgId, attendanceId, opts.scanId);
+    if (scan.product_id) throw new Error("Este scan já foi identificado.");
+    const store = db.prepare(`SELECT name FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, att.store_id) as any;
+    const sig = BusinessSignalService.publish(orgId, {
+      domain: "retail_floor", signalType: "retail_floor_code_unresolved",
+      severity: "attention", basis: "fact", confidence: 1,
+      sourceService: "RetailFloorScanService", sourceEntityType: "store", sourceEntityId: att.store_id,
+      evidence: { store: store?.name || null, code: scan.ean, scans: 1, note: opts.note ? String(opts.note).slice(0, 300) : null, scanId: scan.id, reportedBy: uid(user) },
+      dedupeKey: `retail_floor.code_unresolved|${att.store_id}|${scan.ean}`,
+    });
+    try { logAuthEvent(orgId, uid(user), null, "RETAIL_FLOOR_CODE_REPORTED", { attendanceId, scanId: scan.id, code: scan.ean }); } catch { /* noop */ }
+    return { reported: true, signalId: sig.id, deduped: sig.deduped };
+  }
+
+  private static scanOf(orgId: string, attendanceId: string, scanId: string): any {
+    const scan = db.prepare(`SELECT * FROM retail_floor_attendance_scans WHERE organization_id = ? AND id = ? AND attendance_id = ?`).get(orgId, String(scanId || ""), attendanceId) as any;
+    if (!scan) throw new Error("scanId não pertence a este atendimento.");
+    return scan;
   }
 
   /** Timeline de consultas do atendimento (o que o cliente procurou). */

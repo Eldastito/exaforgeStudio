@@ -9,13 +9,14 @@ import { parseMoneyBR, formatMoneyBR, maskMoneyBRInput } from './retailMoney';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retailClosingForm';
 
+import { formatBRL } from '@/src/lib/metric';
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
 // e da COMISSÃO da equipe, consumindo a API já testada (/api/retailops/*).
 // Só aparece quando o módulo `retail` está habilitado na org.
 // ============================================================================
 
-const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+const brl = (n: any) => formatBRL(n); // null/undefined → '—' (nunca 'R$ 0,00'); zero real segue 'R$ 0,00'
 // todayStr/isoLocal/weeksOfMonthLocal/daysBetween/addMonths vêm de ./retailDateUtils
 // (data LOCAL, não UTC — corrige o off-by-one da escala/fechamento à noite no Brasil;
 // semanas que FECHAM NO MÊS pra escala não atravessar a virada).

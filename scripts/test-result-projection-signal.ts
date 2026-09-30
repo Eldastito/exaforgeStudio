@@ -99,15 +99,20 @@ async function main() {
 
   // ── 12. pass() (mês CORRENTE) audita uma rede física-only ──────────────────
   // Prova a expansão da audiência: sem `orders`, só PDV no mês corrente. A
-  // publicação depende de ≥5 dias decorridos (RN-RP-2), então guarda pelo dia.
+  // publicação depende de ≥5 dias decorridos (RN-RP-2) E do mês ainda ABERTO: no
+  // último dia o mês já é `actual` (fechado) e o alerta "ainda dá pra reagir" não
+  // publica de propósito — então o teste guarda pelos DOIS limites do calendário.
   const nowYm = new Date().toISOString().slice(0, 7);
   const nowDay = Number(new Date().toISOString().slice(8, 10));
+  const totalDaysNow = new Date(Date.UTC(Number(nowYm.slice(0, 4)), Number(nowYm.slice(5, 7)), 0)).getUTCDate();
   const G = mkOrg();
   db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, valor, pecas, status) VALUES (?, ?, '1', 'B1', ?, 100, 1, 'N')`).run(randomUUID(), G, `${nowYm}-01`);
   mkPayable(G, 5000, "monthly", nowYm); // fixo enorme → projeta prejuízo em qualquer ritmo
   RP.pass();
-  if (nowDay >= 5) {
+  if (nowDay >= 5 && nowDay < totalDaysNow) {
     check("12.1 pass() audita rede física-only e sinaliza (mês corrente)", !!sig(G));
+  } else if (nowDay >= totalDaysNow) {
+    check("12.1 pass() no último dia (mês fechado/actual) rodou sem quebrar e NÃO alerta", !sig(G));
   } else {
     check("12.1 pass() rodou sem quebrar (poucos dias no mês → sem sinal ainda)", true);
   }

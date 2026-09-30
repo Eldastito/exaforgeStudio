@@ -7,7 +7,7 @@ import { toast } from '@/src/lib/toast';
 // Insights globais (ADR-136, kernel de inteligência empresarial).
 // Generaliza a tela de Insights do varejo para TODA a plataforma: o Pareto dos
 // sinais abertos de qualquer domínio (finanças, produção, compras, estoque,
-// vendas, varejo…) num só lugar, com "Agir" (propõe a ação recomendada) e o
+// vendas, varejo…) num só lugar, com botão de ação específico (propõe a ação recomendada) e o
 // painel de "Ações em andamento" que fecha o ciclo propor→aprovar→concluir→medir.
 // Núcleo — visível para toda org, consome /api/insights e /api/actions.
 // ============================================================================
@@ -138,17 +138,19 @@ function PrioritiesPanel() {
               <div key={p.signalId || i} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] font-mono text-zinc-500">#{i + 1}</span>
-                  <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{domLabel(p.domain)}</span>
+                  <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{p.presentation?.domainLabel || domLabel(p.domain)}</span>
                   {p.impact && <span className="text-[11px] text-emerald-300">impacto {fmtImpact(p.impact)}</span>}
                   {p.dueHint && <span className="text-[11px] text-zinc-500">· {p.dueHint}</span>}
                 </div>
-                <p className="mt-1 text-sm text-zinc-200">{p.interpretation || p.fact}</p>
+                <p className="mt-1 text-sm text-zinc-200">{p.presentation?.title || p.interpretation}</p>
+                {p.presentation?.meaning && <p className="mt-0.5 text-[12px] text-zinc-500">{p.presentation.meaning}</p>}
+                {p.presentation?.audience === 'technical' && p.presentation?.operationAffected !== 'unknown' && <p className="mt-0.5 text-[11px] text-zinc-500">{p.presentation.operationAffected === 'yes' ? 'Sua operação foi afetada.' : 'Sua operação não foi afetada.'}</p>}
                 <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
                   <span className="text-zinc-500">Sugestão:</span>
                   <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
                   {p.signalId && (acted[p.signalId]
                     ? <span className="inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
-                    : <button onClick={() => act(p)} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">Agir</button>)}
+                    : <button onClick={() => act(p)} title={p.presentation?.actionWillDo || 'Abre os detalhes para você decidir o que fazer.'} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">{p.presentation?.actionLabel || 'Ver detalhes e decidir'}</button>)}
                 </div>
               </div>
             ))}
@@ -157,7 +159,7 @@ function PrioritiesPanel() {
 
         <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mt-6 mb-2">Ações em andamento ({openActions.length})</h3>
         {actions.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-center text-[12px] text-zinc-600">Nenhuma ação ainda. Clique em <strong>“Agir”</strong> numa prioridade acima para criar uma.</div>
+          <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-center text-[12px] text-zinc-600">Nenhuma ação ainda. Use o botão de ação de uma prioridade acima para criar uma.</div>
         ) : (
           <div className="space-y-1.5">
             {actions.map((a) => {

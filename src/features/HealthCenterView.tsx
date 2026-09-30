@@ -89,7 +89,8 @@ export function HealthCenterView() {
   const dispensar = async (a: any) => { setBusy(true); try { const r = await apiFetch(`/api/cash/actions/${a.id}/dismiss`, { method: 'POST' }); if (r.ok) { toast.success('Dispensada.'); load(); } } finally { setBusy(false); } };
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Analisando seu negócio…</div>;
-  const st = STATUS_UI[d?.status] || STATUS_UI.saudavel;
+  // F1.7a: caixa saudável com assuntos abertos NÃO é "tudo bem" — o selo lê a mesma fonte da lista de atenção.
+  const st = STATUS_UI[d?.status === 'saudavel' && (d?.attention?.count || 0) > 0 ? 'atencao' : d?.status] || STATUS_UI.saudavel;
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
@@ -127,6 +128,13 @@ export function HealthCenterView() {
             <span className="text-sm font-semibold uppercase tracking-wide">{st.label}</span>
           </div>
           <p className="mt-1.5 text-[15px] text-zinc-100">{d?.synthesis}</p>
+          {d?.attention?.items?.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {d.attention.items.map((it: any, i: number) => (
+                <li key={it.signalId || i} className="text-[13px] text-zinc-200 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-70" /><span>{it.title} <span className="text-zinc-500">· {it.actionLabel}</span></span></li>
+              ))}
+            </ul>
+          )}
           {d?.triggers?.length > 0 && (
             <ul className="mt-2 space-y-0.5">
               {d.triggers.map((t: any, i: number) => (

@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
+import { presentSignal } from "./SignalLanguage.js";
 
 /**
  * ImpactPrioritizationService (ADR-136, Epic 2 — C3).
@@ -185,7 +186,7 @@ export class ImpactPrioritizationService {
    * Calcula as prioridades a partir dos sinais ABERTOS. Retorna `{ global, byDomain }`.
    * `global` = até 3 no total; `byDomain` = até 3 por domínio.
    */
-  static prioritize(orgId: string, opts: { globalLimit?: number; perDomain?: number } = {}): any {
+  static prioritize(orgId: string, opts: { globalLimit?: number; perDomain?: number; skipGoals?: boolean } = {}): any {
     const globalLimit = Math.max(1, Number(opts.globalLimit) || 3);
     const perDomain = Math.max(1, Number(opts.perDomain) || 3);
 
@@ -202,7 +203,9 @@ export class ImpactPrioritizationService {
 
     // F5 — relevância de meta por domínio (0 sem meta atrasada). Best-effort:
     // qualquer falha ao ler metas NÃO derruba a priorização (fail-safe).
-    const goalGaps = this.goalGapsByDomain(orgId, (opts as any).asOf);
+    // skipGoals: a Central de Saúde (attention) roda DENTRO do overview, que o Snapshot V2 chama
+    // a partir de BusinessGoalService.progress — ler metas aqui fecharia um ciclo (recursão).
+    const goalGaps = opts.skipGoals ? new Map<string, { metric: string; label: string; gap: number }>() : this.goalGapsByDomain(orgId, (opts as any).asOf);
 
     // Agrupa "consequência do mesmo evento": por (domínio, tipo) fica o de maior score.
     const byGroup = new Map<string, any>();
@@ -357,6 +360,7 @@ export class ImpactPrioritizationService {
       signalId: s.id,
       domain: s.domain,
       signalType: s.signal_type,
+      severity, // aditivo (F1.7a): a Central conta atenção pela mesma severidade do ledger
       override,
       score,
       impactLevel: cls.level,
@@ -391,6 +395,9 @@ export class ImpactPrioritizationService {
       approvalNeeded: approval,
       howMeasured: "Resultado registrado como outcome (esperado × realizado) ao concluir a ação.",
       reason: reason(s, severity, override),
+      // F1.7a — linguagem empresarial + ação específica (o `fact`/`interpretation` acima seguem p/ compat; a
+      // tela usa `presentation`). Só forma: signal_type/domain/dedupe no ledger não mudam.
+      presentation: presentSignal({ signalType: s.signal_type, domain: s.domain, evidence, actionType: action?.actionType || null, severity }),
     };
   }
 }

@@ -553,6 +553,7 @@
     "test:retail-floor-scan": "tsx scripts/test-retail-floor-scan.ts",
     "test:retail-code-resolver": "tsx scripts/test-retail-code-resolver.ts",
     "test:semantic-metric": "tsx scripts/test-semantic-metric.ts",
+    "test:signal-language": "tsx scripts/test-signal-language.ts",
     "test:retail-seller-identity": "tsx scripts/test-retail-seller-identity.ts",
     "test:retail-seller-identity-aggregation": "tsx scripts/test-retail-seller-identity-aggregation.ts",
     "test:retail-commission-policy-status": "tsx scripts/test-retail-commission-policy-status.ts",

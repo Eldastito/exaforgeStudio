@@ -63,7 +63,7 @@ async function main() {
   // Briefing da manhã: seção "Sinais da operação" alimentada pelo Pareto, sem finanças.
   const brief = BusinessTutorService.morningBrief(G);
   check("briefing WhatsApp inclui 'Sinais da operação'", brief.text.includes("Sinais da operação"), brief.text.slice(0, 400));
-  check("briefing leva o sinal de varejo (não-finanças) ao WhatsApp", /Distribuir vendas|formar mais vendedores/i.test(brief.text), brief.text);
+  check("briefing leva o sinal de varejo (não-finanças) ao WhatsApp", /Poucas pessoas concentram as vendas/i.test(brief.text) && /Revisar escala e equipe/.test(brief.text) && !/Sinal '/.test(brief.text), brief.text); // F1.7a: linguagem empresarial + ação específica (antes: "Distribuir vendas / formar mais vendedores")
   check("briefing NÃO duplica finanças na seção da operação", !/Cobrar recebíveis vencidos/i.test(brief.text.split("Sinais da operação")[1] || ""));
 
   // Panorama do Diretor IA: bloco generalizado com TODOS os domínios.

@@ -207,50 +207,79 @@ export class RetailCommissionRaceService {
    * quando uma loja tem plano antigo sem competência (o legado vira fallback dos
    * meses não configurados; caso Toulon: P.A 3,50 em set/26 sem recalcular ago).
    */
-  static getPlan(orgId: string, storeId?: string | null, month?: string | null): { plan: RacePlan; source: "store" | "network" | "default"; effectiveMonth?: string | null } {
+  /**
+   * F1.4a — só política `active`/`confirmed` vale para comissão consolidada/pagamento (default =
+   * modo de PAGAMENTO, seguro por construção). `opts.preview` (simulação) também considera PROPOSTAS
+   * pendentes (`draft`/`pending_confirmation`) com precedência sobre o plano vigente — nunca grava.
+   * A resposta traz `status`/`preview` pra tela e o run rotularem de onde a regra veio.
+   */
+  static getPlan(orgId: string, storeId?: string | null, month?: string | null, opts: { preview?: boolean } = {}): { plan: RacePlan; source: "store" | "network" | "default"; effectiveMonth?: string | null; status: string; preview?: boolean; proposalId?: string; confirmedBy?: string | null } {
     if (month && !/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    const PAY = `COALESCE(policy_status, 'active') IN ('active', 'confirmed')`;
+    const order = storeId ? [storeId, "*"] : ["*"];
+    if (opts.preview) {
+      // proposta pendente da competência (loja > rede); a mais recente vence
+      for (const sid of order) {
+        const pr = (month
+          ? db.prepare(`SELECT id, config_json, status FROM retail_commission_policy_proposals WHERE organization_id = ? AND store_id = ? AND year_month = ? AND status IN ('draft', 'pending_confirmation') ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(orgId, sid, month)
+          : db.prepare(`SELECT id, config_json, status FROM retail_commission_policy_proposals WHERE organization_id = ? AND store_id = ? AND year_month IS NULL AND status IN ('draft', 'pending_confirmation') ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(orgId, sid)) as any;
+        const cfg = safeParse<RacePlan>(pr?.config_json);
+        if (cfg) return { plan: cfg, source: sid === "*" ? "network" : "store", effectiveMonth: month || null, status: pr.status, preview: true, proposalId: pr.id };
+      }
+    }
     if (month) {
-      for (const sid of storeId ? [storeId, "*"] : ["*"]) {
-        const row = db.prepare(`SELECT config_json FROM retail_commission_plan_months WHERE organization_id = ? AND store_id = ? AND year_month = ?`).get(orgId, sid, month) as any;
+      for (const sid of order) {
+        const row = db.prepare(`SELECT config_json, policy_status, confirmed_by FROM retail_commission_plan_months WHERE organization_id = ? AND store_id = ? AND year_month = ? AND ${PAY}`).get(orgId, sid, month) as any;
         const cfg = safeParse<RacePlan>(row?.config_json);
-        if (cfg) return { plan: cfg, source: sid === "*" ? "network" : "store", effectiveMonth: month };
+        if (cfg) return { plan: cfg, source: sid === "*" ? "network" : "store", effectiveMonth: month, status: row.policy_status || "active", confirmedBy: row.confirmed_by || null };
       }
     }
     if (storeId) {
-      const sp = db.prepare(`SELECT config_json FROM retail_commission_plans WHERE organization_id = ? AND store_id = ? AND active = 1`).get(orgId, storeId) as any;
+      const sp = db.prepare(`SELECT config_json, policy_status, confirmed_by FROM retail_commission_plans WHERE organization_id = ? AND store_id = ? AND active = 1 AND ${PAY}`).get(orgId, storeId) as any;
       const cfg = safeParse(sp?.config_json);
-      if (cfg) return { plan: cfg, source: "store" };
+      if (cfg) return { plan: cfg, source: "store", status: sp.policy_status || "active", confirmedBy: sp.confirmed_by || null };
     }
-    const net = db.prepare(`SELECT config_json FROM retail_commission_plans WHERE organization_id = ? AND store_id = '*' AND active = 1`).get(orgId) as any;
+    const net = db.prepare(`SELECT config_json, policy_status, confirmed_by FROM retail_commission_plans WHERE organization_id = ? AND store_id = '*' AND active = 1 AND ${PAY}`).get(orgId) as any;
     const cfg = safeParse(net?.config_json);
-    if (cfg) return { plan: cfg, source: "network" };
-    return { plan: DEFAULT_RACE_PLAN, source: "default" };
+    if (cfg) return { plan: cfg, source: "network", status: net.policy_status || "active", confirmedBy: net.confirmed_by || null };
+    return { plan: DEFAULT_RACE_PLAN, source: "default", status: "default" };
   }
 
-  static savePlan(orgId: string, storeId: string | null, config: RacePlan, actorId?: string, month?: string | null): any {
-    const sid = storeId || "*";
-    // Validação de forma mínima: precisa das duas metades; números viram Number.
+  /** Forma mínima de um plano (as duas metades). Compartilhada por savePlan e pelas propostas. */
+  static assertPlanShape(config: any): void {
     if (!config || typeof config !== "object" || !config.seller || !config.manager) {
       throw new Error("config inválida: precisa de { seller, manager }");
     }
+  }
+
+  static savePlan(orgId: string, storeId: string | null, config: RacePlan, actorId?: string, month?: string | null, opts: { status?: "active" | "confirmed"; confirmedBy?: string | null } = {}): any {
+    const sid = storeId || "*";
+    // Validação de forma mínima: precisa das duas metades; números viram Number.
+    this.assertPlanShape(config);
     if (month && !/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
+    // Quem salva direto (modal "Configurar a corrida", owner/admin) está DECIDINDO: a política nasce
+    // `active`. A proposta pendente (ex.: importação por IA) NÃO passa por aqui — só ao confirmar.
+    const status = opts.status || "active";
+    const confirmedBy = opts.confirmedBy ?? actorId ?? null;
     if (month) {
       // Plano da COMPETÊNCIA: não toca no legado — meses sem linha própria
       // continuam caindo no plano antigo (fallback), nada é recalculado.
       db.prepare(
-        `INSERT INTO retail_commission_plan_months (id, organization_id, store_id, year_month, config_json, created_by)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(organization_id, store_id, year_month) DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP`
-      ).run(randomUUID(), orgId, sid, month, JSON.stringify(config), actorId || null);
-      try { logAuthEvent(orgId, actorId || "system", sid, "RETAIL_COMMISSION_PLAN_MONTH_SAVED", { storeId: sid, month }); } catch { /* noop */ }
+        `INSERT INTO retail_commission_plan_months (id, organization_id, store_id, year_month, config_json, created_by, policy_status, confirmed_by, confirmed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(organization_id, store_id, year_month) DO UPDATE SET config_json = excluded.config_json, updated_at = CURRENT_TIMESTAMP,
+           policy_status = excluded.policy_status, confirmed_by = excluded.confirmed_by, confirmed_at = CURRENT_TIMESTAMP`
+      ).run(randomUUID(), orgId, sid, month, JSON.stringify(config), actorId || null, status, confirmedBy);
+      try { logAuthEvent(orgId, actorId || "system", sid, "RETAIL_COMMISSION_PLAN_MONTH_SAVED", { storeId: sid, month, status }); } catch { /* noop */ }
       return this.getPlan(orgId, storeId, month);
     }
     db.prepare(
-      `INSERT INTO retail_commission_plans (id, organization_id, store_id, config_json, active, created_by)
-       VALUES (?, ?, ?, ?, 1, ?)
-       ON CONFLICT(organization_id, store_id) DO UPDATE SET config_json = excluded.config_json, active = 1, updated_at = CURRENT_TIMESTAMP`
-    ).run(randomUUID(), orgId, sid, JSON.stringify(config), actorId || null);
-    try { logAuthEvent(orgId, actorId || "system", sid, "RETAIL_COMMISSION_PLAN_SAVED", { storeId: sid }); } catch { /* noop */ }
+      `INSERT INTO retail_commission_plans (id, organization_id, store_id, config_json, active, created_by, policy_status, confirmed_by, confirmed_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(organization_id, store_id) DO UPDATE SET config_json = excluded.config_json, active = 1, updated_at = CURRENT_TIMESTAMP,
+         policy_status = excluded.policy_status, confirmed_by = excluded.confirmed_by, confirmed_at = CURRENT_TIMESTAMP`
+    ).run(randomUUID(), orgId, sid, JSON.stringify(config), actorId || null, status, confirmedBy);
+    try { logAuthEvent(orgId, actorId || "system", sid, "RETAIL_COMMISSION_PLAN_SAVED", { storeId: sid, status }); } catch { /* noop */ }
     return this.getPlan(orgId, storeId);
   }
 
@@ -445,7 +474,7 @@ export class RetailCommissionRaceService {
    * restringe a UMA loja, mas o prêmio de desvio da REDE sempre considera
    * todas (senão o ranking mentiria).
    */
-  static raceMonth(orgId: string, month: string, opts?: { storeId?: string | null }): any {
+  static raceMonth(orgId: string, month: string, opts?: { storeId?: string | null; preview?: boolean }): any {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
     const weeks = this.weeksOfMonthFor(orgId, month);
     const { start: mStart, end: mEnd } = this.monthRange(month);
@@ -459,7 +488,8 @@ export class RetailCommissionRaceService {
 
     const storeReports: any[] = [];
     for (const st of stores) {
-      const { plan } = this.getPlan(orgId, st.id, month);
+      const planInfo = this.getPlan(orgId, st.id, month, { preview: !!opts?.preview });
+      const { plan } = planInfo;
       const sPlan = plan.seller || DEFAULT_RACE_PLAN.seller;
       const mPlan = plan.manager || DEFAULT_RACE_PLAN.manager;
       const schedule = this.getSchedule(orgId, st.id, mStart, mEnd);
@@ -663,13 +693,14 @@ export class RetailCommissionRaceService {
       }
       storeReports.push({
         storeId: st.id, storeName: st.name, weeks: weekly, monthly, paAmbiguities,
+        policy: { status: planInfo.status, source: planInfo.source, preview: !!planInfo.preview, effectiveMonth: planInfo.effectiveMonth || null, confirmedBy: planInfo.confirmedBy || null },
         store: { quota: storeQuotaMonth, sales: storeSalesMonth, hasData: mInfo.hasData, deviation: storeQuotaMonth > 0 ? round2((storeSalesMonth / storeQuotaMonth - 1) * 10000) / 100 : null },
         manager,
       });
     }
 
     // ── Desvio de cota da REDE (sempre considera todas as lojas) ──
-    const netPlan = this.getPlan(orgId, null, month).plan;
+    const netPlan = this.getPlan(orgId, null, month, { preview: !!opts?.preview }).plan;
     const sellerPrizes = (netPlan.seller?.networkDeviationPrizes || []).map(Number);
     const eligibleSellers = storeReports
       .flatMap((sr) => sr.monthly.map((s: any) => ({ ...s, storeId: sr.storeId, storeName: sr.storeName })))
@@ -833,7 +864,7 @@ export class RetailCommissionRaceService {
     }
     const doubleSourced = Array.from(dsBystore.values());
     return {
-      month, weeks, stores: visible, unassigned,
+      month, preview: !!opts?.preview, weeks, stores: visible, unassigned,
       paAmbiguities, paAmbiguityCount: paAmbiguities.reduce((a, s) => a + s.groups.length, 0),
       doubleSourced, doubleSourcedCount: doubleSourced.reduce((a, s) => a + s.sellers.length, 0),
       networkDeviation: {
@@ -1077,7 +1108,11 @@ export class RetailCommissionRaceService {
    * D7). Um item por vendedor (com o detalhamento no JSON) + um por gerente.
    */
   static createRaceRun(orgId: string, month: string, actorId?: string): any {
+    // Modo PAGAMENTO (default): só política active/confirmed entra. Proposta pendente NUNCA é lida aqui.
     const race = this.raceMonth(orgId, month);
+    const pending = db.prepare(
+      `SELECT id, store_id, status FROM retail_commission_policy_proposals WHERE organization_id = ? AND year_month = ? AND status IN ('draft', 'pending_confirmation')`
+    ).all(orgId, month) as any[];
     const { start, end } = this.monthRange(month);
     const runId = randomUUID();
     let totalSales = 0, totalCommission = 0;
@@ -1092,19 +1127,23 @@ export class RetailCommissionRaceService {
         for (const s of sr.monthly) {
           if (s.total <= 0 && s.sales <= 0) continue;
           insertItem.run(randomUUID(), orgId, runId, sr.storeId, s.sellerUserId || null, s.sellerName, s.sales, s.total,
-            JSON.stringify({ type: "race", month, tierPercent: s.tierPercent, tierAmount: s.tierAmount, paBonus: s.paBonus, weeklyTotal: s.weeklyTotal, deviationPrize: s.deviationPrize, championPrize: s.championPrize || 0, championWins: s.championWins || [], quota: s.quota, quotaSource: s.quotaSource, pa: s.pa, scheduledDays: s.scheduledDays, offDays: s.offDays, daysInMonth: s.daysInMonth }));
+            JSON.stringify({ type: "race", month, policy: sr.policy, tierPercent: s.tierPercent, tierAmount: s.tierAmount, paBonus: s.paBonus, weeklyTotal: s.weeklyTotal, deviationPrize: s.deviationPrize, championPrize: s.championPrize || 0, championWins: s.championWins || [], quota: s.quota, quotaSource: s.quotaSource, pa: s.pa, scheduledDays: s.scheduledDays, offDays: s.offDays, daysInMonth: s.daysInMonth }));
           totalSales += s.sales; totalCommission += s.total;
         }
         if (sr.manager && sr.manager.total > 0) {
           insertItem.run(randomUUID(), orgId, runId, sr.storeId, sr.manager.userId, `${sr.manager.name} (gerente)`, sr.manager.storeSales, sr.manager.total,
-            JSON.stringify({ type: "race_manager", month, storeTierPercent: sr.manager.storeTierPercent, storeTierAmount: sr.manager.storeTierAmount, ownTierAmount: sr.manager.ownTierAmount, paBonus: sr.manager.paBonus, weeklyTotal: sr.manager.weeklyTotal, deviationPrize: sr.manager.deviationPrize }));
+            JSON.stringify({ type: "race_manager", month, policy: sr.policy, storeTierPercent: sr.manager.storeTierPercent, storeTierAmount: sr.manager.storeTierAmount, ownTierAmount: sr.manager.ownTierAmount, paBonus: sr.manager.paBonus, weeklyTotal: sr.manager.weeklyTotal, deviationPrize: sr.manager.deviationPrize }));
           totalCommission += sr.manager.total;
         }
       }
       db.prepare(`UPDATE retail_commission_runs SET total_sales = ?, total_commission = ? WHERE id = ?`).run(round2(totalSales), round2(totalCommission), runId);
     });
     tx();
-    try { logAuthEvent(orgId, actorId || "system", runId, "RETAIL_COMMISSION_RACE_RUN_CREATED", { month, totalCommission: round2(totalCommission) }); } catch { /* noop */ }
-    return RetailCommissionService.getRun(orgId, runId);
+    try { logAuthEvent(orgId, actorId || "system", runId, "RETAIL_COMMISSION_RACE_RUN_CREATED", { month, totalCommission: round2(totalCommission), pendingPolicies: pending.length }); } catch { /* noop */ }
+    const run = RetailCommissionService.getRun(orgId, runId);
+    // O run usou a regra VIGENTE; se há proposta aguardando confirmação pro mesmo mês, avisa (não bloqueia, não paga).
+    return pending.length
+      ? { ...run, warnings: [{ code: "pending_policy", message: `Há ${pending.length} política(s) aguardando confirmação para ${month}; este run usou a regra vigente.`, proposals: pending.map((p) => ({ id: p.id, storeId: p.store_id, status: p.status })) }] }
+      : run;
   }
 }

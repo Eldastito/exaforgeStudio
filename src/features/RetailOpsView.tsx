@@ -2692,6 +2692,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
   const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
   const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
   const [margin, setMargin] = useState(store?.gross_margin_percent != null ? String(store.gross_margin_percent) : '');
+  const [briefTime, setBriefTime] = useState<string>(store?.closing_brief_time || '');
   // Dias fixos SEM funcionamento (0=domingo..6=sábado): sem cota, sem cobrança
   // de pendência e fechamento bloqueado nesses dias. Escala do dia sempre vence.
   const [closedDays, setClosedDays] = useState<number[]>(() => {
@@ -2752,6 +2753,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
         sellerSource: sellerSource === 'manual' ? 'manual' : null,
         grossMarginPercent: margin.trim() === '' ? null : Number(margin.replace(',', '.')),
         closedWeekdays: closedDays.length ? closedDays : null,
+        closingBriefTime: briefTime.trim() === '' ? null : briefTime.trim(),
       });
       const res = editing
         ? await apiFetch(`/api/retailops/stores/${store.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })
@@ -2829,6 +2831,10 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
             </div>
             <span className="mt-1 block text-[11px] text-zinc-500">Ex.: loja que não abre aos <strong>domingos</strong>. Nesses dias a loja não recebe cota (a cota mensal redistribui pros dias abertos), não é cobrada por fechamento/malote e o dia aparece como “fechada”. Feriado avulso: lance <strong>folga geral na escala</strong> daquele dia. Domingo excepcional aberto: lance a escala do dia com quem trabalhou — a escala sempre vence.</span>
           </div>
+          <label className="block text-xs text-zinc-400">Resumo de fechamento no WhatsApp às
+            <input type="time" value={briefTime} onChange={e => setBriefTime(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            <span className="mt-1 block text-[11px] text-zinc-500">Horário (Brasília) em que o gestor recebe o fechamento <strong>desta loja</strong> — use uns 30 min depois que a loja fecha (ex.: loja que fecha às 19h → 19:30). Vazio = padrão da rede (22:30). Só vale se o resumo da noite estiver ligado.</span>
+          </label>
           <label className="block text-xs text-zinc-400">Comissão por vendedor vem de
             <select value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
               <option value="pdv">PDV/ERP (padrão)</option>

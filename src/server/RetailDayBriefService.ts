@@ -17,17 +17,23 @@
  *  - dinheiro sem detalhe no fechamento → "—";
  *  - acumulado da semana/mês só é TOTAL quando não falta fechamento de nenhum dia com cota; se faltar, o
  *    parcial aparece rotulado ("parcial — faltam N dias") e o atingimento não é calculado.
- * Entrega da noite: WhatsApp pra owner/admin com telefone (dinheiro é role-gated §73), janela 21h–23h (SP),
- * opt-in por org, dedupe por dia, `send` injetado (testável sem rede). Determinístico, sem LLM. Isola por org.
+ * Entrega da noite (F1.6d): UM resumo POR HORÁRIO DE FECHAMENTO. Lojas de shopping fecham em horários diferentes (TOULON: Avenida
+ * Brasil 19h, demais 22h) — cada loja vai no resumo do SEU horário (`retail_stores.closing_brief_time`, HH:MM de SP; vazio = 22:30 da
+ * rede): ex. 19:30 só Avenida Brasil; 22:30 as demais + o bloco 'Rede' (o último horário do dia fecha a rede toda). Loja que não abre
+ * naquele dia (closed_weekdays — Av. Brasil aos domingos) sai do dia: nem resumo, nem 'aguardando', nem trava o total da rede.
+ * WhatsApp pra owner/admin com telefone (dinheiro é role-gated §73), opt-in por org, dedupe por (usuário, dia, horário) — a chave
+ * `brief_date` guarda `YYYY-MM-DD#HH:MM` (sem mudar o schema), janela de 3h a partir do horário, `send` injetado (testável sem
+ * rede). Determinístico, sem LLM. Isola por org.
  */
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { onlyDigits } from "./phoneMatch.js";
-import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
+import { RetailClosingService } from "./RetailOpsService.js";
 import { combineMetrics, formatMetric, known, ratioMetric, unknown, notComputed, type Metric } from "../lib/metric.js";
 
-const NIGHT_START = 21, NIGHT_END = 23;            // exclusivo — hora de São Paulo
+export const DEFAULT_NIGHT_TIME = "22:30";         // padrão da rede (lojas sem closing_brief_time) — hora de São Paulo
+const SLOT_WINDOW_MIN = 180;                        // envia até 3h depois do horário (se o servidor estava fora do ar), sem passar da meia-noite
 const CLOSED_OK = "('received','extracted','needs_review','reconciled','divergent','approved')";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -40,6 +46,19 @@ export function weekStartOf(date: string): string {
   const dow = new Date(`${date}T12:00:00Z`).getUTCDay();            // 0=dom
   return addDays(date, -((dow + 6) % 7));
 }
+
+/** Lojas ativas que ABREM na data (closed_weekdays — ex.: Avenida Brasil não abre aos domingos). Fecha nada de loja fechada entra no dia. */
+function storesOpenOn(orgId: string, date: string, cols = "id, name"): any[] {
+  const all = db.prepare(`SELECT ${cols} FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+  return all.filter((s) => { try { return !RetailClosingService.isStoreClosedOnDate(orgId, s.id, date); } catch { return true; } });
+}
+/** Minutos do dia em São Paulo. */
+function spMinutes(now: Date): { dateSP: string; min: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value || "0";
+  return { dateSP: `${g("year")}-${g("month")}-${g("day")}`, min: Number(g("hour")) * 60 + Number(g("minute")) };
+}
+const hhmmToMin = (t: string) => { const m = String(t).match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 
 export type Period = { venda: Metric; cota: Metric; atingimento: Metric; partial: number | null; missingDays: number };
 export type NightStore = { storeId: string; storeName: string; venda: Metric; cota: Metric; atingimento: Metric; dinheiro: Metric; week: Period; month: Period };
@@ -54,7 +73,7 @@ export class RetailDayBriefService {
   /** null = a org não cadastrou NENHUMA cota pra hoje (não há o que dizer; o resumo da manhã segue igual). */
   static morningQuotas(orgId: string, date: string): MorningQuotas | null {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
-    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const stores = storesOpenOn(orgId, date);
     const quotas = new Map((db.prepare(`SELECT store_id, quota_amount FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?`).all(orgId, date) as any[]).map((q) => [q.store_id, Number(q.quota_amount)]));
     const rows = stores.map((s) => ({
       storeId: s.id as string, storeName: s.name as string,
@@ -102,7 +121,7 @@ export class RetailDayBriefService {
     const monthStart = `${date.slice(0, 7)}-01`;
     const weekStart = weekStartOf(date);
     const from = weekStart < monthStart ? weekStart : monthStart;
-    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const stores = storesOpenOn(orgId, date);
 
     const closings = db.prepare(
       `SELECT store_id, closing_date, ${off} AS total, details_json FROM retail_daily_closings
@@ -164,18 +183,38 @@ export class RetailDayBriefService {
     return `${label}: —`;
   }
 
-  /** Mensagem (linguagem do gestor, sem termos técnicos). */
-  static nightText(s: NightSnapshot): string {
+  /**
+   * Mensagem (linguagem do gestor, sem termos técnicos). `opts.storeIds` = só essas lojas (o resumo do horário delas);
+   * `opts.withNetwork` = inclui o bloco "Rede" (só no último horário do dia — é quando todas já fecharam). Sem opts = tudo (prévia).
+   */
+  static nightText(s: NightSnapshot, opts: { storeIds?: string[]; withNetwork?: boolean } = {}): string {
     const lines: string[] = [`Fechamento do dia — ${ddmm(s.date)}`];
     const block = (title: string, x: { venda: Metric; cota: Metric; atingimento: Metric; dinheiro: Metric; week: Period; month: Period }) => {
       const venda = x.venda.state === "unknown" ? "aguardando fechamento" : brl(x.venda);
       lines.push("", title, `Venda: ${venda}`, `Cota: ${brl(x.cota)}`, `Atingimento: ${formatMetric(x.atingimento, { unit: "pct" })}`, `Dinheiro: ${brl(x.dinheiro)}`, this.periodText("Semana", x.week), this.periodText("Mês", x.month));
     };
-    for (const st of s.stores) block(st.storeName, st);
-    block("Rede", s.network);
-    if (s.network.venda.state === "not_computed" && s.network.partialVenda !== null) lines.push(`(Vendido nas lojas com fechamento: ${brlN(s.network.partialVenda)})`);
+    const only = opts.storeIds ? new Set(opts.storeIds) : null;
+    for (const st of s.stores) if (!only || only.has(st.storeId)) block(st.storeName, st);
+    if (opts.withNetwork !== false) {
+      block("Rede", s.network);
+      if (s.network.venda.state === "not_computed" && s.network.partialVenda !== null) lines.push(`(Vendido nas lojas com fechamento: ${brlN(s.network.partialVenda)})`);
+    }
     lines.push("", `Origem: ${s.source === "folha" ? "fechamento (folha) de cada loja" : "fechamento de cada loja"}.`);
     return lines.join("\n");
+  }
+
+  /** Horários de resumo do dia: lojas (abertas na data) agrupadas por `closing_brief_time` (vazio = padrão da rede), em ordem. O último fecha a rede. */
+  static slots(orgId: string, date: string): Array<{ time: string; min: number; storeIds: string[]; last: boolean }> {
+    const rows = storesOpenOn(orgId, date, "id, name, closing_brief_time");
+    const by = new Map<string, string[]>();
+    for (const r of rows) {
+      const t = hhmmToMin(r.closing_brief_time) !== null ? String(r.closing_brief_time) : DEFAULT_NIGHT_TIME;
+      const key = t.padStart(5, "0");
+      if (!by.has(key)) by.set(key, []);
+      by.get(key)!.push(r.id);
+    }
+    const list = Array.from(by.entries()).map(([time, storeIds]) => ({ time, min: hhmmToMin(time) as number, storeIds })).sort((a, b) => a.min - b.min);
+    return list.map((x, i) => ({ ...x, last: i === list.length - 1 }));
   }
 
   // ── entrega da noite ───────────────────────────────────────────────────────
@@ -202,19 +241,31 @@ export class RetailDayBriefService {
     return s.stores.some((st) => st.cota.state === "value" || st.venda.state === "value");
   }
 
+  /**
+   * Um passe (chamado a cada ~5 min pelo Scheduler). Para cada horário do dia cujo momento já chegou (e não passou de 3h), monta o
+   * resumo SÓ das lojas daquele horário (+ "Rede" no último) e envia a owner/admin com telefone — uma vez por (usuário, dia, horário).
+   * Só marca como enviado DEPOIS do envio (falhou → retenta no próximo passe). `force` (prévia/manual) envia todos os horários, sem janela/dedupe.
+   */
   static async runPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any; force?: boolean }): Promise<{ sent: number; skipped: number; reasons: string[] }> {
     const out = { sent: 0, skipped: 0, reasons: [] as string[] };
     if (!this.enabled(orgId)) return out;
-    const { dateSP, hourSP } = FalaTuBriefingDigestService.spParts(opts.now);
-    if (!opts.force && (hourSP < NIGHT_START || hourSP >= NIGHT_END)) return out;
+    const { dateSP, min } = spMinutes(opts.now);
+    const slots = this.slots(orgId, dateSP);
+    const due = opts.force ? slots : slots.filter((sl) => min >= sl.min && min < Math.min(sl.min + SLOT_WINDOW_MIN, 1440));
+    if (!due.length) return out;
     const snap = this.nightSnapshot(orgId, dateSP);
-    if (!this.hasContent(snap)) { out.skipped += 1; out.reasons.push("no_content"); return out; }
-    const text = this.nightText(snap);
-    for (const r of this.recipients(orgId)) {
-      if (!opts.force && this.alreadySent(orgId, r.userId, dateSP)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
-      await opts.send(r.phone, text);            // só marca DEPOIS do envio (falhou → retenta no próximo tick)
-      this.markSent(orgId, r.userId, dateSP);
-      out.sent += 1;
+    const recipients = this.recipients(orgId);
+    for (const sl of due) {
+      const mine = snap.stores.filter((st) => sl.storeIds.includes(st.storeId));
+      if (!mine.some((st) => st.cota.state === "value" || st.venda.state === "value")) { out.skipped += 1; out.reasons.push("no_content"); continue; }
+      const text = this.nightText(snap, { storeIds: sl.storeIds, withNetwork: sl.last });
+      const key = `${dateSP}#${sl.time}`;
+      for (const r of recipients) {
+        if (!opts.force && this.alreadySent(orgId, r.userId, key)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
+        await opts.send(r.phone, text);            // só marca DEPOIS do envio (falhou → retenta no próximo passe)
+        this.markSent(orgId, r.userId, key);
+        out.sent += 1;
+      }
     }
     if (!out.sent && !out.skipped) out.reasons.push("no_recipient");
     return out;

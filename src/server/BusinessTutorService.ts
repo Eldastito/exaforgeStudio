@@ -22,7 +22,7 @@ const brl = (n: any) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
 
 export interface TutorSendResult {
   sent: boolean;
-  reason?: "disabled" | "outside_window" | "already_sent" | "no_phone" | "no_breakeven";
+  reason?: "disabled" | "outside_window" | "already_sent" | "no_phone" | "no_breakeven" | "replaced_by_retail_night_brief";
   phone?: string;
   text?: string;
 }
@@ -232,6 +232,8 @@ export class BusinessTutorService {
   static async runEveningPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any }): Promise<TutorSendResult> {
     const s = db.prepare("SELECT tutor_wa_enabled, tutor_wa_last_evening FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     if (!s || !Number(s.tutor_wa_enabled)) return { sent: false, reason: "disabled" };
+    // F1.6d: varejo com o fechamento POR LOJA ligado recebe ESSE resumo à noite — o "Fim do dia" genérico sairia como uma 2ª mensagem.
+    try { if ((db.prepare("SELECT retail_night_brief_enabled AS e FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.e === 1) return { sent: false, reason: "replaced_by_retail_night_brief" }; } catch { /* coluna ausente → segue */ }
     const { dateSP, hourSP } = this.spParts(opts.now);
     if (hourSP < this.EVENING_START || hourSP >= this.EVENING_END) return { sent: false, reason: "outside_window" };
     if (s.tutor_wa_last_evening === dateSP) return { sent: false, reason: "already_sent" };

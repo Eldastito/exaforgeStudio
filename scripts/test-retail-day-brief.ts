@@ -5,7 +5,7 @@
  * atingimento, dinheiro e o acumulado da SEMANA (seg–dom) e do MÊS; honestidade F1.0 — loja sem cota "—",
  * fechamento não lançado = "aguardando fechamento" (nunca vendeu R$ 0), dinheiro sem detalhe "—", acumulado
  * com dia faltando vira PARCIAL rotulado (sem atingimento), rede com loja sem dado = "Não calculado";
- * fonte oficial da org (folha × caixa); entrega só p/ owner/admin com telefone, janela 21h–23h SP, opt-in,
+ * fonte oficial da org (folha × caixa); entrega só p/ owner/admin com telefone, horário padrão 22:30 SP (F1.6d: por loja — ver test-retail-night-slots), opt-in,
  * dedupe, retry se o envio falhar; isolamento multi-tenant.
  * Uso:  npm run test:retail-day-brief
  */
@@ -103,15 +103,14 @@ async function main() {
   const sent: Array<[string, string]> = [];
   const send = async (phone: string, text: string) => { sent.push([phone, text]); };
   const at = (h: number) => new Date(Date.UTC(2026, 8, 24, h + 3, 30)); // SP = UTC-3 (h+3 pode passar de 24 → vira o dia seguinte em UTC)
-  const off = await B.runPass(A, { now: at(21), send });
+  const off = await B.runPass(A, { now: at(22), send });
   check("opt-in: desligado por padrão não envia nada", off.sent === 0 && sent.length === 0 && B.enabled(A) === false);
   B.setEnabled(A, true);
-  const early = await B.runPass(A, { now: at(20), send });
-  const late = await B.runPass(A, { now: at(23), send });
-  check("fora da janela 21h–23h (SP) não envia", early.sent === 0 && late.sent === 0 && sent.length === 0);
-  const r1 = await B.runPass(A, { now: at(21), send });
+  const early = await B.runPass(A, { now: at(21), send });
+  check("antes do horário padrão (22:30 SP) não envia", early.sent === 0 && sent.length === 0);
+  const r1 = await B.runPass(A, { now: at(22), send });
   check("na janela: envia só p/ owner/admin ativo COM telefone (agent, sem telefone e inativo ficam de fora)", r1.sent === 2 && sent.map(([p]) => p).sort().join() === "5521999990001,5521999990002");
-  const r2 = await B.runPass(A, { now: at(22), send });
+  const r2 = await B.runPass(A, { now: at(23), send });
   check("dedupe: no mesmo dia não reenvia", r2.sent === 0 && r2.skipped >= 1 && sent.length === 2);
   check("a mensagem entregue é o fechamento por loja", /Fechamento do dia — 24\/09/.test(sent[0][1]) && /Grande Rio/.test(sent[0][1]));
   const forced = await B.runPass(A, { now: at(15), send, force: true });
@@ -122,8 +121,8 @@ async function main() {
   const cs = store(O2, "Loja C"); quota(O2, cs, D, 1000); user(O2, "owner", "5521988880001"); B.setEnabled(O2, true);
   let failNext = true, attempts = 0;
   const flaky = async (_p: string, _t: string) => { attempts++; if (failNext) { failNext = false; throw new Error("gateway down"); } };
-  let threw = false; try { await B.runPass(O2, { now: at(21), send: flaky }); } catch { threw = true; }
-  const retry = await B.runPass(O2, { now: at(22), send: flaky });
+  let threw = false; try { await B.runPass(O2, { now: at(22), send: flaky }); } catch { threw = true; }
+  const retry = await B.runPass(O2, { now: at(23), send: flaky });
   check("falha de envio não marca como entregue: o próximo tick retenta e entrega", threw && retry.sent === 1 && attempts === 2);
   check("isolamento: nada da org C na mensagem da A (e vice-versa)", !sent.some(([, t]) => /Loja C/.test(t)) && B.nightSnapshot(O2, D).stores.length === 1 && B.nightSnapshot(O2, D).stores[0].storeName === "Loja C" && !B.nightText(B.nightSnapshot(O2, D)).includes("Grande Rio"));
 

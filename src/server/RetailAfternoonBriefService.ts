@@ -20,6 +20,7 @@
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { onlyDigits } from "./phoneMatch.js";
+import { RetailClosingService } from "./RetailOpsService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { combineMetrics, estimate, formatMetric, known, ratioMetric, unknown, notComputed, notApplicable, type Metric } from "../lib/metric.js";
 
@@ -78,7 +79,8 @@ export class RetailAfternoonBriefService {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
     const cutoffHour = opts.cutoffHour ?? CUTOFF_HOUR;
     const cutMin = cutoffHour * 60;
-    const stores = db.prepare(`SELECT id, name, code FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    // loja que não abre na data (closed_weekdays — Av. Brasil aos domingos) sai do dia: não vira 'sem meta' nem trava o total da rede
+    const stores = (db.prepare(`SELECT id, name, code FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[]).filter((st) => { try { return !RetailClosingService.isStoreClosedOnDate(orgId, st.id, date); } catch { return true; } });
     const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
     const histDates: string[] = [];
     for (let k = 1; k <= 8 && histDates.length < 8; k++) histDates.push(new Date(Date.parse(`${date}T12:00:00Z`) - k * 7 * 86400000).toISOString().slice(0, 10));

@@ -197,7 +197,7 @@ Estrutura pronta pro fluxo diagnóstico: `retail_daily_closings` (`informed_tota
 | F1.2 leitor de código | Entregue | só o Chão de loja; recebimento ainda no leitor antigo |
 | F1.3 política de estoque | Entregue | estratégia de reposição + diagnóstico do negativo |
 | F1.4a política de comissão (status) | Entregue | proposta ≠ pagamento |
-| F1.4b importação por IA das regras | **Pendente** | só criaria proposta |
+| F1.4b importação por IA das regras | Entregue | só cria PROPOSTA (draft); confirmação é do dono no modal da corrida; texto colado, não planilha .xlsx |
 | F1.5 metas por pessoa | Entregue | alerta opt-in |
 | F1.6 briefings (manhã · 16h · noite) | Entregue | manhã = bloco no resumo do Tutor; 16h e noite opt-in |
 | F1.7a linguagem empresarial | Entregue | |

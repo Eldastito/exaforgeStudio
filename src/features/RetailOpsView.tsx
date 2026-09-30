@@ -4537,6 +4537,78 @@ function TierEditor({ label, tiers, onChange, minLabel }: { label: string; tiers
   );
 }
 
+// F1.4b — importar regras de comissão de um TEXTO colado (IA lê; só cria PROPOSTA). Dentro do modal que já existe ("Configurar a
+// corrida"): sem tela/menu novo. Nada vale pra pagamento até o dono confirmar aqui — a IA só sugere, com a evidência citada.
+const PATH_LABEL: Record<string, string> = {
+  'seller.monthlyTiers': 'Vendedor · faixas mensais', 'seller.monthlyPa': 'Vendedor · P.A mensal', 'seller.weeklyFirstTiers': 'Vendedor · faixas do 1º da semana',
+  'seller.weeklyFirstPa': 'Vendedor · P.A semanal', 'seller.weeklySecondPercent': 'Vendedor · % do 2º da semana', 'seller.networkDeviationPrizes': 'Vendedor · prêmio de desvio da rede',
+  'seller.requiresFullMonth': 'Vendedor · exige mês completo', 'manager.storeMonthlyTiers': 'Gerente · faixas mensais da loja', 'manager.ownMonthlyTiers': 'Gerente · faixas mensais próprias',
+  'manager.monthlyPa': 'Gerente · P.A mensal', 'manager.weeklyStoreTiers': 'Gerente · faixas semanais da loja', 'manager.weeklyOwnTiers': 'Gerente · faixas semanais próprias',
+  'manager.weeklyPa': 'Gerente · P.A semanal', 'manager.networkDeviationPrizes': 'Gerente · prêmio de desvio da rede',
+};
+const showVal = (v: any) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v));
+function CommissionImportPanel({ storeId, month, onApplied }: { storeId: string; month: string; onApplied: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any | null>(null);
+  const interpret = async () => {
+    setBusy(true); setRes(null);
+    try {
+      const r = await apiFetch('/api/retailops/commission/policies/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, storeId: storeId || null, month }) });
+      const d = await r.json().catch(() => ({}));
+      setRes(d);
+      if (!r.ok && !d.message) toast.error(d.error || 'Não foi possível ler o texto.');
+    } finally { setBusy(false); }
+  };
+  const act = async (kind: 'confirm' | 'discard') => {
+    if (!res?.proposal?.id) return;
+    if (kind === 'confirm' && !window.confirm(`Confirmar esta política? Ela passa a valer para o pagamento de ${month} (${storeId ? 'desta loja' : 'da rede toda'}).`)) return;
+    setBusy(true);
+    try {
+      const base = `/api/retailops/commission/policies/proposals/${res.proposal.id}`;
+      if (kind === 'confirm') {
+        const a = await apiFetch(`${base}/submit`, { method: 'POST' });
+        const b = a.ok ? await apiFetch(`${base}/confirm`, { method: 'POST' }) : a;
+        if (b.ok) { toast.success('Política confirmada.'); setRes(null); setText(''); onApplied(); } else toast.error('Não foi possível confirmar.');
+      } else {
+        const a = await apiFetch(`${base}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'descartada pelo dono' }) });
+        if (a.ok) { toast.success('Proposta descartada — nada mudou.'); setRes(null); } else toast.error('Não foi possível descartar.');
+      }
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-2.5">
+      <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 text-left text-xs font-medium text-zinc-300"><Sparkles className="w-3.5 h-3.5 text-indigo-300" /> Importar regras de um texto (IA sugere, você confirma)</button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={4} placeholder="Cole aqui o texto das regras (planilha, mensagem, anotação)…" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-100" />
+          <div className="flex items-center gap-2">
+            <button onClick={interpret} disabled={busy || !text.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Ler o texto</button>
+            <span className="text-[11px] text-zinc-500">Nada vale para pagamento até você confirmar. Só aceito o que está escrito no texto.</span>
+          </div>
+          {res && res.created === false && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-200">{res.message || 'Nada foi proposto.'}{Array.isArray(res.rejected) && res.rejected.length > 0 ? <ul className="mt-1 list-disc pl-4 text-amber-200/80">{res.rejected.map((x: any, i: number) => <li key={i}>{PATH_LABEL[x.path] || x.path}: {x.reason}</li>)}</ul> : null}</div>}
+          {res && res.created === true && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 text-[11px] text-zinc-200">
+              <div className="font-medium text-emerald-200">Proposta criada (ainda NÃO vale para pagamento) — o que mudaria:</div>
+              <ul className="mt-1 space-y-1">
+                {res.changes.map((c: any, i: number) => (
+                  <li key={i}><span className="text-zinc-100">{PATH_LABEL[c.path] || c.path}:</span> {showVal(c.from)} → <strong className="text-emerald-300">{showVal(c.to)}</strong><div className="text-zinc-500">no texto: “{c.evidence}”</div></li>
+                ))}
+              </ul>
+              {res.rejected?.length > 0 && <div className="mt-1 text-amber-200/80">{res.rejected.length} item(ns) descartado(s) por não estarem no texto ou fora dos limites.</div>}
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => act('confirm')} disabled={busy} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Confirmar política</button>
+                <button onClick={() => act('discard')} disabled={busy} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Descartar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: string; onClose: () => void }) {
   const [storeId, setStoreId] = useState('');
   const [plan, setPlan] = useState<any | null>(null);
@@ -4602,6 +4674,7 @@ function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: strin
           </select>
           <span className="text-[11px] text-zinc-500">plano em uso: {source === 'store' ? 'próprio da loja' : source === 'network' ? 'da rede' : 'padrão (planilha CARIOCA)'}{effectiveMonth ? ` · competência ${effectiveMonth}` : ' · sem competência (vale todo mês)'} — salvar grava a regra SÓ de {month}.</span>
         </div>
+        <CommissionImportPanel storeId={storeId} month={month} onApplied={() => load(storeId)} />
         {!plan ? <div className="text-sm text-zinc-500">Carregando…</div> : (
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">

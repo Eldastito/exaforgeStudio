@@ -63,6 +63,7 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 ### Passo 7 — Política de comissão (F1.4a)
 - Regra nova entra como **proposta** (`POST /commission/policies/proposals`), nunca vira pagamento sozinha: só `active/confirmed`
   alimenta a comissão. Confirmar = gesto humano (`/confirm`). Avenida Brasil "só o 1º": plano da loja com `weeklySecondPercent: 0`.
+- **Importar de um texto (F1.4b):** no modal **Configurar a corrida** → "Importar regras de um texto": cole o texto, a IA sugere, a tela mostra *campo · de → para · trecho do texto*; só **"Confirmar política"** (gesto do dono) faz valer. A IA descarta o que não está escrito no texto ou está fora de limites, nunca ativa nada sozinha e, se estiver fora do ar, não cria nada. `networkChampions` (ranking da rede) não é interpretado.
 - **Reverter:** `/archive` da proposta.
 
 ### Passo 8 — Estratégia de reposição (F1.3)

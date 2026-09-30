@@ -27,6 +27,8 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
+import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
+import { RetailSellerAbsenceService } from "../RetailSellerAbsenceService.js";
 import { RetailScheduleTemplateService } from "../RetailScheduleTemplateService.js";
 import { RetailScheduleImportService } from "../RetailScheduleImportService.js";
 import { RetailMonthWeeksService } from "../RetailMonthWeeksService.js";
@@ -2164,6 +2166,46 @@ router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
   try { res.json(RetailCommissionRaceService.sellerGoalSignals(orgId, storeId, date)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// F1.5 — meses CONSECUTIVOS abaixo da meta por PESSOA (rede toda, identidade canônica). owner/admin
+// (nomeia pessoas). Meses sem meta/ausência são neutros; nada de R$ na resposta de sinal (§73).
+router.get("/seller-goal-streaks", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  try {
+    const a = SellerGoalStreakService.assess(orgId, date, { monthsBack: req.query.monthsBack ? Number(req.query.monthsBack) : 6 });
+    res.json({ ...a, briefText: SellerGoalStreakService.briefText(a), alertsEnabled: SellerGoalStreakService.enabled(orgId) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/seller-goal-streaks/publish", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(SellerGoalStreakService.publish(orgId, new Date().toISOString().slice(0, 10))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.put("/seller-goal-streaks/alerts", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: SellerGoalStreakService.setEnabled(orgId, !!req.body?.enabled) });
+});
+// Ausências (férias/afastamento) que tornam o mês NÃO elegível pra meta. owner/admin.
+router.get("/sellers/:sellerId/absences", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ absences: RetailSellerAbsenceService.list(orgId, req.params.sellerId) });
+});
+router.post("/sellers/:sellerId/absences", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.status(201).json(RetailSellerAbsenceService.add(orgId, { sellerId: req.params.sellerId, type: req.body?.type, startDate: String(req.body?.startDate || ""), endDate: String(req.body?.endDate || ""), note: req.body?.note ?? null }, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.delete("/sellers/absences/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ok: RetailSellerAbsenceService.cancel(orgId, req.params.id, req.user?.userId) });
 });
 
 // Preferência da empresa p/ a aba Metas: mostrar/ocultar a coluna QUINZENA.

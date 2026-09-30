@@ -17,9 +17,10 @@
  *    definitiva): quem a pessoa É ≠ onde ela trabalhou naquele período. Vender em outra loja
  *    NÃO cria outro vendedor; o resultado é lido por pessoa + loja + período (`storeOn`).
  *
- * Fatia F1.1a: modelo, resolução, fusão e alocação. A unificação das AGREGAÇÕES de venda/comissão
- * pela identidade canônica é a F1.1b (usa `canonicalMatricula`) — até lá, fundir NÃO reescreve
- * ranking/comissão existentes (por isso nada é apagado nem reescrito aqui).
+ * F1.1a: modelo, resolução, fusão e alocação. F1.1b: as AGREGAÇÕES de venda/comissão/corrida/ranking
+ * passam pela identidade canônica via `SellerIdentityContext.canonicalize` (só quando a linha foi tocada
+ * por fusão/alias; org sem aliases/fusões recebe exatamente as chaves de antes). Nada é reescrito no
+ * histórico — a unificação é feita na LEITURA (reversível com `unmerge`).
  * Tudo isolado por organization_id (convenção nº 1).
  */
 import { randomUUID } from "crypto";
@@ -48,6 +49,114 @@ const isoDay = (v: unknown): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 const today = () => new Date().toISOString().slice(0, 10);
+
+/** Chave de casamento das agregações de vendas/corrida (mesma convenção `norm` do RetailCommissionRaceService). */
+const aggNorm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+export type CanonicalRef = {
+  sellerId: string;
+  matricula: string;
+  name: string;                 // nome da identidade canônica (ou "Matrícula X" se sem nome)
+  userId: string | null;
+  /** Chaves `user:`/`mat:`/`nom:` de TODAS as identidades ligadas (canônica + fundidas + aliases): cotas/escala cadastradas com a chave antiga continuam casando. */
+  aliasKeys: string[];
+};
+
+/**
+ * Identidade em MEMÓRIA (uma leitura por agregação): as tabelas de vendedor/alias são pequenas,
+ * então uma agregação carrega tudo UMA vez e resolve milhares de linhas sem tocar o banco.
+ * `empty` = a org não usa aliases nem fusões → `canonicalize` devolve sempre null (0-regressão
+ * POR CONSTRUÇÃO: quem não configurou identidade recebe exatamente as chaves de antes).
+ */
+export class SellerIdentityContext {
+  readonly empty: boolean;
+  private byId = new Map<string, any>();
+  private byMat = new Map<string, any>();
+  private aliases: Array<{ seller_id: string; alias: string; alias_norm: string; kind: string }>;
+  private officials: any[];
+
+  private constructor(sellers: any[], aliases: any[]) {
+    for (const r of sellers) { this.byId.set(r.id, r); this.byMat.set(String(r.matricula), r); }
+    this.aliases = aliases;
+    this.officials = sellers.filter((r) => r.active === 1 && !r.merged_into_seller_id && r.name);
+    this.empty = aliases.length === 0 && !sellers.some((r) => r.merged_into_seller_id);
+  }
+
+  static load(orgId: string): SellerIdentityContext {
+    const sellers = db.prepare(`SELECT id, matricula, name, user_id, active, merged_into_seller_id FROM retail_sellers WHERE organization_id = ?`).all(orgId) as any[];
+    const aliases = db.prepare(`SELECT seller_id, alias, alias_norm, kind FROM retail_seller_aliases WHERE organization_id = ?`).all(orgId) as any[];
+    return new SellerIdentityContext(sellers, aliases);
+  }
+
+  canonicalSeller(id: string): any | null {
+    let cur = this.byId.get(id) || null;
+    for (let i = 0; cur && cur.merged_into_seller_id && i < MAX_MERGE_DEPTH; i++) {
+      const next = this.byId.get(cur.merged_into_seller_id);
+      if (!next) break;
+      cur = next;
+    }
+    return cur;
+  }
+
+  /** Mesma regra do `RetailSellerIdentityService.resolve` — igualdade normalizada, sem fuzzy. `hit` = a linha casada ANTES de seguir a fusão. */
+  resolve(ref: { matricula?: string | null; name?: string | null }): IdentityResolution & { hit: any | null } {
+    const none = { status: "unidentified" as const, seller: null, via: null, candidates: [] as IdentityResolution["candidates"], hit: null };
+    const shape = (x: any) => ({ id: x.id, name: x.name || null, matricula: x.matricula });
+    const found = (hit: any, via: IdentityResolution["via"]) => {
+      const c = this.canonicalSeller(hit.id) || hit;
+      return { status: "identified" as const, seller: shape(c), via, candidates: [] as IdentityResolution["candidates"], hit };
+    };
+    const mat = String(ref.matricula ?? "").trim();
+    if (mat) {
+      const byMat = this.byMat.get(mat);
+      if (byMat) return found(byMat, "matricula");
+      const ids = [...new Set(this.aliases.filter((a) => (a.kind === "matricula" || a.kind === "cai_usuario") && a.alias_norm === normalizeAlias(mat)).map((a) => a.seller_id))];
+      if (ids.length === 1) { const x = this.byId.get(ids[0]); if (x) return found(x, "alias"); }
+      if (ids.length > 1) return { ...none, status: "ambiguous" as any, candidates: ids.map((i) => this.byId.get(i)).filter(Boolean).map(shape) };
+    }
+    const nm = normalizeAlias(ref.name);
+    if (nm.length >= 2) {
+      const officials = this.officials.filter((r) => normalizeAlias(r.name) === nm);
+      const al = this.aliases.filter((a) => a.kind === "name" && a.alias_norm === nm);
+      const map = new Map<string, any>();
+      for (const o of officials) { const c = this.canonicalSeller(o.id) || o; map.set(c.id, c); }
+      for (const a of al) { const c = this.canonicalSeller(a.seller_id); if (c) map.set(c.id, c); }
+      const list = [...map.values()];
+      if (list.length === 1) return { ...found(list[0], al.length && !officials.length ? "alias" : "name"), hit: officials[0] || list[0] };
+      if (list.length > 1) return { ...none, status: "ambiguous" as any, candidates: list.map(shape) };
+    }
+    return none;
+  }
+
+  /**
+   * Só devolve algo quando a identidade DA LINHA foi tocada por fusão ou alias confirmado;
+   * vendedor comum (sem fusão/alias) → null e a agregação segue com as chaves originais.
+   */
+  canonicalize(ref: { matricula?: string | null; name?: string | null }): CanonicalRef | null {
+    if (this.empty) return null;
+    const r = this.resolve(ref);
+    if (r.status !== "identified" || !r.seller) return null;
+    const touched = r.via === "alias" || (r.hit && r.hit.merged_into_seller_id);
+    if (!touched) return null;
+    const c = this.byId.get(r.seller.id);
+    if (!c) return null;
+    const keys = new Set<string>();
+    const addSeller = (x: any) => {
+      if (x.user_id) keys.add(`user:${x.user_id}`);
+      if (x.matricula) keys.add(`mat:${x.matricula}`);
+      if (x.name) keys.add(`nom:${aggNorm(x.name)}`);
+    };
+    const ids = new Set<string>([c.id]);
+    for (const x of this.byId.values()) if ((this.canonicalSeller(x.id) || x).id === c.id) ids.add(x.id);
+    for (const id of ids) { const x = this.byId.get(id); if (x) addSeller(x); }
+    for (const a of this.aliases) {
+      if (!ids.has(a.seller_id)) continue;
+      if (a.kind === "name") keys.add(`nom:${aggNorm(a.alias)}`);
+      else keys.add(`mat:${String(a.alias).trim()}`);
+    }
+    return { sellerId: c.id, matricula: String(c.matricula), name: c.name || `Matrícula ${c.matricula}`, userId: c.user_id || null, aliasKeys: [...keys] };
+  }
+}
 
 export class RetailSellerIdentityService {
   // ── leitura básica ────────────────────────────────────────────────────────
@@ -121,36 +230,12 @@ export class RetailSellerIdentityService {
    * Só igualdade normalizada. Sem correspondência exata → `unidentified` (nunca inventa).
    */
   static resolve(orgId: string, ref: { matricula?: string | null; name?: string | null }): IdentityResolution {
-    const none: IdentityResolution = { status: "unidentified", seller: null, via: null, candidates: [] };
-    const shape = (s: any) => ({ id: s.id, name: s.name || null, matricula: s.matricula });
-    const found = (s: any, via: IdentityResolution["via"]): IdentityResolution => {
-      const c = this.canonicalSeller(orgId, s.id) || s;
-      return { status: "identified", seller: shape(c), via, candidates: [] };
-    };
-
-    const mat = String(ref.matricula ?? "").trim();
-    if (mat) {
-      const byMat = db.prepare(`SELECT * FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, mat) as any;
-      if (byMat) return found(byMat, "matricula");
-      const al = db.prepare(`SELECT seller_id FROM retail_seller_aliases WHERE organization_id = ? AND kind IN ('matricula','cai_usuario') AND alias_norm = ?`).all(orgId, normalizeAlias(mat)) as any[];
-      const ids = [...new Set(al.map((a) => a.seller_id))];
-      if (ids.length === 1) { const s = this.seller(orgId, ids[0]); if (s) return found(s, "alias"); }
-      if (ids.length > 1) return { ...none, status: "ambiguous", candidates: ids.map((i) => shape(this.seller(orgId, i))).filter(Boolean) };
-    }
-    const nm = normalizeAlias(ref.name);
-    if (nm.length >= 2) {
-      const officials = (db.prepare(`SELECT * FROM retail_sellers WHERE organization_id = ? AND active = 1 AND merged_into_seller_id IS NULL AND name IS NOT NULL`).all(orgId) as any[])
-        .filter((r) => normalizeAlias(r.name) === nm);
-      const al = db.prepare(`SELECT seller_id FROM retail_seller_aliases WHERE organization_id = ? AND kind = 'name' AND alias_norm = ?`).all(orgId, nm) as any[];
-      const byId = new Map<string, any>();
-      for (const o of officials) byId.set((this.canonicalSeller(orgId, o.id) || o).id, this.canonicalSeller(orgId, o.id) || o);
-      for (const a of al) { const c = this.canonicalSeller(orgId, a.seller_id); if (c) byId.set(c.id, c); }
-      const list = [...byId.values()];
-      if (list.length === 1) return found(list[0], al.length && !officials.length ? "alias" : "name");
-      if (list.length > 1) return { ...none, status: "ambiguous", candidates: list.map(shape) };
-    }
-    return none;
+    const { hit: _hit, ...r } = SellerIdentityContext.load(orgId).resolve(ref);
+    return r;
   }
+
+  /** Contexto em memória p/ agregações (uma leitura, N linhas). */
+  static context(orgId: string): SellerIdentityContext { return SellerIdentityContext.load(orgId); }
 
   /** Matrícula da identidade CANÔNICA (a que a agregação deve usar — F1.1b). Sem mapeamento → a própria. */
   static canonicalMatricula(orgId: string, matricula: string | null | undefined): string | null {
@@ -176,10 +261,11 @@ export class RetailSellerIdentityService {
         GROUP BY m ORDER BY n DESC`
     ).all(orgId) as any[];
     const out: Array<{ matricula: string; sales: number; lastSale: string | null; displayName: string }> = [];
+    const ctx = SellerIdentityContext.load(orgId);
     for (const r of rows) {
-      const res = this.resolve(orgId, { matricula: String(r.m) });
+      const res = ctx.resolve({ matricula: String(r.m) });
       if (res.status === "identified" && res.seller?.name) continue;
-      out.push({ matricula: String(r.m), sales: Number(r.n), lastSale: r.last_sale || null, displayName: this.displayName(orgId, String(r.m)) });
+      out.push({ matricula: String(r.m), sales: Number(r.n), lastSale: r.last_sale || null, displayName: `Vendedor não identificado — matrícula ${String(r.m)}` });
     }
     return out;
   }

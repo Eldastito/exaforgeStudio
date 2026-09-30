@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 
 export type SellerSaleEntry = {
@@ -184,10 +185,12 @@ export class RetailSellerSalesService {
         GROUP BY seller_key, ss.store_id`
     ).all(orgId, start, end) as any[];
     const bySeller = new Map<string, { sellerName: string; matricula: string | null; sales: number; pecas: number; topStore: string | null; topStoreSales: number }>();
+    const idCtx = RetailSellerIdentityService.context(orgId); // F1.1b: fusão/alias unifica a pessoa no ranking
     for (const r of rows) {
-      const key = String(r.seller_key);
+      const canon = idCtx.canonicalize({ matricula: r.matricula || null, name: r.mapped_name || r.seller_name });
+      const key = canon ? canon.matricula : String(r.seller_key); // = seller_key das linhas da própria canônica (matrícula)
       let e = bySeller.get(key);
-      if (!e) { e = { sellerName: r.mapped_name || r.seller_name, matricula: r.matricula || null, sales: 0, pecas: 0, topStore: null, topStoreSales: -1 }; bySeller.set(key, e); }
+      if (!e) { e = { sellerName: canon ? canon.name : (r.mapped_name || r.seller_name), matricula: canon ? canon.matricula : (r.matricula || null), sales: 0, pecas: 0, topStore: null, topStoreSales: -1 }; bySeller.set(key, e); }
       const s = Number(r.sales || 0);
       e.sales += s;
       e.pecas += Number(r.pecas || 0);

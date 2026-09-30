@@ -16,6 +16,7 @@ import { RetailSellerSalesService } from "./RetailSellerSalesService.js";
 import { RetailErpSellerSalesService } from "./RetailErpSellerSalesService.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 export type CommissionRuleInput = {
   name: string;
   scope?: "store" | "seller" | "product" | "global";
@@ -144,7 +145,14 @@ export class RetailCommissionService {
     // name normalizado → chave, p/ reconciliar lançamentos manuais/ERP (que
     // trazem só o nome) com o vendedor do ZappFlow (que tem userId) de mesmo nome.
     const nameToKey = new Map<string, string>();
-    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string, erpCommission = 0, matricula: string | null = null) => {
+    // F1.1b — mesma canonicalização do salesBySellerStore (as chaves user:/nome dos DOIS caminhos precisam
+    // continuar alinhadas: o fallback de comissão por loja é lido por `sellerMatchKey(userId, nome)`).
+    const idCtx = RetailSellerIdentityService.context(orgId);
+    const add = (userId: string | null, name: string, sales: number, pecas: number, orders: number, source: string, erpCommission = 0, matricula: string | null = null, refMatricula: string | null = null) => {
+      if (source !== "zappflow") {
+        const c = idCtx.canonicalize({ matricula: refMatricula || matricula, name });
+        if (c) { userId = c.userId; name = c.name; matricula = c.matricula; }
+      }
       const n = norm(name);
       const k = (userId && `user:${userId}`) || nameToKey.get(n) || `nom:${n}`;
       const cur = map.get(k) || { sellerUserId: userId || null, sellerName: name, matricula: null, sales: 0, pecas: 0, orders: 0, erpCommission: 0, sources: new Set<string>() };
@@ -160,8 +168,8 @@ export class RetailCommissionService {
     };
     // ZappFlow primeiro: registra os nomes p/ o manual/ERP cair na mesma chave.
     for (const s of this.onlineSalesBySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, 0, s.orders, "zappflow");
-    for (const s of RetailSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "manual");
-    for (const s of RetailErpSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "erp", s.erpCommission);
+    for (const s of RetailSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "manual", 0, null, s.matricula);
+    for (const s of RetailErpSellerSalesService.bySeller(orgId, start, end)) add(s.sellerUserId, s.sellerName, s.sales, s.pecas, s.orders, "erp", s.erpCommission, null, s.matricula);
     // PDV físico por VENDEDOR (VendaMalote → CAI_USUARIO/`vendedor_codigo`): é a
     // base real da comissão por vendedor da rede. Entra por último; casa por
     // userId/nome com as demais fontes quando for a mesma pessoa.
@@ -396,18 +404,27 @@ export class RetailCommissionService {
    * efetiva daquela loja). Dedup por (loja + userId/matrícula/nome) dentro da
    * MESMA loja — não funde a mesma pessoa entre lojas diferentes.
    */
-  static salesBySellerStore(orgId: string, start: string, end: string): Array<{ storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; source: string; salesBySource: Record<string, number>; doubleSourced: boolean }> {
+  static salesBySellerStore(orgId: string, start: string, end: string): Array<{ storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; source: string; salesBySource: Record<string, number>; doubleSourced: boolean; aliasKeys?: string[] }> {
     const norm = (name: string) => String(name || "").trim().toLowerCase();
-    type Row = { storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; sources: Set<string>; bySource: Record<string, number> };
+    type Row = { storeId: string | null; storeName: string; sellerUserId: string | null; sellerName: string; matricula: string | null; sales: number; pecas: number; orders: number; sources: Set<string>; bySource: Record<string, number>; aliasKeys: Set<string> };
+    // F1.1b — identidade canônica: fusão/alias confirmado unifica a MESMA pessoa entre as fontes.
+    // Org sem alias/fusão → ctx.empty → nenhuma linha é tocada (0-regressão por construção).
+    const idCtx = RetailSellerIdentityService.context(orgId);
     const map = new Map<string, Row>();
     const nameToKey = new Map<string, string>();
 
     const add = (storeId: string | null, storeName: string, userId: string | null, matricula: string | null, name: string, sales: number, pecas: number, orders: number, source: string) => {
+      let extraKeys: string[] = [];
+      if (source !== "zappflow") { // pedido online já vem por userId; a fusão/alias vale pras fontes por matrícula/nome
+        const c = idCtx.canonicalize({ matricula, name });
+        if (c) { userId = c.userId; matricula = c.matricula; name = c.name; extraKeys = c.aliasKeys; }
+      }
       const storeKey = storeId || `semLoja:${norm(storeName)}`;
       const n = norm(name);
       const nk = `${storeKey}::${n}`;
       const k = (userId && `${storeKey}::user:${userId}`) || (matricula && `${storeKey}::mat:${matricula}`) || nameToKey.get(nk) || `${storeKey}::nom:${n}`;
-      const cur = map.get(k) || { storeId, storeName, sellerUserId: userId || null, sellerName: name, matricula: matricula || null, sales: 0, pecas: 0, orders: 0, sources: new Set<string>(), bySource: {} as Record<string, number> };
+      const cur = map.get(k) || { storeId, storeName, sellerUserId: userId || null, sellerName: name, matricula: matricula || null, sales: 0, pecas: 0, orders: 0, sources: new Set<string>(), bySource: {} as Record<string, number>, aliasKeys: new Set<string>() };
+      for (const ak of extraKeys) cur.aliasKeys.add(ak);
       cur.sales = round2(cur.sales + (Number(sales) || 0));
       cur.pecas += Number(pecas) || 0;
       cur.orders += Number(orders) || 0;
@@ -479,6 +496,7 @@ export class RetailCommissionService {
         storeId: v.storeId, storeName: v.storeName, sellerUserId: v.sellerUserId, sellerName: v.sellerName, matricula: v.matricula,
         sales: v.sales, pecas: v.pecas, orders: v.orders, source: Array.from(v.sources).sort().join("+"),
         salesBySource: v.bySource,
+        ...(v.aliasKeys.size ? { aliasKeys: Array.from(v.aliasKeys) } : {}),
         // DUPLA CONTAGEM FÍSICA: o PDV é o feed cru da venda física; manual/ERP são
         // RE-LANÇAMENTOS da MESMA venda física. Quando o mesmo vendedor tem PDV +
         // (manual OU ERP) no período, as duas somam e o valor infla (a venda física

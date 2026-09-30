@@ -45,6 +45,7 @@ import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailMonthWeeksService } from "./RetailMonthWeeksService.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
 const norm = (s: any) => String(s || "").trim().toLowerCase();
 function safeParse<T = any>(s: any): T | null { try { return JSON.parse(s ?? "null"); } catch { return null; } }
@@ -142,11 +143,14 @@ type SellerRow = {
   matricula: string | null; sales: number; pecas: number; orders: number; source: string;
 };
 
-function aliasesOf(userId: string | null, matricula: string | null, name: string): string[] {
+function aliasesOf(userId: string | null, matricula: string | null, name: string, extra?: string[] | null): string[] {
   const out: string[] = [];
   if (userId) out.push(`user:${userId}`);
   if (matricula) out.push(`mat:${matricula}`);
   if (name) out.push(`nom:${norm(name)}`);
+  // F1.1b: chaves das identidades fundidas/aliases da MESMA pessoa — cotas e escala cadastradas
+  // com a matrícula/nome antigos continuam casando com a linha canônica (a chave primária, a 1ª, não muda).
+  if (extra) for (const e of extra) if (!out.includes(e)) out.push(e);
   return out;
 }
 function primaryKeyOf(userId: string | null, matricula: string | null, name: string): string {
@@ -359,6 +363,11 @@ export class RetailCommissionRaceService {
         map.set(k, (map.get(k) || 0) + count);
       }
     };
+    const idCtx = RetailSellerIdentityService.context(orgId); // F1.1b
+    const aliasesFor = (userId: string | null, mat: string | null, name: string) => {
+      const c = idCtx.canonicalize({ matricula: mat, name });
+      return c ? aliasesOf(c.userId, c.matricula, c.name, c.aliasKeys) : aliasesOf(userId, mat, name);
+    };
     try {
       const manual = db.prepare(
         `SELECT ss.store_id, ss.matricula, ss.seller_name, rs.user_id, SUM(COALESCE(ss.atendimentos,0)) AS at
@@ -367,7 +376,7 @@ export class RetailCommissionRaceService {
           WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ?
           GROUP BY ss.store_id, COALESCE(NULLIF(ss.matricula,''), LOWER(TRIM(ss.seller_name)))`
       ).all(orgId, start, end) as any[];
-      for (const r of manual) put(r.store_id || null, aliasesOf(r.user_id || null, r.matricula || null, r.seller_name), Number(r.at) || 0);
+      for (const r of manual) put(r.store_id || null, aliasesFor(r.user_id || null, r.matricula || null, r.seller_name), Number(r.at) || 0);
     } catch { /* coluna pode não existir em DB antigo entre deploy e migração */ }
     try {
       const floor = db.prepare(
@@ -377,7 +386,7 @@ export class RetailCommissionRaceService {
           WHERE a.organization_id = ? AND date(a.started_at) BETWEEN ? AND ? AND a.ended_at IS NOT NULL
           GROUP BY a.store_id, a.seller_id`
       ).all(orgId, start, end) as any[];
-      for (const r of floor) put(r.store_id || null, aliasesOf(r.user_id || null, r.matricula || null, r.name), Number(r.at) || 0);
+      for (const r of floor) put(r.store_id || null, aliasesFor(r.user_id || null, r.matricula || null, r.name), Number(r.at) || 0);
     } catch { /* módulo retail_floor pode não ter tabelas em orgs antigas */ }
     return map;
   }
@@ -463,8 +472,8 @@ export class RetailCommissionRaceService {
       // sem venda precisa aparecer — cota não batida também é informação).
       type Roster = { aliases: string[]; name: string; userId: string | null; matricula: string | null };
       const roster = new Map<string, Roster>();
-      const addRoster = (userId: string | null, matricula: string | null, name: string) => {
-        const aliases = aliasesOf(userId, matricula, name);
+      const addRoster = (userId: string | null, matricula: string | null, name: string, extra?: string[] | null) => {
+        const aliases = aliasesOf(userId, matricula, name, extra);
         for (const a of aliases) if (roster.has(a)) {
           const r = roster.get(a)!;
           for (const al of aliases) if (!r.aliases.includes(al)) r.aliases.push(al);
@@ -476,7 +485,7 @@ export class RetailCommissionRaceService {
         for (const a of aliases) roster.set(a, r);
         return r;
       };
-      for (const row of monthRows.filter((r: SellerRow) => r.storeId === st.id)) addRoster(row.sellerUserId, row.matricula, row.sellerName);
+      for (const row of monthRows.filter((r: SellerRow) => r.storeId === st.id)) addRoster(row.sellerUserId, row.matricula, row.sellerName, (row as any).aliasKeys);
       for (const e of schedule) {
         const mat = e.seller_key.startsWith("mat:") ? e.seller_key.slice(4) : null;
         const uid = e.seller_key.startsWith("user:") ? e.seller_key.slice(5) : null;
@@ -491,7 +500,7 @@ export class RetailCommissionRaceService {
 
       const findRow = (rows: SellerRow[], r: Roster): SellerRow | null => {
         const set = new Set(r.aliases);
-        return rows.find((x) => x.storeId === st.id && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a) => set.has(a))) || null;
+        return rows.find((x) => x.storeId === st.id && aliasesOf(x.sellerUserId, x.matricula, x.sellerName, (x as any).aliasKeys).some((a) => set.has(a))) || null;
       };
 
       // ── Semanal ──
@@ -940,20 +949,20 @@ export class RetailCommissionRaceService {
     // venda também aparece — cota não batida é informação).
     type Roster = { aliases: string[]; name: string; userId: string | null; matricula: string | null };
     const roster = new Map<string, Roster>();
-    const addRoster = (userId: string | null, matricula: string | null, name: string) => {
-      const aliases = aliasesOf(userId, matricula, name);
+    const addRoster = (userId: string | null, matricula: string | null, name: string, extra?: string[] | null) => {
+      const aliases = aliasesOf(userId, matricula, name, extra);
       for (const a of aliases) if (roster.has(a)) { const r = roster.get(a)!; for (const al of aliases) if (!r.aliases.includes(al)) r.aliases.push(al); if (!r.userId && userId) r.userId = userId; if (!r.matricula && matricula) r.matricula = matricula; return; }
       const r: Roster = { aliases, name, userId, matricula };
       for (const a of aliases) roster.set(a, r);
     };
-    for (const row of monthRows.filter((r) => r.storeId === storeId)) addRoster(row.sellerUserId, row.matricula, row.sellerName);
+    for (const row of monthRows.filter((r) => r.storeId === storeId)) addRoster(row.sellerUserId, row.matricula, row.sellerName, (row as any).aliasKeys);
     for (const e of schedule) { const mat = e.seller_key.startsWith("mat:") ? e.seller_key.slice(4) : null; const uid = e.seller_key.startsWith("user:") ? e.seller_key.slice(5) : null; addRoster(uid, mat, e.seller_name || e.seller_key); }
     for (const q of quotaRows) { const mat = q.seller_key.startsWith("mat:") ? q.seller_key.slice(4) : null; const uid = q.seller_key.startsWith("user:") ? q.seller_key.slice(5) : null; addRoster(uid, mat, q.seller_name || q.seller_key); }
     const rosterList = Array.from(new Set(roster.values()));
 
     const rowOf = (rows: any[], r: Roster): any => {
       const set = new Set(r.aliases);
-      return rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName).some((a: string) => set.has(a))) || null;
+      return rows.find((x: any) => x.storeId === storeId && aliasesOf(x.sellerUserId, x.matricula, x.sellerName, x.aliasKeys).some((a: string) => set.has(a))) || null;
     };
     const salesOf = (rows: any[], r: Roster): number => round2(rowOf(rows, r)?.sales || 0);
     const pct = (sales: number, quota: number): number | null => (quota > 0 ? round2((sales / quota) * 10000) / 100 : null);

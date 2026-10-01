@@ -5701,6 +5701,8 @@ function CommissionTab() {
   const [pdvPct, setPdvPct] = useState<number | null>(null);
   const [sellerSales, setSellerSales] = useState<any[]>([]);
   const [sellerSalesModal, setSellerSalesModal] = useState(false);
+  // Gerente de loja (admin COM loja atribuída): a comissão da REDE não é dele — a aba diz isso em vez de parecer vazia/quebrada.
+  const [networkOnly, setNetworkOnly] = useState(false);
   const [editSale, setEditSale] = useState<any | null>(null);
   const [folhaQ, setFolhaQ] = useState('');
   const [nameSeller, setNameSeller] = useState<any | null>(null); // modal "dar nome" (sem window.prompt)
@@ -5796,10 +5798,11 @@ function CommissionTab() {
     try {
       const [r, ru, st, rs] = await Promise.all([
         apiFetch('/api/retailops/commission/runs').then(x => x.json()).catch(() => ({})),
-        apiFetch('/api/retailops/commission/rules').then(x => x.json()).catch(() => ({})),
+        apiFetch('/api/retailops/commission/rules').then(x => (x.status === 403 ? { __forbidden: true } : x.json())).catch(() => ({})),
         apiFetch('/api/retailops/stores').then(x => x.json()).catch(() => ({})),
         apiFetch('/api/retailops/commission/report-source').then(x => x.json()).catch(() => ({})),
       ]);
+      if ((ru as any)?.__forbidden) { setNetworkOnly(true); return; }
       setRuns(Array.isArray(r?.runs) ? r.runs : (Array.isArray(r) ? r : []));
       setRules(Array.isArray(ru?.rules) ? ru.rules : (Array.isArray(ru) ? ru : []));
       setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
@@ -5859,6 +5862,15 @@ function CommissionTab() {
   };
 
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
+
+  if (networkOnly) {
+    return (
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100">
+        <p className="font-medium">Esta aba é da rede inteira.</p>
+        <p className="mt-1 text-[12px] text-amber-200/90">Ela mostra a comissão de todos os vendedores e as regras da empresa. Sua conta está restrita às suas lojas, por isso ela não aparece para você. Para acompanhar a sua loja, use o <strong>Fechamento diário</strong>.</p>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -1315,7 +1315,7 @@ router.get("/seller-coverage", (req: AuthRequest, res): any => {
 // pode cobrir a rede toda. Usa o código do vendedor quando presente e cai no
 // operador só quando ausente (retrocompatível: bases sem re-sync mantêm o
 // comportamento antigo). O alias `vendedor` continua sendo a CHAVE exibida.
-router.get("/pdv-sellers", (req: AuthRequest, res): any => {
+router.get("/pdv-sellers", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -1353,7 +1353,7 @@ router.get("/pdv-sellers", (req: AuthRequest, res): any => {
 // Quando o ERP não traz o vendedor por venda, a loja anota no papel e o gestor
 // lança aqui (digitando ou enviando a foto p/ a IA ler). Alimenta a comissão
 // por vendedor (RetailCommissionService.combinedSalesBySeller).
-router.get("/seller-sales", (req: AuthRequest, res): any => {
+router.get("/seller-sales", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -1363,7 +1363,7 @@ router.get("/seller-sales", (req: AuthRequest, res): any => {
   res.json({ start, end, entries: RetailSellerSalesService.list(orgId, start, end, storeId) });
 });
 
-router.post("/seller-sales", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/seller-sales", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, saleDate, entries, source, imageUrl } = req.body || {};
@@ -1377,7 +1377,7 @@ router.post("/seller-sales", requireRole("owner", "admin"), (req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.patch("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.patch("/seller-sales/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
@@ -1397,7 +1397,7 @@ router.patch("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthReque
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.delete("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/seller-sales/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = RetailSellerSalesService.remove(orgId, String(req.params.id), req.user?.userId);
@@ -1407,7 +1407,7 @@ router.delete("/seller-sales/:id", requireRole("owner", "admin"), (req: AuthRequ
 
 // Leitura por FOTO: a IA lê a folha e devolve as linhas para o gestor CONFERIR —
 // NÃO salva. O salvamento é o POST /seller-sales, após a confirmação humana.
-router.post("/seller-sales/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/seller-sales/scan", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!isAIConfigured()) return res.status(400).json({ error: "IA não configurada nesta instância." });
@@ -1983,13 +1983,13 @@ router.post("/stock/alerts/:id/resolve", requireRole("owner", "admin"), (req: Au
 });
 
 // --- Premiação / comissão (Fase G) ---
-router.get("/commission/rules", (req: AuthRequest, res): any => {
+router.get("/commission/rules", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ rules: RetailCommissionService.listRules(orgId) });
 });
 
-router.post("/commission/rules", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/rules", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { name, scope, period, calculationType, config, storeId } = req.body || {};
@@ -1997,7 +1997,7 @@ router.post("/commission/rules", requireRole("owner", "admin"), (req: AuthReques
   res.status(201).json(RetailCommissionService.createRule(orgId, { name, scope, period, calculationType, config, storeId }, req.user?.userId));
 });
 
-router.patch("/commission/rules/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.patch("/commission/rules/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const r = RetailCommissionService.setRuleActive(orgId, req.params.id, req.body?.active !== false, req.user?.userId);
@@ -2027,12 +2027,12 @@ router.get("/commission/report", requireNetworkScope, (req: AuthRequest, res): a
 
 // Fonte do bloco "Comissão total do período": 'race' (espelha a Corrida) ou
 // 'rules' (Regras de comissão). Owner/admin liga.
-router.get("/commission/report-source", (req: AuthRequest, res): any => {
+router.get("/commission/report-source", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ source: RetailCommissionService.reportSource(orgId) });
 });
-router.put("/commission/report-source", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/commission/report-source", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const fromRace = req.body?.fromRace === true || String(req.body?.fromRace) === "true";
@@ -2042,7 +2042,7 @@ router.put("/commission/report-source", requireRole("owner", "admin"), (req: Aut
 // Extrato por LOJA e por VENDEDOR ("rodar o comando" do dono da rede): loja e
 // vendedor opcionais (sem filtro = rede toda); período qualquer, inclusive
 // parcial dentro do mês (ex.: 1º ao dia 15) para saber o quanto já acumulou.
-router.get("/commission/store-report", (req: AuthRequest, res): any => {
+router.get("/commission/store-report", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || ""), end = String(req.query.end || "");
@@ -2052,7 +2052,7 @@ router.get("/commission/store-report", (req: AuthRequest, res): any => {
   res.json(RetailCommissionService.storeSellerExtract(orgId, start, end, { storeId, sellerKey }));
 });
 
-router.get("/commission/runs/:id", (req: AuthRequest, res): any => {
+router.get("/commission/runs/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const run = RetailCommissionService.getRun(orgId, req.params.id);
@@ -2061,7 +2061,7 @@ router.get("/commission/runs/:id", (req: AuthRequest, res): any => {
 });
 
 // Gera a PRÉVIA do período (draft).
-router.post("/commission/runs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/runs", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { periodStart, periodEnd } = req.body || {};
@@ -2070,7 +2070,7 @@ router.post("/commission/runs", requireRole("owner", "admin"), (req: AuthRequest
 });
 
 // Compara com a premiação informada manualmente (divergências).
-router.post("/commission/runs/:id/compare", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/runs/:id/compare", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const run = RetailCommissionService.compare(orgId, req.params.id, req.body?.expected || [], req.user?.userId);
@@ -2079,7 +2079,7 @@ router.post("/commission/runs/:id/compare", requireRole("owner", "admin"), (req:
 });
 
 // Aprovação SEMPRE humana (D7).
-router.post("/commission/runs/:id/approve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/runs/:id/approve", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const run = RetailCommissionService.setStatus(orgId, req.params.id, "approved", req.user?.userId);
@@ -2087,7 +2087,7 @@ router.post("/commission/runs/:id/approve", requireRole("owner", "admin"), (req:
   res.json(run);
 });
 
-router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/runs/:id/reject", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const run = RetailCommissionService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
@@ -2097,7 +2097,7 @@ router.post("/commission/runs/:id/reject", requireRole("owner", "admin"), (req: 
 
 // Ajuste manual do gerente/dono em item DRAFT: sobrescreve o valor calculado
 // (ex.: acordo com o vendedor, correção pontual) — recalcula o total do run.
-router.patch("/commission/runs/:runId/items/:itemId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.patch("/commission/runs/:runId/items/:itemId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const amount = Number(req.body?.commissionAmount);
@@ -2112,7 +2112,7 @@ router.patch("/commission/runs/:runId/items/:itemId", requireRole("owner", "admi
 });
 
 // Remove um item DRAFT (vendedor/loja fora da apuração) — recalcula o total.
-router.delete("/commission/runs/:runId/items/:itemId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/commission/runs/:runId/items/:itemId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -2126,7 +2126,7 @@ router.delete("/commission/runs/:runId/items/:itemId", requireRole("owner", "adm
 
 // --- Corrida de comissão (Fase G2 — modelo CARIOCA) + escala semanal ---------
 // Plano efetivo (loja específica > rede '*' > default da planilha CARIOCA).
-router.get("/commission/plan", (req: AuthRequest, res): any => {
+router.get("/commission/plan", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const storeId = req.query.storeId ? String(req.query.storeId) : null;
@@ -2134,7 +2134,7 @@ router.get("/commission/plan", (req: AuthRequest, res): any => {
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.put("/commission/plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/commission/plan", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   // `month` (YYYY-MM) grava o plano POR COMPETÊNCIA: muda só aquele mês; sem
@@ -2329,7 +2329,7 @@ router.put("/seller-scoreboard/fortnight-visibility", requireRole("owner", "admi
 });
 
 // Materializa a corrida num RUN draft (aprovação segue humana — D7).
-router.post("/commission/race/run", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/commission/race/run", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const month = String(req.body?.month || "");

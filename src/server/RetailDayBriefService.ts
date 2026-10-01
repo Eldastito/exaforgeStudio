@@ -27,6 +27,7 @@
  */
 import { randomUUID } from "crypto";
 import db from "./db.js";
+import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
 import { onlyDigits } from "./phoneMatch.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 import { RetailClosingService } from "./RetailOpsService.js";
@@ -225,9 +226,16 @@ export class RetailDayBriefService {
     db.prepare(`UPDATE organization_settings SET retail_night_brief_enabled = ? WHERE organization_id = ?`).run(on ? 1 : 0, orgId);
     return on;
   }
-  private static recipients(orgId: string): Array<{ userId: string; phone: string }> {
-    const rows = db.prepare(`SELECT id, phone FROM users WHERE organization_id = ? AND role IN ('owner', 'admin') AND COALESCE(global_status, 'active') = 'active'`).all(orgId) as any[];
-    return rows.map((r) => ({ userId: r.id, phone: onlyDigits(r.phone) })).filter((r) => r.phone);
+  /**
+   * Quem recebe o resumo da REDE (venda/cota/dinheiro de todas as lojas): owner e admin SEM loja atribuída, com telefone. Gerente de loja
+   * (admin COM loja, ADR-173) fica de fora — senão a trava por loja seria furada pelo WhatsApp.
+   */
+  static recipients(orgId: string): Array<{ userId: string; phone: string }> {
+    const rows = db.prepare(`SELECT id, phone, role FROM users WHERE organization_id = ? AND role IN ('owner', 'admin') AND COALESCE(global_status, 'active') = 'active'`).all(orgId) as any[];
+    return rows
+      .filter((r) => RetailStoreScopeService.allowed(orgId, r.id, r.role).unrestricted)
+      .map((r) => ({ userId: r.id, phone: onlyDigits(r.phone) }))
+      .filter((r) => r.phone);
   }
   private static alreadySent(orgId: string, userId: string, date: string): boolean {
     return !!db.prepare(`SELECT 1 FROM retail_night_brief_deliveries WHERE organization_id = ? AND user_id = ? AND brief_date = ?`).get(orgId, userId, date);

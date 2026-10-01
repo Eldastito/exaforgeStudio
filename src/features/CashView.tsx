@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { Wallet, Loader2, Plus, ArrowDownCircle, ArrowUpCircle, TrendingUp, TrendingDown, Check, AlertTriangle, CalendarClock, Info, Zap, Target, X } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { formatBRL } from '@/src/lib/metric';
+import { cashHeadline } from '@/src/features/cashBasis';
 
 // Motor de Caixa (ADR-125 Fatia 1) — livro-caixa. Venda ≠ lucro ≠ caixa:
 // só dinheiro que entrou de fato conta como caixa; fiado/recebível fica em "a receber".
 
-const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+// Com milhar ("R$ 1.435.378,92") e sem inventar zero: ausente → "—".
+const brl = (n: any) => formatBRL(n);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export function CashView() {
@@ -72,6 +75,7 @@ export function CashView() {
 
   if (loading) return <div className="flex-1 flex items-center justify-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Carregando…</div>;
   const s = data?.summary;
+  const head = cashHeadline(s);
 
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
@@ -87,8 +91,9 @@ export function CashView() {
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-emerald-400/80">Caixa atual</div>
-            <div className="text-2xl font-semibold text-emerald-200 mt-1">{brl(s?.caixaAtual)}</div>
+            <div className="text-[11px] uppercase tracking-wide text-emerald-400/80">{head.label}</div>
+            <div className="text-2xl font-semibold text-emerald-200 mt-1">{brl(head.value)}</div>
+            {head.note && <div className="text-[11px] text-amber-300/80 mt-0.5">{head.note}</div>}
           </div>
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
             <div className="text-[11px] uppercase tracking-wide text-amber-400/80">A receber</div>
@@ -102,13 +107,24 @@ export function CashView() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-          <span className="inline-flex items-center gap-1 text-emerald-300"><TrendingUp className="w-4 h-4" /> Entrou hoje: {brl(s?.realizadoHoje?.inflow)}</span>
+          <span className="inline-flex items-center gap-1 text-emerald-300"><TrendingUp className="w-4 h-4" /> {head.reliable ? 'Entrou hoje' : 'Entradas hoje'}: {brl(s?.realizadoHoje?.inflow)}</span>
           <span className="inline-flex items-center gap-1 text-red-300"><TrendingDown className="w-4 h-4" /> Saiu hoje: {brl(s?.realizadoHoje?.outflow)}</span>
-          <span className="text-zinc-500">· 7 dias: líquido {brl(s?.realizado7d?.net)}</span>
+          <span className="text-zinc-500">· 7 dias: {head.flowLabel} {brl(head.reliable ? s?.realizado7d?.net : s?.realizado7d?.inflow)}</span>
         </div>
 
+        {/* Sem NENHUMA saída lançada o saldo é só venda acumulada: projetar 13 semanas sobre ele mostraria "sem ruptura" sem base nenhuma. */}
+        {!head.reliable && (
+          <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-[13px] text-amber-200 flex items-start gap-2">
+            <Info className="w-4 h-4 mt-0.5 shrink-0" />
+            <div>
+              <div className="font-medium">Projeção de caixa indisponível</div>
+              <div className="text-amber-200/80 mt-0.5">Ainda não há nenhuma <strong>saída</strong> lançada (contas a pagar, custos fixos, retiradas). Sem elas o número acima é só o que entrou, e uma projeção sobre ele mostraria folga que pode não existir. Lance as saídas em <em>Conta a pagar</em> ou <em>Saída</em>.</div>
+            </div>
+          </div>
+        )}
+
         {/* Projeção de 13 semanas (ADR-125 Fatia 2) */}
-        {fc && (
+        {head.reliable && fc && (
           <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
             <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
               <h3 className="text-sm font-medium text-zinc-100 flex items-center gap-2"><CalendarClock className="w-4 h-4 text-indigo-300" /> Projeção de caixa · 13 semanas</h3>
@@ -167,7 +183,7 @@ export function CashView() {
         )}
 
         {/* Plano para o caixa não furar (ADR-125 Fatia 3) */}
-        {act?.suggestions?.actions?.length > 0 && (
+        {head.reliable && act?.suggestions?.actions?.length > 0 && (
           <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
             <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2 mb-1"><Zap className="w-4 h-4 text-indigo-300" /> Plano para cobrir o rombo de {brl(act.suggestions.shortfall)}</h3>
             <p className="text-[11px] text-zinc-400 mb-2">Sugestões priorizadas — você decide e aplica; nada é executado sozinho. Depois registre quanto trouxe de fato.</p>

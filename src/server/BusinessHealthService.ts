@@ -349,7 +349,9 @@ export class BusinessHealthService {
       dataQuality,
       priorities: priorities.map((p) => ({ ...p, inPlan: open.has(p.title) })),
       ledger: this.history(orgId),
-      kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, survivalDays: st.forecast.survivalDays, tracking: st.cash.tracking || null },
+      kpis: { caixaAtual: st.cash.caixaAtual, aReceber: st.cash.aReceber, aReceberVencido: st.cash.aReceberVencido, aPagar: st.cash.aPagar, // "Dias de caixa" sai do saldo: sem saída lançada o saldo é só venda acumulada e o prazo seria inventado.
+        survivalDays: st.cash.tracking && st.cash.tracking.cashBasis !== "caixa" ? null : st.forecast.survivalDays,
+        entradasRegistradas: st.cash.entradasRegistradas ?? null, tracking: st.cash.tracking || null },
       conversao: st.conversao || null,
       concentracao: st.concentracao || null,
       estoque: st.estoque || null,

@@ -223,14 +223,29 @@ export class FinancialLedgerService {
    * O financeiro do ZappFlow tem ALGUM registro de cada tipo (em qualquer status)? Sem registro, "R$ 0,00" não quer dizer "nada em aberto" —
    * quer dizer "ninguém cadastra isso aqui" (ex.: loja que vive de PDV/fechamento e não lança contas a receber/pagar). Quem monta texto pro
    * dono usa isto pra mostrar "—" em vez de zero (null≠zero). Derivado por query, isolado por organização.
+   *
+   * `cashBasis` diz O QUE o saldo de caixa é de verdade: "caixa" (há saídas lançadas, ou nada lançado ainda) · "vendas" (só ENTRADAS de venda,
+   * nenhuma saída — ex.: a ponte "Faturamento no Diretor" lança todo fechamento aprovado como entrada) · "entradas" (só entradas, de outras
+   * origens). Sem NENHUMA saída o saldo é só a soma do que entrou: não é o dinheiro em conta, e nenhuma projeção sobre ele é confiável.
    */
-  static tracking(orgId: string): { receivables: boolean; payables: boolean; cashEvents: boolean } {
+  static tracking(orgId: string): { receivables: boolean; payables: boolean; cashEvents: boolean; outflows: boolean; cashBasis: "caixa" | "vendas" | "entradas" } {
     const has = (sql: string): boolean => { try { return !!db.prepare(sql).get(orgId); } catch { return false; } };
+    const cashEvents = has("SELECT 1 FROM cash_events WHERE organization_id = ? LIMIT 1");
+    const outflows = has("SELECT 1 FROM cash_events WHERE organization_id = ? AND direction = 'out' LIMIT 1");
+    const nonSalesIn = has("SELECT 1 FROM cash_events WHERE organization_id = ? AND direction = 'in' AND COALESCE(source_type, '') NOT IN ('retail_closing', 'order', 'comigo_order') LIMIT 1");
     return {
       receivables: has("SELECT 1 FROM receivables WHERE organization_id = ? LIMIT 1") || has("SELECT 1 FROM comigo_fiado_ledger WHERE organization_id = ? LIMIT 1"),
       payables: has("SELECT 1 FROM payables WHERE organization_id = ? LIMIT 1"),
-      cashEvents: has("SELECT 1 FROM cash_events WHERE organization_id = ? LIMIT 1"),
+      cashEvents,
+      outflows,
+      cashBasis: !cashEvents || outflows ? "caixa" : nonSalesIn ? "entradas" : "vendas",
     };
+  }
+
+  /** Soma de TUDO que entrou no livro-caixa (sem descontar saída nem contar saldo inicial) — o número honesto quando não há saídas lançadas. */
+  static entradasRegistradas(orgId: string): number {
+    try { return round2((db.prepare("SELECT COALESCE(SUM(amount),0) s FROM cash_events WHERE organization_id = ? AND direction = 'in'").get(orgId) as any).s); }
+    catch { return 0; }
   }
 
   // ── Resumo / overview ───────────────────────────────────────────────────────
@@ -252,6 +267,7 @@ export class FinancialLedgerService {
       aReceberVencido: overdue.amount,
       aReceberVencidoCount: overdue.count,
       tracking: this.tracking(orgId),
+      entradasRegistradas: this.entradasRegistradas(orgId),
       realizadoHoje: this.realizedCash(orgId, t, t),
       realizado7d: this.realizedCash(orgId, daysAgo(6), t),
     };

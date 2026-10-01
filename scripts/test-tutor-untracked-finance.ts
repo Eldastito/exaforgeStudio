@@ -63,10 +63,10 @@ async function main() {
   // ── (4) 'Entrou no caixa' lia o objeto errado ──
   const D = org("D");
   L.recordEvent(D, { direction: "in", amount: 250, sourceType: "manual", sourceId: randomUUID() } as any);
-  check("entrou dinheiro hoje (R$ 250): 'Entrou no caixa: R$ 250,00' (antes saía R$ 0,00)", /Entrou no caixa: R\$ 250,00/.test(night(D)), night(D));
+  check("entrou dinheiro hoje (R$ 250): mostra R$ 250,00 (antes saía R$ 0,00); sem saída lançada o rótulo é 'Entradas registradas hoje' (ver test-honest-cash)", /(Entrou no caixa|Entradas registradas hoje): R\$ 250,00/.test(night(D)), night(D));
   const E = org("E");
   L.recordEvent(E, { direction: "in", amount: 70, eventDate: "2026-01-10", sourceType: "manual", sourceId: randomUUID() } as any);
-  check("há lançamentos, mas nenhum hoje: 'Entrou no caixa: R$ 0,00' (zero é fato)", /Entrou no caixa: R\$ 0,00/.test(night(E)), night(E));
+  check("há lançamentos, mas nenhum hoje: 'R$ 0,00' (zero é fato)", /(Entrou no caixa|Entradas registradas hoje): R\$ 0,00/.test(night(E)), night(E));
   const snapD: any = (FinanceSnapshotAdapter as any).build ? (FinanceSnapshotAdapter as any).build(D) : null;
   const entrou = snapD?.finance?.entrouHoje?.value ?? snapD?.entrouHoje?.value;
   check("snapshot de decisão: entrouHoje também lê o inflow (250), não o objeto", entrou === 250, JSON.stringify(entrou));

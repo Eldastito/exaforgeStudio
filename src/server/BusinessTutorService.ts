@@ -132,9 +132,12 @@ export class BusinessTutorService {
     const k = ov?.kpis || {};
     // null≠zero: "R$ 0,00" só quando o financeiro do ZappFlow TEM registro daquele tipo. Loja que vive de PDV/fechamento e nunca lançou
     // contas a receber/pagar não "deve zero" — o dado não existe aqui. Overview sem a informação (`tracking` ausente) segue como antes.
-    const tk = k.tracking || { receivables: true, payables: true, cashEvents: true };
-    const caixaTxt = tk.cashEvents || Number(k.caixaAtual) !== 0 ? brl(k.caixaAtual) : "—";
-    const kpiParts = [`Caixa ${caixaTxt}`, `a receber ${tk.receivables ? brl(k.aReceber) : "—"}`, `a pagar ${tk.payables ? brl(k.aPagar) : "—"}`];
+    const tk = k.tracking || { receivables: true, payables: true, cashEvents: true, cashBasis: "caixa" };
+    // Sem NENHUMA saída lançada o "saldo" é só a soma do que entrou (ex.: toda venda de loja lançada como entrada): chamar de "Caixa" engana.
+    const caixaPart = tk.cashBasis === "vendas" ? `Vendas registradas ${brl(k.entradasRegistradas)} (sem saídas lançadas)`
+      : tk.cashBasis === "entradas" ? `Entradas registradas ${brl(k.entradasRegistradas)} (sem saídas lançadas)`
+      : `Caixa ${tk.cashEvents || Number(k.caixaAtual) !== 0 ? brl(k.caixaAtual) : "—"}`;
+    const kpiParts = [caixaPart, `a receber ${tk.receivables ? brl(k.aReceber) : "—"}`, `a pagar ${tk.payables ? brl(k.aPagar) : "—"}`];
     if (Number.isFinite(k.survivalDays) && k.survivalDays > 0 && k.survivalDays < 999) kpiParts.push(`~${Math.round(k.survivalDays)} dias de caixa`);
     lines.push("");
     lines.push(`💰 ${kpiParts.join(" · ")}`);
@@ -233,7 +236,8 @@ export class BusinessTutorService {
     }
     // `realizadoHoje` é um OBJETO ({inflow, outflow, net}) — antes ia inteiro pro brl() e saía SEMPRE "R$ 0,00", mesmo com dinheiro entrando.
     const tk = sum?.tracking || { receivables: true, payables: true, cashEvents: true };
-    lines.push(`💵 Entrou no caixa: ${tk.cashEvents ? brl(sum?.realizadoHoje?.inflow) : "— (o financeiro não recebe as vendas da loja)"}`);
+    const entrouLabel = tk.cashBasis && tk.cashBasis !== "caixa" ? "Entradas registradas hoje" : "Entrou no caixa";
+    lines.push(`💵 ${entrouLabel}: ${tk.cashEvents ? brl(sum?.realizadoHoje?.inflow) : "— (o financeiro não recebe as vendas da loja)"}`);
     lines.push(`📈 Margem estimada: ${retail && !(Number(day.orders) > 0) ? "—" : brl(day.profit)}`);
     let attn = 0;
     try { attn = BusinessHealthService.attention(orgId).count; } catch { /* best-effort */ }

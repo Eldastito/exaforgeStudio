@@ -17,9 +17,13 @@ export class RetailDashboardService {
    * antes, o header de Insights filtrado por loja seguia mostrando cota/venda/
    * pendências da REDE inteira (só o título mudava), contradizendo o ranking.
    */
-  static daily(orgId: string, date: string, storeId: string | null = null): any {
-    const filter = storeId ? " AND store_id = ?" : "";
-    const args = storeId ? [orgId, date, storeId] : [orgId, date];
+  static daily(orgId: string, date: string, storeId: string | null = null, restrictStoreIds?: string[]): any {
+    // `restrictStoreIds` = gerente de loja (admin COM loja atribuída, ADR-173): TODOS os números ficam só das lojas dele.
+    const ids: string[] | null = storeId ? [storeId] : (restrictStoreIds ?? null);
+    const inSql = (col: string) => (ids ? (ids.length ? ` AND ${col} IN (${ids.map(() => "?").join(",")})` : " AND 1=0") : "");
+    const idArgs = ids ?? [];
+    const filter = inSql("store_id");
+    const args = [orgId, date, ...idArgs];
     const quotaTotal = num((db.prepare(`SELECT COALESCE(SUM(quota_amount),0) AS s FROM retail_store_quotas WHERE organization_id = ? AND quota_date = ?${filter}`).get(...args) as any)?.s);
     const realized = num((db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'${filter}`).get(...args) as any)?.s);
 
@@ -28,7 +32,7 @@ export class RetailDashboardService {
       `SELECT c.store_id, c.informed_total, COALESCE(q.quota_amount,0) AS quota
          FROM retail_daily_closings c
     LEFT JOIN retail_store_quotas q ON q.organization_id = c.organization_id AND q.store_id = c.store_id AND q.quota_date = c.closing_date
-        WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${storeId ? " AND c.store_id = ?" : ""}`
+        WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${inSql("c.store_id")}`
     ).all(...args) as any[];
     let storesAbove = 0, storesBelow = 0;
     // Fechamento com valor 0 é "aguardando" (a folha ainda não chegou), não "vendeu R$ 0":
@@ -51,8 +55,8 @@ export class RetailDashboardService {
     for (const p of pend) pendBy[p.task_type] = p.c;
 
     const divergences = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND divergence_status = 'divergent'${filter}`).get(...args) as any)?.c);
-    const negativeStock = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_store_inventory WHERE organization_id = ? AND quantity_available < 0${filter}`).get(...(storeId ? [orgId, storeId] : [orgId])) as any)?.c);
-    const activeStores = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND active = 1${storeId ? " AND id = ?" : ""}`).get(...(storeId ? [orgId, storeId] : [orgId])) as any)?.c);
+    const negativeStock = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_store_inventory WHERE organization_id = ? AND quantity_available < 0${filter}`).get(orgId, ...idArgs) as any)?.c);
+    const activeStores = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND active = 1${inSql("id")}`).get(orgId, ...idArgs) as any)?.c);
 
     return {
       date,
@@ -76,10 +80,12 @@ export class RetailDashboardService {
    * conferência. Só leitura, isolado por org. Lista TODAS as lojas ativas
    * (loja sem fechamento aparece com venda 0).
    */
-  static dailyInforme(orgId: string, date: string): any {
+  static dailyInforme(orgId: string, date: string, restrictStoreIds?: string[]): any {
     const r2 = (x: number) => Math.round((Number(x) || 0) * 100) / 100;
     const nextDate = new Date(Date.parse(date + "T12:00:00Z") + 86400000).toISOString().slice(0, 10);
-    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    let stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    // Gerente de loja (admin COM loja atribuída, ADR-173): só as lojas dele — e como os totais saem das linhas, o total também.
+    if (restrictStoreIds) { const ok = new Set(restrictStoreIds); stores = stores.filter((x) => ok.has(x.id)); }
     const closings = db.prepare(
       `SELECT store_id, informed_total, quota_amount, details_json
          FROM retail_daily_closings WHERE organization_id = ? AND closing_date = ? AND status != 'rejected'`
@@ -131,7 +137,7 @@ export class RetailDashboardService {
     const cmpRows = rows.filter((r) => !r.awaiting && r.cota > 0);
     const desvioComparable = cmpRows.length ? r2(cmpRows.reduce((a, r) => a + r.venda - r.cota, 0)) : null;
     return {
-      date, nextDate, stores: rows,
+      date, nextDate, stores: rows, scoped: !!restrictStoreIds,
       total: {
         dinheiro: r2(tDinheiro), venda: totalVenda, cota: totalCota, desvio: r2(totalVenda - totalCota),
         closedStores: rows.filter((r) => !r.awaiting).length, desvioComparable,

@@ -100,7 +100,7 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
-import { RetailDayBriefService } from "../RetailDayBriefService.js";
+import { RetailDayBriefService, DEFAULT_NIGHT_TIME } from "../RetailDayBriefService.js";
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
 import { RetailReplenishmentStrategyService } from "../RetailReplenishmentStrategyService.js";
@@ -2350,6 +2350,20 @@ router.put("/night-brief/enabled", requireNetworkScope, (req: AuthRequest, res):
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ enabled: RetailDayBriefService.setEnabled(orgId, !!req.body?.enabled) });
+});
+
+// Chaves dos resumos por loja (parcial 16h + fechamento da noite) e horário de cada loja — o que o dono liga/ajusta na Central de Saúde.
+// `recipients` = quantas pessoas recebem (owner/admin SEM loja, com telefone); 0 = ligar a chave não envia nada.
+router.get("/brief-settings", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({
+    afternoonEnabled: RetailAfternoonBriefService.enabled(orgId),
+    nightEnabled: RetailDayBriefService.enabled(orgId),
+    defaultNightTime: DEFAULT_NIGHT_TIME,
+    recipients: RetailDayBriefService.recipients(orgId).length,
+    stores: RetailStoreService.list(orgId).filter((s: any) => s.active).map((s: any) => ({ id: s.id, name: s.name, closingBriefTime: s.closing_brief_time || null })),
+  });
 });
 
 // F1.5 — meses CONSECUTIVOS abaixo da meta por PESSOA (rede toda, identidade canônica). owner/admin

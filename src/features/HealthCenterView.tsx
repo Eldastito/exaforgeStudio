@@ -145,6 +145,7 @@ export function HealthCenterView() {
         </div>
 
         <TutorWhatsAppCard />
+        <RetailBriefsCard />
 
         <SetupChecklistCard />
 
@@ -460,6 +461,99 @@ function HireSimulatorCard() {
       ) : (
         <div className="mt-3 text-[12px] text-amber-300">{res.message}</div>
       ))}
+    </div>
+  );
+}
+
+// Resumos das lojas no WhatsApp (varejo): parcial das 16h + fechamento da noite por loja. Antes não havia tela — as chaves só existiam na API.
+// Só aparece para o dono/admin SEM loja (o servidor responde 403 ao gerente e a org sem lojas não tem o que ligar). Cada loja pode ter o seu
+// horário (loja de rua fecha mais cedo que a de shopping); vazio = padrão da rede.
+function RetailBriefsCard() {
+  const [cfg, setCfg] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [times, setTimes] = useState<Record<string, string>>({});
+
+  const load = useCallback(() => {
+    apiFetch('/api/retailops/brief-settings').then((r) => (r.ok ? r.json() : null)).then((x: any) => {
+      if (!x || !Array.isArray(x.stores) || x.stores.length === 0) { setCfg(null); return; }
+      setCfg(x);
+      setTimes(Object.fromEntries(x.stores.map((st: any) => [st.id, st.closingBriefTime || ''])));
+    }).catch(() => setCfg(null));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = async (path: string, key: 'afternoonEnabled' | 'nightEnabled', label: string) => {
+    setBusy(true);
+    try {
+      const next = !cfg[key];
+      const r = await apiFetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.error || 'Falha');
+      setCfg((c: any) => ({ ...c, [key]: !!d.enabled }));
+      toast.success(d.enabled ? `${label} ligado.` : `${label} desligado.`);
+    } catch (e: any) { toast.error(e.message || 'Não consegui salvar.'); } finally { setBusy(false); }
+  };
+  const saveTime = async (st: any) => {
+    const value = (times[st.id] || '').trim();
+    if (value === (st.closingBriefTime || '')) return;
+    const r = await apiFetch(`/api/retailops/stores/${st.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ closingBriefTime: value === '' ? null : value }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { toast.error(d?.error || 'Não consegui salvar o horário.'); setTimes((t) => ({ ...t, [st.id]: st.closingBriefTime || '' })); return; }
+    toast.success(value ? `${st.name}: resumo às ${value}.` : `${st.name}: volta ao horário padrão (${cfg.defaultNightTime}).`);
+    load();
+  };
+
+  if (!cfg) return null;
+  const Switch = ({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) => (
+    <button onClick={onClick} disabled={busy} aria-label={label} className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-emerald-600' : 'bg-zinc-700'}`}>
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${on ? 'translate-x-5' : ''}`} />
+    </button>
+  );
+  return (
+    <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+      <div className="flex items-center gap-2">
+        <MessageCircle className="w-4 h-4 text-emerald-300 shrink-0" />
+        <div className="text-sm font-medium text-zinc-100">Resumos das lojas no WhatsApp</div>
+      </div>
+      <div className="mt-3 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[13px] text-zinc-100">Parcial das 16h</div>
+            <div className="text-[12px] text-zinc-400">Como cada loja está no meio da tarde, com o dinheiro.</div>
+          </div>
+          <Switch on={!!cfg.afternoonEnabled} onClick={() => toggle('/api/retailops/afternoon-brief/enabled', 'afternoonEnabled', 'Parcial das 16h')} label="Parcial das 16h" />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[13px] text-zinc-100">Fechamento da noite, por loja</div>
+            <div className="text-[12px] text-zinc-400">Cada loja vai no resumo do seu horário; o último inclui a rede.</div>
+          </div>
+          <Switch on={!!cfg.nightEnabled} onClick={() => toggle('/api/retailops/night-brief/enabled', 'nightEnabled', 'Fechamento da noite')} label="Fechamento da noite por loja" />
+        </div>
+      </div>
+      <div className="mt-3 border-t border-emerald-500/15 pt-3">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Horário do resumo da noite (vazio = {cfg.defaultNightTime})</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {cfg.stores.map((st: any) => (
+            <label key={st.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-2.5 py-1.5 text-[12px] text-zinc-300">
+              <span className="truncate">{st.name}</span>
+              <input
+                type="time"
+                value={times[st.id] || ''}
+                onChange={(e) => setTimes((t) => ({ ...t, [st.id]: e.target.value }))}
+                onBlur={() => saveTime(st)}
+                className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[12px] text-zinc-100"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-1 text-[11px] text-zinc-500">Loja de rua costuma fechar antes da de shopping — ajuste só as que fogem do padrão.</div>
+      </div>
+      <div className={`mt-2 text-[11px] ${cfg.recipients > 0 ? 'text-zinc-400' : 'text-amber-300/90'}`}>
+        {cfg.recipients > 0
+          ? `Vai para ${cfg.recipients} pessoa(s): dono/admin da rede com WhatsApp cadastrado. Gerente de loja não recebe (o resumo é da rede toda).`
+          : 'Ninguém para receber: nenhum dono/admin da rede tem WhatsApp cadastrado no perfil. Ligar as chaves não envia nada até cadastrar.'}
+      </div>
     </div>
   );
 }

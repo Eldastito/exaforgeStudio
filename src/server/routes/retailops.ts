@@ -685,7 +685,7 @@ router.post("/stores/rescue-merge-orphans", requireRole("owner", "admin"), (req:
 // Custos fixos cadastrados da loja (aluguel, luz, condomínio...) por categoria.
 // SEC-F13 (FE3/RN-CG-06/§73): dinheiro absoluto é owner/admin — o GET é role-gated
 // igual ao PUT abaixo (ler o custo é tão sensível quanto gravá-lo).
-router.get("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/costs", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
@@ -694,7 +694,7 @@ router.get("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest
 });
 
 // Salva os custos fixos da loja (só owner/admin). Body: { costs: { aluguel: 1200, ... } }.
-router.put("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/stores/:id/costs", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -706,7 +706,7 @@ router.put("/stores/:id/costs", requireRole("owner", "admin"), (req: AuthRequest
 // Custos VARIÁVEIS da loja (taxa cartão, imposto, embalagem etc.) — ADR-083 E5.
 // Body salvo é {costs: {card_fee: {percent, fixedPerSale}, ...}}.
 // SEC-F13: role-gated (dinheiro absoluto — §73), como o PUT abaixo.
-router.get("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/variable-costs", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
@@ -714,7 +714,7 @@ router.get("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: Au
   catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.put("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/stores/:id/variable-costs", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -726,14 +726,14 @@ router.put("/stores/:id/variable-costs", requireRole("owner", "admin"), (req: Au
 // SAVE-001/003 (PDR TOULON, Fatia 1C) — config financeira COMPOSTA (margem +
 // custos fixos + variáveis) num só GET/PUT atômico com versão otimista. A UI nova
 // usa isto; os endpoints acima seguem para compatibilidade.
-router.get("/stores/:id/financial-settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/financial-settings", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailStoreCostService.financialSettings(orgId, req.params.id)); }
   catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
-router.put("/stores/:id/financial-settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/stores/:id/financial-settings", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -746,7 +746,7 @@ router.put("/stores/:id/financial-settings", requireRole("owner", "admin"), (req
 
 // Resultado gerencial + ponto de equilíbrio de UMA loja no mês (?period=YYYY-MM).
 // SEC-F13: lucro/margem absolutos são owner/admin (§73).
-router.get("/stores/:id/result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/result", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
@@ -764,7 +764,7 @@ router.get("/stores/:id/result", requireRole("owner", "admin"), (req: AuthReques
 // Resultado de TODAS as lojas + totais da rede (?period=YYYY-MM). Hífen no path
 // para não colidir com /stores/:id (senão :id capturaria "result").
 // SEC-F13: lucro/margem da rede são owner/admin (§73).
-router.get("/stores-result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores-result", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
@@ -1276,21 +1276,21 @@ router.put("/feature-flags/:key", requireRole("owner", "admin"), (req: AuthReque
 
 // POS-002/003 (Fatia 3) — tarifas POS por loja × meio de pagamento (crédito/
 // débito) + custo esperado a partir do resumo do POS.
-router.get("/stores/:id/pos-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/pos-fees", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailPosFeeService.rules(orgId, req.params.id)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.put("/stores/:id/pos-fees", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/stores/:id/pos-fees", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailPosFeeService.set(orgId, req.params.id, req.body || {}, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.get("/stores/:id/pos-fees/expected", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/stores/:id/pos-fees/expected", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const q = req.query;

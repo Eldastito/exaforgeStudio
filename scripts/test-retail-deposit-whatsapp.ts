@@ -106,8 +106,12 @@ async function main() {
   __setClosingExtractorForTests(null);
 
   // ── 9) Ledger reflete + isolamento multi-tenant. ──
-  const ledger = RetailCashDepositService.monthLedger(A, lojaA.id, "2026-09");
-  check("9.1 totalDeposited do mês soma os 2 lançados via WhatsApp (1179,75 + 2500)", Math.abs(ledger.totalDeposited - 3679.75) < 0.01, String(ledger.totalDeposited));
+  // O depósito por TEXTO cai no dia comercial de HOJE (não numa data fixa): antes o teste assumia "2026-09" e só passava em
+  // setembro (falhou a partir de 01/10). Agora soma o ledger do mês de cada depósito — o do comprovante é 2026-09, o do texto é o mês corrente.
+  const mesTexto = String((db.prepare(`SELECT deposit_date FROM retail_cash_deposits WHERE organization_id = ? AND store_id = ? AND amount = 2500`).get(A, lojaA.id) as any)?.deposit_date || "").slice(0, 7);
+  const meses = Array.from(new Set(["2026-09", mesTexto]));
+  const totalMeses = meses.reduce((a, m) => a + RetailCashDepositService.monthLedger(A, lojaA.id, m).totalDeposited, 0);
+  check("9.1 totalDeposited soma os 2 lançados via WhatsApp (1179,75 + 2500), cada um no mês em que caiu", /^\d{4}-\d{2}$/.test(mesTexto) && Math.abs(totalMeses - 3679.75) < 0.01, JSON.stringify({ meses, totalMeses }));
   check("9.2 org B não vê nada", countDeps(B, lojaB.id) === 0 && RetailCashDepositService.monthLedger(B, lojaB.id, "2026-09").totalDeposited === 0);
 
   __setDepositExtractorForTests(null);

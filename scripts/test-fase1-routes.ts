@@ -137,6 +137,28 @@ async function main() {
   for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of netRoutes) { const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) okRole.push(`${who[0]} ${m} ${p.split("?")[0]}→${r.status}`); }
   check("owner e admin SEM loja atribuída (co-admin) continuam acessando as rotas de rede (0-regressão)", okRole.length === 0, okRole.join(" | "));
 
+  // ── aba Comissão: as 7 rotas sem trava + as de ESCRITA da mesma aba (que só tinham requireRole e o gerente-admin passava) ──
+  const comRoutes: Array<[string, string, any?]> = [
+    ["GET", `/pdv-sellers?${range}`], ["GET", `/seller-sales?${range}`], ["GET", "/commission/rules"], ["GET", "/commission/report-source"],
+    ["GET", `/commission/store-report?storeId=${carioca}&${range}`], ["GET", "/commission/runs/abc"], ["GET", "/commission/plan?period=2026-09"],
+    ["POST", "/seller-sales", { saleDate: D, entries: [{ sellerName: "X", valor: 1 }] }], ["PATCH", "/seller-sales/abc", {}], ["DELETE", "/seller-sales/abc"],
+    ["POST", "/commission/rules", { name: "x" }], ["PATCH", "/commission/rules/abc", {}], ["PUT", "/commission/report-source", { fromRace: false }],
+    ["POST", "/commission/runs", {}], ["POST", "/commission/runs/abc/compare", {}], ["POST", "/commission/runs/abc/approve", {}], ["POST", "/commission/runs/abc/reject", {}],
+    ["PATCH", "/commission/runs/abc/items/def", {}], ["DELETE", "/commission/runs/abc/items/def"], ["PUT", "/commission/plan", {}], ["POST", "/commission/race/run", {}],
+  ];
+  const comLeaks = [];
+  for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "admin", b, GER); if (r.status !== 403) comLeaks.push(`${m} ${p.split("?")[0]}→${r.status}`); }
+  check(`gerente-admin: as ${comRoutes.length} rotas da aba Comissão (leitura E escrita: regras, apuração, aprovar, plano, vendas por vendedor) respondem 403`, comLeaks.length === 0, comLeaks.join(" | "));
+  const comOk = [];
+  for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) comOk.push(`${who[0]} ${m} ${p.split("?")[0]}→${r.status}`); }
+  check("owner e co-admin sem loja: nenhuma delas é barrada (pode dar 400/404 de validação, nunca 403/401) — 0-regressão", comOk.length === 0, comOk.join(" | "));
+  const keep = [];
+  for (const p of ["/commission/runs", `/commission/race?month=2026-09`]) { const r = await call("GET", p, A, "admin", undefined, GER); if (r.status === 403 || r.status === 401) keep.push(`${p}→${r.status}`); }
+  check("o que já filtra por loja dentro do handler NÃO foi travado (commission/runs lista e commission/race)", keep.length === 0, keep.join(" | "));
+  const noRole = [];
+  for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) noRole.push(`${m} ${p.split("?")[0]}→${r.status}`); }
+  check("perfil comum (agent): também 403 em todas", noRole.length === 0, noRole.join(" | "));
+
   const gh = await call("GET", `/insights/header?date=${D}`, A, "admin", undefined, GER);
   check("gerente: o cabeçalho do Insights é só da loja dele (cota 1.300, vendido 1.358,70, 1 loja) — não da rede (9.500)", gh.status === 200 && gh.body?.daily?.quotaTotal === 1300 && Math.abs(gh.body.daily.realized - 1358.7) < 0.01 && gh.body.daily.activeStores === 1 && gh.body.scoped === true, JSON.stringify({ q: gh.body?.daily?.quotaTotal, r: gh.body?.daily?.realized, n: gh.body?.daily?.activeStores, scoped: gh.body?.scoped }));
   check("gerente: o ranking do Insights só traz a loja dele", [...(gh.body?.ranking?.top3 || []), ...(gh.body?.ranking?.bottom3 || [])].every((x: any) => x.storeName === "Carioca"), JSON.stringify(gh.body?.ranking));

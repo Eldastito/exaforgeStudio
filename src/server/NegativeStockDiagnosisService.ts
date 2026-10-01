@@ -74,8 +74,11 @@ export class NegativeStockDiagnosisService {
     const causeCount = byCause.filter((c) => c.cause !== "unknown").length;
     const total = rows.length;
     const unknown = byCause.find((c) => c.cause === "unknown")?.count || 0;
+    // Mesma unidade nos dois pedaços (OCORRÊNCIAS): antes "1 causa identificada · 9 sem causa provada" misturava
+    // tipos de causa com ocorrências e parecia que só 1 de 10 tinha explicação.
+    const identified = total - unknown;
     const headline = `${total} ocorrência${total === 1 ? "" : "s"} em ${stores.size} loja${stores.size === 1 ? "" : "s"}` +
-      (causeCount ? ` · ${causeCount} causa${causeCount === 1 ? "" : "s"} identificada${causeCount === 1 ? "" : "s"}` : " · nenhuma causa identificada") +
+      (identified ? ` · ${identified} com causa identificada` : " · nenhuma com causa identificada") +
       (unknown ? ` · ${unknown} sem causa provada` : "");
     return { total, storeCount: stores.size, causeCount, byCause, headline };
   }

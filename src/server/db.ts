@@ -12283,6 +12283,8 @@ const initDb = () => {
   } catch(e){ console.error('[DB] Falha ao criar retail_seller_absences', e); }
   // Alerta proativo (business_signals) de meses consecutivos abaixo da meta: opt-in por org (nomeia PESSOAS).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_seller_goal_streak_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // Fechamento por loja: o gerente (admin COM loja) só aprova/rejeita o fechamento se o DONO permitir (default 0 = só o dono/co-admin sem loja).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_manager_can_approve INTEGER DEFAULT 0`); } catch(e){}
 
 };
 

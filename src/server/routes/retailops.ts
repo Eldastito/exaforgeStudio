@@ -23,7 +23,7 @@ const requireNetworkScope = (req: AuthRequest, res: any, next: any): any => {
   if (!["owner", "admin"].includes(role)) return res.status(403).json({ error: "Forbidden" });
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   const scope = RetailStoreScopeService.allowed(req.organizationId, req.user?.userId || "", role);
-  if (!scope.unrestricted) return res.status(403).json({ error: "Esta informação é da rede inteira; sua conta está restrita às suas lojas." });
+  if (!scope.unrestricted) return res.status(403).json({ error: "Esta área é da rede inteira; sua conta está restrita às suas lojas." });
   next();
 };
 import { RetailStoreService } from "../RetailStoreService.js";
@@ -617,12 +617,12 @@ router.get("/store-scope/me", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailStoreScopeService.allowed(orgId, req.user?.userId, req.user?.role));
 });
-router.get("/store-scope/:userId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.get("/store-scope/:userId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ storeIds: RetailStoreScopeService.forUser(orgId, req.params.userId) });
 });
-router.put("/store-scope/:userId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/store-scope/:userId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -640,7 +640,7 @@ router.get("/stores/:id", (req: AuthRequest, res): any => {
 });
 
 // Mutações: só owner/admin da organização.
-router.post("/stores", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stores", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -649,7 +649,7 @@ router.post("/stores", requireRole("owner", "admin"), (req: AuthRequest, res): a
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.patch("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.patch("/stores/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -661,7 +661,7 @@ router.patch("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, re
 
 // EXCLUIR loja duplicada: se existir outra loja com o MESMO código, o histórico
 // (estoque, fechamentos, cotas…) é UNIFICADO nela antes de apagar.
-router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/stores/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -673,7 +673,7 @@ router.delete("/stores/:id", requireRole("owner", "admin"), (req: AuthRequest, r
 // escala/malote/cotas/vendas que ficaram apontando pro store_id apagado voltam
 // pra loja sobrevivente. Sem body.apply = DRY-RUN (só relata); apply=true grava.
 // Nunca apaga nada; idempotente; auditado no serviço. Só owner/admin, org-scoped.
-router.post("/stores/rescue-merge-orphans", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stores/rescue-merge-orphans", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {

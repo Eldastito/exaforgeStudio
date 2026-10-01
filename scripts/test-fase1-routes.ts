@@ -177,6 +177,36 @@ async function main() {
   for (const [m, p, b] of finRoutes) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) finAgent.push(`${m} ${p.replace(carioca, ":id").split("?")[0]}→${r.status}`); }
   check("perfil comum (agent): também 403 em todas", finAgent.length === 0, finAgent.join(" | "));
 
+  // ── AUTO-ESCALAÇÃO: o gerente-admin NÃO pode tirar a própria restrição nem mexer no cadastro das lojas ──
+  // Achado por HTTP: `PUT /store-scope/<ele>` com lista vazia dava 200 e ele virava irrestrito; PATCH/POST/DELETE em /stores também
+  // passavam. Sem isto, TODAS as travas por loja eram contornáveis por quem tem o papel admin.
+  const extra = db.prepare(`INSERT INTO retail_stores (id, organization_id, name, code) VALUES (?, ?, 'Loja Alvo', 'ALVO')`); const alvo = randomUUID(); extra.run(alvo, A);
+  const mgmt: Array<[string, string, any?]> = [
+    ["GET", `/store-scope/${GER}`], ["PUT", `/store-scope/${GER}`, { storeIds: [] }],
+    ["POST", "/stores", { name: "Nova pelo gerente", code: "NPG" }], ["PATCH", `/stores/${alvo}`, { name: "Renomeada pelo gerente" }],
+    ["DELETE", `/stores/${alvo}`], ["POST", "/stores/rescue-merge-orphans", {}],
+  ];
+  const mgLeaks = [];
+  for (const [m, p, b] of mgmt) { const r = await call(m, p, A, "admin", b, GER); if (r.status !== 403) mgLeaks.push(`${m} ${p.replace(GER, ":user").replace(alvo, ":id")}→${r.status}`); }
+  check(`gerente-admin: as ${mgmt.length} rotas que mexem na restrição de loja e no cadastro das lojas respondem 403`, mgLeaks.length === 0, mgLeaks.join(" | "));
+  const me = await call("GET", "/store-scope/me", A, "admin", undefined, GER);
+  check("depois das tentativas, o gerente CONTINUA restrito à loja dele (não virou irrestrito)", me.body?.unrestricted === false && me.body?.storeIds?.length === 1 && me.body.storeIds[0] === carioca, JSON.stringify(me.body));
+  const still = db.prepare(`SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?`).get(alvo, A) as any;
+  check("a loja-alvo continua existindo e com o nome original (nada foi renomeado/excluído)", still?.name === "Loja Alvo" && (db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND code = 'NPG'`).get(A) as any).c === 0, JSON.stringify(still));
+  const mgOk = [];
+  for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of mgmt) { if (m === "DELETE") continue; const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) mgOk.push(`${who[0]} ${m} ${p.replace(GER, ":user").replace(alvo, ":id")}→${r.status}`); }
+  check("owner e co-admin sem loja continuam gerindo restrição e lojas (0-regressão)", mgOk.length === 0, mgOk.join(" | "));
+  const mgAgent = [];
+  for (const [m, p, b] of mgmt) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) mgAgent.push(`${m} ${p.replace(GER, ":user").replace(alvo, ":id")}→${r.status}`); }
+  check("perfil comum (agent): também 403 em todas", mgAgent.length === 0, mgAgent.join(" | "));
+  // o dono SEGUE conseguindo reatribuir lojas ao gerente (fluxo legítimo da tela de usuários)
+  const ownerSet = await call("PUT", `/store-scope/${GER}`, A, "owner", { storeIds: [carioca] }, "u_owner");
+  check("o DONO continua atribuindo lojas ao gerente (PUT /store-scope como owner → 200)", ownerSet.status === 200 && JSON.stringify(ownerSet.body?.storeIds) === JSON.stringify([carioca]), JSON.stringify(ownerSet));
+
+  // limpeza: o bloco acima criou/renomeou lojas auxiliares (a "Loja Alvo" e as criadas pelo owner/co-admin) — volta às 3 lojas do cenário
+  db.prepare(`DELETE FROM retail_stores WHERE organization_id = ? AND id NOT IN (?, ?, ?)`).run(A, carioca, avb, grande);
+  check("cenário restaurado: só as 3 lojas originais", (db.prepare(`SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ?`).get(A) as any).c === 3);
+
   const gh = await call("GET", `/insights/header?date=${D}`, A, "admin", undefined, GER);
   check("gerente: o cabeçalho do Insights é só da loja dele (cota 1.300, vendido 1.358,70, 1 loja) — não da rede (9.500)", gh.status === 200 && gh.body?.daily?.quotaTotal === 1300 && Math.abs(gh.body.daily.realized - 1358.7) < 0.01 && gh.body.daily.activeStores === 1 && gh.body.scoped === true, JSON.stringify({ q: gh.body?.daily?.quotaTotal, r: gh.body?.daily?.realized, n: gh.body?.daily?.activeStores, scoped: gh.body?.scoped }));
   check("gerente: o ranking do Insights só traz a loja dele", [...(gh.body?.ranking?.top3 || []), ...(gh.body?.ranking?.bottom3 || [])].every((x: any) => x.storeName === "Carioca"), JSON.stringify(gh.body?.ranking));

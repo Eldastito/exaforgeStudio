@@ -568,6 +568,7 @@
     "test:fase1-routes": "tsx scripts/test-fase1-routes.ts",
     "test:retail-store-write-scope": "tsx scripts/test-retail-store-write-scope.ts",
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
+    "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",
     "test:retail-questions": "tsx scripts/test-retail-questions.ts",
     "test:commission-import": "tsx scripts/test-commission-import.ts",
     "test:seller-goal-streak": "tsx scripts/test-seller-goal-streak.ts",

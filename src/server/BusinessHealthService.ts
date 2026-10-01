@@ -20,7 +20,7 @@ import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
  */
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const brl = (n: number) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 
 type StatusLevel = "saudavel" | "atencao" | "risco" | "critico";
 const SEVERITY: Record<StatusLevel, number> = { saudavel: 0, atencao: 1, risco: 2, critico: 3 };

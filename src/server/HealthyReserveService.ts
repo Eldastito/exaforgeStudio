@@ -33,7 +33,7 @@ import { BusinessSignalService } from "./BusinessSignalService.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const pct2 = (num: number, den: number): number | null => (den > 0 ? round2((num / den) * 100) : null);
-const brl = (n: number) => `R$ ${n.toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 
 // Alvos padrão do método das 4 contas (% da base).
 export const DEFAULT_TARGETS = { profit: 10, prolabore: 50, taxes: 18, ops: 22 } as const;

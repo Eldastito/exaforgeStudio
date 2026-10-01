@@ -44,7 +44,7 @@ export interface DecisionInput {
 }
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const brl = (n: any) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 /** Vertical configurada da org (para puxar inteligência de mercado do nicho). */
 function orgVertical(orgId: string): string | null {
   try { return (db.prepare("SELECT vertical FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.vertical || null; } catch { return null; }

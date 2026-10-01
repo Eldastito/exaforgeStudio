@@ -25,7 +25,7 @@ import { ManagerialCashFlowService } from "./ManagerialCashFlowService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-const brl = (n: number) => `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 
 export interface ConnectedFinancials {
   period: string;

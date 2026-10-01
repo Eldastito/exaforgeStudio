@@ -26,6 +26,64 @@ const requireNetworkScope = (req: AuthRequest, res: any, next: any): any => {
   if (!scope.unrestricted) return res.status(403).json({ error: "Esta área é da rede inteira; sua conta está restrita às suas lojas." });
   next();
 };
+// ── Trava POR LOJA nas rotas de escrita (ADR-173) ───────────────────────────────────────────────────────────────
+// O gerente é "admin" COM loja atribuída: `requireRole` o deixa passar em qualquer loja. Aqui o servidor confere se a
+// loja da AÇÃO está no escopo dele. Dono e admin sem loja (co-admin) passam; restrito que não permite identificar a
+// loja da ação leva 403 (nunca "na dúvida, libera").
+const scopeOf = (req: AuthRequest) => RetailStoreScopeService.allowed(req.organizationId || "", req.user?.userId || "", req.user?.role || "");
+const storeAllowed = (req: AuthRequest, storeId: unknown): boolean => {
+  const scope = scopeOf(req);
+  return scope.unrestricted || (typeof storeId === "string" && storeId !== "" && scope.storeIds.includes(storeId));
+};
+type StoreResolver = (req: AuthRequest, orgId: string) => unknown[];
+const requireStoreAccess = (resolve: StoreResolver, mode: "all" | "any" = "all") => (req: AuthRequest, res: any, next: any): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  let ids: string[] = [];
+  try { ids = resolve(req, orgId).filter((v): v is string => typeof v === "string" && v !== ""); } catch { ids = []; }
+  // Isolamento entre organizações (vale p/ qualquer papel): loja citada que não é desta org não existe pra ela.
+  const inOrg = db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`);
+  if (ids.some((id) => !inOrg.get(orgId, id))) return res.status(404).json({ error: "store_not_found" });
+  const scope = scopeOf(req);
+  if (scope.unrestricted) return next();
+  if (!ids.length) return res.status(403).json({ error: "Não foi possível identificar a loja desta ação; sua conta está restrita às suas lojas." });
+  const ok = mode === "any" ? ids.some((id) => scope.storeIds.includes(id)) : ids.every((id) => scope.storeIds.includes(id));
+  if (!ok) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
+  next();
+};
+const inBody = (k = "storeId"): StoreResolver => (req) => [(req.body as any)?.[k] == null ? null : String((req.body as any)[k])];
+const inParam = (k: string): StoreResolver => (req) => [req.params[k]];
+const lookupStore = (sql: string, ...cols: string[]): StoreResolver => (req, orgId) => {
+  const row = db.prepare(sql).get(orgId, String(req.params.id ?? req.params.rid ?? "")) as any;
+  return row ? cols.map((c) => row[c]) : [];
+};
+const ofClosing = lookupStore(`SELECT store_id FROM retail_daily_closings WHERE organization_id = ? AND id = ?`, "store_id");
+const ofTransfer = lookupStore(`SELECT origin_store_id, dest_store_id FROM retail_stock_transfers WHERE organization_id = ? AND id = ?`, "origin_store_id", "dest_store_id");
+const ofResponsible = lookupStore(`SELECT store_id FROM retail_store_responsibles WHERE organization_id = ? AND id = ?`, "store_id");
+const ofAlert = lookupStore(`SELECT store_id FROM retail_stock_alerts WHERE organization_id = ? AND id = ?`, "store_id");
+const ofReceipt = lookupStore(`SELECT store_id FROM retail_goods_receipts WHERE organization_id = ? AND id = ?`, "store_id");
+const ofBoletaEvent = lookupStore(`SELECT store_id FROM retail_boleta_events WHERE organization_id = ? AND id = ?`, "store_id");
+const ofTransferBody: StoreResolver = (req) => [(req.body as any)?.originStoreId, (req.body as any)?.destStoreId].map((v) => (v == null ? null : String(v)));
+
+/** O gerente (admin COM loja) só aprova/rejeita/altera fechamento APROVADO se o DONO permitir (`retail_manager_can_approve`). */
+const managerMayApprove = (orgId: string): boolean => {
+  try { return Number((db.prepare(`SELECT retail_manager_can_approve AS v FROM organization_settings WHERE organization_id = ?`).get(orgId) as any)?.v || 0) === 1; }
+  catch { return false; }
+};
+const requireApprovalRight = (req: AuthRequest, res: any, next: any): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (scopeOf(req).unrestricted || managerMayApprove(req.organizationId)) return next();
+  res.status(403).json({ error: "A aprovação do fechamento é do dono. Ele pode liberar isso para os gerentes." });
+};
+/** Fechamento já APROVADO: o gerente sem permissão do dono não reescreve (senão burlaria a aprovação). */
+const blockEditApproved = (req: AuthRequest, res: any, next: any): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (scopeOf(req).unrestricted || managerMayApprove(orgId)) return next();
+  const c = db.prepare(`SELECT status FROM retail_daily_closings WHERE organization_id = ? AND id = ?`).get(orgId, String(req.params.id || "")) as any;
+  if (c?.status === "approved") return res.status(403).json({ error: "Fechamento já aprovado pelo dono; só o dono altera." });
+  next();
+};
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
@@ -147,7 +205,7 @@ router.get("/revenue-bridge", (req: AuthRequest, res): any => {
   res.json({ enabled: RetailRevenueBridgeService.isEnabled(orgId) });
 });
 
-router.put("/revenue-bridge", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/revenue-bridge", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const enabled = RetailRevenueBridgeService.setEnabled(orgId, !!req.body?.enabled);
@@ -163,7 +221,7 @@ router.get("/official-sale-source", (req: AuthRequest, res): any => {
   res.json({ source: officialSaleSourceOf(orgId) });
 });
 
-router.put("/official-sale-source", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/official-sale-source", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const source = String(req.body?.source || "");
@@ -185,7 +243,7 @@ router.get("/patterns", (req: AuthRequest, res): any => {
 });
 
 // Desfecho de uma ação sobre um padrão (fecha o loop — ADR-142 Fatia 3).
-router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/patterns/:id/outcome", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const r = RetailPatternMemoryService.recordOutcome(orgId, req.params.id, { outcome: req.body?.outcome, realizedImpact: req.body?.realizedImpact, note: req.body?.note }, (req as any).userId);
@@ -194,7 +252,7 @@ router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRe
 });
 
 // Analisa as operações e publica sinais p/ o Pareto/Diretor IA (ADR-136).
-router.post("/signals/refresh", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/signals/refresh", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: true, ...RetailOpsSignalPublisher.run(orgId, { asOf: req.body?.asOf }) });
@@ -352,13 +410,13 @@ router.get("/online-reserve", (req: AuthRequest, res): any => {
 });
 
 // Vendedor padrão da loja online (comissão das vendas headless). "" = sem.
-router.put("/online-reserve/default-seller", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/online-reserve/default-seller", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: true, defaultSellerUserId: RetailOnlineReserveService.setDefaultOnlineSeller(orgId, req.body?.userId || null) });
 });
 
-router.put("/online-reserve/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/online-reserve/flag", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const enabled = RetailOnlineReserveService.setEnabled(orgId, !!req.body?.enabled);
@@ -368,7 +426,7 @@ router.put("/online-reserve/flag", requireRole("owner", "admin"), (req: AuthRequ
 });
 
 // Define a reserva e-commerce de um produto/variante numa loja.
-router.put("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/online-reserve/item", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
@@ -378,7 +436,7 @@ router.put("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequ
 });
 
 // Remove a reserva de um produto/variante numa loja.
-router.delete("/online-reserve/item", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/online-reserve/item", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
@@ -387,7 +445,7 @@ router.delete("/online-reserve/item", requireRole("owner", "admin"), (req: AuthR
 });
 
 // Confirma a baixa (operador lançou no PDV) — por pedido ou por item.
-router.post("/online-reserve/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/online-reserve/confirm", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const b = req.body || {};
@@ -398,13 +456,13 @@ router.post("/online-reserve/confirm", requireRole("owner", "admin"), (req: Auth
   res.json({ ok: true, ...r, pending: RetailOnlineReserveService.listPending(orgId) });
 });
 
-router.put("/patterns/flag", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/patterns/flag", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: true, enabled: RetailPatternMemoryService.setEnabled(orgId, !!req.body?.enabled) });
 });
 
-router.post("/patterns/learn", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/patterns/learn", requireNetworkScope, async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -430,20 +488,20 @@ router.get("/receiving/:id", (req: AuthRequest, res): any => {
   res.json(r);
 });
 
-router.post("/receiving", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/receiving", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.status(201).json(RetailReceivingService.createReceipt(orgId, req.body || {}, req.user?.userId));
 });
 
-router.post("/receiving/:id/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/receiving/:id/scan", requireRole("owner", "admin"), requireStoreAccess(ofReceipt), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailReceivingService.scanItem(orgId, req.params.id, String(req.body?.ean || ""), Number(req.body?.qty || 1), req.user?.userId)); }
   catch (e: any) { res.status(e.message === "receipt_not_found" ? 404 : 400).json({ error: e.message }); }
 });
 
-router.post("/receiving/:id/confirm", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/receiving/:id/confirm", requireRole("owner", "admin"), requireStoreAccess(ofReceipt), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailReceivingService.confirm(orgId, req.params.id, req.user?.userId)); }
@@ -457,7 +515,7 @@ router.get("/scan/lookup", (req: AuthRequest, res): any => {
   res.json(RetailScanService.lookupByEan(orgId, String(req.query.ean || "")));
 });
 
-router.post("/scan/receive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/scan/receive", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -476,7 +534,7 @@ router.get("/reconciliation", (req: AuthRequest, res): any => {
   res.json(RetailReconciliationService.report(orgId, month, String(req.query.onlyDivergent || "") === "1"));
 });
 
-router.post("/reconciliation/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/reconciliation/import", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   csvUpload.single("file")(req, res, (err: any) => {
@@ -502,7 +560,7 @@ router.post("/diagnostic/recommend", (req: AuthRequest, res): any => {
 });
 
 // Confirmação: aplica a recomendação (módulos + modo de estoque + ativação).
-router.post("/diagnostic/apply", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/diagnostic/apply", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const out = RetailDiagnosticService.apply(orgId, req.body || {}, req.user?.userId);
@@ -532,14 +590,14 @@ router.get("/stock-mode", (req: AuthRequest, res): any => {
   res.json(RetailStockModeService.status(orgId));
 });
 
-router.post("/stock-mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock-mode", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json({ orgMode: RetailStockModeService.setOrgMode(orgId, String(req.body?.mode), req.user?.userId) }); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.post("/stock-mode/store/:storeId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock-mode/store/:storeId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const mode = req.body?.mode === null || req.body?.mode === undefined ? null : String(req.body.mode);
@@ -548,7 +606,7 @@ router.post("/stock-mode/store/:storeId", requireRole("owner", "admin"), (req: A
 });
 
 // Graduação supervisor → nativo (ADR-084 D5): promove a loja e semeia o núcleo.
-router.post("/stock-mode/graduate/:storeId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock-mode/graduate/:storeId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailGraduationService.graduate(orgId, req.params.storeId, req.user?.userId)); }
@@ -562,7 +620,7 @@ router.get("/activation", (req: AuthRequest, res): any => {
   res.json(RetailActivationService.status(orgId));
 });
 
-router.post("/activation/activate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/activation/activate", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const out = RetailActivationService.activate(orgId, req.user?.userId);
@@ -571,7 +629,7 @@ router.post("/activation/activate", requireRole("owner", "admin"), (req: AuthReq
   res.json(out);
 });
 
-router.post("/activation/deactivate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/activation/deactivate", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailActivationService.deactivate(orgId, req.user?.userId));
@@ -940,7 +998,7 @@ router.get("/card-acquirer/reconciliation", (req: AuthRequest, res): any => {
 // Carga MANUAL do lado do adquirente — enquanto a API da Sicredi não tem
 // credenciais, o financeiro sobe o JSON do extrato do internet banking. Cada
 // linha vira upsert por (source, numero_transacao, parcela).
-router.post("/card-acquirer/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/card-acquirer/import", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { source, rows } = req.body || {};
@@ -950,7 +1008,7 @@ router.post("/card-acquirer/import", requireRole("owner", "admin"), (req: AuthRe
 });
 
 // Sync API Sicredi — STUB até a Sicredi liberar credenciais/manual.
-router.post("/card-acquirer/sync-sicredi", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/card-acquirer/sync-sicredi", requireNetworkScope, async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.body?.start || "").slice(0, 10);
@@ -1055,7 +1113,7 @@ router.get("/card-receivable-mode", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ mode: RetailCardReceivableService.getMode(orgId) });
 });
-router.put("/card-receivable-mode", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/card-receivable-mode", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const dplus1 = req.body?.dplus1 === true || String(req.body?.dplus1) === "true";
@@ -1120,7 +1178,7 @@ router.get("/sellers", (req: AuthRequest, res): any => {
   res.json({ sellers, unmapped });
 });
 
-router.put("/sellers/:matricula", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/sellers/:matricula", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const matricula = String(req.params.matricula || "").trim();
@@ -1150,7 +1208,7 @@ router.get("/sellers/next-matricula", requireRole("owner", "admin"), (req: AuthR
 
 // "Excluir" vendedor = desativa a identidade + encerra as lotações (soft delete,
 // preserva histórico de comissão/venda pela matrícula). owner/admin.
-router.delete("/sellers/:sellerId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/sellers/:sellerId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { RetailSellerDirectoryService.deactivateSeller(orgId, String(req.params.sellerId), req.user?.userId); res.json({ ok: true }); }
@@ -1165,7 +1223,7 @@ router.get("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: Aut
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.put("/sellers/:sellerId/stores", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/sellers/:sellerId/stores", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1212,7 +1270,7 @@ router.post("/sellers/:sellerId/aliases", requireNetworkScope, (req: AuthRequest
   try { res.json(RetailSellerIdentityService.addAlias(orgId, req.params.sellerId, { alias: String(req.body?.alias || ""), kind: req.body?.kind }, req.user?.userId)); }
   catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });
-router.delete("/sellers/aliases/:aliasId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/sellers/aliases/:aliasId", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: RetailSellerIdentityService.removeAlias(orgId, req.params.aliasId, req.user?.userId) });
@@ -1235,7 +1293,7 @@ router.get("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req
   const date = String(req.query.date || todaySP());
   res.json({ date, stores: RetailSellerIdentityService.assignmentsOn(orgId, req.params.sellerId, date), storeOn: RetailSellerIdentityService.storeOn(orgId, req.params.sellerId, date) });
 });
-router.post("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/sellers/:sellerId/assignments", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1248,7 +1306,7 @@ router.post("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (re
 
 // PERF-001 (Fatia 4) — backfill da resolução de catálogo dos itens do PDV
 // (em lotes idempotentes/interrompíveis). owner/admin.
-router.post("/pdv-catalog/backfill", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/pdv-catalog/backfill", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const limit = Math.max(1, Math.min(5000, parseInt(String(req.body?.limit || "1000"), 10) || 1000));
@@ -1263,7 +1321,7 @@ router.get("/feature-flags", requireRole("owner", "admin"), (req: AuthRequest, r
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ flags: RetailFeatureFlagService.status(orgId) });
 });
-router.put("/feature-flags/:key", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/feature-flags/:key", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const key = String(req.params.key || "") as RetailFlagKey;
@@ -1437,7 +1495,7 @@ router.get("/stores/:id/responsibles", (req: AuthRequest, res): any => {
   res.json({ responsibles: RetailResponsibleService.list(orgId, req.params.id) });
 });
 
-router.post("/stores/:id/responsibles", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stores/:id/responsibles", requireRole("owner", "admin"), requireStoreAccess(inParam("id")), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1446,7 +1504,7 @@ router.post("/stores/:id/responsibles", requireRole("owner", "admin"), (req: Aut
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.patch("/responsibles/:rid", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.patch("/responsibles/:rid", requireRole("owner", "admin"), requireStoreAccess(ofResponsible), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const r = RetailResponsibleService.update(orgId, req.params.rid, req.body || {}, req.user?.userId);
@@ -1454,7 +1512,7 @@ router.patch("/responsibles/:rid", requireRole("owner", "admin"), (req: AuthRequ
   res.json(r);
 });
 
-router.delete("/responsibles/:rid", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/responsibles/:rid", requireRole("owner", "admin"), requireStoreAccess(ofResponsible), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = RetailResponsibleService.remove(orgId, req.params.rid, req.user?.userId);
@@ -1468,7 +1526,7 @@ router.get("/quotas", (req: AuthRequest, res): any => {
   res.json({ date: today(req), quotas: RetailQuotaService.listByDate(orgId, today(req)) });
 });
 
-router.post("/quotas", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/quotas", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, quotaDate, quotaAmount } = req.body || {};
@@ -1476,7 +1534,7 @@ router.post("/quotas", requireRole("owner", "admin"), (req: AuthRequest, res): a
   res.status(201).json(RetailQuotaService.set(orgId, { storeId, quotaDate, quotaAmount }, req.user?.userId));
 });
 
-router.post("/quotas/import", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/quotas/import", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -1487,7 +1545,7 @@ router.post("/quotas/import", requireRole("owner", "admin"), (req: AuthRequest, 
 // últimas 8 semanas (system_total > 0); sem amostra do dia da semana, cai na
 // média geral dos últimos 28 dias. { date?, apply? } — apply=true grava as
 // cotas (source 'pdv_suggest'); sem apply, só devolve as sugestões.
-router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/quotas/suggest", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.body?.date || today(req)).slice(0, 10);
@@ -1502,7 +1560,7 @@ router.post("/quotas/suggest", requireRole("owner", "admin"), (req: AuthRequest,
 // gestor confere antes); apply=true grava a cota diária da loja de cada dia do
 // mês (aberto = fatia proporcional, folga = 0), de onde a cota por vendedor já
 // deriva. Erros de negócio (loja inexistente, mês todo em folga) → 400.
-router.post("/quotas/distribute-monthly", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/quotas/distribute-monthly", requireRole("owner", "admin"), requireStoreAccess(inBody()), async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, month, monthlyAmount, apply } = req.body || {};
@@ -1558,7 +1616,7 @@ router.get("/transfers/:id", (req: AuthRequest, res): any => {
   res.json(t);
 });
 
-router.post("/transfers", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/transfers", requireRole("owner", "admin"), requireStoreAccess(ofTransferBody, "any"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1567,14 +1625,14 @@ router.post("/transfers", requireRole("owner", "admin"), (req: AuthRequest, res)
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.post("/transfers/:id/receive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/transfers/:id/receive", requireRole("owner", "admin"), requireStoreAccess(ofTransfer, "any"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailTransferService.receive(orgId, req.params.id, { items: req.body?.items }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.post("/transfers/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/transfers/:id/cancel", requireRole("owner", "admin"), requireStoreAccess(ofTransfer, "any"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailTransferService.cancel(orgId, req.params.id, req.user?.userId)); }
@@ -1586,6 +1644,19 @@ router.get("/closings", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ date: today(req), closings: RetailClosingService.listByDate(orgId, today(req)) });
+});
+
+// Política de aprovação do fechamento: por padrão só o dono (e co-admin sem loja) aprova; o dono pode liberar os gerentes de loja.
+router.get("/closing-approval-policy", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ managerCanApprove: managerMayApprove(req.organizationId) });
+});
+router.put("/closing-approval-policy", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (typeof req.body?.managerCanApprove !== "boolean") return res.status(400).json({ error: "managerCanApprove (boolean) é obrigatório." });
+  db.prepare(`UPDATE organization_settings SET retail_manager_can_approve = ? WHERE organization_id = ?`).run(req.body.managerCanApprove ? 1 : 0, orgId);
+  res.json({ managerCanApprove: managerMayApprove(orgId) });
 });
 
 // Conferência semanal: grade loja × 7 dias (segunda→domingo). ?date= = qualquer
@@ -1606,17 +1677,19 @@ router.get("/closings/:id", (req: AuthRequest, res): any => {
 });
 
 // Abre (ou devolve) o fechamento pendente de uma loja no dia.
-router.post("/closings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, closingDate } = req.body || {};
   if (!storeId || !closingDate) return res.status(400).json({ error: "storeId e closingDate são obrigatórios" });
+  // Isolamento: a loja precisa ser desta organização (antes criava fechamento apontando para loja de OUTRA org).
+  if (!RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   res.status(201).json(RetailClosingService.getOrCreate(orgId, storeId, closingDate));
 });
 
 // Registra o total informado + itens e calcula o desvio vs cota (manual; a via
 // WhatsApp/IA entra na Fase C chamando este mesmo caminho).
-router.post("/closings/:id/inform", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings/:id/inform", requireRole("owner", "admin"), requireStoreAccess(ofClosing), blockEditApproved, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { informedTotal, items } = req.body || {};
@@ -1630,7 +1703,7 @@ router.post("/closings/:id/inform", requireRole("owner", "admin"), (req: AuthReq
 // QUOTA-003: define/corrige a COTA DA LOJA no dia deste fechamento (ex.: digitar
 // os 3.800 da folha por cima de um palpite do PDV). Atualiza o snapshot do
 // fechamento pra tela refletir na hora. Devolve o fechamento atualizado.
-router.post("/closings/:id/quota", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings/:id/quota", requireRole("owner", "admin"), requireStoreAccess(ofClosing), blockEditApproved, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const amount = Number(req.body?.amount);
@@ -1643,7 +1716,7 @@ router.post("/closings/:id/quota", requireRole("owner", "admin"), (req: AuthRequ
 
 // CLOSE-003: exclui o fechamento do dia da loja (e a cota do dia) — pra limpar
 // um lançamento errado. A coluna Cota da tela vem do snapshot do fechamento.
-router.delete("/closings/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/closings/:id", requireRole("owner", "admin"), requireStoreAccess(ofClosing), blockEditApproved, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = RetailClosingService.remove(orgId, String(req.params.id), req.user?.userId);
@@ -1651,7 +1724,7 @@ router.delete("/closings/:id", requireRole("owner", "admin"), (req: AuthRequest,
   res.json({ ok: true });
 });
 
-router.post("/closings/:id/approve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings/:id/approve", requireRole("owner", "admin"), requireStoreAccess(ofClosing), requireApprovalRight, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const c = RetailClosingService.setStatus(orgId, req.params.id, "approved", req.user?.userId);
@@ -1663,7 +1736,7 @@ router.post("/closings/:id/approve", requireRole("owner", "admin"), (req: AuthRe
   res.json({ ...c, syncedSellers });
 });
 
-router.post("/closings/:id/reject", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings/:id/reject", requireRole("owner", "admin"), requireStoreAccess(ofClosing), requireApprovalRight, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const c = RetailClosingService.setStatus(orgId, req.params.id, "rejected", req.user?.userId);
@@ -1675,7 +1748,7 @@ router.post("/closings/:id/reject", requireRole("owner", "admin"), (req: AuthReq
 // dinheiro/PIX, crédito e débito POR BANDEIRA, despesas, ranking por vendedor
 // (valor/AT/peças), cadastros, boletas, malote, prêmio do dia e conferência
 // com o resumo do POS. O total é derivado; divergências viram flags (D4).
-router.post("/closings/:id/detailed", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/closings/:id/detailed", requireRole("owner", "admin"), requireStoreAccess(ofClosing), blockEditApproved, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const c = RetailClosingService.get(orgId, req.params.id);
@@ -1693,7 +1766,7 @@ router.get("/stores/:id/card-brands", (req: AuthRequest, res): any => {
   res.json(RetailClosingService.getCardBrands(orgId, req.params.id));
 });
 
-router.put("/stores/:id/card-brands", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/stores/:id/card-brands", requireRole("owner", "admin"), requireStoreAccess(inParam("id")), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   if (!RetailStoreService.get(orgId, req.params.id)) return res.status(404).json({ error: "store_not_found" });
@@ -1730,7 +1803,7 @@ router.get("/boletas/line-audit", (req: AuthRequest, res): any => {
 });
 
 // Abre o dia com o nº inicial do talão (gestão).
-router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/boletas/day/open", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, initialNumber } = req.body || {};
@@ -1744,7 +1817,7 @@ router.post("/boletas/day/open", requireRole("owner", "admin"), (req: AuthReques
 
 // O CLIQUE da venda — SEM requireRole de propósito: o vendedor no balcão
 // também registra (a segurança é o gate do módulo + org). Hora é do servidor.
-router.post("/boletas/click", (req: AuthRequest, res): any => {
+router.post("/boletas/click", requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, sellerName, idempotencyKey } = req.body || {};
@@ -1770,7 +1843,7 @@ router.get("/boletas/history", (req: AuthRequest, res): any => {
 });
 
 // Desfaz o ÚLTIMO clique (misclick) — gestão.
-router.post("/boletas/click/:id/cancel", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/boletas/click/:id/cancel", requireRole("owner", "admin"), requireStoreAccess(ofBoletaEvent), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailBoletaService.cancelClick(orgId, req.params.id, req.user?.userId)); }
@@ -1791,6 +1864,7 @@ router.post("/closings/scan", (req: AuthRequest, res): any => {
     const storeId = String(req.body?.storeId || "");
     const date = String(req.body?.date || todaySP());
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
+    if (!storeAllowed(req, storeId)) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
     if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
     // CLOSE-002: trava — loja de folga geral no dia não recebe fechamento nem por foto.
     if (RetailClosingService.isStoreClosedOnDate(orgId, storeId, String(date).slice(0, 10))) {
@@ -1816,7 +1890,7 @@ router.get("/tasks", (req: AuthRequest, res): any => {
   res.json({ date: today(req), tasks: RetailTaskService.listByDate(orgId, today(req)) });
 });
 
-router.post("/tasks/generate-day", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/tasks/generate-day", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.body?.date || today(req));
@@ -1940,7 +2014,7 @@ router.get("/stock-policies", (req: AuthRequest, res): any => {
   });
 });
 
-router.post("/stock-policies", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock-policies", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1948,7 +2022,7 @@ router.post("/stock-policies", requireRole("owner", "admin"), (req: AuthRequest,
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
-router.delete("/stock-policies/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/stock-policies/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const ok = RetailStockPolicyService.remove(orgId, req.params.id, req.user?.userId);
@@ -1963,7 +2037,7 @@ router.get("/stock/alerts", (req: AuthRequest, res): any => {
 });
 
 // Ajuste de saldo por loja (permite negativo → gera alerta). owner/admin.
-router.post("/stock/adjust", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock/adjust", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, productServiceId, variantId, quantityAvailable, delta } = req.body || {};
@@ -1974,7 +2048,7 @@ router.post("/stock/adjust", requireRole("owner", "admin"), (req: AuthRequest, r
   res.json(row);
 });
 
-router.post("/stock/alerts/:id/resolve", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/stock/alerts/:id/resolve", requireRole("owner", "admin"), requireStoreAccess(ofAlert), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const a = RetailInventoryService.resolveAlert(orgId, req.params.id, req.body?.note, req.user?.userId);
@@ -2312,7 +2386,7 @@ router.post("/sellers/:sellerId/absences", requireNetworkScope, (req: AuthReques
   try { res.status(201).json(RetailSellerAbsenceService.add(orgId, { sellerId: req.params.sellerId, type: req.body?.type, startDate: String(req.body?.startDate || ""), endDate: String(req.body?.endDate || ""), note: req.body?.note ?? null }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
-router.delete("/sellers/absences/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.delete("/sellers/absences/:id", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: RetailSellerAbsenceService.cancel(orgId, req.params.id, req.user?.userId) });
@@ -2320,7 +2394,7 @@ router.delete("/sellers/absences/:id", requireRole("owner", "admin"), (req: Auth
 
 // Preferência da empresa p/ a aba Metas: mostrar/ocultar a coluna QUINZENA.
 // owner/admin. Aditivo, opt-in — não altera cálculo, só a exibição.
-router.put("/seller-scoreboard/fortnight-visibility", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/seller-scoreboard/fortnight-visibility", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const hide = req.body?.hide ? 1 : 0;
@@ -2349,7 +2423,7 @@ router.get("/schedule", (req: AuthRequest, res): any => {
   res.json({ storeId, start, end, entries: RetailCommissionRaceService.getSchedule(orgId, storeId, start, end) });
 });
 
-router.put("/schedule", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/schedule", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, start, end, entries } = req.body || {};
@@ -2372,6 +2446,7 @@ router.post("/schedule/scan", requireRole("owner", "admin"), (req: AuthRequest, 
     const storeId = String((req as any).body?.storeId || "");
     const weekStart = String((req as any).body?.weekStart || "").slice(0, 10);
     if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+    if (!storeAllowed(req, storeId)) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return res.status(400).json({ error: "weekStart (YYYY-MM-DD, domingo) obrigatório" });
     if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
     // 7 datas da semana (domingo→sábado) em UTC — evita off-by-one de fuso.
@@ -2388,7 +2463,7 @@ router.post("/schedule/scan", requireRole("owner", "admin"), (req: AuthRequest, 
   });
 });
 
-router.post("/schedule/copy-week", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/schedule/copy-week", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, fromStart, toStart, days } = req.body || {};
@@ -2407,7 +2482,7 @@ router.get("/schedule/off-pattern", (req: AuthRequest, res): any => {
   res.json({ storeId, patterns: RetailScheduleTemplateService.list(orgId, storeId) });
 });
 
-router.put("/schedule/off-pattern", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/schedule/off-pattern", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, patterns } = req.body || {};
@@ -2418,7 +2493,7 @@ router.put("/schedule/off-pattern", requireRole("owner", "admin"), (req: AuthReq
 });
 
 // Aplica o template no intervalo (só insere 'off' onde a grade tá vazia).
-router.post("/schedule/apply-template", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/schedule/apply-template", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, start, end } = req.body || {};
@@ -2442,7 +2517,7 @@ router.get("/month-weeks", (req: AuthRequest, res): any => {
   res.json({ month, override, defaultWeeks, effective: override || defaultWeeks, source: override ? "override" : "default" });
 });
 
-router.put("/month-weeks", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/month-weeks", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { month, weeks } = req.body || {};
@@ -2489,7 +2564,7 @@ router.get("/seller-quotas", (req: AuthRequest, res): any => {
   res.json({ storeId, month, weeks, quotas: RetailCommissionRaceService.listSellerQuotas(orgId, storeId, weeks.map((w) => w.start)) });
 });
 
-router.put("/seller-quotas", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.put("/seller-quotas", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, weekStart, quotas } = req.body || {};
@@ -2522,7 +2597,7 @@ router.get("/dashboard/money-audit", requireRole("owner", "admin"), (req: AuthRe
 // Releitura SOB DEMANDA do resumo da Alterdata para um dia (antídoto do dia
 // lido parcial pelo TEF tardio — caso 19/09). Regrava turnos de todas as lojas
 // ativas com filial; releitura com turno 0 não apaga valor bom já gravado.
-router.post("/dashboard/money-audit/refresh", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.post("/dashboard/money-audit/refresh", requireNetworkScope, async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const date = String(req.body?.date || "");
@@ -2550,8 +2625,9 @@ router.get("/dashboard/informe", (req: AuthRequest, res): any => {
 // Quem pode MEXER no malote de uma loja: dono/admin, OU o GERENTE lotado NAQUELA
 // loja (user_stores — reusa a trava de loja do ADR-173). Ausência de lotação NÃO
 // libera (diferente de canAccessStore) — o malote é ação de responsável.
+// Admin COM loja atribuída (gerente) só mexe no malote das lojas dele — `admin` sozinho não basta (ADR-173).
 const canManageStore = (req: AuthRequest, orgId: string, storeId: string): boolean =>
-  ["owner", "admin"].includes(req.user?.role || "") || RetailStoreScopeService.isAssignedTo(orgId, req.user?.userId || "", storeId);
+  req.user?.role === "owner" || (req.user?.role === "admin" && scopeOf(req).unrestricted) || RetailStoreScopeService.isAssignedTo(orgId, req.user?.userId || "", storeId);
 const canManageAnyStore = (req: AuthRequest, orgId: string): boolean =>
   ["owner", "admin"].includes(req.user?.role || "") || RetailStoreScopeService.hasAnyAssignment(orgId, req.user?.userId || "");
 // Erro de negócio "semana fechada" → 409 com mensagem amigável.
@@ -2712,7 +2788,7 @@ router.post("/cash/week/close", (req: AuthRequest, res): any => {
 
 // Reabre (destrava) uma semana fechada. Só dono/admin (o gerente fecha; reabrir
 // é decisão do dono — preserva a integridade da conferência).
-router.post("/cash/week/reopen", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/cash/week/reopen", requireRole("owner", "admin"), requireStoreAccess(inBody()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { storeId, weekStart } = req.body || {};
@@ -2774,7 +2850,7 @@ router.get("/impact/baseline", (req: AuthRequest, res): any => {
 });
 
 // Captura explícita do baseline (orgs que ativaram antes deste recurso).
-router.post("/impact/baseline/capture", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/impact/baseline/capture", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ captured: RetailImpactService.captureBaseline(orgId), baseline: RetailImpactService.baseline(orgId) });
@@ -2821,7 +2897,7 @@ router.get("/pricing/products", requireRole("owner", "admin"), (req: AuthRequest
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-router.post("/pricing/apply", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+router.post("/pricing/apply", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   const userId = req.user?.userId;
   if (!orgId || !userId) return res.status(401).json({ error: "Unauthorized" });

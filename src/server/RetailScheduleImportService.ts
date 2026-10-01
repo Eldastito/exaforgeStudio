@@ -15,6 +15,7 @@
  *    mas sinalizado em `unmatched` pra conferência).
  *  - Férias/atestado entram como 'off' (não trabalha aquele dia).
  */
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 import db from "./db.js";
 import { resolveMatriculaByName } from "./RetailOpsService.js";
 import { extractScheduleFromImage } from "./llm.js";
@@ -78,11 +79,7 @@ export function buildScheduleFromExtraction(
 function storeRoster(orgId: string, storeId: string): Array<{ matricula: string; name: string }> {
   let rows: any[] = [];
   try {
-    rows = db.prepare(
-      `SELECT s.matricula, s.name FROM retail_seller_store_assignments a
-         JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
-        WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1`
-    ).all(orgId, storeId) as any[];
+    rows = RetailSellerIdentityService.rosterOn(orgId, storeId);
   } catch { rows = []; }
   if (!rows.length) {
     try { rows = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[]; } catch { rows = []; }

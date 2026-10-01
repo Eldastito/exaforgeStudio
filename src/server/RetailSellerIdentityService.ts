@@ -154,9 +154,22 @@ export class SellerIdentityContext {
       if (a.kind === "name") keys.add(`nom:${aggNorm(a.alias)}`);
       else keys.add(`mat:${String(a.alias).trim()}`);
     }
-    return { sellerId: c.id, matricula: String(c.matricula), name: c.name || `Matrícula ${c.matricula}`, userId: c.user_id || null, aliasKeys: [...keys] };
+    return { sellerId: c.id, matricula: String(c.matricula), name: c.name || unidentifiedLabel(c.matricula), userId: c.user_id || null, aliasKeys: [...keys] };
   }
 }
+
+/** Vigência de uma lotação numa data (YYYY-MM-DD). Temporária/cobertura: janela inclusiva; legado: sem limite inferior; transferência: fim exclusivo. */
+function assignmentApplies(r: any, d: string): boolean {
+  const from = String(r.effective_from || "").slice(0, 10) || "0000-00-00";
+  const to = r.effective_to ? String(r.effective_to).slice(0, 10) : null;
+  const type = (r.assignment_type || "principal") as AssignmentType;
+  if (type === "temporaria" || type === "cobertura_ferias") return from <= d && to !== null && d <= to;
+  if (r.assignment_type === null) return r.active ? true : (to !== null && d < to);
+  return from <= d && (r.active ? (to === null || d <= to) : (to !== null && d < to));
+}
+
+/** Rótulo único de matrícula sem pessoa confirmada (PRD Fase 1 §3): nunca "Matrícula X" solto, nunca nome chutado. */
+export const unidentifiedLabel = (matricula: unknown): string => `Vendedor não identificado — matrícula ${String(matricula ?? "").trim() || "?"}`;
 
 export class RetailSellerIdentityService {
   // ── leitura básica ────────────────────────────────────────────────────────
@@ -250,7 +263,7 @@ export class RetailSellerIdentityService {
     const m = String(matricula ?? "").trim();
     const r = m ? this.resolve(orgId, { matricula: m }) : null;
     if (r?.status === "identified" && r.seller?.name) return r.seller.name;
-    return `Vendedor não identificado — matrícula ${m || "?"}`;
+    return unidentifiedLabel(m);
   }
 
   /** Matrículas vistas nas vendas sem pessoa nomeada/confirmada (pendência acionável, nunca chute). */
@@ -265,7 +278,7 @@ export class RetailSellerIdentityService {
     for (const r of rows) {
       const res = ctx.resolve({ matricula: String(r.m) });
       if (res.status === "identified" && res.seller?.name) continue;
-      out.push({ matricula: String(r.m), sales: Number(r.n), lastSale: r.last_sale || null, displayName: `Vendedor não identificado — matrícula ${String(r.m)}` });
+      out.push({ matricula: String(r.m), sales: Number(r.n), lastSale: r.last_sale || null, displayName: unidentifiedLabel(r.m) });
     }
     return out;
   }
@@ -400,16 +413,40 @@ export class RetailSellerIdentityService {
     ).all(orgId, c.id) as any[];
     const out: Array<{ storeId: string; storeName: string | null; type: AssignmentType }> = [];
     for (const r of rows) {
-      const from = String(r.effective_from || "").slice(0, 10) || "0000-00-00";
-      const to = r.effective_to ? String(r.effective_to).slice(0, 10) : null;
-      const type = (r.assignment_type || "principal") as AssignmentType;
-      let applies: boolean;
-      if (type === "temporaria" || type === "cobertura_ferias") applies = from <= d && to !== null && d <= to;   // janela inclusiva
-      else if (r.assignment_type === null) applies = r.active ? true : (to !== null && d < to);                  // legado: sem limite inferior (a data de cadastro não é o início real)
-      else applies = from <= d && (r.active ? (to === null || d <= to) : (to !== null && d < to));               // transferência: fim EXCLUSIVO (o dia da transferência já é da loja nova)
-      if (applies) out.push({ storeId: r.store_id, storeName: r.store_name || null, type });
+      if (assignmentApplies(r, d)) out.push({ storeId: r.store_id, storeName: r.store_name || null, type: (r.assignment_type || "principal") as AssignmentType });
     }
     return out;
+  }
+
+  /**
+   * Quem está NA loja numa data (equipe do dia): lotação vigente + cobertura/temporária vigente. Quem está
+   * cobrindo OUTRA loja no dia não conta na loja de origem (a pessoa não está lá). Só vendedores ativos e
+   * canônicos (fundido nunca aparece). Mesmo critério de `assignmentsOn` — uma única definição de vigência.
+   */
+  static rosterOn(orgId: string, storeId: string, date?: string): Array<{ id: string; matricula: string; name: string | null; photoUrl: string | null }> {
+    const d = isoDay(date) || today();
+    const rows = db.prepare(
+      `SELECT a.seller_id, a.store_id, a.assignment_type, a.is_primary, a.active, a.effective_from, a.effective_to,
+              s.matricula, s.name, s.photo_url
+         FROM retail_seller_store_assignments a
+         JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+        WHERE a.organization_id = ? AND s.active = 1 AND s.merged_into_seller_id IS NULL
+          AND a.seller_id IN (SELECT seller_id FROM retail_seller_store_assignments WHERE organization_id = ? AND store_id = ?)`
+    ).all(orgId, orgId, storeId) as any[];
+    const bySeller = new Map<string, any[]>();
+    for (const r of rows) { if (!bySeller.has(r.seller_id)) bySeller.set(r.seller_id, []); bySeller.get(r.seller_id)!.push(r); }
+    const out: Array<{ id: string; matricula: string; name: string | null; photoUrl: string | null }> = [];
+    for (const [sid, list] of bySeller) {
+      const live = list.filter((r) => assignmentApplies(r, d));
+      const here = live.some((r) => r.store_id === storeId);
+      if (!here) continue;
+      const coveringElsewhere = live.some((r) => r.store_id !== storeId && (r.assignment_type === "temporaria" || r.assignment_type === "cobertura_ferias"));
+      const coveringHere = live.some((r) => r.store_id === storeId && (r.assignment_type === "temporaria" || r.assignment_type === "cobertura_ferias"));
+      if (coveringElsewhere && !coveringHere) continue;
+      const x = list[0];
+      out.push({ id: sid, matricula: String(x.matricula), name: x.name || null, photoUrl: x.photo_url || null });
+    }
+    return out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   }
 
   /**

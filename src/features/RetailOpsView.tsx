@@ -5204,7 +5204,7 @@ function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: stri
                 const row = matrix[sk] || Array(7).fill(false);
                 return (
                   <tr key={sk} className="border-t border-zinc-800/70">
-                    <td className="px-3 py-1 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                    <td className="px-3 py-1 text-zinc-200">{s.name || `Vendedor não identificado — matrícula ${s.matricula}`}</td>
                     {row.map((v, i) => (
                       <td key={i} className="px-2 py-1 text-center">
                         <input type="checkbox" checked={!!v} onChange={() => toggle(sk, i)} className="accent-red-500" />
@@ -5519,7 +5519,7 @@ function ScheduleTab() {
           {/* SELL-006: escalar temporariamente alguém de outra loja */}
           <select value="" onChange={e => { addFromOther(e.target.value); e.currentTarget.value = ''; }} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300" title="Escalar um vendedor de outra loja nesta semana">
             <option value="">+ de outra loja…</option>
-            {allSellers.filter((s: any) => !sellers.some((x: any) => String(x.matricula) === String(s.matricula))).map((s: any) => <option key={s.matricula} value={s.matricula}>{s.name || `Matrícula ${s.matricula}`}</option>)}
+            {allSellers.filter((s: any) => !sellers.some((x: any) => String(x.matricula) === String(s.matricula))).map((s: any) => <option key={s.matricula} value={s.matricula}>{s.name || `Vendedor não identificado — matrícula ${s.matricula}`}</option>)}
           </select>
           <input ref={importRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importPhoto(f); e.currentTarget.value = ''; }} />
           <button onClick={() => importRef.current?.click()} disabled={importing || !storeId} title="Envie a foto da escala que a loja mandou — a IA lê e pré-preenche a semana" className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 px-2.5 py-1.5 text-xs text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-50">{importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Importar de foto</button>
@@ -5550,7 +5550,7 @@ function ScheduleTab() {
                 return (
                   <tr key={sk} className="border-t border-zinc-800/70">
                     <td className="px-3 py-1.5 text-zinc-200">
-                      {s.name || <span className="text-amber-300/90">Matrícula {s.matricula}</span>}
+                      {s.name || <span className="text-amber-300/90">Vendedor não identificado — matrícula {s.matricula}</span>}
                       {s.is_primary ? <Store className="inline w-3 h-3 ml-1 text-emerald-400" /> : null}
                       {s._temp ? <span className="ml-1.5 rounded bg-zinc-800 px-1 py-0.5 text-[9px] text-zinc-400">de outra loja</span> : null}
                     </td>
@@ -5626,7 +5626,7 @@ function ScheduleTab() {
                   const sk = keyOf(s);
                   return (
                     <tr key={sk} className="border-t border-zinc-800/70">
-                      <td className="px-3 py-1.5 text-zinc-200">{s.name || `Matrícula ${s.matricula}`}</td>
+                      <td className="px-3 py-1.5 text-zinc-200">{s.name || `Vendedor não identificado — matrícula ${s.matricula}`}</td>
                       {raceWeeks.map((w: any) => (
                         <td key={w.start} className="px-2 py-1 text-center">
                           <input inputMode="decimal" placeholder="—" value={quotaGrid[w.start]?.[sk] ?? ''} onChange={e => setQuotaGrid(p => ({ ...p, [w.start]: { ...(p[w.start] || {}), [sk]: maskMoneyBRInput(e.target.value) } }))} className="w-24 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1 text-xs text-zinc-100 text-right tabular-nums" />
@@ -5978,7 +5978,7 @@ function CommissionTab() {
             {report.pendingIdentityCount > 0 && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
                 <AlertTriangle className="inline w-3.5 h-3.5 mr-1" />
-                {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <strong>Vendedores da loja</strong> antes de aprovar a apuração.
+                {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Vendedor não identificado — matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <strong>Vendedores da loja</strong> antes de aprovar a apuração.
               </p>
             )}
             <ReportBlock title={report.mode === 'race' ? 'Por vendedor e gerente' : 'Por vendedor'} empty={report.mode === 'race' ? 'Nenhum vendedor com venda ou comissão na corrida deste mês.' : (report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.')} rows={noRuleReport ? (report.bySeller || []).map((r: any) => ({ ...r, commission: null })) : report.bySeller} cols={[['sellerName', report.mode === 'race' ? 'Nome' : 'Vendedor'], ['source', report.mode === 'race' ? 'Papel' : 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
@@ -6064,7 +6064,7 @@ function CommissionTab() {
                         <tr key={i} className="border-t border-zinc-800/70">
                           <td className="px-3 py-2 text-zinc-100">
                             <button onClick={() => nomearVendedor(v)} title="Dar nome a este vendedor" className="text-left hover:text-indigo-300">
-                              {v.seller_name || <span className="font-mono text-zinc-300">Matrícula {v.vendedor}</span>}
+                              {v.seller_name || <span className="font-mono text-zinc-300">Vendedor não identificado — matrícula {v.vendedor}</span>}
                             </button>
                           </td>
                           <td className="px-3 py-2 text-zinc-300">{v.store_name}</td>
@@ -6878,7 +6878,7 @@ function SellerScoreboardTab() {
                 {data.sellers.map((s: any) => (
                   <tr key={s.sellerKey} className="border-t border-zinc-800/70">
                     <td className="px-3 py-2 text-[13px] text-zinc-200">
-                      <div>{s.sellerName || `Matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</div>
+                      <div>{s.sellerName || `Vendedor não identificado — matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</div>
                       {(() => {
                         const src = s.month?.sources || {};
                         const keys = Object.keys(src);
@@ -7013,7 +7013,7 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
                 {cov.lotados.map((s: any) => (
                   <div key={s.seller_id} className="inline-flex items-center gap-0.5 rounded-lg border border-zinc-800 bg-zinc-900/40 pl-2.5 pr-1 py-1 text-[13px] text-zinc-200">
                     {s.is_primary ? <Store className="w-3 h-3 text-emerald-400 mr-1" /> : null}
-                    <span>{s.name || `Matrícula ${s.matricula}`}</span>
+                    <span>{s.name || `Vendedor não identificado — matrícula ${s.matricula}`}</span>
                     <button onClick={() => setAssignFor(s)} title="Editar vendedor / transferir de loja" className="ml-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-indigo-300"><Pencil className="w-3 h-3" /></button>
                     <button onClick={() => setDeleteFor(s)} title="Inativar vendedor (preserva histórico)" className="rounded p-1 text-zinc-500 hover:bg-amber-500/10 hover:text-amber-300"><Trash2 className="w-3 h-3" /></button>
                   </div>
@@ -7147,7 +7147,7 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
 // o histórico de comissão/venda continua pela matrícula).
 function SellerDeleteModal({ seller, onClose, onDeleted }: { seller: any; onClose: () => void; onDeleted: () => void }) {
   const [saving, setSaving] = useState(false);
-  const label = seller.name || `Matrícula ${seller.matricula}`;
+  const label = seller.name || `Vendedor não identificado — matrícula ${seller.matricula}`;
   const del = async () => {
     setSaving(true);
     try {

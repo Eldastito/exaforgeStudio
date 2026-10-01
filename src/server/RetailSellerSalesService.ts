@@ -215,11 +215,7 @@ export class RetailSellerSalesService {
     let rows: any[] = [];
     if (storeId) {
       try {
-        rows = db.prepare(
-          `SELECT s.name FROM retail_seller_store_assignments a
-             JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
-            WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1`
-        ).all(orgId, storeId) as any[];
+        rows = RetailSellerIdentityService.rosterOn(orgId, storeId);
       } catch { rows = []; }
     }
     if (!rows.length) {

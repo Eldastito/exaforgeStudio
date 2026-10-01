@@ -7,6 +7,7 @@
  * loja. Camada aditiva, isolada por organização. Auditado via logAuthEvent.
  */
 import { randomUUID } from "node:crypto";
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailBoletaService } from "./RetailBoletaService.js";
@@ -434,11 +435,7 @@ export class RetailClosingService {
   private static rosterNames(orgId: string, storeId: string): string[] {
     let rows: any[] = [];
     try {
-      rows = db.prepare(
-        `SELECT s.name FROM retail_seller_store_assignments a
-           JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
-          WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1`
-      ).all(orgId, storeId) as any[];
+      rows = RetailSellerIdentityService.rosterOn(orgId, storeId);
     } catch { rows = []; }
     if (!rows.length) {
       try { rows = db.prepare(`SELECT name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[]; } catch { rows = []; }

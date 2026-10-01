@@ -63,6 +63,9 @@ export class RetailSellerDuplicateService {
       const subset = short.toks.every((t) => long.toks.includes(t));
       const sameFirst = x.toks[0] === y.toks[0] && x.toks[0].length >= 3;
       if (!subset && !sameFirst) continue;
+      // "Vinícius Romão" × "Vinícius Nascimento": nome completo dos dois, sobrenomes diferentes e nenhum contém o outro →
+      // são pessoas DIFERENTES por construção (PRD Fase 1 §3). Nunca sugere fusão nem pergunta de novo.
+      if (!subset && x.toks.length >= 2 && y.toks.length >= 2) continue;
       // Par redundante: existe um nome mais completo que contém os dois ("EDUARDO" × "Eduardo" quando há "Eduardo Lázaro").
       // A resposta vem pelo nome completo — perguntar os três pares seria o mesmo assunto 3 vezes.
       if (subset && rows.some((z) => z.id !== x.id && z.id !== y.id && z.toks.length > Math.max(x.toks.length, y.toks.length) && within(x, z) && within(y, z))) continue;

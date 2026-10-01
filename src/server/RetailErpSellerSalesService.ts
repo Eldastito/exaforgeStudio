@@ -15,6 +15,7 @@
  * os nomes de campo mais prováveis e é fácil de ajustar quando o corpo real
  * chegar. Isolado por org.
  */
+import { unidentifiedLabel } from "./RetailSellerIdentityService.js";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -121,7 +122,7 @@ export class RetailErpSellerSalesService {
       const realMatricula = r.matricula && !String(r.matricula).startsWith("nome:") ? r.matricula : null;
       return {
       sellerUserId: r.user_id || null,
-      sellerName: r.mapped_name || r.seller_name || (realMatricula ? `Matrícula ${realMatricula}` : "vendedor"),
+      sellerName: r.mapped_name || r.seller_name || (realMatricula ? unidentifiedLabel(realMatricula) : "vendedor"),
       matricula: realMatricula,
       sales: round2(r.sales),
       pecas: Number(r.pecas || 0),

@@ -95,7 +95,7 @@ async function main() {
   check("sem nenhuma entrada identificada, agrupada por loja (2 lojas)", by("no_entry_registered")?.count === 2 && by("no_entry_registered")?.stores.length === 2);
   check("saldo parado ≥30 dias identificado", by("stale_balance")?.count === 1);
   check("sem evidência = 'unknown' (não chuta causa) e vem por último", by("unknown")?.count === 1 && dg.byCause[dg.byCause.length - 1].cause === "unknown");
-  check("3 causas identificadas (unknown não conta) e resumo em linguagem do gestor", dg.causeCount === 3 && /^5 ocorrências em 3 lojas · 3 causas identificadas · 1 sem causa provada$/.test(dg.headline || ""), dg.headline || "");
+  check("3 causas identificadas (unknown não conta) e resumo em linguagem do gestor, na MESMA unidade (ocorrências: 4 com causa + 1 sem = 5)", dg.causeCount === 3 && /^5 ocorrências em 3 lojas · 4 com causa identificada · 1 sem causa provada$/.test(dg.headline || ""), dg.headline || "");
   const onlyCarioca = N.diagnose(A, { storeId: carioca });
   check("filtro de loja: só as ocorrências da loja", onlyCarioca.total === 2 && onlyCarioca.storeCount === 1);
   const scoped = N.diagnose(A, { restrictStoreIds: [grande] });

@@ -89,6 +89,9 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 7. **Kleyton/Cleiton** e **matrículas desconhecidas**: **decisão do dono em 30/09/2026 — ficam com o Bruno/equipe resolver.** Enquanto isso seguem como "Vendedor não identificado"; nada é unido sem resposta (cartão "são a mesma pessoa?" ou `POST /sellers/:id/merge`).
 8. Nada disto foi validado em navegador com dado real da TOULON; os testes usam dado de teste.
 
+9. **Acabamentos da homologação (`test:fase1-polish`):** valores do resumo com separador de milhar; manchete do estoque negativo na mesma unidade ("796 com causa identificada · 9 sem causa provada"); o cartão de vendedores não pergunta 3× o mesmo assunto (EDUARDO × Eduardo × Eduardo Lázaro) e, quando o nome curto bate com várias pessoas diferentes ("Vinicius" × Romão × MARCUS VINICIUS), pergunta "são pessoas diferentes?" em vez de sugerir "mesma pessoa".
+10. **Fora do código, de propósito (decisão do dono/Bruno):** nomes com sufixo de loja ("Lohan Grande rio", "Jullia nova iguaçu") podem ser convenção do cadastro para distinguir pessoas — o sistema não tira o sufixo sozinho. A loja "MT FRANQUIA GRANDE RIO" (cód. 1005) aparece no estoque negativo mas não no seletor de lojas: confirmar se é loja real, duplicata ou inativa antes de qualquer mudança.
+
 ## 4. Como provar que nada quebrou
 
 ```

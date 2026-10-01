@@ -18,7 +18,12 @@ import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
  * decide o QUÊ e o QUANDO, o que o torna testável sem rede.
  */
 
-const brl = (n: any) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
+// pt-BR com separador de milhar ("R$ 1.426.635,58") — antes saía "R$ 1426635,58", ilegível e inconsistente com "R$ 5.700".
+export const brl = (n: any) => {
+  const v = Number(n) || 0;
+  const [int, dec] = Math.abs(v).toFixed(2).split(".");
+  return `R$ ${v < 0 ? "-" : ""}${int.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${dec}`;
+};
 
 export interface TutorSendResult {
   sent: boolean;

@@ -46,6 +46,12 @@ export class RetailSellerDuplicateService {
 
   static suggestions(orgId: string): DuplicateSuggestion[] {
     const rows = this.load(orgId);
+    const within = (a: Row, b: Row) => a.toks.every((t) => b.toks.includes(t));            // todas as palavras de a estão em b
+    // Quem o nome curto também poderia ser: nomes MAIS LONGOS que o contêm.
+    const supers = (r: Row) => rows.filter((z) => z.id !== r.id && z.toks.length > r.toks.length && within(r, z));
+    // "Vinicius" cabe em "Vinicius Romão", "Vinicius Nascimento" e "MARCUS VINICIUS": são pessoas diferentes entre si,
+    // então confirmar "mesma pessoa" com qualquer uma seria chute.
+    const ambiguous = (r: Row) => { const c = supers(r); return c.some((a, i) => c.slice(i + 1).some((b) => !within(a, b) && !within(b, a))); };
     const distinct = new Set((db.prepare(`SELECT seller_a_id, seller_b_id FROM retail_seller_distinct_pairs WHERE organization_id = ?`).all(orgId) as any[]).map((r) => `${r.seller_a_id}|${r.seller_b_id}`));
     const out: DuplicateSuggestion[] = [];
     for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
@@ -57,13 +63,19 @@ export class RetailSellerDuplicateService {
       const subset = short.toks.every((t) => long.toks.includes(t));
       const sameFirst = x.toks[0] === y.toks[0] && x.toks[0].length >= 3;
       if (!subset && !sameFirst) continue;
-      const kind: "likely" | "check" = subset ? "likely" : "check";
+      // Par redundante: existe um nome mais completo que contém os dois ("EDUARDO" × "Eduardo" quando há "Eduardo Lázaro").
+      // A resposta vem pelo nome completo — perguntar os três pares seria o mesmo assunto 3 vezes.
+      if (subset && rows.some((z) => z.id !== x.id && z.id !== y.id && z.toks.length > Math.max(x.toks.length, y.toks.length) && within(x, z) && within(y, z))) continue;
+      const ambiguousShort = subset && short.toks.length < long.toks.length && ambiguous(short);
+      const kind: "likely" | "check" = subset && !ambiguousShort ? "likely" : "check";
       // canônica sugerida: nome mais longo; empate → a de menor id (estável)
       const into = x.toks.length === y.toks.length ? (x.id < y.id ? x : y) : long;
       const view = (r: Row) => ({ id: r.id, name: r.name, matricula: r.matricula, stores: r.stores.map((s) => s.name) });
       out.push({
         kind, a: view(x), b: view(y), suggestedIntoId: into.id,
-        question: kind === "likely" ? `"${x.name}" e "${y.name}" são a mesma pessoa?` : `"${x.name}" e "${y.name}" são pessoas diferentes? (mesmo primeiro nome)`,
+        question: kind === "likely" ? `"${x.name}" e "${y.name}" são a mesma pessoa?`
+          : ambiguousShort ? `"${short.name}" pode ser mais de uma pessoa — "${x.name}" e "${y.name}" são pessoas diferentes?`
+          : `"${x.name}" e "${y.name}" são pessoas diferentes? (mesmo primeiro nome)`,
       });
     }
     out.sort((p, q) => (p.kind === q.kind ? 0 : p.kind === "likely" ? -1 : 1));

@@ -44,7 +44,7 @@ export class FinanceSnapshotAdapter {
           basis: "fact", source: "FinancialLedgerService",
         },
         aPagar: { value: Number(sum.aPagar) || 0, basis: "fact", source: "FinancialLedgerService" },
-        entrouHoje: { value: Number(sum.realizadoHoje) || 0, basis: "fact", source: "FinancialLedgerService" },
+        entrouHoje: { value: Number(sum.realizadoHoje?.inflow) || 0, basis: "fact", source: "FinancialLedgerService" },
         previsaoCaixa: {
           survivalDays: fc?.survivalDays ?? null,
           primeiraRuptura: fc?.firstRisk ? { semanasAdiante: fc.firstRisk.weeksAhead, semana: fc.firstRisk.weekStart, saldo: fc.firstRisk.ending } : null,

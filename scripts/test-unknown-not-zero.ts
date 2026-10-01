@@ -97,6 +97,11 @@ async function main() {
   check("premissa do teste: o sinal publicado entra na atenção (senão os checks abaixo seriam vazios)", attn > 0 && ov.status === "saudavel", JSON.stringify({ attn, status: ov.status }));
   const ev2 = Tutor.eveningBrief(T);
   check("fim do dia com assunto aberto: não diz 'Nada em aberto'", !/Nada em aberto/.test(ev2.text) && /precisa|precisam/.test(ev2.text), ev2.text);
+  // A org N USA o financeiro (teve uma conta a receber, já recebida): "nada em aberto" é fato dela. (Org que NUNCA lançou conta a receber
+  // não pode afirmar isso — ver test-tutor-untracked-finance.)
+  const { FinancialLedgerService: Ledger } = await import("../src/server/FinancialLedgerService.js");
+  const rcv: any = Ledger.addReceivable(N, { description: "Venda a prazo", amount: 100, dueDate: "2026-09-01" });
+  Ledger.receiveReceivable(N, rcv.id, { date: "2026-09-02" });
   const evN2 = Tutor.eveningBrief(N);
   check("org sem assunto aberto: segue 'Nada em aberto por hoje' (0-regressão)", /Nada em aberto por hoje/.test(evN2.text), evN2.text);
   const mb = Tutor.morningBrief(T);

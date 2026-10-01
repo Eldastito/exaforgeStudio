@@ -39,8 +39,8 @@ async function main() {
   }, retailRoutes);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${(server.address() as any).port}/api/retailops`;
-  const call = async (method: string, p: string, org: string, role: string, body?: any) => {
-    const r = await fetch(base + p, { method, headers: { "content-type": "application/json", "x-test-org": org, "x-test-role": role }, body: body ? JSON.stringify(body) : undefined });
+  const call = async (method: string, p: string, org: string, role: string, body?: any, user = "u1") => {
+    const r = await fetch(base + p, { method, headers: { "content-type": "application/json", "x-test-org": org, "x-test-role": role, "x-test-user": user }, body: body ? JSON.stringify(body) : undefined });
     let j: any = null; try { j = await r.json(); } catch { /* sem corpo */ }
     return { status: r.status, body: j };
   };
@@ -118,6 +118,40 @@ async function main() {
   const rb = await call("GET", `/insights/header?date=${D}`, B, "owner");
   const ib = await call("GET", `/dashboard/informe?date=${D}`, B, "owner");
   check("isolamento: a org B vê cabeçalho e informe vazios (sem lojas/fechamentos da A)", rb.body.daily.closedStores === 0 && rb.body.daily.quotaTotal === 0 && ib.body.stores.length === 0);
+
+  // ── GERENTE DE LOJA = 'admin' COM loja atribuída (ADR-173): o papel sozinho não o barra ──
+  // Achado: `requireRole("owner","admin")` deixa o gerente-admin passar e ele via a REDE inteira (venda, dinheiro, comissão de
+  // todos os vendedores). Aqui: ele só enxerga a(s) loja(s) dele; rotas de rede (comissão, pessoas, chaves) exigem escopo de rede.
+  const GER = "user_gerente_carioca", COADMIN = "user_coadmin_sem_loja";
+  db.prepare(`INSERT INTO user_stores (id, organization_id, user_id, store_id) VALUES (?, ?, ?, ?)`).run(randomUUID(), A, GER, carioca);
+  const range = "start=2026-09-01&end=2026-09-30";
+  const netRoutes: Array<[string, string, any?]> = [
+    ["GET", `/commission/report?${range}`], ["GET", "/afternoon-brief"], ["GET", "/day-brief"], ["GET", "/seller-goal-streaks"],
+    ["GET", "/sellers/identity/suggestions"], ["GET", "/commission/policies"], ["PUT", "/night-brief/enabled", { enabled: false }],
+    ["PUT", "/stock/replenishment-strategy", { strategy: "continuous_replenishment" }],
+  ];
+  const leaks = [];
+  for (const [m, p, b] of netRoutes) { const r = await call(m, p, A, "admin", b, GER); if (r.status !== 403) leaks.push(`${m} ${p.split("?")[0]}→${r.status}`); }
+  check("gerente-admin (loja atribuída): rotas de REDE (comissão de todos, pessoas, chaves) respondem 403", leaks.length === 0, leaks.join(" | "));
+  const okRole = [];
+  for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of netRoutes) { const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) okRole.push(`${who[0]} ${m} ${p.split("?")[0]}→${r.status}`); }
+  check("owner e admin SEM loja atribuída (co-admin) continuam acessando as rotas de rede (0-regressão)", okRole.length === 0, okRole.join(" | "));
+
+  const gh = await call("GET", `/insights/header?date=${D}`, A, "admin", undefined, GER);
+  check("gerente: o cabeçalho do Insights é só da loja dele (cota 1.300, vendido 1.358,70, 1 loja) — não da rede (9.500)", gh.status === 200 && gh.body?.daily?.quotaTotal === 1300 && Math.abs(gh.body.daily.realized - 1358.7) < 0.01 && gh.body.daily.activeStores === 1 && gh.body.scoped === true, JSON.stringify({ q: gh.body?.daily?.quotaTotal, r: gh.body?.daily?.realized, n: gh.body?.daily?.activeStores, scoped: gh.body?.scoped }));
+  check("gerente: o ranking do Insights só traz a loja dele", [...(gh.body?.ranking?.top3 || []), ...(gh.body?.ranking?.bottom3 || [])].every((x: any) => x.storeName === "Carioca"), JSON.stringify(gh.body?.ranking));
+  check("gerente pedindo OUTRA loja no cabeçalho (?storeId=Av. Brasil) → 403; a loja dele → 200", (await call("GET", `/insights/header?date=${D}&storeId=${avb}`, A, "admin", undefined, GER)).status === 403 && (await call("GET", `/insights/header?date=${D}&storeId=${carioca}`, A, "admin", undefined, GER)).status === 200);
+  const gi = await call("GET", `/dashboard/informe?date=${D}`, A, "admin", undefined, GER);
+  check("gerente: o Informe diário só lista a loja dele e o total é só dela (1.358,70), marcado como 'scoped'", gi.status === 200 && gi.body?.stores?.length === 1 && gi.body.stores[0].storeName === "Carioca" && Math.abs(gi.body.total.venda - 1358.7) < 0.01 && gi.body.scoped === true, JSON.stringify({ n: gi.body?.stores?.map((x: any) => x.storeName), v: gi.body?.total?.venda, scoped: gi.body?.scoped }));
+  const { buildDailyInformeText } = await import("../src/features/retailInformeText.js");
+  const gtxt = buildDailyInformeText(gi.body);
+  check("texto do informe do gerente (copiar/compartilhar): 'Suas lojas — Dia', só a Carioca, sem outras lojas nem 'Empresa Dia'", /Suas lojas — Dia/.test(gtxt) && /Carioca/.test(gtxt) && !/Avenida Brasil|Grande Rio|Empresa Dia/.test(gtxt), gtxt);
+  const oh = await call("GET", `/insights/header?date=${D}`, A, "owner");
+  const oi = await call("GET", `/dashboard/informe?date=${D}`, A, "owner");
+  check("owner: continua vendo a rede inteira (cota 9.500, 3 lojas) e não é 'scoped' — 0-regressão", Math.round(oh.body.daily.quotaTotal) === 9500 && oh.body.daily.activeStores === 3 && !oh.body.scoped && oi.body.stores.length === 3 && !oi.body.scoped);
+  const co = await call("GET", `/dashboard/informe?date=${D}`, A, "admin", undefined, COADMIN);
+  check("admin SEM loja atribuída (co-admin): vê a rede inteira, como antes — 0-regressão", co.status === 200 && co.body.stores.length === 3 && !co.body.scoped);
+  check("stock/negative do gerente segue filtrado pela loja dele (já era assim) e não foi travado", (await call("GET", "/stock/negative", A, "admin", undefined, GER)).status === 200);
 
   server.close();
   console.log("\n=== PRD Fase 1 · rotas HTTP: perfil + data do dia (São Paulo) ===");

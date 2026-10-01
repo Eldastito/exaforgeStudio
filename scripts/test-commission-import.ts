@@ -106,7 +106,7 @@ async function main() {
 
   // ── fiação ──
   const route = fs.readFileSync(path.join(process.cwd(), "src/server/routes/retailops.ts"), "utf8");
-  check("rota só owner/admin e só chama interpret (nunca confirm/savePlan)", /router\.post\("\/commission\/policies\/import", requireRole\("owner", "admin"\)/.test(route) && !/\.confirm\(|\.savePlan\(|\.submit\(|policy_status\s*=/.test(fs.readFileSync(path.join(process.cwd(), "src/server/RetailCommissionImportService.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//, "").replace(/\/\/.*$/gm, "")));
+  check("rota só owner/admin e só chama interpret (nunca confirm/savePlan)", /router\.post\("\/commission\/policies\/import", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/.test(route) && !/\.confirm\(|\.savePlan\(|\.submit\(|policy_status\s*=/.test(fs.readFileSync(path.join(process.cwd(), "src/server/RetailCommissionImportService.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//, "").replace(/\/\/.*$/gm, "")));
 
   console.log("\n=== PRD Fase 1 · F1.4b: importação por IA das regras de comissão ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);

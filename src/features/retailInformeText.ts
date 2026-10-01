@@ -27,6 +27,8 @@ export interface InformeData {
   date: string;      // YYYY-MM-DD
   nextDate: string;  // YYYY-MM-DD
   stores: InformeStoreRow[];
+  /** true = gerente de loja: o informe é só das lojas dele, não da empresa. Ausente = comportamento antigo. */
+  scoped?: boolean;
   total: {
     dinheiro: number; venda: number; cota: number; desvio: number; cotaNext: number;
     /** Resultado só entre lojas já fechadas com cota; null = nada a comparar. Ausente = usa `desvio`. */
@@ -95,7 +97,7 @@ export function buildDailyInformeText(data: InformeData): string {
     L.push(...block(s.storeName, s, data.nextDate));
     L.push("");
   }
-  L.push("Empresa Dia", br(data.date));
+  L.push(data.scoped ? "Suas lojas — Dia" : "Empresa Dia", br(data.date));
   const t = data.total;
   L.push(t.dinheiroKnown === false ? "—" : money(t.dinheiro));
   L.push(`Venda ${money(t.venda)}`);

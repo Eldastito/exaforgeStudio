@@ -157,7 +157,7 @@ function InsightsHeader({ header, storeFilter }: { header: any; storeFilter: str
     <div className="mb-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500">{storeFilter ? 'Vendido hoje' : 'Vendido hoje (rede)'}</p>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">{storeFilter ? 'Vendido hoje' : header.scoped ? 'Vendido hoje (suas lojas)' : 'Vendido hoje (rede)'}</p>
           <p className="text-lg font-semibold text-zinc-100">{noClosed ? '—' : brl(d.realized || 0)}</p>
           {known && <p className="text-[10px] text-zinc-600">{noClosed ? 'aguardando fechamento' : `${d.closedStores} de ${d.activeStores} loja(s) com fechamento`}</p>}
         </div>
@@ -2188,7 +2188,7 @@ function DailyInformeCard({ date }: { date: string }) {
     <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900/40">
       <button onClick={() => setOpen(o => !o)} className="flex w-full items-center gap-2 px-3 py-2 text-left">
         <span className="font-medium text-zinc-200">📋 Informe diário · {dm(date)}</span>
-        <span className="text-[11px] text-zinc-500">rede — por loja e total</span>
+        <span className="text-[11px] text-zinc-500">{data.scoped ? 'suas lojas — por loja e total' : 'rede — por loja e total'}</span>
         <span className="ml-auto text-[11px] text-zinc-500">{open ? 'ocultar' : 'mostrar'}</span>
       </button>
       {open && (
@@ -2248,7 +2248,7 @@ function DailyInformeCard({ date }: { date: string }) {
                   );
                 })}
                 <tr className="border-t-2 border-zinc-700 bg-zinc-800/40 font-semibold">
-                  <td className="px-2.5 py-2 text-zinc-100">Empresa (total)
+                  <td className="px-2.5 py-2 text-zinc-100">{data.scoped ? 'Suas lojas (total)' : 'Empresa (total)'}
                     {t.closedStores != null && t.closedStores < (data.stores || []).length && <span className="ml-1 text-[10px] font-normal text-zinc-500">· {t.closedStores} de {(data.stores || []).length} lojas com fechamento (resultado só dessas)</span>}
                   </td>
                   <td className="px-2.5 py-2 text-right text-zinc-200 tabular-nums">{noneClosed || t.dinheiroKnown === false ? '—' : brl(t.dinheiro)}</td>
@@ -2262,7 +2262,7 @@ function DailyInformeCard({ date }: { date: string }) {
           </div>
           {/* Total ABERTO por forma de pagamento — a conferência do dono. */}
           <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">Total da empresa por forma de pagamento</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">{data.scoped ? 'Total das suas lojas por forma de pagamento' : 'Total da empresa por forma de pagamento'}</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
               <span className="text-zinc-300">Dinheiro <strong className="text-zinc-100">{noneClosed || t.dinheiroKnown === false ? '—' : brl(bm.dinheiro)}</strong></span>
               {Number(bm.pix) > 0 && <span className="text-zinc-300">PIX <strong className="text-zinc-100">{brl(bm.pix)}</strong></span>}

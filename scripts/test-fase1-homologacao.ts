@@ -104,13 +104,14 @@ async function main() {
   // ═══ 3. FIAÇÃO DE PRODUÇÃO ═══
   const routes = read("src/server/routes/retailops.ts");
   const need: Array<[string, RegExp]> = [
-    ["parcial 16h", /router\.get\("\/afternoon-brief", requireRole\("owner", "admin"\)/], ["liga 16h", /router\.put\("\/afternoon-brief\/enabled", requireRole/],
-    ["manhã/noite", /router\.get\("\/day-brief", requireRole\("owner", "admin"\)/], ["liga noite", /router\.put\("\/night-brief\/enabled", requireRole/],
-    ["duplicidade", /"\/sellers\/identity\/suggestions", requireRole/], ["confirma mesma pessoa", /"\/sellers\/identity\/confirm-same", requireRole/], ["pessoas diferentes", /"\/sellers\/identity\/not-same", requireRole/],
-    ["diagnóstico negativo", /"\/stock\/negative\/diagnosis"/], ["estratégia (troca só owner/admin)", /router\.put\("\/stock\/replenishment-strategy", requireRole\("owner", "admin"\)/],
-    ["metas por pessoa", /"\/seller-goal-streaks", requireRole\("owner", "admin"\)/], ["política de comissão", /"\/commission\/policies\/proposals\/:id\/confirm", requireRole\("owner", "admin"\)/], ["importação por IA (só proposta)", /"\/commission\/policies\/import", requireRole\("owner", "admin"\)/],
+    ["parcial 16h", /router\.get\("\/afternoon-brief", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/], ["liga 16h", /router\.put\("\/afternoon-brief\/enabled", (?:requireRole|requireNetworkScope)/],
+    ["manhã/noite", /router\.get\("\/day-brief", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/], ["liga noite", /router\.put\("\/night-brief\/enabled", (?:requireRole|requireNetworkScope)/],
+    ["duplicidade", /"\/sellers\/identity\/suggestions", (?:requireRole|requireNetworkScope)/], ["confirma mesma pessoa", /"\/sellers\/identity\/confirm-same", (?:requireRole|requireNetworkScope)/], ["pessoas diferentes", /"\/sellers\/identity\/not-same", (?:requireRole|requireNetworkScope)/],
+    ["diagnóstico negativo", /"\/stock\/negative\/diagnosis"/], ["estratégia (troca só owner/admin)", /router\.put\("\/stock\/replenishment-strategy", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/],
+    ["metas por pessoa", /"\/seller-goal-streaks", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/], ["política de comissão", /"\/commission\/policies\/proposals\/:id\/confirm", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/], ["importação por IA (só proposta)", /"\/commission\/policies\/import", (?:requireRole\("owner", "admin"\)|requireNetworkScope)/],
   ];
   for (const [label, re] of need) check(`rota montada (dinheiro/pessoas = owner/admin onde deve): ${label}`, re.test(routes));
+  check("a trava de rede exige owner/admin E escopo de rede (gerente de loja = admin com loja atribuída não passa)", /const requireNetworkScope[\s\S]{0,400}\["owner", "admin"\]\.includes\(role\)[\s\S]{0,300}scope\.unrestricted/.test(routes));
   const sched = read("src/server/Scheduler.ts");
   check("Scheduler: parcial 16h e fechamento da noite têm passe no tick", /await this\.retailAfternoonBriefPass\(\)/.test(sched) && /await this\.retailNightBriefPass\(\)/.test(sched));
   check("Scheduler: alerta de metas por pessoa tem passe", /SellerGoalStreakService/.test(sched));

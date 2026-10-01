@@ -570,6 +570,7 @@
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
     "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",
     "test:tutor-untracked-finance": "tsx scripts/test-tutor-untracked-finance.ts",
+    "test:honest-cash": "tsx scripts/test-honest-cash.ts",
     "test:retail-questions": "tsx scripts/test-retail-questions.ts",
     "test:commission-import": "tsx scripts/test-commission-import.ts",
     "test:seller-goal-streak": "tsx scripts/test-seller-goal-streak.ts",

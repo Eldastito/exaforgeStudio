@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import { formatBRL } from '@/src/lib/metric';
+import { cashHeadline } from '@/src/features/cashBasis';
 import { useStore } from '@/src/store/useStore';
 import type { ViewMode } from '@/src/store/useStore';
 
 // Central de Saúde e Decisão (ADR-126 Fatia 1) — a tela-síntese: status geral +
 // as 3 prioridades do dia com impacto em R$ e uma ação. Global (todas as verticais).
 
-const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+// Com milhar ("R$ 1.435.378,92") e sem inventar zero: ausente → "—".
+const brl = (n: any) => formatBRL(n);
 
 // "atualizado há X" — relativo e curto (agora / há 40s / há 3min / há 1h).
 function agoLabel(ts: number | null, now: number): string {
@@ -240,7 +243,7 @@ export function HealthCenterView() {
 
         {/* KPIs rápidos */}
         <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[13px]">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center gap-1"><Wallet className="w-3 h-3" /> Caixa</div><div className="text-zinc-100 font-semibold mt-0.5">{brl(d?.kpis?.caixaAtual)}</div></div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500 flex items-center gap-1"><Wallet className="w-3 h-3" /> {cashHeadline(d?.kpis).label.replace(' atual', '')}</div><div className="text-zinc-100 font-semibold mt-0.5">{brl(cashHeadline(d?.kpis).value)}</div>{cashHeadline(d?.kpis).note && <div className="text-[10px] text-amber-300/80 mt-0.5">{cashHeadline(d?.kpis).note}</div>}</div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">A receber</div><div className="text-amber-200 font-semibold mt-0.5">{brl(d?.kpis?.aReceber)}</div>{d?.kpis?.aReceberVencido > 0 && <div className="text-[10px] text-red-300 mt-0.5">{brl(d.kpis.aReceberVencido)} vencido</div>}</div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">A pagar</div><div className="text-red-200 font-semibold mt-0.5">{brl(d?.kpis?.aPagar)}</div></div>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5"><div className="text-[10px] uppercase tracking-wide text-zinc-500">Dias de caixa</div><div className="text-zinc-100 font-semibold mt-0.5">{d?.kpis?.survivalDays != null ? `~${d.kpis.survivalDays}` : '—'}</div></div>

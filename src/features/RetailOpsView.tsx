@@ -10,6 +10,7 @@ import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './re
 import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retailClosingForm';
 
 import { formatBRL } from '@/src/lib/metric';
+import { weekCellValue } from '@/src/features/retailWeekCell';
 // ============================================================================
 // Rede de Lojas — Operação (RetailOps, ADR-083/084). Telas do FECHAMENTO diário
 // e da COMISSÃO da equipe, consumindo a API já testada (/api/retailops/*).
@@ -2309,12 +2310,8 @@ function WeeklyClosingsCard() {
     const d = new Date(`${anchor}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + deltaDays); setAnchor(d.toISOString().slice(0, 10));
   };
   const ddmm = (iso: string) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
-  const cellValue = (c: any): number | null => {
-    if (!c) return null;
-    if (metric === 'system') return Number(c.system_total || 0);
-    if (metric === 'variance') return Number(c.informed_total || 0) - Number(c.system_total || 0);
-    return Number(c.informed_total || 0);
-  };
+  // Fechamento sem valor informado é "aguardando" ("—"), não R$ 0,00 (ver retailWeekCell.ts).
+  const cellValue = (c: any): number | null => weekCellValue(c, metric);
   const divergent = (c: any) => c && Number(c.system_total || 0) > 0 && Math.abs(Number(c.informed_total || 0) - Number(c.system_total || 0)) > 0.009;
 
   return (

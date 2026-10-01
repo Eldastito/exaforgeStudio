@@ -92,6 +92,9 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 9. **Acabamentos da homologação (`test:fase1-polish`):** valores do resumo com separador de milhar; manchete do estoque negativo na mesma unidade ("796 com causa identificada · 9 sem causa provada"); o cartão de vendedores não pergunta 3× o mesmo assunto (EDUARDO × Eduardo × Eduardo Lázaro) e, quando o nome curto bate com várias pessoas diferentes ("Vinicius" × Romão × MARCUS VINICIUS), pergunta "são pessoas diferentes?" em vez de sugerir "mesma pessoa".
 10. **Fora do código, de propósito (decisão do dono/Bruno):** nomes com sufixo de loja ("Lohan Grande rio", "Jullia nova iguaçu") podem ser convenção do cadastro para distinguir pessoas — o sistema não tira o sufixo sozinho. A loja "MT FRANQUIA GRANDE RIO" (cód. 1005) aparece no estoque negativo mas não no seletor de lojas: confirmar se é loja real, duplicata ou inativa antes de qualquer mudança.
 
+11. **Data padrão = São Paulo (`test:fase1-routes`):** as rotas da Retail Ops que não recebem `?date=` (o cabeçalho do Insights, `/day-brief`, `/afternoon-brief`, metas) assumiam a data **UTC**. Às 22:30 (BRT) o servidor já está em 01:30 UTC do dia seguinte — a prévia do fechamento e o Insights mostravam **amanhã** (tudo "aguardando", cota de amanhã) justo na hora de conferir. Agora o padrão é "hoje em São Paulo"; `?date=` explícito continua mandando.
+12. **Perfil nas rotas (`test:fase1-routes`):** as 14 rotas novas da Fase 1 que nomeiam pessoas, mostram dinheiro ou ligam chaves respondem **403** a quem não é owner/admin. Rotas **anteriores** à Fase 1 (`insights/header`, `dashboard/informe`, `commission/report`, `stock/negative`) não têm trava de perfil no próprio router — mostram valores a qualquer perfil que tenha acesso ao módulo. Não alterado; decidir se deve travar é do dono (§73).
+
 ## 4. Como provar que nada quebrou
 
 ```

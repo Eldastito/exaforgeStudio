@@ -59,7 +59,7 @@ async function main() {
   check("...e esses dois continuam 'likely' (mesma pessoa provável) — só há um nome completo possível", has(edL, edU)?.kind === "likely" && has(edL, edC)?.kind === "likely");
   check("'Vinicius' bate com 3 pessoas diferentes: NÃO é 'likely' (não deixa confirmar 'mesma pessoa' no chute)", [vR, vN, vM].every((o) => has(vS, o)?.kind === "check"), JSON.stringify(sug.filter((s) => [s.a.id, s.b.id].includes(vS)).map((s) => s.kind)));
   check("...e a pergunta é pelo lado seguro ('pessoas diferentes?') e diz que o nome curto pode ser mais de uma pessoa", /pode ser mais de uma pessoa/.test(has(vS, vM)?.question || "") && /pessoas diferentes/.test(has(vS, vM)?.question || ""));
-  check("Vinicius Romão × Nascimento segue como 'check' (pessoas diferentes) — 0-regressão", has(vR, vN)?.kind === "check");
+  check("Vinicius Romão × Nascimento = diferentes por construção (S1): não é sugerido nem fundido", !has(vR, vN));
   // nome curto que cabe em UMA só pessoa continua 'likely' (0-regressão)
   const O = `org_O_${randomUUID().slice(0, 6)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'X', 'active')`).run(randomUUID(), O);

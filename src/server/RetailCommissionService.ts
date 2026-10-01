@@ -182,7 +182,7 @@ export class RetailCommissionService {
         source: Array.from(v.sources).sort().join("+"),
         // SELL-007: matrícula sem nome (e sem usuário ZappFlow) = pendência
         // acionável — não é resultado final silencioso.
-        pendingIdentity: !v.sellerUserId && /^Matrícula\s/.test(String(v.sellerName || "")),
+        pendingIdentity: !v.sellerUserId && String(v.sellerName || "").startsWith("Vendedor não identificado"),
       }))
       .sort((a, b) => b.sales - a.sales);
   }
@@ -277,7 +277,7 @@ export class RetailCommissionService {
     return {
       period: { start, end },
       bySeller, byProduct, byStore, globalCommission,
-      // SELL-007: quantos vendedores estão como "Matrícula X" (identidade
+      // SELL-007: quantos vendedores estão como "Vendedor não identificado" (identidade
       // pendente) — o gestor resolve antes de confiar na apuração.
       pendingIdentityCount: bySeller.filter((s: any) => s.pendingIdentity).length,
       totals: { sellerCommission, productCommission, storeCommission, totalCommission, sellerErpCommission: sum(bySeller, "erpCommission") },

@@ -45,8 +45,7 @@ async function main() {
   const find = (x: string, y: string) => D.suggestions(A).find((s) => [s.a.id, s.b.id].includes(x) && [s.a.id, s.b.id].includes(y));
   check("Eduardo × Eduardo Lázaro = 'likely' (mesma pessoa provável), canônica = o nome mais completo", find(edu, eduL)?.kind === "likely" && find(edu, eduL)?.suggestedIntoId === eduL);
   check("Lohan × Lohan Grande Rio = 'likely'", find(lohanA, lohanB)?.kind === "likely" && find(lohanA, lohanB)?.suggestedIntoId === lohanB);
-  check("Vinícius Romão × Vinícius Nascimento = 'check' (mesmo 1º nome, sobrenomes diferentes) e vem DEPOIS dos 'likely'", find(vinR, vinN)?.kind === "check" && sug.findIndex((s) => s.kind === "check") > sug.findIndex((s) => s.kind === "likely"));
-  check("a pergunta do 'check' assume 'pessoas diferentes' e mostra as lojas de cada um", /pessoas diferentes/.test(find(vinR, vinN)!.question) && find(vinR, vinN)!.a.stores.concat(find(vinR, vinN)!.b.stores).sort().join() === "Avenida Brasil,Bangu");
+  check("Vinícius Romão × Vinícius Nascimento = diferentes por construção: NÃO é sugerido (nem fundido)", !find(vinR, vinN) && (db.prepare(`SELECT COUNT(*) AS c FROM retail_sellers WHERE organization_id = ? AND merged_into_seller_id IS NOT NULL`).get(A) as any).c === 0);
   check("quem não tem parecido (Marina) não aparece; nada foi fundido sozinho", !sug.some((s) => s.a.name === "Marina Souza" || s.b.name === "Marina Souza") && (db.prepare(`SELECT COUNT(*) AS c FROM retail_sellers WHERE organization_id = ? AND merged_into_seller_id IS NOT NULL`).get(A) as any).c === 0);
   const sugB = D.suggestions(B);
   check("isolamento: a org B vê só o par dela (Eduardo × Eduardo Lázaro da B), nunca vendedores da A", sugB.length === 1 && sugB[0].a.id !== edu && sugB[0].b.id !== edu && [sugB[0].a.id, sugB[0].b.id].includes(otherOrg));

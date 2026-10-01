@@ -56,7 +56,7 @@ async function main() {
 
   const rep = RetailCommissionService.report(A, P0, P1);
   const v1 = rep.bySeller.find((x: any) => x.sellerName === "Ana Vendedora");
-  const v2 = rep.bySeller.find((x: any) => x.sellerName === "Matrícula V2");
+  const v2 = rep.bySeller.find((x: any) => x.sellerName === "Vendedor não identificado — matrícula V2");
   check("Por vendedor preenche do PDV: V1 = 600 (2 vendas, 6 peças)", v1?.sales === 600 && v1?.orders === 2 && v1?.pecas === 6, JSON.stringify(v1));
   check("V1 tem nome do mapeamento (Ana Vendedora)", v1?.sellerName === "Ana Vendedora");
   check("Comissão por vendedor = 5% do que cada um vendeu (V1 = 30, V2 = 20)", v1?.commission === 30 && v2?.commission === 20, JSON.stringify([v1, v2]));

@@ -9,6 +9,7 @@
  * Base de cálculo = realizado do período (soma dos `informed_total` dos
  * fechamentos da loja no intervalo). Cota do período = soma das cotas diárias.
  */
+import { unidentifiedLabel } from "./RetailSellerIdentityService.js";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -377,7 +378,7 @@ export class RetailCommissionService {
       ).all(orgId, start, end) as any[];
       return rows.map((r) => ({
         sellerUserId: r.user_id || null,
-        sellerName: r.mapped_name || `Matrícula ${r.matricula}`,
+        sellerName: r.mapped_name || unidentifiedLabel(r.matricula),
         matricula: String(r.matricula),
         sales: round2(Number(r.sales || 0)),
         pecas: Number(r.pecas || 0),
@@ -474,7 +475,7 @@ export class RetailCommissionService {
     ).all(orgId, start, end) as any[];
     for (const r of erp) {
       const realMat = r.matricula && !String(r.matricula).startsWith("nome:") ? r.matricula : null;
-      add(r.store_id || null, r.store_name, r.user_id || null, realMat, r.mapped_name || r.seller_name || (realMat ? `Matrícula ${realMat}` : "vendedor"), Number(r.s) || 0, Number(r.p) || 0, Number(r.n) || 0, "erp");
+      add(r.store_id || null, r.store_name, r.user_id || null, realMat, r.mapped_name || r.seller_name || (realMat ? unidentifiedLabel(realMat) : "vendedor"), Number(r.s) || 0, Number(r.p) || 0, Number(r.n) || 0, "erp");
     }
 
     const pdv = db.prepare(
@@ -489,7 +490,7 @@ export class RetailCommissionService {
           AND COALESCE(st.seller_source, 'pdv') <> 'manual'
         GROUP BY st.id, s.filial, COALESCE(NULLIF(s.vendedor_codigo, ''), s.vendedor)`
     ).all(orgId, start, end) as any[];
-    for (const r of pdv) add(r.store_id || null, r.store_name, r.user_id || null, String(r.matricula), r.mapped_name || `Matrícula ${r.matricula}`, Number(r.sv) || 0, Number(r.p) || 0, Number(r.n) || 0, "pdv");
+    for (const r of pdv) add(r.store_id || null, r.store_name, r.user_id || null, String(r.matricula), r.mapped_name || unidentifiedLabel(r.matricula), Number(r.sv) || 0, Number(r.p) || 0, Number(r.n) || 0, "pdv");
 
     return Array.from(map.values())
       .map((v) => ({

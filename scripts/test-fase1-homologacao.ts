@@ -77,7 +77,7 @@ async function main() {
   const lohanA = seller("201", "Lohan", grande), lohanB = seller("202", "Lohan Grande Rio", grande);
   const vinR = seller("301", "Vinícius Romão", ab), vinN = seller("302", "Vinícius Nascimento", store("Bangu", "1004"));
   const has = (a: string, b: string, kind: string) => Dup.suggestions(T).some((s) => [s.a.id, s.b.id].includes(a) && [s.a.id, s.b.id].includes(b) && s.kind === kind);
-  check("casos do Bruno: Lohan e Eduardo = 'mesma pessoa?'; Vinícius = 'pessoas diferentes?'", has(lohanA, lohanB, "likely") && has(edu, eduL, "likely") && has(vinR, vinN, "check"));
+  check("casos do Bruno: Lohan e Eduardo = 'mesma pessoa?'; Vinícius Romão × Nascimento = diferentes por construção (nem sugerido)", has(lohanA, lohanB, "likely") && has(edu, eduL, "likely") && !has(vinR, vinN, "check") && !has(vinR, vinN, "likely"));
   check("NADA funde sozinho: antes da resposta do dono nenhuma identidade foi unida", (db.prepare(`SELECT COUNT(*) AS c FROM retail_sellers WHERE organization_id = ? AND merged_into_seller_id IS NOT NULL`).get(T) as any).c === 0);
   Dup.markDistinct(T, vinR, vinN);
   Dup.confirmSame(T, lohanA, lohanB, {}, "dono");
@@ -118,7 +118,7 @@ async function main() {
   const cols = (db.prepare(`PRAGMA table_info(organization_settings)`).all() as any[]).map((c) => c.name);
   check("colunas opt-in existem (sem elas o ALTER aditivo não rodou)", ["retail_afternoon_brief_enabled", "retail_night_brief_enabled", "retail_seller_goal_streak_enabled", "retail_replenishment_strategy", "retail_official_sale_source"].every((c) => cols.includes(c)));
   const pkg = JSON.parse(read("package.json")).scripts as Record<string, string>;
-  const tests = ["semantic-metric", "retail-code-resolver", "retail-floor-scan", "retail-seller-identity", "retail-seller-identity-aggregation", "seller-duplicates", "retail-commission-policy-status", "seller-goal-streak", "retail-afternoon-brief", "retail-day-brief", "retail-night-slots", "retail-replenishment-strategy", "retail-questions", "commission-import", "signal-language", "unknown-not-zero", "fase1-polish", "fase1-routes", "retail-store-write-scope", "retail-brief-switches", "whatsapp-recipients", "tutor-untracked-finance", "honest-cash", "fase1-homologacao"];
+  const tests = ["semantic-metric", "retail-code-resolver", "retail-floor-scan", "retail-seller-identity", "retail-seller-identity-aggregation", "seller-duplicates", "seller-allocation-roster", "retail-commission-policy-status", "seller-goal-streak", "retail-afternoon-brief", "retail-day-brief", "retail-night-slots", "retail-replenishment-strategy", "retail-questions", "commission-import", "signal-language", "unknown-not-zero", "fase1-polish", "fase1-routes", "retail-store-write-scope", "retail-brief-switches", "whatsapp-recipients", "tutor-untracked-finance", "honest-cash", "fase1-homologacao"];
   check("todos os testes da Fase 1 estão no package.json e os arquivos existem", tests.every((t) => !!pkg[`test:${t}`] && fs.existsSync(path.join(process.cwd(), `scripts/test-${t}.ts`))), tests.filter((t) => !pkg[`test:${t}`]).join(","));
   check("runbook de homologação da Fase 1 existe e cobre as chaves, o roteiro e a reversão", /Reversão/.test(read("docs/runbook/fase1-homologacao.md")) && /night-brief\/enabled/.test(read("docs/runbook/fase1-homologacao.md")) && /afternoon-brief\/enabled/.test(read("docs/runbook/fase1-homologacao.md")));
 

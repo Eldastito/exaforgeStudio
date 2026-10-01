@@ -28,6 +28,7 @@
  *    números gravados derivam dele).
  *  - Formato preservado: "017752" mantém a largura dos zeros do talão.
  */
+import { unidentifiedLabel } from "./RetailSellerIdentityService.js";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -175,7 +176,7 @@ export class RetailBoletaService {
       return {
         id: e.id, number: e.boleta_number, seq: e.seq, sellerName: e.seller_name,
         clickedAt: e.clicked_at,
-        pdv: pdv ? { valor: round2(pdv.valor), pecas: Number(pdv.pecas || 0), sellerName: pdv.seller_name || (pdv.matricula ? `Matrícula ${pdv.matricula}` : null) } : null,
+        pdv: pdv ? { valor: round2(pdv.valor), pecas: Number(pdv.pecas || 0), sellerName: pdv.seller_name || (pdv.matricula ? unidentifiedLabel(pdv.matricula) : null) } : null,
       };
     });
     const matched = clicks.filter((c) => c.pdv);

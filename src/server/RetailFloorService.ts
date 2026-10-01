@@ -17,6 +17,7 @@
  *    indicadores do módulo NÃO alimentam cobrança/comissão; o contexto expõe o
  *    flag para a UI avisar.
  */
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 import db from "./db.js";
 import { BusinessTimeService } from "./BusinessTimeService.js";
 import { randomUUID, createHash, timingSafeEqual } from "crypto";
@@ -153,14 +154,9 @@ export class RetailFloorService {
     if (!db.prepare(`SELECT 1 FROM retail_stores WHERE organization_id = ? AND id = ?`).get(orgId, storeId)) {
       throw new Error("Loja não encontrada.");
     }
-    const assigned = db.prepare(
-      `SELECT s.id, s.matricula, s.name, s.photo_url
-         FROM retail_seller_store_assignments a
-         JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
-        WHERE a.organization_id = ? AND a.store_id = ? AND a.active = 1 AND s.active = 1
-        ORDER BY s.name`
-    ).all(orgId, storeId) as any[];
-    const shape = (rows: any[]) => rows.map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null, photoUrl: s.photo_url || null }));
+    // equipe VIGENTE hoje (cobertura/temporária entram; quem cobre outra loja sai) — PRD Fase 1 §3
+    const assigned = RetailSellerIdentityService.rosterOn(orgId, storeId);
+    const shape = (rows: any[]) => rows.map((s) => ({ id: s.id, matricula: s.matricula, name: s.name || null, photoUrl: s.photo_url || s.photoUrl || null }));
     if (assigned.length) return { sellers: shape(assigned), scoped: true };
     const all = db.prepare(`SELECT id, matricula, name, photo_url FROM retail_sellers WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
     return { sellers: shape(all), scoped: false };

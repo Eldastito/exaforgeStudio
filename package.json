@@ -561,6 +561,7 @@
     "test:retail-day-brief": "tsx scripts/test-retail-day-brief.ts",
     "test:retail-night-slots": "tsx scripts/test-retail-night-slots.ts",
     "test:seller-duplicates": "tsx scripts/test-seller-duplicates.ts",
+    "test:seller-allocation-roster": "tsx scripts/test-seller-allocation-roster.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",
     "test:unknown-not-zero": "tsx scripts/test-unknown-not-zero.ts",

@@ -130,10 +130,15 @@ export class BusinessTutorService {
     } catch { /* noop */ }
 
     const k = ov?.kpis || {};
-    const kpiParts = [`Caixa ${brl(k.caixaAtual)}`, `a receber ${brl(k.aReceber)}`, `a pagar ${brl(k.aPagar)}`];
+    // null≠zero: "R$ 0,00" só quando o financeiro do ZappFlow TEM registro daquele tipo. Loja que vive de PDV/fechamento e nunca lançou
+    // contas a receber/pagar não "deve zero" — o dado não existe aqui. Overview sem a informação (`tracking` ausente) segue como antes.
+    const tk = k.tracking || { receivables: true, payables: true, cashEvents: true };
+    const caixaTxt = tk.cashEvents || Number(k.caixaAtual) !== 0 ? brl(k.caixaAtual) : "—";
+    const kpiParts = [`Caixa ${caixaTxt}`, `a receber ${tk.receivables ? brl(k.aReceber) : "—"}`, `a pagar ${tk.payables ? brl(k.aPagar) : "—"}`];
     if (Number.isFinite(k.survivalDays) && k.survivalDays > 0 && k.survivalDays < 999) kpiParts.push(`~${Math.round(k.survivalDays)} dias de caixa`);
     lines.push("");
     lines.push(`💰 ${kpiParts.join(" · ")}`);
+    if (kpiParts.some((x) => x.endsWith("—"))) lines.push("(— = ainda sem registro no financeiro do ZappFlow; não significa zero)");
     lines.push("");
     lines.push("Abra a *Central de Saúde* no ZappFlow para agir. 💪");
 
@@ -226,7 +231,9 @@ export class BusinessTutorService {
     } else {
       lines.push(`🛒 Vendas: ${brl(day.revenue)}${Number(day.orders) > 0 ? ` (${day.orders} pedido(s))` : ""}`);
     }
-    lines.push(`💵 Entrou no caixa: ${brl(sum?.realizadoHoje)}`);
+    // `realizadoHoje` é um OBJETO ({inflow, outflow, net}) — antes ia inteiro pro brl() e saía SEMPRE "R$ 0,00", mesmo com dinheiro entrando.
+    const tk = sum?.tracking || { receivables: true, payables: true, cashEvents: true };
+    lines.push(`💵 Entrou no caixa: ${tk.cashEvents ? brl(sum?.realizadoHoje?.inflow) : "— (o financeiro não recebe as vendas da loja)"}`);
     lines.push(`📈 Margem estimada: ${retail && !(Number(day.orders) > 0) ? "—" : brl(day.profit)}`);
     let attn = 0;
     try { attn = BusinessHealthService.attention(orgId).count; } catch { /* best-effort */ }
@@ -235,10 +242,18 @@ export class BusinessTutorService {
       lines.push(`Ainda há ${brl(aReceber)} a receber em aberto. Responda *SIM* que amanhã cedo eu te lembro de cobrar. 💬`);
     } else {
       lines.push("");
-      // "Nada em aberto" só vale quando a Central de Saúde também não tem assunto aberto.
-      lines.push(attn > 0
-        ? `Nada a receber em aberto, mas ${attn} ${attn === 1 ? "assunto precisa" : "assuntos precisam"} de atenção na Central de Saúde. 🌙`
-        : "Nada em aberto por hoje. Bom descanso! 🌙");
+      const assunto = `${attn} ${attn === 1 ? "assunto precisa" : "assuntos precisam"} de atenção na Central de Saúde`;
+      if (!tk.receivables) {
+        // Sem nenhuma conta a receber cadastrada, "nada a receber" seria afirmar o que o sistema não sabe.
+        lines.push(attn > 0
+          ? `Não há contas a receber cadastradas no ZappFlow, então não sei o que está em aberto. ${assunto}. 🌙`
+          : "Não há contas a receber cadastradas no ZappFlow, então não sei o que está em aberto. Bom descanso! 🌙");
+      } else {
+        // "Nada em aberto" só vale quando a Central de Saúde também não tem assunto aberto.
+        lines.push(attn > 0
+          ? `Nada a receber em aberto, mas ${assunto}. 🌙`
+          : "Nada em aberto por hoje. Bom descanso! 🌙");
+      }
     }
     return { text: lines.join("\n"), hasReceivables: aReceber > 0 };
   }

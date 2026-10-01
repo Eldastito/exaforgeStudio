@@ -219,6 +219,20 @@ export class FinancialLedgerService {
     return { created };
   }
 
+  /**
+   * O financeiro do ZappFlow tem ALGUM registro de cada tipo (em qualquer status)? Sem registro, "R$ 0,00" não quer dizer "nada em aberto" —
+   * quer dizer "ninguém cadastra isso aqui" (ex.: loja que vive de PDV/fechamento e não lança contas a receber/pagar). Quem monta texto pro
+   * dono usa isto pra mostrar "—" em vez de zero (null≠zero). Derivado por query, isolado por organização.
+   */
+  static tracking(orgId: string): { receivables: boolean; payables: boolean; cashEvents: boolean } {
+    const has = (sql: string): boolean => { try { return !!db.prepare(sql).get(orgId); } catch { return false; } };
+    return {
+      receivables: has("SELECT 1 FROM receivables WHERE organization_id = ? LIMIT 1") || has("SELECT 1 FROM comigo_fiado_ledger WHERE organization_id = ? LIMIT 1"),
+      payables: has("SELECT 1 FROM payables WHERE organization_id = ? LIMIT 1"),
+      cashEvents: has("SELECT 1 FROM cash_events WHERE organization_id = ? LIMIT 1"),
+    };
+  }
+
   // ── Resumo / overview ───────────────────────────────────────────────────────
   static summary(orgId: string) {
     this.syncFromSales(orgId); // reflete vendas pagas antes de somar
@@ -237,6 +251,7 @@ export class FinancialLedgerService {
       // fiado é saldo corrente, sem vencimento por item, então fica de fora.
       aReceberVencido: overdue.amount,
       aReceberVencidoCount: overdue.count,
+      tracking: this.tracking(orgId),
       realizadoHoje: this.realizedCash(orgId, t, t),
       realizado7d: this.realizedCash(orgId, daysAgo(6), t),
     };

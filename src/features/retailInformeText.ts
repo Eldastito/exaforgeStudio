@@ -17,6 +17,10 @@ export interface InformeStoreRow {
   cota: number;
   desvio: number;   // venda - cota (>=0 bateu, <0 faltou)
   cotaNext: number;
+  /** Loja sem fechamento (ou de valor 0): a folha ainda não chegou — não é "vendeu R$ 0". Ausente = comportamento antigo. */
+  awaiting?: boolean;
+  /** false = fechamento sem detalhe de pagamento: o dinheiro é desconhecido (não R$ 0,00). Ausente = comportamento antigo. */
+  dinheiroKnown?: boolean;
   byMethod?: any;
 }
 export interface InformeData {
@@ -25,6 +29,9 @@ export interface InformeData {
   stores: InformeStoreRow[];
   total: {
     dinheiro: number; venda: number; cota: number; desvio: number; cotaNext: number;
+    /** Resultado só entre lojas já fechadas com cota; null = nada a comparar. Ausente = usa `desvio`. */
+    desvioComparable?: number | null;
+    dinheiroKnown?: boolean;
     byMethod?: any;
   };
 }
@@ -61,9 +68,18 @@ function hasPay(m: any): boolean {
   return !!m && (Number(m.dinheiro) > 0 || Number(m.pix) > 0 || Number(m.voucher) > 0 || Number(m.troca) > 0 || bandeiras(m.credito).length > 0 || bandeiras(m.debito).length > 0);
 }
 
-function block(name: string, r: { dinheiro: number; venda: number; cota: number; desvio: number; cotaNext: number }, nextDate: string): string[] {
+function block(name: string, r: { dinheiro: number; venda: number; cota: number; desvio: number; cotaNext: number; awaiting?: boolean; dinheiroKnown?: boolean }, nextDate: string): string[] {
   const L: string[] = [name];
-  L.push(money(r.dinheiro));
+  if (r.awaiting) {
+    // Sem fechamento: nunca "Bateu R$ 0,00" (F1.0 — desconhecido ≠ zero).
+    L.push("—");
+    L.push("Venda —");
+    L.push(`Cota ${money(r.cota)}`);
+    L.push("Aguardando fechamento");
+    L.push(`Cota ${dm(nextDate)} ${money(r.cotaNext)}`);
+    return L;
+  }
+  L.push(r.dinheiroKnown === false ? "—" : money(r.dinheiro));
   L.push(`Venda ${money(r.venda)}`);
   L.push(`Cota ${money(r.cota)}`);
   L.push(Number(r.desvio) >= 0 ? `Bateu ${money(r.desvio)}` : `Faltou ${money(Math.abs(Number(r.desvio)))}`);
@@ -81,10 +97,11 @@ export function buildDailyInformeText(data: InformeData): string {
   }
   L.push("Empresa Dia", br(data.date));
   const t = data.total;
-  L.push(money(t.dinheiro));
+  L.push(t.dinheiroKnown === false ? "—" : money(t.dinheiro));
   L.push(`Venda ${money(t.venda)}`);
   L.push(`Cota ${money(t.cota)}`);
-  L.push(Number(t.desvio) >= 0 ? `Bateu ${money(t.desvio)}` : `Faltou ${money(Math.abs(Number(t.desvio)))}`);
+  const tDes = t.desvioComparable !== undefined ? t.desvioComparable : t.desvio;
+  L.push(tDes == null ? "Aguardando fechamento" : Number(tDes) >= 0 ? `Bateu ${money(tDes)}` : `Faltou ${money(Math.abs(Number(tDes)))}`);
   L.push(`Cota ${dm(data.nextDate)} ${money(t.cotaNext)}`);
 
   // Formas de pagamento da empresa "num lugar só" (pedido do cliente).

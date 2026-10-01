@@ -143,24 +143,36 @@ const ACTION_STATUS: Record<string, { label: string; cls: string }> = {
 function InsightsHeader({ header, storeFilter }: { header: any; storeFilter: string }) {
   const d = header.daily || {};
   const rk = header.ranking || {};
-  const varOk = Number(d.variance) >= 0;
+  // Estados honestos (F1.0): sem fechamento = "—" (aguardando), sem cota = "—", desvio só entre lojas que já fecharam.
+  // Payload antigo (sem os campos novos) cai no comportamento de sempre.
+  const known = d.closedStores != null;
+  const noClosed = known && Number(d.closedStores) === 0;
+  const noQuota = !(Number(d.quotaTotal) > 0);
+  const cmpVar = known ? d.comparableVariance : d.variance;
+  const cmpPct = known ? d.comparableVariancePercent : d.variancePercent;
+  const hasVar = cmpVar != null;
+  const varOk = hasVar && Number(cmpVar) >= 0;
+  const varCls = !hasVar ? 'border-zinc-800 bg-zinc-900/50' : varOk ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5';
   return (
     <div className="mb-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">{storeFilter ? 'Vendido hoje' : 'Vendido hoje (rede)'}</p>
-          <p className="text-lg font-semibold text-zinc-100">{brl(d.realized || 0)}</p>
+          <p className="text-lg font-semibold text-zinc-100">{noClosed ? '—' : brl(d.realized || 0)}</p>
+          {known && <p className="text-[10px] text-zinc-600">{noClosed ? 'aguardando fechamento' : `${d.closedStores} de ${d.activeStores} loja(s) com fechamento`}</p>}
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">Cota do dia</p>
-          <p className="text-lg font-semibold text-zinc-200">{brl(d.quotaTotal || 0)}</p>
+          <p className="text-lg font-semibold text-zinc-200">{noQuota ? '—' : brl(d.quotaTotal)}</p>
+          {noQuota && <p className="text-[10px] text-zinc-600">sem cota cadastrada</p>}
         </div>
-        <div className={`rounded-xl border p-3 ${varOk ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-          <p className={`text-[10px] uppercase tracking-wider ${varOk ? 'text-emerald-400/80' : 'text-red-400/80'}`}>Desvio</p>
-          <p className={`text-lg font-semibold ${varOk ? 'text-emerald-300' : 'text-red-300'}`}>
-            {d.variance > 0 ? '+' : ''}{brl(d.variance || 0)}
-            {d.variancePercent != null && <span className="ml-1 text-xs opacity-80">({d.variancePercent > 0 ? '+' : ''}{Math.round((d.variancePercent || 0) * 10) / 10}%)</span>}
+        <div className={`rounded-xl border p-3 ${varCls}`}>
+          <p className={`text-[10px] uppercase tracking-wider ${!hasVar ? 'text-zinc-500' : varOk ? 'text-emerald-400/80' : 'text-red-400/80'}`}>Desvio</p>
+          <p className={`text-lg font-semibold ${!hasVar ? 'text-zinc-200' : varOk ? 'text-emerald-300' : 'text-red-300'}`}>
+            {hasVar ? <>{Number(cmpVar) > 0 ? '+' : ''}{brl(cmpVar)}</> : '—'}
+            {hasVar && cmpPct != null && <span className="ml-1 text-xs opacity-80">({cmpPct > 0 ? '+' : ''}{Math.round((cmpPct || 0) * 10) / 10}%)</span>}
           </p>
+          {known && <p className="text-[10px] text-zinc-600">{hasVar ? 'só das lojas com fechamento' : 'sem fechamento com cota para comparar'}</p>}
         </div>
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">Lojas na cota</p>
@@ -2120,10 +2132,14 @@ function DailyInformeCard({ date }: { date: string }) {
   if (loading || !data) return null;
   const t = data.total || {};
   const bm = t.byMethod || {};
+  // Nenhuma loja fechou (payload antigo sem o campo → comportamento de sempre): total é "—", não R$ 0,00.
+  const noneClosed = t.closedStores === 0;
   const dm = (d: string) => `${String(d).slice(8, 10)}/${String(d).slice(5, 7)}`;
-  const desvio = (v: number) => Number(v) >= 0
-    ? <span className="text-emerald-300 font-medium">Bateu {brl(v)}</span>
-    : <span className="text-red-300 font-medium">Faltou {brl(Math.abs(Number(v)))}</span>;
+  const desvio = (v: number | null | undefined) => v == null
+    ? <span className="text-zinc-500">—</span>
+    : Number(v) >= 0
+      ? <span className="text-emerald-300 font-medium">Bateu {brl(v)}</span>
+      : <span className="text-red-300 font-medium">Faltou {brl(Math.abs(Number(v)))}</span>;
   const bandeiras = (m: any) => Object.entries(m || {}).filter(([, v]) => Number(v) > 0).sort((a, b) => Number(b[1]) - Number(a[1]));
   const credBand = bandeiras(bm.credito), debBand = bandeiras(bm.debito);
   const toggleStore = (id: string) => setOpenStores(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -2214,10 +2230,10 @@ function DailyInformeCard({ date }: { date: string }) {
                             <span>{s.storeName}{!s.hasClosing && <span className="ml-1 text-[10px] text-zinc-600">(sem fechamento)</span>}</span>
                           )}
                         </td>
-                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.dinheiro)}</td>
-                        <td className="px-2.5 py-1.5 text-right text-zinc-100 tabular-nums">{brl(s.venda)}</td>
-                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{brl(s.cota)}</td>
-                        <td className="px-2.5 py-1.5 text-right tabular-nums">{desvio(s.desvio)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.awaiting || s.dinheiroKnown === false ? '—' : brl(s.dinheiro)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-100 tabular-nums">{s.awaiting ? '—' : brl(s.venda)}</td>
+                        <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.cota > 0 ? brl(s.cota) : '—'}</td>
+                        <td className="px-2.5 py-1.5 text-right tabular-nums">{s.awaiting ? <span className="text-zinc-500 text-[11px]">aguardando</span> : desvio(s.cota > 0 ? s.desvio : null)}</td>
                         <td className="px-2.5 py-1.5 text-right text-zinc-400 tabular-nums">{s.cotaNext > 0 ? brl(s.cotaNext) : '—'}</td>
                       </tr>
                       {isOpen && (
@@ -2232,11 +2248,13 @@ function DailyInformeCard({ date }: { date: string }) {
                   );
                 })}
                 <tr className="border-t-2 border-zinc-700 bg-zinc-800/40 font-semibold">
-                  <td className="px-2.5 py-2 text-zinc-100">Empresa (total)</td>
-                  <td className="px-2.5 py-2 text-right text-zinc-200 tabular-nums">{brl(t.dinheiro)}</td>
-                  <td className="px-2.5 py-2 text-right text-zinc-50 tabular-nums">{brl(t.venda)}</td>
-                  <td className="px-2.5 py-2 text-right text-zinc-300 tabular-nums">{brl(t.cota)}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{desvio(t.desvio)}</td>
+                  <td className="px-2.5 py-2 text-zinc-100">Empresa (total)
+                    {t.closedStores != null && t.closedStores < (data.stores || []).length && <span className="ml-1 text-[10px] font-normal text-zinc-500">· {t.closedStores} de {(data.stores || []).length} lojas com fechamento (resultado só dessas)</span>}
+                  </td>
+                  <td className="px-2.5 py-2 text-right text-zinc-200 tabular-nums">{noneClosed || t.dinheiroKnown === false ? '—' : brl(t.dinheiro)}</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-50 tabular-nums">{noneClosed ? '—' : brl(t.venda)}</td>
+                  <td className="px-2.5 py-2 text-right text-zinc-300 tabular-nums">{t.cota > 0 ? brl(t.cota) : '—'}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">{desvio(t.desvioComparable !== undefined ? t.desvioComparable : t.desvio)}</td>
                   <td className="px-2.5 py-2 text-right text-zinc-300 tabular-nums">{t.cotaNext > 0 ? brl(t.cotaNext) : '—'}</td>
                 </tr>
               </tbody>
@@ -2246,7 +2264,7 @@ function DailyInformeCard({ date }: { date: string }) {
           <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">Total da empresa por forma de pagamento</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
-              <span className="text-zinc-300">Dinheiro <strong className="text-zinc-100">{brl(bm.dinheiro)}</strong></span>
+              <span className="text-zinc-300">Dinheiro <strong className="text-zinc-100">{noneClosed || t.dinheiroKnown === false ? '—' : brl(bm.dinheiro)}</strong></span>
               {Number(bm.pix) > 0 && <span className="text-zinc-300">PIX <strong className="text-zinc-100">{brl(bm.pix)}</strong></span>}
               {Number(bm.voucher) > 0 && <span className="text-zinc-300">Voucher <strong className="text-zinc-100">{brl(bm.voucher)}</strong></span>}
               {Number(bm.troca) > 0 && <span className="text-zinc-300">Troca <strong className="text-zinc-100">{brl(bm.troca)}</strong></span>}
@@ -5675,6 +5693,8 @@ function CommissionTab() {
   const [start, setStart] = useState(firstOfMonth);
   const [end, setEnd] = useState(todayStr());
   const [report, setReport] = useState<any | null>(null);
+  // Sem NENHUMA regra ativa (nem % de loja de referência, nem comissão do ERP): total R$ 0,00 seria "não calculado", não zero.
+  const noRuleReport = !!report && report.mode !== 'race' && !!report.hasRules && !Object.values(report.hasRules).some(Boolean) && !report.sellerCommissionSource && !report.hasErpSellerSales;
   const [loadingReport, setLoadingReport] = useState(false);
 
   const [pdvSellers, setPdvSellers] = useState<any[]>([]);
@@ -5891,6 +5911,12 @@ function CommissionTab() {
 
         {report && (
           <div className="mt-3 space-y-4">
+            {noRuleReport && (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
+                <AlertTriangle className="inline w-3.5 h-3.5 mr-1" />
+                <strong>Sem regra de comissão ativa</strong> — a comissão <strong>não foi calculada</strong> (não é R$ 0,00). Crie ou confirme uma regra em “Nova regra”.
+              </p>
+            )}
             {report.mode === 'race' ? (
               <>
                 <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px] text-emerald-200">
@@ -5901,8 +5927,8 @@ function CommissionTab() {
                 </div>
               </>
             ) : (
-              <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{brl(report.totals?.totalCommission)}</span>
-                <span className="text-zinc-500"> · vendedores {brl(report.totals?.sellerCommission)} · produtos {brl(report.totals?.productCommission)} · lojas {brl(report.totals?.storeCommission)}{report.storeIsReference ? ' (referência)' : ''}</span>
+              <div className="text-sm text-zinc-300">Comissão total do período: <span className="font-semibold text-emerald-300">{noRuleReport ? '—' : brl(report.totals?.totalCommission)}</span>
+                <span className="text-zinc-500"> · vendedores {noRuleReport ? '—' : brl(report.totals?.sellerCommission)} · produtos {noRuleReport ? '—' : brl(report.totals?.productCommission)} · lojas {noRuleReport ? '—' : brl(report.totals?.storeCommission)}{report.storeIsReference ? ' (referência)' : ''}</span>
               </div>
             )}
 
@@ -5912,7 +5938,7 @@ function CommissionTab() {
                 {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <strong>Vendedores da loja</strong> antes de aprovar a apuração.
               </p>
             )}
-            <ReportBlock title={report.mode === 'race' ? 'Por vendedor e gerente' : 'Por vendedor'} empty={report.mode === 'race' ? 'Nenhum vendedor com venda ou comissão na corrida deste mês.' : (report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.')} rows={report.bySeller} cols={[['sellerName', report.mode === 'race' ? 'Nome' : 'Vendedor'], ['source', report.mode === 'race' ? 'Papel' : 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
+            <ReportBlock title={report.mode === 'race' ? 'Por vendedor e gerente' : 'Por vendedor'} empty={report.mode === 'race' ? 'Nenhum vendedor com venda ou comissão na corrida deste mês.' : (report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.')} rows={noRuleReport ? (report.bySeller || []).map((r: any) => ({ ...r, commission: null })) : report.bySeller} cols={[['sellerName', report.mode === 'race' ? 'Nome' : 'Vendedor'], ['source', report.mode === 'race' ? 'Papel' : 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
             {report.sellerCommissionSource === 'store_fallback' && report.sellerCommissionPercent != null && <p className="text-[11px] text-zinc-500 -mt-2">Comissão por vendedor calculada por <strong className="text-zinc-300">{report.sellerCommissionPercent}%</strong> (regra da loja) sobre o que <strong className="text-zinc-300">cada vendedor</strong> vendeu (PDV/CAI_USUARIO + ZappFlow + lançamentos). Como sai da mesma regra da loja, a linha “Por loja” abaixo vira só <strong className="text-zinc-300">referência</strong> e não soma no total. Para pagar as duas juntas, crie uma regra com escopo “Cada vendedor”.</p>}
             {report.hasErpSellerSales && <p className="text-[11px] text-zinc-500 -mt-2">“Comissão” é a nossa apuração (pelas regras); “Comissão ERP” é a que o próprio ERP calculou — compare para conferir divergências.</p>}
             {report.mode !== 'race' && <ReportBlock title="Por produto" empty={!report.hasRules?.product ? 'Sem regra por produto ativa.' : 'Nenhuma venda por produto no período.'} rows={report.byProduct} cols={[['productName', 'Produto'], ['sales', 'Vendas', true], ['orders', 'Nº vendas'], ['commission', 'Comissão', true]]} />}

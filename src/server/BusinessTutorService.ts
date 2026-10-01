@@ -211,15 +211,28 @@ export class BusinessTutorService {
     const lines: string[] = [];
     lines.push("📊 *Fim do dia* — o resumo de hoje:");
     lines.push("");
-    lines.push(`🛒 Vendas: ${brl(day.revenue)}${Number(day.orders) > 0 ? ` (${day.orders} pedido(s))` : ""}`);
+    // Varejo com lojas: a venda vive no fechamento por LOJA, não em pedidos — o total de pedidos (R$ 0,00)
+    // não é "vendeu zero", é "não calculado aqui". Mostra "—" em vez de inventar zero.
+    let retail = false;
+    try { retail = Number((db.prepare("SELECT COUNT(*) AS c FROM retail_stores WHERE organization_id = ? AND active = 1").get(orgId) as any)?.c) > 0; } catch { /* sem varejo */ }
+    if (retail && !(Number(day.orders) > 0)) {
+      lines.push("🛒 Vendas: — (nesta mensagem não há venda de loja; veja o fechamento por loja)");
+    } else {
+      lines.push(`🛒 Vendas: ${brl(day.revenue)}${Number(day.orders) > 0 ? ` (${day.orders} pedido(s))` : ""}`);
+    }
     lines.push(`💵 Entrou no caixa: ${brl(sum?.realizadoHoje)}`);
-    lines.push(`📈 Margem estimada: ${brl(day.profit)}`);
+    lines.push(`📈 Margem estimada: ${retail && !(Number(day.orders) > 0) ? "—" : brl(day.profit)}`);
+    let attn = 0;
+    try { attn = BusinessHealthService.attention(orgId).count; } catch { /* best-effort */ }
     if (aReceber > 0) {
       lines.push("");
       lines.push(`Ainda há ${brl(aReceber)} a receber em aberto. Responda *SIM* que amanhã cedo eu te lembro de cobrar. 💬`);
     } else {
       lines.push("");
-      lines.push("Nada em aberto por hoje. Bom descanso! 🌙");
+      // "Nada em aberto" só vale quando a Central de Saúde também não tem assunto aberto.
+      lines.push(attn > 0
+        ? `Nada a receber em aberto, mas ${attn} ${attn === 1 ? "assunto precisa" : "assuntos precisam"} de atenção na Central de Saúde. 🌙`
+        : "Nada em aberto por hoje. Bom descanso! 🌙");
     }
     return { text: lines.join("\n"), hasReceivables: aReceber > 0 };
   }

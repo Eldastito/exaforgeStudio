@@ -2398,6 +2398,20 @@ function ClosingsTab() {
   const [bridge, setBridge] = useState<boolean | null>(null);
   const [moneyAudit, setMoneyAudit] = useState<any | null>(null);
   const [auditing, setAuditing] = useState(false);
+  // Gerente de loja = admin COM loja atribuída: não mexe na config da rede (o servidor responde 403). Desconhecido → trata como rede
+  // (o servidor continua sendo a trava; aqui só evita oferecer botão que vai dar erro).
+  const [scopeInfo, setScopeInfo] = useState<{ unrestricted?: boolean } | null>(null);
+  const isNetwork = isOwnerAdmin && scopeInfo?.unrestricted !== false;
+  // Política do dono: o gerente só aprova fechamento se o dono liberar (padrão: não).
+  const [mgrApprove, setMgrApprove] = useState<boolean | null>(null);
+  const canApprove = isOwnerAdmin && (isNetwork || mgrApprove === true);
+  const toggleMgrApprove = async () => {
+    const next = !mgrApprove;
+    const res = await apiFetch('/api/retailops/closing-approval-policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ managerCanApprove: next }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { setMgrApprove(!!d.managerCanApprove); toast.success(d.managerCanApprove ? 'Gerentes agora podem aprovar o fechamento da própria loja.' : 'Só você aprova o fechamento. Gerentes continuam informando.'); }
+    else toast.error(d.error || 'Falha ao alterar quem aprova o fechamento.');
+  };
 
   // Conferência de valores da data: abre lado a lado informado × Alterdata ×
   // PDV × manual × ranking, com deltas e indícios (só dono/admin — é dinheiro).
@@ -2444,11 +2458,15 @@ function ClosingsTab() {
     setMoneyAudit(null); // conferência é da data carregada — trocar a data limpa
     setLoading(true);
     try {
-      const [st, cl, br] = await Promise.all([
+      const [st, cl, br, sc, pol] = await Promise.all([
         apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({})),
         apiFetch(`/api/retailops/closings?date=${date}`).then(r => r.json()).catch(() => ({})),
         apiFetch('/api/retailops/revenue-bridge').then(r => r.json()).catch(() => ({})),
+        apiFetch('/api/retailops/store-scope/me').then(r => r.json()).catch(() => null),
+        isOwnerAdmin ? apiFetch('/api/retailops/closing-approval-policy').then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null),
       ]);
+      setScopeInfo(sc && typeof sc.unrestricted === 'boolean' ? sc : null);
+      setMgrApprove(pol && typeof pol.managerCanApprove === 'boolean' ? pol.managerCanApprove : null);
       setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
       setClosings(Array.isArray(cl?.closings) ? cl.closings : (Array.isArray(cl) ? cl : []));
       setBridge(!!br?.enabled);
@@ -2468,7 +2486,7 @@ function ClosingsTab() {
   const setStatus = async (c: any, action: 'approve' | 'reject') => {
     const res = await apiFetch(`/api/retailops/closings/${c.id}/${action}`, { method: 'POST' });
     if (res.ok) { toast.success(action === 'approve' ? 'Fechamento aprovado.' : 'Fechamento rejeitado.'); load(); }
-    else toast.error('Falha ao atualizar o fechamento.');
+    else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao atualizar o fechamento.'); }
   };
   // CLOSE-003: apaga um fechamento errado (status/informado) E a cota do dia
   // dessa loja — a coluna Cota da tela vem do snapshot do fechamento.
@@ -2483,12 +2501,12 @@ function ClosingsTab() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <label className="text-xs text-zinc-400">Data
           <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ml-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
         </label>
         <button onClick={load} className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><RefreshCw className="w-3.5 h-3.5" /> Atualizar</button>
-        <button
+        {isNetwork && <button
           onClick={async () => {
             const res = await apiFetch('/api/retailops/quotas/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, apply: true }) });
             const d = await res.json().catch(() => ({}));
@@ -2506,7 +2524,7 @@ function ClosingsTab() {
           className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20"
         >
           Sugerir cotas (PDV)
-        </button>
+        </button>}
         {isOwnerAdmin && (
           <button
             onClick={auditMoney}
@@ -2517,19 +2535,33 @@ function ClosingsTab() {
             {auditing ? 'Conferindo…' : 'Conferir números'}
           </button>
         )}
-        {bridge !== null && (
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+        {isNetwork && mgrApprove !== null && (
+          <button
+            onClick={toggleMgrApprove}
+            title={mgrApprove
+              ? 'Ligado: o gerente de cada loja aprova/rejeita o fechamento da PRÓPRIA loja. Clique para voltar a ser só você.'
+              : 'Desligado: o gerente informa o fechamento, mas só você aprova. Clique para liberar o gerente a aprovar o da própria loja.'}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${mgrApprove ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}
+          >
+            <span className={`inline-block w-2 h-2 rounded-full ${mgrApprove ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+            Gerente aprova fechamento: {mgrApprove ? 'sim' : 'não'}
+          </button>
+        )}
+        {isNetwork && bridge !== null && (
           <button
             onClick={toggleBridge}
             title={bridge
               ? 'Ligado: os fechamentos aprovados/conciliados contam como faturamento no Diretor IA / Caixa / DRE. Clique para desligar.'
               : 'Desligado: o faturamento das lojas fica só na Operação da Rede. Clique para o Diretor IA / Caixa enxergarem a receita.'}
-            className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${bridge ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${bridge ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}
           >
             <span className={`inline-block w-2 h-2 rounded-full ${bridge ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
             Faturamento no Diretor {bridge ? 'ligado' : 'desligado'}
           </button>
         )}
-        <button onClick={() => setStoreModal({ store: null })} className={`inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 ${bridge === null ? 'ml-auto' : ''}`}><Plus className="w-4 h-4" /> Nova loja</button>
+        {isNetwork && <button onClick={() => setStoreModal({ store: null })} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Nova loja</button>}
+        </div>
       </div>
 
       {moneyAudit && (
@@ -2588,7 +2620,7 @@ function ClosingsTab() {
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
           <p className="text-sm text-zinc-500">Nenhuma loja cadastrada na rede ainda.</p>
           <p className="mt-1 text-[12px] text-zinc-600">Cadastre as lojas (filiais) para registrar o fechamento diário, apurar comissão e conferir divergências.</p>
-          <button onClick={() => setStoreModal({ store: null })} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Cadastrar primeira loja</button>
+          {isNetwork && <button onClick={() => setStoreModal({ store: null })} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"><Plus className="w-4 h-4" /> Cadastrar primeira loja</button>}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -2622,6 +2654,7 @@ function ClosingsTab() {
                       <div className="flex items-center gap-2">
                         <span>{s.name}{s.code ? <span className="text-zinc-500"> · {s.code}</span> : null}</span>
                         {!s.active && <span className="text-[10px] rounded-full border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-zinc-400">inativa</span>}
+                        {isNetwork && <>
                         <button onClick={() => setStoreModal({ store: s })} title="Editar loja" className="text-[11px] text-zinc-500 hover:text-zinc-300">editar</button>
                         <button onClick={() => toggleActive(s)} title={s.active ? 'Desativar loja' : 'Reativar loja'} className="text-[11px] text-zinc-500 hover:text-zinc-300">{s.active ? 'desativar' : 'reativar'}</button>
                         <button
@@ -2635,6 +2668,7 @@ function ClosingsTab() {
                           title="Excluir loja duplicada (unifica o histórico na outra loja de mesmo código)"
                           className="text-[11px] text-rose-400/80 hover:text-rose-300"
                         >excluir</button>
+                        </>}
                       </div>
                     </td>
                     <td className="px-3 py-2">
@@ -2652,7 +2686,7 @@ function ClosingsTab() {
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => openInform(s)} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-200 hover:bg-zinc-800">{c && c.informed_total != null ? 'Editar' : 'Informar'}</button>
-                        {c && ['received', 'extracted', 'needs_review'].includes(c.status) && (
+                        {c && canApprove && ['received', 'extracted', 'needs_review'].includes(c.status) && (
                           <>
                             <button onClick={() => setStatus(c, 'approve')} title="Aprovar" className="rounded bg-emerald-600/90 px-1.5 py-0.5 text-white hover:bg-emerald-500"><Check className="w-3.5 h-3.5" /></button>
                             <button onClick={() => setStatus(c, 'reject')} title="Rejeitar" className="rounded border border-red-500/40 px-1.5 py-0.5 text-red-300 hover:bg-red-500/10"><X className="w-3.5 h-3.5" /></button>

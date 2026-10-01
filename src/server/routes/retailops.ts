@@ -11,6 +11,7 @@ import fs from "fs";
 import path from "path";
 import { randomUUID } from "node:crypto";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
+import { todaySP } from "../spDate.js";
 import { RetailStoreService } from "../RetailStoreService.js";
 import { RetailStoreCostService, FIXED_COST_CATEGORIES, VARIABLE_COST_CATEGORIES } from "../RetailStoreCostService.js";
 import { RetailQuotaService, RetailClosingService, RetailTaskService, RetailResponsibleService } from "../RetailOpsService.js";
@@ -75,7 +76,7 @@ const router = Router();
 
 const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-const today = (req: AuthRequest) => String(req.query.date || new Date().toISOString().slice(0, 10));
+const today = (req: AuthRequest) => String(req.query.date || todaySP());
 
 /**
  * Envelope de erro das telas analíticas (PDR TOULON, Fatia 4C / PERF-006/007).
@@ -1211,7 +1212,7 @@ router.post("/sellers/:sellerId/unmerge", requireRole("owner", "admin"), (req: A
 router.get("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const date = String(req.query.date || new Date().toISOString().slice(0, 10));
+  const date = String(req.query.date || todaySP());
   res.json({ date, stores: RetailSellerIdentityService.assignmentsOn(orgId, req.params.sellerId, date), storeOn: RetailSellerIdentityService.storeOn(orgId, req.params.sellerId, date) });
 });
 router.post("/sellers/:sellerId/assignments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
@@ -1768,7 +1769,7 @@ router.post("/closings/scan", (req: AuthRequest, res): any => {
     const file = (req as any).file;
     if (!file) return res.status(400).json({ error: "Nenhuma imagem enviada." });
     const storeId = String(req.body?.storeId || "");
-    const date = String(req.body?.date || new Date().toISOString().slice(0, 10));
+    const date = String(req.body?.date || todaySP());
     if (!storeId) return res.status(400).json({ error: "storeId é obrigatório" });
     if (!RetailStoreService.get(orgId, storeId)) return res.status(404).json({ error: "store_not_found" });
     // CLOSE-002: trava — loja de folga geral no dia não recebe fechamento nem por foto.
@@ -2199,7 +2200,7 @@ router.get("/seller-scoreboard", (req: AuthRequest, res): any => {
   if (!RetailStoreScopeService.canAccessStore(orgId, req.user?.userId, req.user?.role, storeId)) {
     return res.status(403).json({ error: "Sem permissão para esta loja." });
   }
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   try {
     const board = RetailCommissionRaceService.sellerPeriodScoreboard(orgId, storeId, date);
     // Preferência da empresa: esconder a coluna QUINZENA (a quinzena segue
@@ -2222,7 +2223,7 @@ router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
   if (!RetailStoreScopeService.canAccessStore(orgId, req.user?.userId, req.user?.role, storeId)) {
     return res.status(403).json({ error: "Sem permissão para esta loja." });
   }
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   try { res.json(RetailCommissionRaceService.sellerGoalSignals(orgId, storeId, date)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
@@ -2231,7 +2232,7 @@ router.get("/seller-goal-signals", (req: AuthRequest, res): any => {
 router.get("/afternoon-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   try { const snapshot = RetailAfternoonBriefService.snapshot(orgId, date); res.json({ snapshot, text: RetailAfternoonBriefService.text(snapshot), enabled: RetailAfternoonBriefService.enabled(orgId) }); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
@@ -2245,7 +2246,7 @@ router.put("/afternoon-brief/enabled", requireRole("owner", "admin"), (req: Auth
 router.get("/day-brief", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   try {
     const night = RetailDayBriefService.nightSnapshot(orgId, date);
     res.json({ morning: RetailDayBriefService.morningQuotas(orgId, date), night, nightText: RetailDayBriefService.nightText(night), nightEnabled: RetailDayBriefService.enabled(orgId) });
@@ -2262,7 +2263,7 @@ router.put("/night-brief/enabled", requireRole("owner", "admin"), (req: AuthRequ
 router.get("/seller-goal-streaks", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   try {
     const a = SellerGoalStreakService.assess(orgId, date, { monthsBack: req.query.monthsBack ? Number(req.query.monthsBack) : 6 });
     res.json({ ...a, briefText: SellerGoalStreakService.briefText(a), alertsEnabled: SellerGoalStreakService.enabled(orgId) });
@@ -2271,7 +2272,7 @@ router.get("/seller-goal-streaks", requireRole("owner", "admin"), (req: AuthRequ
 router.post("/seller-goal-streaks/publish", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(SellerGoalStreakService.publish(orgId, new Date().toISOString().slice(0, 10))); }
+  try { res.json(SellerGoalStreakService.publish(orgId, todaySP())); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 router.put("/seller-goal-streaks/alerts", requireRole("owner", "admin"), (req: AuthRequest, res): any => {

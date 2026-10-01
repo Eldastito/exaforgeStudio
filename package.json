@@ -565,6 +565,7 @@
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",
     "test:unknown-not-zero": "tsx scripts/test-unknown-not-zero.ts",
     "test:fase1-polish": "tsx scripts/test-fase1-polish.ts",
+    "test:fase1-routes": "tsx scripts/test-fase1-routes.ts",
     "test:retail-questions": "tsx scripts/test-retail-questions.ts",
     "test:commission-import": "tsx scripts/test-commission-import.ts",
     "test:seller-goal-streak": "tsx scripts/test-seller-goal-streak.ts",

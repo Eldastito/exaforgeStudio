@@ -335,7 +335,8 @@ export class BusinessHealthService {
       : `${attention.count} ${attention.count === 1 ? "assunto precisa" : "assuntos precisam"} de atenção.`;
     else if (priorities[0]) synthesis = `${st.triggers[0]?.label || "Há pontos de atenção."} Comece por: ${priorities[0].title.toLowerCase()}.`;
     else synthesis = st.triggers[0]?.label || "Há pontos de atenção.";
-    const statusLabel = label[st.status];
+    // "Saudável" aqui é o status do CAIXA; com assunto aberto o rótulo não pode dizer "Saudável" (F1.7a).
+    const statusLabel = st.status === "saudavel" && attention.count > 0 ? "Atenção" : label[st.status];
     const dataQuality = this.dataQuality(orgId);
     const narrative = this.narrative(orgId, { statusLabel, synthesis, priorities, dataQuality });
     return {

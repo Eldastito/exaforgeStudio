@@ -238,7 +238,8 @@ router.get("/insights/header", (req: AuthRequest, res): any => {
       WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${storeId ? " AND c.store_id = ?" : ""}`
   ).all(...(storeId ? [orgId, date, storeId] : [orgId, date])) as any[];
   const scored = rows
-    .filter((r) => Number(r.quota) > 0)
+    // Fechamento de valor 0 = aguardando a folha: fora do ranking (senão virava "-100%" falso).
+    .filter((r) => Number(r.quota) > 0 && Number(r.realized) > 0)
     .map((r) => ({
       storeId: r.store_id, storeName: r.store_name,
       realized: Number(r.realized) || 0, quota: Number(r.quota) || 0,
@@ -246,7 +247,8 @@ router.get("/insights/header", (req: AuthRequest, res): any => {
     }))
     .sort((a, b) => b.variancePercent - a.variancePercent);
   const top3 = scored.slice(0, 3);
-  const bottom3 = scored.slice(-3).reverse();
+  // Sem repetir no "Bottom" quem já está no "Top" (com poucas lojas a mesma aparecia nos dois).
+  const bottom3 = scored.slice(Math.max(top3.length, scored.length - 3)).reverse();
   res.json({
     date, storeId, daily, ranking: { top3, bottom3, ranked: scored.length, total: daily.activeStores },
   });

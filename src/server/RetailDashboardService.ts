@@ -31,10 +31,16 @@ export class RetailDashboardService {
         WHERE c.organization_id = ? AND c.closing_date = ? AND c.status != 'rejected'${storeId ? " AND c.store_id = ?" : ""}`
     ).all(...args) as any[];
     let storesAbove = 0, storesBelow = 0;
+    // Fechamento com valor 0 é "aguardando" (a folha ainda não chegou), não "vendeu R$ 0":
+    // sem isso a loja entrava como "abaixo da cota" e o desvio da rede ficava inflado.
+    let closedStores = 0, comparableStores = 0, realizedComparable = 0, quotaOfClosed = 0;
     for (const r of cmp) {
+      if (num(r.informed_total) <= 0) continue;
+      closedStores++;
       // Fechamento SEM cota não é "loja na cota" (0 ≥ 0 contava como acima e o
       // card inflava): só entra na conta quem tem cota do dia cadastrada.
       if (num(r.quota) <= 0) continue;
+      comparableStores++; realizedComparable += num(r.informed_total); quotaOfClosed += num(r.quota);
       if (num(r.informed_total) >= num(r.quota)) storesAbove++; else storesBelow++;
     }
 
@@ -53,6 +59,10 @@ export class RetailDashboardService {
       quotaTotal, realized, variance: realized - quotaTotal,
       variancePercent: quotaTotal > 0 ? ((realized - quotaTotal) / quotaTotal) * 100 : 0,
       activeStores, storesAbove, storesBelow,
+      // Desvio só entre lojas que JÁ têm fechamento com cota (null = nada a comparar — nunca R$ 0).
+      closedStores, comparableStores,
+      comparableVariance: comparableStores > 0 ? realizedComparable - quotaOfClosed : null,
+      comparableVariancePercent: comparableStores > 0 && quotaOfClosed > 0 ? ((realizedComparable - quotaOfClosed) / quotaOfClosed) * 100 : null,
       pendingClosings: pendBy.fechamento, pendingMalote: pendBy.malote, pendingScale: pendBy.escala,
       divergences, negativeStock,
     };
@@ -88,6 +98,8 @@ export class RetailDashboardService {
       // Cota do dia: snapshot do fechamento; senão a cota viva da loja.
       const cota = c && num(c.quota_amount) > 0 ? num(c.quota_amount) : (quotaToday.get(s.id) || 0);
       let dinheiro = 0;
+      // Fechamento SEM detalhe de pagamento: o dinheiro é DESCONHECIDO (não "R$ 0,00 em dinheiro").
+      let dinheiroKnown = false;
       // Forma de pagamento POR LOJA (pedido do cliente: "individual e no total").
       // O dado já é capturado no fechamento detalhado; antes só o total abria por
       // bandeira. Aqui expomos a mesma quebra em CADA loja.
@@ -97,6 +109,7 @@ export class RetailDashboardService {
         try {
           const d = JSON.parse(c.details_json) || {};
           dinheiro = num(d.dinheiro);
+          dinheiroKnown = d.dinheiro != null;
           sPix = num(d.pix); sVoucher = num(d.voucher); sTroca = num(d.troca); sOutros = num(d.outros);
           tDinheiro += num(d.dinheiro); tPix += num(d.pix); tVoucher += num(d.voucher); tTroca += num(d.troca); tOutros += num(d.outros);
           for (const [k, v] of Object.entries(d.credito || {})) { const val = num(v); sCredito[k] = r2((sCredito[k] || 0) + val); sTotCred += val; credito[k] = r2((credito[k] || 0) + val); tCredito += val; }
@@ -106,16 +119,23 @@ export class RetailDashboardService {
       return {
         storeId: s.id, storeName: s.name, dinheiro: r2(dinheiro), venda: r2(venda), cota: r2(cota),
         desvio: r2(venda - cota), cotaNext: r2(quotaNext.get(s.id) || 0), hasClosing: !!c,
+        // Sem fechamento (ou fechamento de valor 0) = aguardando: o número acima é só preenchimento, não "vendeu R$ 0".
+        awaiting: !c || venda <= 0, dinheiroKnown,
         byMethod: { dinheiro: r2(dinheiro), pix: r2(sPix), voucher: r2(sVoucher), troca: r2(sTroca), outros: r2(sOutros), credito: sCredito, debito: sDebito, totalCredito: r2(sTotCred), totalDebito: r2(sTotDeb) },
       };
     });
 
     const totalVenda = r2(rows.reduce((a, r) => a + r.venda, 0));
     const totalCota = r2(rows.reduce((a, r) => a + r.cota, 0));
+    // Resultado do dia só entre as lojas que JÁ fecharam e têm cota; nenhuma → null (nunca "Bateu R$ 0,00").
+    const cmpRows = rows.filter((r) => !r.awaiting && r.cota > 0);
+    const desvioComparable = cmpRows.length ? r2(cmpRows.reduce((a, r) => a + r.venda - r.cota, 0)) : null;
     return {
       date, nextDate, stores: rows,
       total: {
         dinheiro: r2(tDinheiro), venda: totalVenda, cota: totalCota, desvio: r2(totalVenda - totalCota),
+        closedStores: rows.filter((r) => !r.awaiting).length, desvioComparable,
+        dinheiroKnown: rows.some((r) => !r.awaiting && r.dinheiroKnown),
         cotaNext: r2(rows.reduce((a, r) => a + r.cotaNext, 0)),
         byMethod: { dinheiro: r2(tDinheiro), pix: r2(tPix), voucher: r2(tVoucher), troca: r2(tTroca), outros: r2(tOutros), credito, debito, totalCredito: r2(tCredito), totalDebito: r2(tDebito) },
       },

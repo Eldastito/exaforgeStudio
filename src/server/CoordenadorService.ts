@@ -24,7 +24,7 @@ export class CoordenadorService {
 
   private static resolveUser(orgId: string, fromNumber: string): any | null {
     const users = db.prepare(
-      "SELECT id, name, email, phone, role FROM users WHERE organization_id = ? AND phone IS NOT NULL AND phone != ''"
+      "SELECT id, name, email, phone, role FROM users WHERE organization_id = ? AND phone IS NOT NULL AND phone != '' AND COALESCE(global_status,'active') = 'active'"
     ).all(orgId) as any[];
     return users.find(u => phoneMatches(u.phone, fromNumber)) || null;
   }

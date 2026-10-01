@@ -18,12 +18,9 @@ import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
  * decide o QUÊ e o QUANDO, o que o torna testável sem rede.
  */
 
-// pt-BR com separador de milhar ("R$ 1.426.635,58") — antes saía "R$ 1426635,58", ilegível e inconsistente com "R$ 5.700".
-export const brl = (n: any) => {
-  const v = Number(n) || 0;
-  const [int, dec] = Math.abs(v).toFixed(2).split(".");
-  return `R$ ${v < 0 ? "-" : ""}${int.replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${dec}`;
-};
+// pt-BR com separador de milhar — implementação única em brlFormat.ts (reexportada: há quem importe daqui).
+import { brl } from "./brlFormat.js";
+export { brl };
 
 export interface TutorSendResult {
   sent: boolean;
@@ -66,13 +63,17 @@ export class BusinessTutorService {
     return d;
   }
 
-  /** Número do dono para o tutor: o configurado; senão o telefone do usuário dono/admin. */
+  /**
+   * Número do dono para o tutor: o configurado; senão o telefone do dono (ou, na falta, de um admin ATIVO). O resumo traz caixa, estoque
+   * e prioridades da empresa inteira — antes o fallback aceitava QUALQUER usuário com telefone (vendedor/atendente inclusive) quando o
+   * dono não tinha o seu cadastrado.
+   */
   static ownerPhone(orgId: string): string {
     const s = db.prepare("SELECT tutor_wa_phone FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
     const configured = onlyDigits(s?.tutor_wa_phone);
     if (configured) return this.withBrDdi(configured);
     const u = db.prepare(
-      "SELECT phone FROM users WHERE organization_id = ? AND phone IS NOT NULL AND phone <> '' ORDER BY (role='owner') DESC, (role='admin') DESC, created_at ASC LIMIT 1"
+      "SELECT phone FROM users WHERE organization_id = ? AND role IN ('owner', 'admin') AND COALESCE(global_status, 'active') = 'active' AND phone IS NOT NULL AND phone <> '' ORDER BY (role='owner') DESC, created_at ASC LIMIT 1"
     ).get(orgId) as any;
     return this.withBrDdi(onlyDigits(u?.phone));
   }

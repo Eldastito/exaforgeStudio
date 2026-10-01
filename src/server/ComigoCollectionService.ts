@@ -15,7 +15,7 @@ import { randomUUID } from "crypto";
  * volta); só não ganha fiado novo.
  */
 
-const brl = (n: number) => `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 const firstName = (name?: string) => String(name || "").trim().split(/\s+/)[0] || "tudo bem";
 
 // Régua suave — o tom escala com carinho, nunca vira ameaça (ADR-113 D3).

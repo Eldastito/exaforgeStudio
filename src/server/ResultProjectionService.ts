@@ -23,6 +23,7 @@
 import db from "./db.js";
 import { ManagerialDreService } from "./ManagerialDreService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { brl } from "./brlFormat.js";
 
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -121,8 +122,6 @@ export class ResultProjectionService {
     else if (elapsedDays < 5) confidence = "insufficient_elapsed";
     else if (elapsedDays < totalDays * 0.5) confidence = "medium";
     else confidence = "high";
-
-    const brl = (n: number) => `R$ ${n.toFixed(2).replace(".", ",")}`;
     const note = confidence === "actual"
       ? `Mês fechado: resultado ${brl(projResultado)} (ponto de equilíbrio ${breakEvenRevenue != null ? brl(breakEvenRevenue) : "—"}).`
       : `No ritmo atual (${elapsedDays}/${totalDays} dias), o mês projeta ${brl(projResultado)} de resultado — ${onTrack ? "acima" : "ABAIXO"} do equilíbrio${breakEvenRevenue != null ? ` (${brl(breakEvenRevenue)})` : ""}. ${confidence === "insufficient_elapsed" ? "Poucos dias decorridos — confiança baixa." : "Premissa: ritmo constante."}`;
@@ -153,7 +152,6 @@ export class ResultProjectionService {
       const actionable = (r.confidence === "medium" || r.confidence === "high")
         && r.projected.resultado != null && r.projected.resultado < 0;
       if (actionable) {
-        const brl = (n: number) => `R$ ${n.toFixed(2).replace(".", ",")}`;
         const faltam = r.totalDays - r.elapsedDays;
         BusinessSignalService.publish(orgId, {
           domain: "result_projection",

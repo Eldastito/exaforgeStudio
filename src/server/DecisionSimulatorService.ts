@@ -234,6 +234,6 @@ export class DecisionSimulatorService {
   }
 }
 
-function brl(n: any): string { return `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`; }
+import { brl } from "./brlFormat.js";
 
 export default DecisionSimulatorService;

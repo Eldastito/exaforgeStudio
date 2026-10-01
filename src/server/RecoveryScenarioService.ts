@@ -1,4 +1,5 @@
 import { CashForecastService, ForecastWeek } from "./CashForecastService.js";
+import { brl } from "./brlFormat.js";
 
 /**
  * RecoveryScenarioService — Simulador de Recuperação + "quanto podemos prometer?" +
@@ -215,7 +216,7 @@ export class RecoveryScenarioService {
 
   /** Rascunho de mensagem (template determinístico — sem LLM; refino por IA é opcional/futuro). */
   private static draftMessage(x: { debtTotal: number; monthly: number; installments: number; down: number; feasible: boolean }): string {
-    const brl = (n: number) => `R$ ${round2(n).toFixed(2).replace(".", ",")}`;
+
     if (!x.feasible) {
       return "Olá! Reconhecemos a pendência e queremos regularizar. No momento nosso fluxo de caixa não comporta parcelas fixas — poderíamos conversar sobre um período de carência ou alongamento de prazo? Obrigado pela compreensão.";
     }

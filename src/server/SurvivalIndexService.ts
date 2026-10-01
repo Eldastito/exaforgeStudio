@@ -20,7 +20,7 @@ import { RetailImpactService } from "./RetailImpactService.js";
 
 const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
 const round1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
-const brl = (n: number) => `R$ ${(Number(n) || 0).toFixed(2).replace(".", ",")}`;
+import { brl } from "./brlFormat.js";
 const NEUTRAL = 50;
 
 interface Comp { key: string; label: string; weight: number; score: number; hasData: boolean; note: string }

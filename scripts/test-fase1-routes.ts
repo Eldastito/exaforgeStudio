@@ -159,6 +159,24 @@ async function main() {
   for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) noRole.push(`${m} ${p.split("?")[0]}→${r.status}`); }
   check("perfil comum (agent): também 403 em todas", noRole.length === 0, noRole.join(" | "));
 
+  // ── finanças das lojas (resultado, custos, aluguel, taxas de maquininha): leitura E escrita, só rede ──
+  const finRoutes: Array<[string, string, any?]> = [
+    ["GET", `/stores-result?period=2026-09`], ["GET", `/stores/${carioca}/result?period=2026-09`],
+    ["GET", `/stores/${carioca}/costs`], ["PUT", `/stores/${carioca}/costs`, { costs: {} }],
+    ["GET", `/stores/${carioca}/variable-costs`], ["PUT", `/stores/${carioca}/variable-costs`, { costs: {} }],
+    ["GET", `/stores/${carioca}/financial-settings`], ["PUT", `/stores/${carioca}/financial-settings`, {}],
+    ["GET", `/stores/${carioca}/pos-fees`], ["PUT", `/stores/${carioca}/pos-fees`, {}], ["GET", `/stores/${carioca}/pos-fees/expected?${range}`],
+  ];
+  const finLeaks = [];
+  for (const [m, p, b] of finRoutes) { const r = await call(m, p, A, "admin", b, GER); if (r.status !== 403) finLeaks.push(`${m} ${p.replace(carioca, ":id").split("?")[0]}→${r.status}`); }
+  check(`gerente-admin: as ${finRoutes.length} rotas de finanças das lojas (resultado, custos, aluguel, configuração financeira, taxas) respondem 403 — leitura E escrita`, finLeaks.length === 0, finLeaks.join(" | "));
+  const finOk = [];
+  for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of finRoutes) { const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) finOk.push(`${who[0]} ${m} ${p.replace(carioca, ":id").split("?")[0]}→${r.status}`); }
+  check("owner e co-admin sem loja: nenhuma delas é barrada (0-regressão)", finOk.length === 0, finOk.join(" | "));
+  const finAgent = [];
+  for (const [m, p, b] of finRoutes) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) finAgent.push(`${m} ${p.replace(carioca, ":id").split("?")[0]}→${r.status}`); }
+  check("perfil comum (agent): também 403 em todas", finAgent.length === 0, finAgent.join(" | "));
+
   const gh = await call("GET", `/insights/header?date=${D}`, A, "admin", undefined, GER);
   check("gerente: o cabeçalho do Insights é só da loja dele (cota 1.300, vendido 1.358,70, 1 loja) — não da rede (9.500)", gh.status === 200 && gh.body?.daily?.quotaTotal === 1300 && Math.abs(gh.body.daily.realized - 1358.7) < 0.01 && gh.body.daily.activeStores === 1 && gh.body.scoped === true, JSON.stringify({ q: gh.body?.daily?.quotaTotal, r: gh.body?.daily?.realized, n: gh.body?.daily?.activeStores, scoped: gh.body?.scoped }));
   check("gerente: o ranking do Insights só traz a loja dele", [...(gh.body?.ranking?.top3 || []), ...(gh.body?.ranking?.bottom3 || [])].every((x: any) => x.storeName === "Carioca"), JSON.stringify(gh.body?.ranking));

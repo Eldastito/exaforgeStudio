@@ -187,7 +187,7 @@ export class BusinessSignalService {
   }
 
   private static setStatus(orgId: string, id: string, status: string): { ok: boolean } {
-    const r = db.prepare("UPDATE business_signals SET status = ? WHERE id = ? AND organization_id = ?").run(status, id, orgId);
+    const r = db.prepare("UPDATE business_signals SET status = ?, auto_resolved = 0 WHERE id = ? AND organization_id = ?").run(status, id, orgId);
     return { ok: r.changes > 0 };
   }
   static acknowledge(orgId: string, id: string) { return this.setStatus(orgId, id, "acknowledged"); }
@@ -205,7 +205,7 @@ export class BusinessSignalService {
    * deixou de valer). No-op se não existe ou já foi fechado. Isolado por org.
    */
   static resolveByDedupe(orgId: string, dedupeKey: string): { ok: boolean } {
-    const r = db.prepare("UPDATE business_signals SET status = 'resolved' WHERE organization_id = ? AND dedupe_key = ? AND status = 'open'").run(orgId, dedupeKey);
+    const r = db.prepare("UPDATE business_signals SET status = 'resolved', auto_resolved = 1 WHERE organization_id = ? AND dedupe_key = ? AND status = 'open'").run(orgId, dedupeKey);
     return { ok: r.changes > 0 };
   }
 
@@ -214,8 +214,9 @@ export class BusinessSignalService {
    * toca `resolved` — NUNCA reabre um `dismissed` (o humano disse "não me interessa";
    * respeitar isso). Complemento do `resolveByDedupe` p/ detectores self-healing. Isolado.
    */
-  static reopenByDedupe(orgId: string, dedupeKey: string): { ok: boolean } {
-    const r = db.prepare("UPDATE business_signals SET status = 'open' WHERE organization_id = ? AND dedupe_key = ? AND status = 'resolved'").run(orgId, dedupeKey);
+  static reopenByDedupe(orgId: string, dedupeKey: string, opts: { onlyAutoResolved?: boolean } = {}): { ok: boolean } {
+    // `onlyAutoResolved`: só reabre o que o PRÓPRIO detector fechou (S6) — o que uma pessoa resolveu fica resolvido.
+    const r = db.prepare(`UPDATE business_signals SET status = 'open', auto_resolved = 0 WHERE organization_id = ? AND dedupe_key = ? AND status = 'resolved'${opts.onlyAutoResolved ? " AND auto_resolved = 1" : ""}`).run(orgId, dedupeKey);
     return { ok: r.changes > 0 };
   }
 

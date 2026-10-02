@@ -136,6 +136,33 @@ export class RetailDayBriefService {
     return { ...p, cota, atingimento: ratioMetric(p.venda, cota, { unit: "pct" }), cotaBasis: "meta_mensal" };
   }
 
+  /**
+   * S6 — o MÊS até ontem por loja, para o parcial das 16h (que só tem a meta do DIA): meta mensal cadastrada × fechamentos JÁ ENVIADOS
+   * do mês (1º até `date`-1). É FATO do que foi enviado — dia sem fechamento não vira "vendeu 0", e por isso não calcula atingimento %.
+   * Sem meta mensal → `goal` null (a linha não aparece). Isola por org.
+   */
+  static monthToDate(orgId: string, date: string): Map<string, { goal: number | null; sold: number; closedDays: number }> {
+    const monthStart = `${date.slice(0, 7)}-01`;
+    const out = new Map<string, { goal: number | null; sold: number; closedDays: number }>();
+    if (date <= monthStart) return out;                                   // dia 1: ainda não há mês fechado
+    const end = addDays(date, -1);
+    const off = officialSaleSql(officialSaleSourceOf(orgId));
+    const rows = db.prepare(
+      `SELECT store_id, closing_date, ${off} AS total FROM retail_daily_closings
+        WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND status IN ${CLOSED_OK}`,
+    ).all(orgId, monthStart, end) as any[];
+    const goals = RetailMonthlyGoalService.map(orgId, date.slice(0, 7));
+    for (const r of rows) {
+      const t = Number(r.total);
+      if (!Number.isFinite(t) || t <= 0) continue;
+      const cur = out.get(r.store_id) || { goal: goals.get(r.store_id) ?? null, sold: 0, closedDays: 0 };
+      cur.sold = round2(cur.sold + t); cur.closedDays += 1;
+      out.set(r.store_id, cur);
+    }
+    for (const [storeId, g] of goals) if (!out.has(storeId)) out.set(storeId, { goal: g, sold: 0, closedDays: 0 });
+    return out;
+  }
+
   static nightSnapshot(orgId: string, date: string): NightSnapshot {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date deve ser YYYY-MM-DD");
     const source = officialSaleSourceOf(orgId);

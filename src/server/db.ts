@@ -12305,6 +12305,9 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_retail_monthly_goals_month ON retail_store_monthly_goals (organization_id, month);
   `);
 
+  // S6 — distingue "resolvido pelo próprio detector" (auto) de "resolvido por uma pessoa": só o primeiro pode ser reaberto quando o problema volta.
+  try { db.exec(`ALTER TABLE business_signals ADD COLUMN auto_resolved INTEGER DEFAULT 0`); } catch(e){}
+
 };
 
 initDb();

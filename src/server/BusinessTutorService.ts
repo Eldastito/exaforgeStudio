@@ -241,7 +241,11 @@ export class BusinessTutorService {
     // `realizadoHoje` é um OBJETO ({inflow, outflow, net}) — antes ia inteiro pro brl() e saía SEMPRE "R$ 0,00", mesmo com dinheiro entrando.
     const tk = sum?.tracking || { receivables: true, payables: true, cashEvents: true };
     const entrouLabel = tk.cashBasis && tk.cashBasis !== "caixa" ? "Entradas registradas hoje" : "Entrou no caixa";
-    lines.push(`💵 ${entrouLabel}: ${tk.cashEvents ? brl(sum?.realizadoHoje?.inflow) : "— (o financeiro não recebe as vendas da loja)"}`);
+    // S7: sem saída lançada (base "vendas"/"entradas") o financeiro NÃO é o caixa real: o zero é fato (nada foi lançado hoje), mas lê como "a loja não vendeu" — então diz o que ele mede.
+    const semBaseDeCaixa = !!tk.cashBasis && tk.cashBasis !== "caixa";
+    const entrouHoje = Number(sum?.realizadoHoje?.inflow) || 0;
+    const nota = semBaseDeCaixa && entrouHoje === 0 ? " (só o que foi lançado no financeiro hoje — não é a venda da loja)" : "";
+    lines.push(`💵 ${entrouLabel}: ${tk.cashEvents ? brl(sum?.realizadoHoje?.inflow) + nota : "— (o financeiro não recebe as vendas da loja)"}`);
     lines.push(`📈 Margem estimada: ${retail && !(Number(day.orders) > 0) ? "—" : brl(day.profit)}`);
     let attn = 0;
     try { attn = BusinessHealthService.attention(orgId).count; } catch { /* best-effort */ }

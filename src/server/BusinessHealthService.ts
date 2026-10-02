@@ -96,7 +96,7 @@ export class BusinessHealthService {
     if (estoque && estoque.slowMoverCapital > 0) {
       const rev = LossMarginService.monthlyRevenue(orgId, new Date().toISOString().slice(0, 7));
       const material = rev > 0 ? estoque.slowMoverCapital >= 0.15 * rev : estoque.slowMoverCapital > 0;
-      if (material) triggers.push({ level: "atencao", code: "estoque_parado", label: `${brl(estoque.slowMoverCapital)} parados em estoque sem giro${estoque.slowMoverCount > 0 ? ` (${estoque.slowMoverCount} item${estoque.slowMoverCount > 1 ? "s" : ""})` : ""}.` });
+      if (material) triggers.push({ level: "atencao", code: "estoque_parado", label: `${brl(estoque.slowMoverCapital)} parados em estoque sem giro${estoque.slowMoverCount > 0 ? ` (${estoque.slowMoverCount} ${estoque.slowMoverCount > 1 ? "itens" : "item"})` : ""}.` });
     }
 
     const overall = (triggers.reduce<StatusLevel>((acc, t) => (SEVERITY[t.level] > SEVERITY[acc] ? t.level : acc), "saudavel"));

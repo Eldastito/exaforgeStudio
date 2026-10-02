@@ -129,6 +129,23 @@ const CATALOG: Record<string, Entry> = {
     title: "O resultado aparece, mas o caixa não acompanha", meaning: "Há lucro no papel sem o dinheiro correspondente entrar.",
     actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
   },
+  // ── Padrões recorrentes da loja (RetailPatternMemoryService — só os validados) ──
+  caixa_divergente_recorrente: {
+    title: (ev) => inStore(ev, "O caixa diverge do sistema com frequência"), meaning: "Nas últimas semanas, vários fechamentos da loja não bateram com o sistema.",
+    actionLabel: "Registrar e acompanhar", actionWillDo: "Cria uma tarefa para investigar por que o fechamento da loja diverge do sistema.", affected: "yes",
+  },
+  estoque_negativo_recorrente: {
+    title: (ev) => inStore(ev, "O saldo de estoque fica negativo com frequência"), meaning: "O mesmo tipo de divergência de estoque vem se repetindo na loja.",
+    actionLabel: "Registrar e acompanhar", actionWillDo: "Cria uma tarefa para achar por que as vendas saem sem entrada ou transferência lançada.", affected: "yes",
+  },
+  meta_nao_batida_recorrente: {
+    title: (ev) => inStore(ev, "A loja não bate a meta com frequência"), meaning: "Nas últimas semanas a loja ficou abaixo da meta várias vezes.",
+    actionLabel: "Rever a meta e a execução", actionWillDo: "Cria uma tarefa para rever a meta e o que está travando o resultado da loja.", affected: "yes",
+  },
+  fechamento_atrasado_recorrente: {
+    title: (ev) => inStore(ev, "O fechamento da loja chega atrasado com frequência"), meaning: "Vários fechamentos foram enviados depois do dia a que se referem.",
+    actionLabel: "Cobrar o fechamento no prazo", actionWillDo: "Cria uma tarefa para combinar com a loja o envio do fechamento no mesmo dia.", affected: "no",
+  },
   // ── Metas e pessoas ─────────────────────────────────────────────────────
   retail_store_below_quota: {
     title: (ev) => inStore(ev, "A loja está abaixo da meta"), meaning: "O resultado do período está atrás da meta combinada.",

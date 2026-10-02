@@ -4844,7 +4844,7 @@ function RaceSection({ stores }: { stores: any[] }) {
       </div>
       <p className="mt-1 text-[11px] text-zinc-500">O padrão da sua planilha: bateu a cota 1% · +10% 1,5% · +20% 2% · +30% 3% (vale a maior) · P.A ≥ 2,50 com cota · 1º/2º da semana · desvio de cota da rede · bloco do gerente. Cota individual vem do cadastro semanal ou da escala (cota da loja ÷ escalados). Ajuste tudo em “Configurar corrida”.</p>
 
-      <div className="mt-2"><SellerDuplicatesCard /></div>
+      <div className="mt-2"><UnidentifiedSellersCard /><SellerDuplicatesCard /></div>
 
       {/* Vendas SEM loja atribuída — não entram na corrida (por que "não confere"). */}
       {race && race.unassigned && (
@@ -6910,6 +6910,43 @@ function SellerScoreboardTab() {
 
 // `embedStoreId`: quando presente, o diretório roda EMBUTIDO (ex.: dentro da aba
 // Metas) — segue a loja de fora e esconde o próprio seletor/título.
+// S1b (PRD Fase 1 §3) — "vendedores a identificar": matrículas que vendem mas ainda não têm pessoa confirmada.
+// Nunca chuta nome: o dono digita (ou ignora). Some quando todas estão identificadas.
+function UnidentifiedSellersCard() {
+  const [items, setItems] = useState<any[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => {
+    apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (!items.length) return null;
+  const save = async (m: string) => {
+    const name = (names[m] || '').trim();
+    if (!name) return;
+    setBusy(m);
+    try {
+      const res = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(m)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      if (res.ok) { toast.success(`Matrícula ${m} agora é ${name}.`); setNames(n => ({ ...n, [m]: '' })); load(); } else toast.error('Não foi possível salvar.');
+    } finally { setBusy(null); }
+  };
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Users className="w-4 h-4 text-amber-400" /> Vendedores a identificar <span className="text-[11px] font-normal text-zinc-500">— {items.length} matrícula{items.length === 1 ? '' : 's'} vendendo sem nome confirmado</span></div>
+      <div className="mt-2 space-y-1.5">
+        {items.slice(0, 20).map((u: any) => (
+          <div key={u.matricula} className="flex flex-wrap items-center gap-2 text-[12px] text-zinc-300">
+            <span className="min-w-[210px]">{u.displayName}</span>
+            <span className="text-zinc-500">{u.sales} venda{u.sales === 1 ? '' : 's'}{u.lastSale ? ` · última ${String(u.lastSale).slice(0, 10)}` : ''}</span>
+            <input value={names[u.matricula] || ''} onChange={e => setNames(n => ({ ...n, [u.matricula]: e.target.value }))} placeholder="Nome da pessoa" className="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-100 text-[12px] w-44" />
+            <button disabled={busy === u.matricula || !(names[u.matricula] || '').trim()} onClick={() => save(u.matricula)} className="px-2 py-1 rounded-md bg-amber-600/80 hover:bg-amber-600 text-white text-[12px] disabled:opacity-40">Confirmar</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // F1.1c — "esses dois são a mesma pessoa?": cartão contextual (sem tela/menu novo). Só aparece quando o
 // sistema vê nome parecido entre vendedores e some quando o dono responde. Nunca funde sozinho.
 function SellerDuplicatesCard() {
@@ -6986,7 +7023,7 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
 
   return (
     <div>
-      {!embedStoreId && <SellerDuplicatesCard />}
+      {!embedStoreId && <><UnidentifiedSellersCard /><SellerDuplicatesCard /></>}
       <div className="mb-3 flex items-center gap-2 flex-wrap">
         {!embedStoreId && <span className="text-sm text-zinc-300">Vendedores da loja</span>}
         {!embedStoreId && (

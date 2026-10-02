@@ -12285,6 +12285,8 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_seller_goal_streak_enabled INTEGER DEFAULT 0`); } catch(e){}
   // Fechamento por loja: o gerente (admin COM loja) só aprova/rejeita o fechamento se o DONO permitir (default 0 = só o dono/co-admin sem loja).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_manager_can_approve INTEGER DEFAULT 0`); } catch(e){}
+  // Fusão de vendedor reversível: lotação movida/encerrada pela fusão guarda de quem veio, p/ o unmerge devolver (S1b).
+  try { db.exec(`ALTER TABLE retail_seller_store_assignments ADD COLUMN via_merge_of TEXT`); } catch(e){}
 
 };
 

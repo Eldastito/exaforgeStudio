@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Check, RefreshCw, Lightbulb } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
+import SignalBriefDialog from '@/src/components/SignalBriefDialog';
 
 // ============================================================================
 // Insights globais (ADR-136, kernel de inteligência empresarial).
@@ -64,6 +65,8 @@ function PrioritiesPanel() {
       else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao analisar.'); }
     } finally { setAnalyzing(false); }
   };
+  // "Entendi o que aconteceu… Quer que eu execute?": o botão abre o briefing; só o "Sim" chama o act (que cria a ação governada, como sempre).
+  const [briefing, setBriefing] = useState<any | null>(null);
   const act = async (p: any) => {
     if (!p?.signalId) return;
     const res = await apiFetch('/api/insights/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signalId: p.signalId }) });
@@ -150,7 +153,7 @@ function PrioritiesPanel() {
                   <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-indigo-200">{p.recommendedAction}</span>
                   {p.signalId && (acted[p.signalId]
                     ? <span className="inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
-                    : <button onClick={() => act(p)} title={p.presentation?.actionWillDo || 'Abre os detalhes para você decidir o que fazer.'} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">{p.presentation?.actionLabel || 'Ver detalhes e decidir'}</button>)}
+                    : <button onClick={() => setBriefing(p)} title={p.presentation?.actionWillDo || 'Abre os detalhes para você decidir o que fazer.'} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">{p.presentation?.actionLabel || 'Ver detalhes e decidir'}</button>)}
                 </div>
               </div>
             ))}
@@ -182,6 +185,7 @@ function PrioritiesPanel() {
           </div>
         )}
       </div>
+      {briefing && <SignalBriefDialog signal={briefing} onClose={() => setBriefing(null)} onConfirm={async () => { await act(briefing); setBriefing(null); }} />}
     </div>
   );
 }

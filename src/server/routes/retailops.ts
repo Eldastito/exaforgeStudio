@@ -100,6 +100,7 @@ import { RetailTransferService } from "../RetailTransferService.js";
 import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
+import { RetailMonthlyGoalService } from "../RetailMonthlyGoalService.js";
 import { RetailDayBriefService, DEFAULT_NIGHT_TIME } from "../RetailDayBriefService.js";
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
@@ -2345,6 +2346,30 @@ router.get("/day-brief", requireNetworkScope, (req: AuthRequest, res): any => {
     const night = RetailDayBriefService.nightSnapshot(orgId, date);
     res.json({ morning: RetailDayBriefService.morningQuotas(orgId, date), night, nightText: RetailDayBriefService.nightText(night), nightEnabled: RetailDayBriefService.enabled(orgId) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+// PRD Fase 1 §12 — meta MENSAL por loja/competência como dado (alimenta "Mês X / meta" do fechamento da noite). owner/co-admin sem loja.
+router.get("/monthly-goals", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : todaySP().slice(0, 7);
+  try {
+    const goals = RetailMonthlyGoalService.list(orgId, month);
+    const stores = (db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
+      .map((st) => ({ storeId: st.id, storeName: st.name, goalAmount: goals.find((g) => g.storeId === st.id)?.goalAmount ?? null }));
+    res.json({ month, stores });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.put("/monthly-goals", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailMonthlyGoalService.set(orgId, { storeId: String(req.body?.storeId || ""), month: String(req.body?.month || ""), goalAmount: req.body?.goalAmount }, req.user?.userId)); }
+  catch (e: any) { res.status(e.message === "Loja não encontrada." ? 404 : 400).json({ error: e.message }); }
+});
+router.delete("/monthly-goals", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ ok: RetailMonthlyGoalService.clear(orgId, String(req.body?.storeId || req.query.storeId || ""), String(req.body?.month || req.query.month || ""), req.user?.userId) }); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 router.put("/night-brief/enabled", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

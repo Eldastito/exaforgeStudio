@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 } from 'lucide-react';
+import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
@@ -5598,6 +5598,7 @@ function ScheduleTab() {
       {/* Cota MENSAL da loja → dividida por semana/dia respeitando folgas
           (planilha "MENSAL" do cliente). Grava a cota DIÁRIA da loja, de onde a
           cota por vendedor já deriva. */}
+      <MonthlyGoalsCard month={month} />
       {storeId && (
         <div className="mt-4">
           <MonthlyQuotaDistributePanel storeId={storeId} month={month} onApplied={loadQuotas} />
@@ -5639,6 +5640,55 @@ function ScheduleTab() {
             </table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// PRD Fase 1 §12 — META MENSAL por loja/competência (dado). Alimenta "Mês X / meta" do fechamento da noite. NÃO divide por dias:
+// a cota diária continua vindo da planilha/distribuição. Só aparece pra quem enxerga a rede (a rota recusa os demais).
+function MonthlyGoalsCard({ month }: { month: string }) {
+  const [rows, setRows] = useState<Array<{ storeId: string; storeName: string; goalAmount: number | null }> | null>(null);
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = useCallback(() => {
+    apiFetch(`/api/retailops/monthly-goals?month=${encodeURIComponent(month)}`).then(r => (r.ok ? r.json() : null)).then(d => {
+      if (d && Array.isArray(d.stores)) { setRows(d.stores); setVals({}); } else setRows(null);
+    }).catch(() => setRows(null));
+  }, [month]);
+  useEffect(() => { load(); }, [load]);
+  if (!rows || !rows.length) return null;
+  const save = async (storeId: string) => {
+    const v = parseMoneyBR(vals[storeId] || '');
+    if (!(v > 0)) { toast.error('Digite a meta do mês (maior que zero).'); return; }
+    setBusy(storeId);
+    try {
+      const res = await apiFetch('/api/retailops/monthly-goals', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month, goalAmount: v }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success('Meta mensal salva.'); load(); } else toast.error(d.error || 'Não foi possível salvar.');
+    } finally { setBusy(null); }
+  };
+  const clear = async (storeId: string) => {
+    setBusy(storeId);
+    try {
+      const res = await apiFetch('/api/retailops/monthly-goals', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month }) });
+      if (res.ok) { toast.success('Meta mensal removida.'); load(); } else toast.error('Não foi possível remover.');
+    } finally { setBusy(null); }
+  };
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2 text-sm font-medium text-zinc-200"><Target className="w-4 h-4 text-emerald-400" /> Meta mensal por loja — {month.slice(5)}/{month.slice(0, 4)}</div>
+      <p className="mb-2 text-[11px] text-zinc-500">É o “R$ X de R$ meta” do acumulado do mês no fechamento da noite. Não divide por dias: a cota diária continua vindo da planilha. Loja sem meta cadastrada continua usando a soma das cotas diárias.</p>
+      <div className="space-y-1.5">
+        {rows.map(r => (
+          <div key={r.storeId} className="flex flex-wrap items-center gap-2 text-[12px] text-zinc-300">
+            <span className="w-44 truncate">{r.storeName}</span>
+            <span className="w-32 text-zinc-400 tabular-nums">{r.goalAmount === null ? 'não cadastrada' : `R$ ${formatMoneyBR(r.goalAmount)}`}</span>
+            <input inputMode="decimal" placeholder="meta do mês" value={vals[r.storeId] || ''} onChange={e => setVals(v => ({ ...v, [r.storeId]: maskMoneyBRInput(e.target.value) }))} className="w-36 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
+            <button disabled={busy === r.storeId || !(vals[r.storeId] || '').trim()} onClick={() => save(r.storeId)} className="rounded-md bg-emerald-600/80 hover:bg-emerald-600 px-2 py-1 text-xs text-white disabled:opacity-40">Salvar</button>
+            {r.goalAmount !== null && <button disabled={busy === r.storeId} onClick={() => clear(r.storeId)} className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Remover</button>}
+          </div>
+        ))}
       </div>
     </div>
   );

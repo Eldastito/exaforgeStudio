@@ -12287,6 +12287,21 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_manager_can_approve INTEGER DEFAULT 0`); } catch(e){}
   // Fusão de vendedor reversível: lotação movida/encerrada pela fusão guarda de quem veio, p/ o unmerge devolver (S1b).
   try { db.exec(`ALTER TABLE retail_seller_store_assignments ADD COLUMN via_merge_of TEXT`); } catch(e){}
+  // Meta MENSAL por loja/competência como DADO (PRD Fase 1 §12). Distinta da cota diária (que segue vindo da planilha/distribuição).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retail_store_monthly_goals (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      store_id TEXT NOT NULL,
+      month TEXT NOT NULL,                       -- competência YYYY-MM
+      goal_amount REAL NOT NULL,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME,
+      UNIQUE (organization_id, store_id, month)
+    );
+    CREATE INDEX IF NOT EXISTS idx_retail_monthly_goals_month ON retail_store_monthly_goals (organization_id, month);
+  `);
 
 };
 

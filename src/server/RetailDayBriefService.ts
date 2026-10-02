@@ -31,6 +31,8 @@ import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
 import { onlyDigits } from "./phoneMatch.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 import { RetailClosingService } from "./RetailOpsService.js";
+import { RetailMonthlyGoalService } from "./RetailMonthlyGoalService.js";
+import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
 import { combineMetrics, formatMetric, known, ratioMetric, unknown, notComputed, type Metric } from "../lib/metric.js";
 
 export const DEFAULT_NIGHT_TIME = "22:30";         // padrão da rede (lojas sem closing_brief_time) — hora de São Paulo
@@ -61,11 +63,12 @@ function spMinutes(now: Date): { dateSP: string; min: number } {
 }
 const hhmmToMin = (t: string) => { const m = String(t).match(/^(\d{1,2}):(\d{2})$/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
 
-export type Period = { venda: Metric; cota: Metric; atingimento: Metric; partial: number | null; missingDays: number };
+/** `cotaBasis`: de onde veio o denominador — `meta_mensal` (PRD §12, cadastrada) ou `cotas_diarias` (soma das cotas do período). */
+export type Period = { venda: Metric; cota: Metric; atingimento: Metric; partial: number | null; missingDays: number; cotaBasis?: "meta_mensal" | "cotas_diarias" };
 export type NightStore = { storeId: string; storeName: string; venda: Metric; cota: Metric; atingimento: Metric; dinheiro: Metric; week: Period; month: Period };
 export type NightSnapshot = {
   date: string; weekStart: string; monthStart: string; source: "folha" | "system";
-  stores: NightStore[]; network: { venda: Metric; cota: Metric; atingimento: Metric; dinheiro: Metric; partialVenda: number | null; week: Period; month: Period };
+  stores: NightStore[]; network: { venda: Metric; cota: Metric; atingimento: Metric; dinheiro: Metric; partialVenda: number | null; week: Period; month: Period; storesHit: number | null; storesBelow: number | null; storesNoData: number };
 };
 export type MorningQuotas = { date: string; stores: Array<{ storeId: string; storeName: string; meta: Metric }>; network: { meta: Metric; partialMeta: number | null }; withoutQuota: string[] };
 
@@ -85,16 +88,38 @@ export class RetailDayBriefService {
     return { date, stores: rows, network: { meta: net.fact, partialMeta: net.partialFact }, withoutQuota: rows.filter((r) => r.meta.state !== "value").map((r) => r.storeName) };
   }
 
+  /**
+   * Exceções realmente importantes do dia (PRD §9): "<loja> está sem escala" e "N vendedores ainda precisam ser
+   * identificados". Honesto: só fala de escala se a org USA escala (há alguma entrada cadastrada) — org sem escala não é cobrada.
+   */
+  static morningExceptions(orgId: string, date: string): string[] {
+    const out: string[] = [];
+    try {
+      const usesSchedule = !!db.prepare(`SELECT 1 FROM retail_schedule_entries WHERE organization_id = ? LIMIT 1`).get(orgId);
+      if (usesSchedule) {
+        const semEscala = storesOpenOn(orgId, date).filter((st) => !db.prepare(`SELECT 1 FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ? AND status = 'work' LIMIT 1`).get(orgId, st.id, date));
+        for (const st of semEscala) out.push(`${st.name} está sem escala.`);
+      }
+    } catch { /* best-effort */ }
+    try {
+      const n = RetailSellerIdentityService.unidentified(orgId).length;
+      if (n > 0) out.push(n === 1 ? "1 vendedor ainda precisa ser identificado." : `${n} vendedores ainda precisam ser identificados.`);
+    } catch { /* best-effort */ }
+    return out;
+  }
+
   /** Linhas pro resumo da manhã (vazio quando não há cota cadastrada — 0-regressão). */
   static morningLines(orgId: string, date: string): string[] {
     let q: MorningQuotas | null = null;
     try { q = this.morningQuotas(orgId, date); } catch { return []; }
     if (!q) return [];
-    const lines = ["*🎯 Cota de hoje por loja:*"];
+    const lines = ["*🎯 Meta de hoje por loja:*"];
     for (const s of q.stores) if (s.meta.state === "value") lines.push(`• ${s.storeName}: ${brl(s.meta)}`);
     if (q.network.meta.state === "value") lines.push(`• Rede: ${brl(q.network.meta)}`);
-    else if (q.network.partialMeta !== null) lines.push(`• Rede (só lojas com cota): ${brlN(q.network.partialMeta)}`);
-    if (q.withoutQuota.length) lines.push(`Sem cota cadastrada: ${q.withoutQuota.join(", ")}.`);
+    else if (q.network.partialMeta !== null) lines.push(`• Rede (só lojas com meta): ${brlN(q.network.partialMeta)}`);
+    if (q.withoutQuota.length) lines.push(`Sem meta do dia cadastrada: ${q.withoutQuota.join(", ")}.`);
+    const ex = this.morningExceptions(orgId, date);
+    if (ex.length) lines.push("", ...ex.map((e) => `⚠️ ${e}`));
     return lines;
   }
 
@@ -113,6 +138,13 @@ export class RetailDayBriefService {
       : known(round2(venda), { unit: "brl", source: "fechamento (folha)" });
     const cotaM = haveQuota ? known(round2(cota), { unit: "brl", source: "cota" }) : unknown("cota não cadastrada no período", { unit: "brl" });
     return { venda: vendaM, cota: cotaM, atingimento: ratioMetric(vendaM, cotaM, { unit: "pct" }), partial, missingDays: missing };
+  }
+
+  /** Troca o denominador do mês pela META MENSAL cadastrada (PRD §12). Sem meta → período intacto (soma das cotas diárias). */
+  private static withGoal(p: Period, goal: number | null | undefined): Period {
+    if (goal === null || goal === undefined || !(goal > 0)) return { ...p, cotaBasis: p.cota.state === "value" ? "cotas_diarias" : undefined };
+    const cota = known(round2(goal), { unit: "brl", source: "meta mensal" });
+    return { ...p, cota, atingimento: ratioMetric(p.venda, cota, { unit: "pct" }), cotaBasis: "meta_mensal" };
   }
 
   static nightSnapshot(orgId: string, date: string): NightSnapshot {
@@ -147,6 +179,7 @@ export class RetailDayBriefService {
     const range = (a: string, b: string) => { const out: string[] = []; for (let d = a; d <= b; d = addDays(d, 1)) out.push(d); return out; };
     const weekDates = range(weekStart, date), monthDates = range(monthStart, date);
 
+    const goals = RetailMonthlyGoalService.map(orgId, date.slice(0, 7));
     const out: NightStore[] = stores.map((s) => {
       const cl = closingBy.get(s.id) || new Map<string, number>(), qu = quotaBy.get(s.id) || new Map<string, number>();
       const t = cl.get(date);
@@ -158,7 +191,7 @@ export class RetailDayBriefService {
         const d = JSON.parse(detailsBy.get(s.id) ?? "null");
         if (t !== undefined && d && d.dinheiro !== undefined && d.dinheiro !== null && Number.isFinite(Number(d.dinheiro))) dinheiro = known(round2(Number(d.dinheiro)), { unit: "brl", source: "fechamento (folha)" });
       } catch { /* sem detalhe */ }
-      return { storeId: s.id, storeName: s.name, venda, cota, atingimento: ratioMetric(venda, cota, { unit: "pct" }), dinheiro, week: this.period(weekDates, cl, qu), month: this.period(monthDates, cl, qu) };
+      return { storeId: s.id, storeName: s.name, venda, cota, atingimento: ratioMetric(venda, cota, { unit: "pct" }), dinheiro, week: this.period(weekDates, cl, qu), month: this.withGoal(this.period(monthDates, cl, qu), goals.get(s.id)) };
     });
 
     const sumPeriod = (pick: (s: NightStore) => Period): Period => {
@@ -166,12 +199,22 @@ export class RetailDayBriefService {
       const c = combineMetrics(out.map((s) => pick(s).cota), { unit: "brl" });
       return { venda: v.fact, cota: c.fact, atingimento: ratioMetric(v.fact, c.fact, { unit: "pct" }), partial: v.partialFact, missingDays: out.reduce((a, s) => a + pick(s).missingDays, 0) };
     };
+    // Mês da REDE: só usa a meta mensal quando TODA loja aberta tem a sua (misturar meta e soma-de-cotas seria denominador inconsistente).
+    let netMonth = sumPeriod((s) => s.month);
+    if (out.length && out.every((s) => s.month.cotaBasis === "meta_mensal")) {
+      netMonth = this.withGoal(netMonth, round2(out.reduce((a, s) => a + (s.month.cota.state === "value" ? Number(s.month.cota.value) : 0), 0)));
+    }
+    // Lojas que bateram a meta do dia × abaixo (só com venda E cota conhecidas — sem dado nunca vira "abaixo").
+    let hit = 0, below = 0, noData = 0;
+    for (const s of out) {
+      if (s.venda.state === "value" && s.cota.state === "value" && Number(s.cota.value) > 0) { if (Number(s.venda.value) >= Number(s.cota.value)) hit++; else below++; } else noData++;
+    }
     const nv = combineMetrics(out.map((s) => s.venda), { unit: "brl" });
     const nc = combineMetrics(out.map((s) => s.cota), { unit: "brl" });
     const nd = combineMetrics(out.map((s) => s.dinheiro), { unit: "brl" });
     return {
       date, weekStart, monthStart, source, stores: out,
-      network: { venda: nv.fact, cota: nc.fact, dinheiro: nd.fact, partialVenda: nv.partialFact, atingimento: ratioMetric(nv.fact, nc.fact, { unit: "pct" }), week: sumPeriod((s) => s.week), month: sumPeriod((s) => s.month) },
+      network: { venda: nv.fact, cota: nc.fact, dinheiro: nd.fact, partialVenda: nv.partialFact, atingimento: ratioMetric(nv.fact, nc.fact, { unit: "pct" }), week: sumPeriod((s) => s.week), month: netMonth, storesHit: hit + below > 0 ? hit : null, storesBelow: hit + below > 0 ? below : null, storesNoData: noData },
     };
   }
 
@@ -180,7 +223,7 @@ export class RetailDayBriefService {
       const at = p.atingimento.state === "value" ? ` (${formatMetric(p.atingimento, { unit: "pct" })})` : "";
       return `${label}: ${brl(p.venda)} de ${brl(p.cota)}${at}`;
     }
-    if (p.venda.state === "not_computed" && p.partial !== null) return `${label}: ${brlN(p.partial)} — parcial, ${p.venda.reason || "faltam fechamentos"}`;
+    if (p.venda.state === "not_computed" && p.partial !== null) return `${label}: ${brlN(p.partial)} — parcial, ${p.venda.reason || "faltam fechamentos"}${p.cotaBasis === "meta_mensal" ? ` (meta do mês ${brl(p.cota)})` : ""}`;
     return `${label}: —`;
   }
 
@@ -198,6 +241,7 @@ export class RetailDayBriefService {
     for (const st of s.stores) if (!only || only.has(st.storeId)) block(st.storeName, st);
     if (opts.withNetwork !== false) {
       block("Rede", s.network);
+      if (s.network.storesHit !== null && s.network.storesBelow !== null) lines.push(`Lojas que bateram a meta: ${s.network.storesHit} · abaixo da meta: ${s.network.storesBelow}${s.network.storesNoData ? ` · sem dado: ${s.network.storesNoData}` : ""}`);
       if (s.network.venda.state === "not_computed" && s.network.partialVenda !== null) lines.push(`(Vendido nas lojas com fechamento: ${brlN(s.network.partialVenda)})`);
     }
     lines.push("", `Origem: ${s.source === "folha" ? "fechamento (folha) de cada loja" : "fechamento de cada loja"}.`);

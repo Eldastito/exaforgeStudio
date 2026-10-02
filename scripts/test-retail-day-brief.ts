@@ -83,7 +83,7 @@ async function main() {
   check("manhã: cota por loja (Grande Rio 2.500, Carioca 500) e Bangu sem cota", m.stores.find((s: any) => s.storeName === "Grande Rio")!.meta.value === 2500 && m.stores.find((s: any) => s.storeName === "Carioca")!.meta.value === 500 && m.withoutQuota.join() === "Bangu");
   check("manhã: rede NÃO soma como total quando falta cota de alguma loja (parcial 3.000 à parte)", m.network.meta.state === "not_computed" && m.network.partialMeta === 3000);
   const ml = B.morningLines(A, D).join("\n");
-  check("manhã: linhas no vocabulário do gestor e avisa quem está sem cota", /Cota de hoje por loja/.test(ml) && /• Grande Rio: R\$ 2\.500/.test(ml) && /Sem cota cadastrada: Bangu/.test(ml) && !/Rede: R\$/.test(ml));
+  check("manhã: linhas no vocabulário do gestor e avisa quem está sem cota", /Meta de hoje por loja/.test(ml) && /• Grande Rio: R\$ 2\.500/.test(ml) && /Sem meta do dia cadastrada: Bangu/.test(ml) && !/Rede: R\$/.test(ml));
   quota(A, bangu, D, 1000);
   const ml2 = B.morningLines(A, D).join("\n");
   check("manhã: com TODAS as lojas com cota, a rede aparece como total (4.000)", /• Rede: R\$ 4\.000/.test(ml2));
@@ -93,8 +93,8 @@ async function main() {
   const today = FalaTuBriefingDigestService.spParts(new Date()).dateSP;
   const cT = store(O, "Loja Hoje"); quota(O, cT, today, 1234);
   const brief = BusinessTutorService.morningBrief(O).text;
-  check("resumo da manhã do Tutor inclui a cota de hoje por loja", /Cota de hoje por loja/.test(brief) && /Loja Hoje: R\$ 1\.234/.test(brief), brief.slice(0, 400));
-  check("resumo da manhã de org sem cota não muda (sem bloco de cota)", !/Cota de hoje por loja/.test(BusinessTutorService.morningBrief(N).text));
+  check("resumo da manhã do Tutor inclui a cota de hoje por loja", /Meta de hoje por loja/.test(brief) && /Loja Hoje: R\$ 1\.234/.test(brief), brief.slice(0, 400));
+  check("resumo da manhã de org sem cota não muda (sem bloco de cota)", !/Meta de hoje por loja/.test(BusinessTutorService.morningBrief(N).text));
 
   // ── entrega da noite ──
   check("dia sem cota e sem fechamento em nenhuma loja → sem conteúdo", !B.hasContent(B.nightSnapshot(N, D)) && B.hasContent(snap));

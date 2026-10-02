@@ -25,6 +25,7 @@ import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
 import { ExecutiveQueryToolsService, type ExecutiveToolResult } from "./ExecutiveQueryToolsService.js";
 import { parseMoneyPt } from "./RetailQuestionTools.js";
+import { isCampaignRequest, isDecisionInquiry, inactiveDaysFrom } from "./ConversationalIntentRules.js";
 
 const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const clean = (s: string) => norm(s).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -74,6 +75,12 @@ export class ExecutiveQueryRouterService {
     if (/(analis|diagnostic|avali|ver|como (esta|anda|foi)).{0,25}desempenho/.test(ql) && (/vendedor|vendedora/.test(ql) || !!resolveSellerInText(orgId, question).id)) {
       return { tool: "diagnostico_vendedor", args: { text: question } };
     }
+    // F2.1 (ADR-203) — IMPERATIVOS ANTES da saída analítica: "Analisa para mim" numa pergunta de decisão (R$ 180 mil, 30% de entrada) e
+    // "Crie uma campanha…" não são "por que caiu" — antes, o "analis" jogava a decisão no LLM aberto e o "90 dias" fazia a campanha virar
+    // análise de decisão. A definição vive em ConversationalIntentRules (a mesma que o FalaTu usa).
+    if (isCampaignRequest(question)) return { tool: "proposta_campanha", args: { days: inactiveDaysFrom(question) ?? undefined } };
+    if (isDecisionInquiry(question)) return { tool: "analisar_decisao", args: { text: question } };
+
     // Análise de causa é do panorama (contexto amplo), não de ferramenta.
     if (/(por ?que|explique|analis|caiu|cairam|motivo|diagnostic)/.test(ql)) return null;
 
@@ -85,25 +92,34 @@ export class ExecutiveQueryRouterService {
 
     // F1.7b — perguntas simples do varejo (ferramentas em RetailQuestionTools). ANTES das regras genéricas de
     // meta/estoque/vendas/caixa, que as engoliriam ("dinheiro" → caixa, "estoque" → produto, "meta" → progresso).
-    // PRD §24 — DECISÃO de compra/investimento (com condições ou "estou pensando em…"): motor de decisão, não o simulador de estoque.
-    // "Posso comprar R$ 180 mil?" puro continua em `simular_compra` (§25).
-    if (parseMoneyPt(question) != null && /(compr|invest)/.test(ql) &&
-        (/(entrada|parcel|prazo|\d+\s*(dias|meses)|\d+\s*%|a prazo)/.test(ql) || /(pensando em|considerando|avaliando|planejo|pretendo|estou vendo|queria comprar)/.test(ql))) {
-      return { tool: "analisar_decisao", args: { text: question } };
-    }
     // PRD §25 — "Como está minha operação/negócio/empresa?" (panorama composto; as lojas "hoje" seguem em `meta_do_dia`).
     if (/como (esta|anda|vai|estao|andam) .{0,14}(operacao|negocio|empresa|rede|tudo)/.test(ql) && !/lojas?/.test(ql)) return { tool: "panorama_operacao", args: {} };
     if (/(posso|da pra|d[aá] pra|devo|vale a pena|consigo).{0,25}compr/.test(ql)) {
       const ignored = [/entrada/.test(ql) ? "a entrada" : "", /(\d+\s*dias|prazo|parcel)/.test(ql) ? "o prazo/parcelamento" : ""].filter(Boolean);
       return { tool: "simular_compra", args: { amount: parseMoneyPt(question) ?? undefined, ignored } };
     }
+    // F2.1 — produtos parados (honesto: só afirma com giro MEDIDO — S9) e "tem problema no estoque?" (divergência).
+    if (/(produto|item|peca|mercadoria|estoque)s?.{0,20}(parad|sem giro|encalhad)|(parad|encalhad)[oa]s?.{0,20}(estoque|produto|item|peca)/.test(ql)) return { tool: "produtos_parados", args: {} };
+    if (/(problema|alerta|ruptura)/.test(ql) && /\bestoque\b/.test(ql) && !/\bestoque\s+d[aeo]s?\s+\w{3,}/.test(ql)) return { tool: "divergencia_estoque", args: {} };
+    // F2.1 — "qual loja está pior/melhor" (% da meta mensal já fechada); a pergunta por VENDEDOR segue em ranking_vendedores.
+    if (/\b(qual|quais|que)\b.{0,25}\blojas?\b/.test(ql) && /(pior|piores|melhor|melhores|mais fraca|vendeu menos|vendeu mais|menos vend)/.test(ql) && !/vendedor/.test(ql) && (!period || period === "mes")) {
+      return { tool: "ranking_lojas", args: { best: /(melhor|melhores|vendeu mais)/.test(ql) } };
+    }
     if (/diverg/.test(ql) && /estoque/.test(ql) || /(estoque|saldo) negativ/.test(ql)) return { tool: "divergencia_estoque", args: {} };
     if (/dinheiro/.test(ql) && /(vend|fatur|entrou|hoje)/.test(ql) && !/(em caixa|saldo|quanto tenho)/.test(ql)) return { tool: "dinheiro_do_dia", args: { store: storeTerm, date: undefined } };
     if (/(vendedor|vendedora|quem)/.test(ql) && /(sem bater|abaixo da meta|nao bateu|n[aã]o bateu|n[aã]o bat)/.test(ql) && /(mes|meses|seguid)/.test(ql)) return { tool: "vendedores_abaixo_meta", args: {} };
     if (/(qual|quem|melhor|top|ranking)/.test(ql) && /vendedor/.test(ql) && /(vendeu mais|mais vendeu|melhor|top|ranking|mais vend)/.test(ql)) return { tool: "ranking_vendedores", args: { period: period || "semana" } };
+    if (/\bquem\b.{0,12}(vendeu|vende|mais vendeu)/.test(ql) && /mais/.test(ql) && !/loja/.test(ql)) return { tool: "ranking_vendedores", args: { period: period || "semana" } };
     // "quanto falta pra <loja> bater a meta" = cota do DIA da loja; sem loja/sem "hoje" (ex.: "…meta do mês?") segue na meta de negócio.
     if (/quanto falta/.test(ql) && /(meta|cota)/.test(ql) && (period === "hoje" || (!period && storeTerm))) return { tool: "meta_do_dia", args: { store: storeTerm } };
-    if ((/como (estao|esta|vao|vai) .{0,20}lojas?/.test(ql) || /lojas? (hoje|agora)/.test(ql)) && (period === "hoje" || /agora/.test(ql))) return { tool: "meta_do_dia", args: {} };
+    // F2.1 — "Quanto falta para a Grande Rio?" / "Quanto a Carioca precisa vender hoje?" = a cota do DIA da loja (loja real no texto).
+    if (store && (/quanto falta/.test(ql) || /(quanto|o que).{0,25}(precisa|preciso|tem que|deve|devo).{0,12}vender/.test(ql)) && (!period || period === "hoje")) return { tool: "meta_do_dia", args: { store: storeTerm } };
+    // "O que está acontecendo na Grande Rio?" = o dia da loja.
+    if (store && /(o que (esta|ta) (acontecendo|rolando)|como (esta|anda|vai) (a |o )?(loja|dia))/.test(ql) && (!period || period === "hoje")) return { tool: "meta_do_dia", args: { store: storeTerm } };
+    if ((/como (estao|esta|vao|vai|andam|anda) .{0,20}lojas?/.test(ql) || /lojas? (hoje|agora)/.test(ql)) && (!period || period === "hoje" || /agora/.test(ql))) return { tool: "meta_do_dia", args: {} };
+    // F2.1 — "Como fechou ontem?" / "Como foi a semana?": vendas por loja (fechamentos reais) no período.
+    if (/como (fechou|fecharam)/.test(ql)) return { tool: "vendas_por_loja", args: { store: storeTerm, period: period || "ontem" } };
+    if (/como (foi|foram|esta sendo|esta indo) .{0,12}(semana|mes)/.test(ql)) return { tool: "vendas_por_loja", args: { store: storeTerm, period: period || "semana" } };
     if (/(cota|meta|quota)/.test(ql) && /(abaixo|nao bateu|n[aã]o bateu)/.test(ql) && period === "hoje") return { tool: "meta_do_dia", args: { store: storeTerm } };
 
     // Abaixo da cota/meta: relatório de dias negativos por loja (default mês).

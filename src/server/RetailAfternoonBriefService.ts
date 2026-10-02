@@ -66,6 +66,20 @@ export class RetailAfternoonBriefService {
     catch { return null; }
   }
 
+  /**
+   * F2.1 (ADR-203, RN-F2-7): frescor do PDV para QUALQUER resposta "até agora" — "último dado confirmado às HH:MM" (hora de SP) e se está
+   * ATRASADO. `dataAsOf` null = o PDV nunca sincronizou (org sem PDV: quem chama não carimba nada).
+   */
+  static freshness(orgId: string, now: Date = new Date()): { dataAsOf: string | null; hhmm: string | null; stale: boolean } {
+    const dataAsOf = this.lastSyncAt(orgId);
+    if (!dataAsOf) return { dataAsOf: null, hhmm: null, stale: false };
+    const t = new Date(dataAsOf.replace(" ", "T") + (dataAsOf.includes("Z") ? "" : "Z"));
+    const ms = t.getTime();
+    if (!Number.isFinite(ms)) return { dataAsOf, hhmm: null, stale: true };
+    const hhmm = t.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+    return { dataAsOf, hhmm, stale: now.getTime() - ms > STALE_SYNC_MIN * 60_000 };
+  }
+
   /** Data do PDV mais recente sincronizada (frescor do "até agora"). */
   private static lastSyncAt(orgId: string): string | null {
     try {

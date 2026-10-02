@@ -60,7 +60,7 @@ export class RetailOpsSignalPublisher {
     const current = new Set<string>();
     let published = 0;
     const pub = (s: any): void => {
-      try { BusinessSignalService.publish(orgId, { basis: "fact", confidence: 1, sourceService: "RetailOpsSignalPublisher", sourceEntityType: "retail_online_reserve", ...s }); current.add(s.dedupeKey); published++; } catch { /* noop */ }
+      try { BusinessSignalService.publish(orgId, { basis: "fact", confidence: 1, sourceService: "RetailOpsSignalPublisher", sourceEntityType: "retail_online_reserve", ...s }); try { BusinessSignalService.reopenByDedupe(orgId, s.dedupeKey, { onlyAutoResolved: true }); } catch { /* noop */ } current.add(s.dedupeKey); published++; } catch { /* noop */ }
     };
 
     for (const r of reserves) {

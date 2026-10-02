@@ -22,6 +22,7 @@ import db from "./db.js";
 import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
 import { onlyDigits } from "./phoneMatch.js";
 import { RetailClosingService } from "./RetailOpsService.js";
+import { RetailDayBriefService } from "./RetailDayBriefService.js";
 import { FalaTuBriefingDigestService } from "./FalaTuBriefingDigestService.js";
 import { combineMetrics, estimate, formatMetric, known, ratioMetric, unknown, notComputed, notApplicable, type Metric } from "../lib/metric.js";
 
@@ -37,6 +38,8 @@ export type StorePartial = {
   meta: Metric; vendido: Metric; atingimento: Metric; falta: Metric; dinheiro: Metric;
   pace: { status: "below" | "ok" | "above" | "insufficient_history"; expected: Metric; historyDays: number; message: string | null };
   salesCount: number;
+  /** S6 — meta do MÊS × fechamentos já enviados até ontem (null = sem meta mensal cadastrada → a linha não aparece). */
+  mes: { goal: number; sold: number | null; falta: number | null; closedDays: number } | null;
 };
 export type AfternoonSnapshot = {
   date: string; cutoffHour: number; source: "pdv"; dataAsOf: string | null; stale: boolean;
@@ -90,6 +93,8 @@ export class RetailAfternoonBriefService {
     const nowMs = (opts.now || new Date()).getTime();
     const stale = !dataAsOf || (nowMs - new Date(dataAsOf.replace(" ", "T") + (dataAsOf.includes("Z") ? "" : "Z")).getTime()) > STALE_SYNC_MIN * 60_000;
 
+    let mtd: ReturnType<typeof RetailDayBriefService.monthToDate> = new Map();
+    try { mtd = RetailDayBriefService.monthToDate(orgId, date); } catch { /* sem mês: o parcial segue só com o dia */ }
     const out: StorePartial[] = [];
     for (const st of stores) {
       const q = db.prepare(`SELECT quota_amount FROM retail_store_quotas WHERE organization_id = ? AND store_id = ? AND quota_date = ?`).get(orgId, st.id, date) as any;
@@ -140,7 +145,12 @@ export class RetailAfternoonBriefService {
         const status = avg <= 0 ? "ok" : v < avg * BELOW_PACE_RATIO ? "below" : v > avg * (2 - BELOW_PACE_RATIO) ? "above" : "ok";
         pace = { status, expected, historyDays: days.length, message: status === "below" ? `${st.name} está abaixo do ritmo habitual deste horário (${days.length} mesmos dias da semana).` : null };
       }
-      out.push({ storeId: st.id, storeName: st.name, meta, vendido, atingimento, falta, dinheiro, pace, salesCount: all.length });
+      out.push({ storeId: st.id, storeName: st.name, meta, vendido, atingimento, falta, dinheiro, pace, salesCount: all.length, mes: (() => {
+        const m = mtd.get(st.id);
+        if (!m || !(m.goal! > 0)) return null;
+        // sem NENHUM fechamento enviado no mês: não afirma "vendeu 0" — mostra só a meta
+        return m.closedDays > 0 ? { goal: m.goal!, sold: m.sold, falta: Math.max(0, round2(m.goal! - m.sold)), closedDays: m.closedDays } : { goal: m.goal!, sold: null, falta: null, closedDays: 0 };
+      })() });
     }
 
     const netMeta = combineMetrics(out.map((s) => s.meta), { unit: "brl" });
@@ -161,7 +171,13 @@ export class RetailAfternoonBriefService {
     const block = (title: string, x: { meta: Metric; vendido: Metric; atingimento: Metric; falta: Metric; dinheiro: Metric }) => {
       lines.push("", title, `Meta: ${brlNoCents(x.meta)}`, `Vendido: ${brlNoCents(x.vendido)}`, `Atingimento: ${formatMetric(x.atingimento, { unit: "pct" })}`, `Falta: ${brlNoCents(x.falta)}`, `Dinheiro: ${brlNoCents(x.dinheiro)}`);
     };
-    for (const st of s.stores) block(`${st.storeName} — ${s.cutoffHour}h`, st);
+    const brlN = (v: number) => formatMetric(known(v, { unit: "brl" }), { unit: "brl" }).replace(/,00(?=$| —)/, "");
+    for (const st of s.stores) {
+      block(`${st.storeName} — ${s.cutoffHour}h`, st);
+      if (st.mes) lines.push(st.mes.sold !== null
+        ? `Mês: meta ${brlN(st.mes.goal)} · fechado até ontem ${brlN(st.mes.sold)} · faltam ${brlN(st.mes.falta!)} (só fechamentos já enviados)`
+        : `Mês: meta ${brlN(st.mes.goal)} · sem fechamento enviado ainda`);
+    }
     block("Rede", s.network);
     if (s.network.vendido.state === "not_computed" && s.network.partialVendido !== null) lines.push(`(Vendido nas lojas com dado: ${brlNoCents(known(s.network.partialVendido, { unit: "brl" }))})`);
     const paceLines = s.stores.map((st) => st.pace.message).filter(Boolean) as string[];

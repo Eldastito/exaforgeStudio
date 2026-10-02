@@ -334,6 +334,12 @@ export class RetailImpactService {
       };
     });
     const slowMoverCapital = money(slow.reduce((a, s) => a + s.capital, 0));
+    // S9: "sem giro" só vale se o sistema ENXERGA as saídas. Org cujo estoque vem direto do ERP (ex.: Alterdata) não grava `stock_movements`:
+    // todo item aparece "sem saída" sem que isso prove "sem venda". Medido = há ao menos 1 saída registrada na janela.
+    const saidasInWindow = num((db.prepare(
+      `SELECT COUNT(*) AS n FROM stock_movements WHERE organization_id = ? AND type = 'saida' AND created_at >= datetime('now', ?)`
+    ).get(orgId, `-${days} days`) as any)?.n);
+    const giroMeasured = saidasInWindow > 0;
 
     const MAX_LIST = 50;
     return {
@@ -342,9 +348,11 @@ export class RetailImpactService {
       slowMoverDays: days,
       slowMoverCount: slow.length,
       slowMoverCapital,
+      giroMeasured,
+      saidasInWindow,
       slowMovers: slow.slice(0, MAX_LIST),
       slowMoversTruncated: slow.length > MAX_LIST,
-      note: "Capital parado = custo médio × quantidade em estoque (fato, não estimativa). Sem giro = com saldo e sem saída há N dias. Agregado por organização (núcleo sem dimensão de loja).",
+      note: "Capital parado = custo médio × quantidade em estoque (fato, não estimativa). Sem giro = com saldo e sem saída há N dias. Agregado por organização (núcleo sem dimensão de loja). `giroMeasured=false` = o sistema não recebe saídas de estoque na janela: o 'sem giro' NÃO é prova de parado.",
     };
   }
 }

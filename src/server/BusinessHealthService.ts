@@ -93,7 +93,8 @@ export class BusinessHealthService {
 
     // Estoque parado sem giro (ADR-132 Fatia 4) — capital travado no produto errado.
     const estoque = this.stockSummary(orgId);
-    if (estoque && estoque.slowMoverCapital > 0) {
+    // S9: sem saídas de estoque registradas, "parado" não é fato (só "o sistema não enxerga o giro") — não vira gatilho.
+    if (estoque && estoque.giroMeasured && estoque.slowMoverCapital > 0) {
       const rev = LossMarginService.monthlyRevenue(orgId, new Date().toISOString().slice(0, 7));
       const material = rev > 0 ? estoque.slowMoverCapital >= 0.15 * rev : estoque.slowMoverCapital > 0;
       if (material) triggers.push({ level: "atencao", code: "estoque_parado", label: `${brl(estoque.slowMoverCapital)} parados em estoque sem giro${estoque.slowMoverCount > 0 ? ` (${estoque.slowMoverCount} ${estoque.slowMoverCount > 1 ? "itens" : "item"})` : ""}.` });
@@ -115,7 +116,7 @@ export class BusinessHealthService {
    * Fatia 4, detalhamento). Lista limitada (top por capital) pra não inflar o
    * payload da tela.
    */
-  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number; slowMovers: any[]; unknownCostCount: number; slowMoversTruncated: boolean } | null {
+  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number; slowMovers: any[]; unknownCostCount: number; giroMeasured: boolean; slowMoversTruncated: boolean } | null {
     try {
       const sc = RetailImpactService.stockCapital(orgId) as any;
       if (!sc || Number(sc.itemsInStock) <= 0) return null;
@@ -137,6 +138,7 @@ export class BusinessHealthService {
         slowMoverCapital: Number(sc.slowMoverCapital) || 0,
         slowMoverCount: Number(sc.slowMoverCount) || 0,
         slowMovers,
+        giroMeasured: sc.giroMeasured !== false,
         unknownCostCount: all.filter((s: any) => !(Number(s.avgCost) > 0)).length,
         slowMoversTruncated: !!sc.slowMoversTruncated || all.length > TOP,
       };

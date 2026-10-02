@@ -35,7 +35,9 @@ export class FinanceSnapshotAdapter {
         source: "FinanceSnapshotAdapter",
         period,
         statusGeral: status,
-        caixa: { value: Number(sum.caixaAtual) || 0, basis: "fact", source: "FinancialLedgerService" },
+        // `reliable`: o "caixa" só é SALDO quando há saída lançada (cashBasis 'caixa'); com a ponte de faturamento ligada e nenhuma
+        // saída, é só a soma das vendas registradas — quem decide (DecisionEngine) não pode tratar isso como liquidez.
+        caixa: { value: Number(sum.caixaAtual) || 0, basis: "fact", source: "FinancialLedgerService", reliable: (sum.tracking?.cashBasis ?? "caixa") === "caixa", cashBasis: sum.tracking?.cashBasis ?? null },
         aReceber: {
           value: Number(sum.aReceber) || 0,
           vencido: Number(sum.aReceberVencido) || 0,

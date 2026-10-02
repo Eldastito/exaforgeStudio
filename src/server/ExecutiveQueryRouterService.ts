@@ -79,6 +79,14 @@ export class ExecutiveQueryRouterService {
 
     // F1.7b — perguntas simples do varejo (ferramentas em RetailQuestionTools). ANTES das regras genéricas de
     // meta/estoque/vendas/caixa, que as engoliriam ("dinheiro" → caixa, "estoque" → produto, "meta" → progresso).
+    // PRD §24 — DECISÃO de compra/investimento (com condições ou "estou pensando em…"): motor de decisão, não o simulador de estoque.
+    // "Posso comprar R$ 180 mil?" puro continua em `simular_compra` (§25).
+    if (parseMoneyPt(question) != null && /(compr|invest)/.test(ql) &&
+        (/(entrada|parcel|prazo|\d+\s*(dias|meses)|\d+\s*%|a prazo)/.test(ql) || /(pensando em|considerando|avaliando|planejo|pretendo|estou vendo|queria comprar)/.test(ql))) {
+      return { tool: "analisar_decisao", args: { text: question } };
+    }
+    // PRD §25 — "Como está minha operação/negócio/empresa?" (panorama composto; as lojas "hoje" seguem em `meta_do_dia`).
+    if (/como (esta|anda|vai|estao|andam) .{0,14}(operacao|negocio|empresa|rede|tudo)/.test(ql) && !/lojas?/.test(ql)) return { tool: "panorama_operacao", args: {} };
     if (/(posso|da pra|d[aá] pra|devo|vale a pena|consigo).{0,25}compr/.test(ql)) {
       const ignored = [/entrada/.test(ql) ? "a entrada" : "", /(\d+\s*dias|prazo|parcel)/.test(ql) ? "o prazo/parcelamento" : ""].filter(Boolean);
       return { tool: "simular_compra", args: { amount: parseMoneyPt(question) ?? undefined, ignored } };

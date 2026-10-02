@@ -1,3 +1,4 @@
+import { visibleTriggers, hiddenAttention } from '@/src/lib/healthTriggers';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
@@ -138,9 +139,12 @@ export function HealthCenterView() {
               ))}
             </ul>
           )}
-          {d?.triggers?.length > 0 && (
+          {hiddenAttention(d?.attention?.count, d?.attention?.items?.length || 0) > 0 && (
+            <p className="mt-1.5 text-[12px] text-zinc-400">+ {hiddenAttention(d?.attention?.count, d?.attention?.items?.length || 0)} outro(s) assunto(s) — veja todos em Insights.</p>
+          )}
+          {visibleTriggers(d?.triggers, d?.synthesis).length > 0 && (
             <ul className="mt-2 space-y-0.5">
-              {d.triggers.map((t: any, i: number) => (
+              {visibleTriggers(d?.triggers, d?.synthesis).map((t: any, i: number) => (
                 <li key={i} className="text-[12px] text-zinc-300/80 flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 opacity-70" />{t.label}</li>
               ))}
             </ul>

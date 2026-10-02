@@ -6,6 +6,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, weeksOfMonthLocal, daysBetween, addMonths } from './retailDateUtils';
 import { buildDailyInformeText } from './retailInformeText';
 import { parseMoneyBR, formatMoneyBR, maskMoneyBRInput } from './retailMoney';
+import SignalBriefDialog from '@/src/components/SignalBriefDialog';
 import { boletasEsperadas, boletaFinalEsperada, PRODUTOS_POR_BOLETA } from './retailBoletas';
 import { reconcileBandeiras, sumBandeiras, paDe, canSaveClosing } from './retailClosingForm';
 
@@ -276,6 +277,7 @@ function InsightsTab() {
     const d = await apiFetch('/api/retailops/stores').then(r => r.json()).catch(() => ({}));
     setStores((Array.isArray(d?.stores) ? d.stores : []).filter((s: any) => s.active));
   };
+  const [briefing, setBriefing] = useState<any | null>(null);   // "Entendi o que aconteceu… Quer que eu execute?" (o Sim chama o act)
   const act = async (p: any) => {
     if (!p?.signalId) return;
     const res = await apiFetch('/api/retailops/insights/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signalId: p.signalId }) });
@@ -395,7 +397,7 @@ function InsightsTab() {
                   )}
                   {p.signalId && (acted[p.signalId]
                     ? <span className="ml-auto inline-flex items-center gap-1 text-emerald-300"><Check className="w-3.5 h-3.5" /> {acted[p.signalId] === 'approved' ? 'ação criada' : 'ação criada (aguarda aprovação)'}</span>
-                    : <button onClick={() => act(p)} title={p.presentation?.actionWillDo || 'Abre os detalhes para você decidir o que fazer.'} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">{p.presentation?.actionLabel || 'Ver detalhes e decidir'}</button>)}
+                    : <button onClick={() => setBriefing(p)} title={p.presentation?.actionWillDo || 'Abre os detalhes para você decidir o que fazer.'} className="ml-auto inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-500">{p.presentation?.actionLabel || 'Ver detalhes e decidir'}</button>)}
                 </div>
                 {isOpen && (
                   <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-[11px] text-zinc-400">
@@ -455,6 +457,7 @@ function InsightsTab() {
           })}
         </div>
       )}
+      {briefing && <SignalBriefDialog signal={briefing} onClose={() => setBriefing(null)} onConfirm={async () => { await act(briefing); setBriefing(null); }} />}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import db from "../db.js";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
+import { SignalBriefService } from "../SignalBriefService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
 import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
@@ -106,6 +107,17 @@ router.post("/patterns/:id/outcome", requireRole("owner", "admin"), (req: AuthRe
 // POST /api/insights/act — age a partir de um insight de QUALQUER domínio: propõe
 // a ação recomendada do sinal. A política de aprovação decide se já nasce
 // aprovada ou aguardando (nada executa sozinho). owner/admin.
+// GET /api/insights/brief/:signalId — "Entendi o que aconteceu… Quer que eu execute?" (PRD Fase 1, critério de sucesso).
+// O briefing que o gestor vê ANTES de o /act criar a ação: o que houve, causa mais provável (hipótese), dados que sustentam e a
+// ação recomendada. Read-only (não cria nada). owner/admin — mesma régua do /act (dinheiro §73).
+router.get("/brief/:signalId", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = SignalBriefService.brief(orgId, String(req.params.signalId || ""), req.user);
+  if (!b.found) return res.status(404).json({ error: b.error || "Sinal não encontrado ou já resolvido." });
+  res.json(b);
+});
+
 router.post("/act", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

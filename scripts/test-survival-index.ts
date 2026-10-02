@@ -91,6 +91,7 @@ async function main() {
   db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 2000)`).run(randomUUID(), orgEstoque);
   // Muito capital parado (8000) para pouca venda (2000) → componente pontua baixo.
   db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'p1', 100, 80)`).run(randomUUID(), orgEstoque);
+  db.prepare(`INSERT INTO stock_movements (id, organization_id, product_service_id, type, quantity) VALUES (?, ?, 'pSells', 'saida', 1)`).run(randomUUID(), orgEstoque); // org registra saídas (giro MEDIDO — S9); este produto é que não saiu
   const sEstoque = S.score(orgEstoque);
   const compEstoque = sEstoque.components.find((c: any) => c.key === "estoque");
   check("estoque deixa de ser neutro: tem dado", compEstoque.hasData === true);
@@ -101,6 +102,7 @@ async function main() {
   F.recordEvent(orgEstoqueOk, { direction: "in", amount: 5000 });
   db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 5000)`).run(randomUUID(), orgEstoqueOk);
   db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'p1', 10, 50)`).run(randomUUID(), orgEstoqueOk);
+  db.prepare(`INSERT INTO stock_movements (id, organization_id, product_service_id, type, quantity) VALUES (?, ?, 'pSells', 'saida', 1)`).run(randomUUID(), orgEstoqueOk); // org registra saídas (giro MEDIDO — S9); este produto é que não saiu
   check("estoque enxuto pontua alto", (S.score(orgEstoqueOk).components.find((c: any) => c.key === "estoque")?.score ?? 0) >= 80);
 
   // Estoque com GIRO recente NÃO é penalizado — mede sem giro, não capital total (ADR-132 Fatia 4).

@@ -61,7 +61,9 @@ export class InventorySnapshotAdapter {
       return {
         available: true, source: "InventorySnapshotAdapter",
         capitalTotal: { value: Number(sc?.totalCapital) || 0, basis: "fact", source: "RetailImpactService" },
-        semGiro: { value: Number(sc?.slowMoverCapital) || 0, itens: Number(sc?.slowMoverCount) || 0, basis: "fact", source: "RetailImpactService" },
+        semGiro: sc && sc.giroMeasured === false
+          ? { value: null, itens: null, basis: "n/a", motivo: "giro_nao_medido: o sistema não recebe saídas de estoque na janela — 'sem saída' não prova 'sem venda'", source: "RetailImpactService" }
+          : { value: Number(sc?.slowMoverCapital) || 0, itens: Number(sc?.slowMoverCount) || 0, basis: "fact", source: "RetailImpactService" },
         estoqueBaixo: { itens: estoqueBaixo, basis: "fact" },
         rupturas: sellout
           ? { itens: null, basis: "n/a", motivo: "collection_sellout: saldo zero é fim normal de ciclo, não ruptura" }

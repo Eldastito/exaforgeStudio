@@ -39,6 +39,7 @@ export class SurvivalIndexService {
     try {
       const sc = RetailImpactService.stockCapital(orgId) as any;
       if (!sc || Number(sc.itemsInStock) <= 0) return { hasData: false, parado: 0, total: 0 };
+      if (sc.giroMeasured === false) return { hasData: false, parado: 0, total: 0 };   // S9: sem saídas registradas o "parado" não é medido → neutro, não puxa o índice
       return { hasData: true, parado: Number(sc.slowMoverCapital) || 0, total: Number(sc.totalCapital) || 0 };
     } catch { return { hasData: false, parado: 0, total: 0 }; }
   }

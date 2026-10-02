@@ -274,7 +274,16 @@ export function HealthCenterView() {
         )}
 
         {/* Estoque parado sem giro (ADR-132 Fatia 4) — com o detalhamento das peças */}
-        {d?.estoque?.slowMoverCapital > 0 && (
+        {d?.estoque && d.estoque.giroMeasured === false && d.estoque.totalCapital > 0 && (
+          <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-zinc-400">Estoque a custo (só itens com custo cadastrado)</span>
+              <span className="font-semibold text-zinc-200">{brl(d.estoque.totalCapital)}</span>
+            </div>
+            <p className="mt-1 text-[11px] text-zinc-500">Giro não medido: o sistema não recebe as saídas de estoque dos últimos 60 dias (o estoque vem direto do ERP), então não dá para afirmar o que está parado.</p>
+          </div>
+        )}
+        {d?.estoque?.giroMeasured !== false && d?.estoque?.slowMoverCapital > 0 && (
           <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px]">
             <div className="flex items-center justify-between gap-2">
               <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} ${d.estoque.slowMoverCount > 1 ? 'itens' : 'item'})` : ''}</span>
@@ -449,7 +458,9 @@ function HireSimulatorCard() {
             {mode === 'stock' && (
               <>
                 {res.coverageKnown && <span>Cobertura: <b className="text-zinc-200">{res.currentCoverageDays}→{res.newCoverageDays}</b> dias</span>}
-                <span>Pode ficar parado: <b className="text-amber-200">{brl(res.estIdle)}</b> {res.slowPct != null && <span className="text-zinc-500">(~{res.slowPct}%)</span>}</span>
+                {res.estIdle != null
+                  ? <span>Pode ficar parado: <b className="text-amber-200">{brl(res.estIdle)}</b> {res.slowPct != null && <span className="text-zinc-500">(~{res.slowPct}%)</span>}</span>
+                  : <span className="text-zinc-500">Quanto ficaria parado: não medido (o sistema não recebe as saídas de estoque).</span>}
               </>
             )}
             {mode === 'withdraw' && (

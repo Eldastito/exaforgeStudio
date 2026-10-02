@@ -108,6 +108,7 @@ async function main() {
   const orgStock = mkOrg("EstoqueParado");
   db.prepare(`INSERT INTO orders (id, organization_id, status, total_amount) VALUES (?, ?, 'pago', 1000)`).run(randomUUID(), orgStock);
   db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, 'pDead', 50, 40)`).run(randomUUID(), orgStock); // 2000 parado, sem saída
+  db.prepare(`INSERT INTO stock_movements (id, organization_id, product_service_id, type, quantity) VALUES (?, ?, 'pSells', 'saida', 1)`).run(randomUUID(), orgStock); // org registra saídas (giro MEDIDO — S9); este produto é que não saiu
   const ovStock = H.overview(orgStock);
   check("estoque parado sem giro vira gatilho na Central", ovStock.triggers.some((t: any) => t.code === "estoque_parado"));
   check("overview expõe o estoque sem giro", ovStock.estoque?.slowMoverCapital === 2000);

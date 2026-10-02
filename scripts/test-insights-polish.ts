@@ -58,6 +58,7 @@ async function main() {
     db.prepare(`INSERT INTO products_services (id, organization_id, type, name, price, active, stock_control_enabled) VALUES (?, ?, 'product', ?, 100, 1, 1)`).run(pid, A, name);
     db.prepare(`INSERT INTO inventory_items (id, organization_id, product_service_id, quantity_available, avg_cost) VALUES (?, ?, ?, ?, ?)`).run(randomUUID(), A, pid, qty, cost);
   };
+  db.prepare(`INSERT INTO stock_movements (id, organization_id, product_service_id, type, quantity) VALUES (?, ?, 'pSells', 'saida', 1)`).run(randomUUID(), A);   // giro MEDIDO (S9)
   inv(10, 20, "Camisa");        // capital 200, custo conhecido
   inv(4, 0, "Cinto");            // custo 0 = desconhecido
   inv(3, null, "Bermuda");       // sem custo

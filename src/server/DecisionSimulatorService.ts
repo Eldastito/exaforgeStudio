@@ -91,11 +91,12 @@ export class DecisionSimulatorService {
     const amount = Number(input?.amount) || 0;
     if (!(amount > 0)) return { ok: false, reason: "valor_invalido", message: "Informe o valor da compra de estoque." };
 
-    let totalCapital = 0, slowMoverCapital = 0;
+    let totalCapital = 0, slowMoverCapital = 0, giroMeasured = true;
     try {
       const sc = RetailImpactService.stockCapital(orgId) as any;
       totalCapital = Number(sc?.totalCapital) || 0;
       slowMoverCapital = Number(sc?.slowMoverCapital) || 0;
+      giroMeasured = sc?.giroMeasured !== false;
     } catch { /* sem estoque */ }
 
     const { marginFrac, revenue30 } = this.marginContext(orgId);
@@ -104,19 +105,25 @@ export class DecisionSimulatorService {
     // mês — o que superestimaria a cobertura. Sem margem/vendas, fica 0.
     const cogsDaily = marginFrac > 0 && revenue30 > 0 ? (revenue30 * (1 - marginFrac)) / 30 : 0;
     const slowShare = totalCapital > 0 ? slowMoverCapital / totalCapital : 0;
-    const estIdle = round2(amount * slowShare);
-    const slowPct = Math.round(slowShare * 100);
+    // S9: sem saídas de estoque registradas não dá para dizer quanto ficaria parado (nem "0%") — o número fica nulo.
+    const estIdle: number | null = giroMeasured ? round2(amount * slowShare) : null;
+    const slowPct: number | null = giroMeasured ? Math.round(slowShare * 100) : null;
+    const semGiroNote = " Não estimo quanto ficaria parado: o giro do estoque não é medido (o sistema não recebe as saídas).";
 
     if (cogsDaily <= 0) {
       return {
         ok: true, coverageKnown: false, amount, totalCapital, estIdle, slowPct,
-        veredito: `Ainda não tenho velocidade de venda (margem/vendas) para estimar a cobertura em dias.${totalCapital > 0 ? ` Pelo seu histórico, ~${slowPct}% do estoque hoje está sem giro — ao comprar ${brl(amount)}, algo perto de ${brl(estIdle)} pode ficar parado se o padrão se repetir.` : ""}`,
+        veredito: `Ainda não tenho velocidade de venda (margem/vendas) para estimar a cobertura em dias.${!giroMeasured ? semGiroNote : totalCapital > 0 ? ` Pelo seu histórico, ~${slowPct}% do estoque hoje está sem giro — ao comprar ${brl(amount)}, algo perto de ${brl(estIdle)} pode ficar parado se o padrão se repetir.` : ""}`,
       };
     }
     const currentCoverageDays = Math.round(totalCapital / cogsDaily);
     const newCoverageDays = Math.round((totalCapital + amount) / cogsDaily);
     let veredito: string;
-    if (newCoverageDays <= 60) veredito = `Comprar ${brl(amount)} leva sua cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — dentro do saudável. Só ~${slowPct}% costuma ficar sem giro (~${brl(estIdle)}).`;
+    if (!giroMeasured) {
+      veredito = newCoverageDays <= 60 ? `Comprar ${brl(amount)} leva sua cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — dentro do saudável.${semGiroNote}`
+        : newCoverageDays <= 120 ? `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias. Dá, mas priorize o que gira.${semGiroNote}`
+        : `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — é muito estoque para o ritmo de venda atual. Compre menos ou o que sai mais rápido.${semGiroNote}`;
+    } else if (newCoverageDays <= 60) veredito = `Comprar ${brl(amount)} leva sua cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — dentro do saudável. Só ~${slowPct}% costuma ficar sem giro (~${brl(estIdle)}).`;
     else if (newCoverageDays <= 120) veredito = `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias. Dá, mas ~${brl(estIdle)} (~${slowPct}% do padrão) pode ficar parado +60 dias — priorize o que gira.`;
     else veredito = `Comprar ${brl(amount)} leva a cobertura de ${currentCoverageDays} para ${newCoverageDays} dias — é muito estoque para o giro atual. Cerca de ${brl(estIdle)} tende a empatar capital. Compre menos ou o que sai mais rápido.`;
 

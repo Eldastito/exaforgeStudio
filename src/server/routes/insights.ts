@@ -41,12 +41,15 @@ router.get("/", (req: AuthRequest, res): any => {
   const open = BusinessSignalService.list(orgId, { status: "open" });
   const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
   const byDomain: Record<string, number> = {};
+  // Sinais TÉCNICOS (automações/plataforma) não são assunto do dono: ficam fora das contagens e aparecem só como um número à parte.
+  let technicalOpen = 0;
   for (const s of open) {
+    if (s.domain === "runtime" || s.domain === "platform") { technicalOpen += 1; continue; }
     bySeverity[s.severity] = (bySeverity[s.severity] || 0) + 1;
     byDomain[s.domain] = (byDomain[s.domain] || 0) + 1;
   }
   const ledger = OutcomeMeasurementService.ledger(orgId, { limit: 1 });
-  res.json({ priorities, openCount: open.length, bySeverity, byDomain, ledgerTotals: ledger.totals });
+  res.json({ priorities, openCount: open.length - technicalOpen, technicalOpen, bySeverity, byDomain, ledgerTotals: ledger.totals });
 });
 
 // POST /api/insights/refresh — "Analisar agora" da plataforma: roda TODOS os

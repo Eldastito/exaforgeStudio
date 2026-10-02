@@ -1,9 +1,10 @@
+import { formatBRL } from '@/src/lib/metric';
 import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart3, RefreshCw, FileDown, Loader2, TrendingDown, Plus, Sparkles, ArrowUpRight, ArrowDownRight, Minus, Receipt, UserCog, AlertTriangle, Target, Gauge, PiggyBank, Landmark } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
-const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
+const brl = (v: any) => formatBRL(v);   // milhar com ponto; null/ausente = "—" (nunca R$ 0,00)
 const int = (v: number) => String(Math.round(Number(v || 0)));
 const fmtCard = (c: any) => c.format === 'brl' ? brl(c.value) : c.format === 'int' ? int(c.value) : String(c.value);
 

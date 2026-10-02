@@ -277,7 +277,7 @@ export function HealthCenterView() {
         {d?.estoque?.slowMoverCapital > 0 && (
           <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[13px]">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} item${d.estoque.slowMoverCount > 1 ? 's' : ''})` : ''}</span>
+              <span className="text-zinc-400">Estoque parado sem giro{d.estoque.slowMoverCount > 0 ? ` (${d.estoque.slowMoverCount} ${d.estoque.slowMoverCount > 1 ? 'itens' : 'item'})` : ''}</span>
               <span className="font-semibold text-amber-300">{brl(d.estoque.slowMoverCapital)}{d.estoque.totalCapital > d.estoque.slowMoverCapital ? <span className="text-[11px] text-zinc-500"> de {brl(d.estoque.totalCapital)}</span> : null}</span>
             </div>
             {Array.isArray(d.estoque.slowMovers) && d.estoque.slowMovers.length > 0 && (
@@ -288,9 +288,12 @@ export function HealthCenterView() {
                       {s.label}
                       {s.quantity > 0 && <span className="text-zinc-500"> · {s.quantity} un</span>}
                     </span>
-                    <span className="shrink-0 text-amber-300/90">{brl(s.capital)}</span>
+                    <span className="shrink-0 text-amber-300/90" title={s.capitalKnown === false ? 'Sem custo cadastrado — o valor parado não é conhecido' : undefined}>{s.capitalKnown === false ? '—' : brl(s.capital)}</span>
                   </li>
                 ))}
+                {d.estoque.unknownCostCount > 0 && (
+                  <li className="pt-0.5 text-[11px] text-zinc-500">{d.estoque.unknownCostCount} {d.estoque.unknownCostCount > 1 ? 'itens' : 'item'} sem custo cadastrado ("—"): o total acima soma só o que tem custo.</li>
+                )}
                 {d.estoque.slowMoversTruncated && (
                   <li className="pt-0.5 text-[11px] text-zinc-500">…e mais itens — veja o relatório de estoque.</li>
                 )}

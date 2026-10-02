@@ -571,6 +571,7 @@
     "test:seller-diagnosis": "tsx scripts/test-seller-diagnosis.ts",
     "test:retail-signal-reopen": "tsx scripts/test-retail-signal-reopen.ts",
     "test:central-polish": "tsx scripts/test-central-polish.ts",
+    "test:insights-polish": "tsx scripts/test-insights-polish.ts",
     "test:retail-exception-signals": "tsx scripts/test-retail-exception-signals.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",

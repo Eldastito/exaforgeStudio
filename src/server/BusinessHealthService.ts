@@ -115,7 +115,7 @@ export class BusinessHealthService {
    * Fatia 4, detalhamento). Lista limitada (top por capital) pra não inflar o
    * payload da tela.
    */
-  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number; slowMovers: any[]; slowMoversTruncated: boolean } | null {
+  private static stockSummary(orgId: string): { totalCapital: number; slowMoverCapital: number; slowMoverCount: number; slowMovers: any[]; unknownCostCount: number; slowMoversTruncated: boolean } | null {
     try {
       const sc = RetailImpactService.stockCapital(orgId) as any;
       if (!sc || Number(sc.itemsInStock) <= 0) return null;
@@ -128,6 +128,8 @@ export class BusinessHealthService {
         variantLabel: s.variantLabel ?? null,
         quantity: Number(s.quantity) || 0,
         capital: Number(s.capital) || 0,
+        // custo médio 0/ausente ≠ "parado R$ 0,00": o valor parado é DESCONHECIDO (a tela mostra "—")
+        capitalKnown: Number(s.avgCost) > 0,
         lastSaleAt: s.lastSaleAt ?? null,
       }));
       return {
@@ -135,6 +137,7 @@ export class BusinessHealthService {
         slowMoverCapital: Number(sc.slowMoverCapital) || 0,
         slowMoverCount: Number(sc.slowMoverCount) || 0,
         slowMovers,
+        unknownCostCount: all.filter((s: any) => !(Number(s.avgCost) > 0)).length,
         slowMoversTruncated: !!sc.slowMoversTruncated || all.length > TOP,
       };
     } catch { return null; }

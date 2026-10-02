@@ -23,6 +23,9 @@ import { DecisionActionService } from "./DecisionActionService.js";
 import { NegativeStockDiagnosisService } from "./NegativeStockDiagnosisService.js";
 import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
 import { RetailQuestionTools } from "./RetailQuestionTools.js";
+import { SellerDiagnosisService } from "./SellerDiagnosisService.js";
+import { normalizeAlias } from "./RetailSellerIdentityService.js";
+import db from "./db.js";
 
 type Res = { ok: boolean; tool: string; summary?: string; data?: any; clarify?: string };
 
@@ -169,6 +172,29 @@ export class ExecutiveDecisionTools {
     if (!parts.length) return { ok: true, tool: "panorama_operacao", summary: "Não encontrei dados da operação pra resumir agora.", data };
     return { ok: true, tool: "panorama_operacao", data, summary: `Panorama da operação (${ddmm(date)}):\n\n${parts.join("\n\n")}` };
   }
+}
+
+/** PRD §18 (S5) — acha o vendedor citado na pergunta. Nome completo OU primeiro nome único; ambíguo/inexistente → clarify (nunca chuta). */
+export function resolveSellerInText(orgId: string, text: string): { id?: string; clarify?: string } {
+  const q = ` ${normalizeAlias(text)} `;
+  const rows = (db.prepare(`SELECT id, name FROM retail_sellers WHERE organization_id = ? AND active = 1 AND merged_into_seller_id IS NULL AND name IS NOT NULL AND TRIM(name) <> ''`).all(orgId) as any[]);
+  const full = rows.filter((r) => q.includes(` ${normalizeAlias(r.name)} `));
+  if (full.length === 1) return { id: full[0].id };
+  if (full.length > 1) return { clarify: `Encontrei mais de uma pessoa: ${full.map((r) => r.name).join(", ")}. De qual delas?` };
+  const first = rows.filter((r) => { const f = normalizeAlias(r.name).split(" ")[0]; return f.length >= 3 && q.includes(` ${f} `); });
+  if (first.length === 1) return { id: first[0].id };
+  if (first.length > 1) return { clarify: `Há mais de uma pessoa com esse nome: ${first.map((r) => r.name).join(", ")}. Qual delas?` };
+  return { clarify: "De qual vendedor? Diga o nome (ex.: \"analisar desempenho de Maria Souza\")." };
+}
+
+export function diagnosticoVendedor(orgId: string, args: { text?: string; date?: string }): Res {
+  const r = resolveSellerInText(orgId, String(args?.text || ""));
+  if (!r.id) return { ok: true, tool: "diagnostico_vendedor", clarify: r.clarify };
+  const d = SellerDiagnosisService.diagnose(orgId, r.id, args?.date || today());
+  if (!d.found) return { ok: false, tool: "diagnostico_vendedor", summary: d.error };
+  if (!d.enough) return { ok: true, tool: "diagnostico_vendedor", data: d, summary: `${d.seller?.name}: ${d.reason}` };
+  const lines = d.findings.map((f) => `${f.kind === "hypothesis" ? "Hipótese" : "Fato"}: ${f.text}`);
+  return { ok: true, tool: "diagnostico_vendedor", data: d, summary: `Desempenho de ${d.seller?.name} (últimos 30 dias contra os 30 anteriores):\n\n${lines.join("\n")}\n\nHipótese é leitura dos números, não é causa comprovada.` };
 }
 
 export default ExecutiveDecisionTools;

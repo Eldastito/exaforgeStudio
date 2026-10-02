@@ -23,7 +23,7 @@ import { BusinessGoalService } from "./BusinessGoalService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailQuestionTools } from "./RetailQuestionTools.js";
-import { ExecutiveDecisionTools } from "./ExecutiveDecisionTools.js";
+import { ExecutiveDecisionTools, diagnosticoVendedor } from "./ExecutiveDecisionTools.js";
 
 export interface ExecutiveToolDef {
   name: string;
@@ -146,6 +146,11 @@ export class ExecutiveQueryToolsService {
       args: [{ name: "text", description: "A pergunta como o gestor escreveu (extraio valor, entrada e prazo)", required: true }],
     },
     {
+      name: "diagnostico_vendedor", money: true,
+      description: "Diagnóstico de desempenho de UM vendedor: vendas, nº de vendas, ticket médio, P.A. e dias escalados contra o período anterior, com fato separado de hipótese. Serve: 'analisar desempenho de Maria Souza'.",
+      args: [{ name: "text", description: "A pergunta como o gestor escreveu (extraio o nome do vendedor)", required: true }],
+    },
+    {
       name: "panorama_operacao", money: true,
       description: "Panorama da operação hoje: lojas (meta/vendido), o que precisa de atenção, exceções (sem escala, vendedores a identificar), aprovações pendentes e divergência de estoque. Serve: 'como está minha operação'.",
       args: [],
@@ -193,6 +198,7 @@ export class ExecutiveQueryToolsService {
         }
         case "divergencia_estoque": return RetailQuestionTools.divergenciaEstoque(orgId);
         case "analisar_decisao": return ExecutiveDecisionTools.analisarDecisao(orgId, { text: String(args.text || "") });
+        case "diagnostico_vendedor": return diagnosticoVendedor(orgId, { text: String(args.text || "") });
         case "panorama_operacao": return ExecutiveDecisionTools.panoramaOperacao(orgId);
         case "simular_compra": return RetailQuestionTools.simularCompra(orgId, Number(args.amount) || null, Array.isArray(args.ignored) ? args.ignored : []);
       }

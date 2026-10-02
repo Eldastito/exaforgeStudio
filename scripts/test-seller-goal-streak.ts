@@ -79,7 +79,7 @@ async function main() {
   check("matrícula sem nome: mede, mas NÃO é identificada e conta em skippedUnidentified", !!un && a.skippedUnidentified >= 1);
   const txt = G.briefText(a)!;
   check("briefText nomeia só IDENTIFICADOS, na linguagem do gestor, sem R$", /Kleyton Cunha/.test(txt) && !/99999/.test(txt) && !/R\$/.test(txt) && /🔴 3º mês consecutivo abaixo da meta/.test(txt) && /🟠 2º mês consecutivo/.test(txt) && /🟡 1º mês/.test(txt));
-  check("briefText lista os meses da sequência (Julho 81%, Agosto 76%, Setembro 69%) e oferece análise do 2º mês em diante", /Julho — 81%/.test(txt) && /Agosto — 76%/.test(txt) && /Setembro — 69%/.test(txt) && (txt.match(/Posso analisar o desempenho/g) || []).length === 3);
+  check("briefText lista os meses da sequência (Julho 81%, Agosto 76%, Setembro 69%) e oferece análise do 2º mês em diante", /Julho — 81%/.test(txt) && /Agosto — 76%/.test(txt) && /Setembro — 69%/.test(txt) && (txt.match(/analisar desempenho de /g) || []).length === 3);
   check("sem ninguém abaixo → briefText null (nada de ruído)", G.briefText({ people: [] }) === null);
 
   // ── ausências: férias tornam o mês NEUTRO ──

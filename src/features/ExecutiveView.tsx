@@ -1052,7 +1052,7 @@ function OperacoesTab() {
               <Metric label="Confirmações pendentes" value={String(indicators.confirmationsPending || 0)} />
               <Metric label="Confirmações vencidas" value={String(indicators.confirmationsTimedOut || 0)} accent={indicators.confirmationsTimedOut > 0 ? 'amber' : undefined} />
               <Metric label="Jobs pendentes" value={String(indicators.jobsPending || 0)} />
-              <Metric label="Jobs falhados (dead-letter)" value={String(indicators.jobsFailed || 0)} accent={indicators.jobsFailed > 0 ? 'amber' : undefined} />
+              <Metric label="Tarefas que falharam (esgotaram as tentativas)" value={String(indicators.jobsFailed || 0)} accent={indicators.jobsFailed > 0 ? 'amber' : undefined} />
             </div>
           </div>
         )}
@@ -1209,7 +1209,7 @@ function sourceLabel(s: string): string {
     case 'process_escalated': return 'Processo escalado';
     case 'process_failed': return 'Processo falhou';
     case 'action_overdue': return 'Ação com deadline vencido';
-    case 'job_dead_letter': return 'Job na dead-letter';
+    case 'job_dead_letter': return 'Tarefa que falhou repetidamente';
     case 'confirmation_timeout': return 'Confirmação vencida';
     default: return s;
   }

@@ -55,7 +55,7 @@ async function main() {
   const tr = L.presentSignal({ signalType: "retail_transfer_suggested", domain: "retail_ops" });
   check('ação "Preparar transferência" para redistribuição (não "recomprar")', tr.actionLabel === "Preparar transferência" && !/recompr|comprar/i.test(tr.title + tr.meaning));
   const sg = L.presentSignal({ signalType: "seller_goal_streak", domain: "retail_ops", evidence: { seller: "Kleyton Cunha", streak: 3 } });
-  check("meta por pessoa: 'Kleyton Cunha — 3º mês seguido abaixo da meta' + Analisar desempenho", sg.title === "Kleyton Cunha — 3º mês seguido abaixo da meta" && sg.actionLabel === "Analisar desempenho");
+  check("meta por pessoa: 'Kleyton Cunha — 3º mês seguido abaixo da meta' + Ver desempenho e decidir", sg.title === "Kleyton Cunha — 3º mês seguido abaixo da meta" && sg.actionLabel === "Ver desempenho e decidir");
   const cu = L.presentSignal({ signalType: "retail_floor_code_unresolved", domain: "retail_floor", evidence: { store: "Loja 1" } });
   check("etiqueta não reconhecida (F1.2) tem ação 'Vincular código ao produto'", cu.actionLabel === "Vincular código ao produto");
 

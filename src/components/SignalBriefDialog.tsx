@@ -13,6 +13,7 @@ type Brief = {
   operationAffected?: 'yes' | 'no' | 'unknown';
   cause: { known: boolean; text: string; confidencePct: number | null; alternatives: string[] };
   evidence: Array<{ label: string; value: string }>;
+  diagnosis?: { enough: boolean; reason?: string; findings: Array<{ kind: 'fact' | 'hypothesis'; text: string }> };
   impact?: { amount: number | null; unit: string | null; basis: string | null; restricted: boolean } | null;
   recommendation: { label: string; willDo: string };
   governance: string; question: string;
@@ -78,6 +79,22 @@ export default function SignalBriefDialog({ signal, onClose, onConfirm }: { sign
                   {brief.evidence.map(e => <li key={e.label}><span className="text-zinc-500">{e.label}:</span> {e.value}</li>)}
                   {brief.impact && <li><span className="text-zinc-500">Impacto{brief.impact.basis ? ` (${brief.impact.basis})` : ''}:</span> {fmtImpact(brief.impact)}</li>}
                 </ul>
+              </section>
+            )}
+            {brief.diagnosis && (
+              <section>
+                <div className="text-[11px] uppercase tracking-wide text-zinc-500">Desempenho da pessoa</div>
+                {!brief.diagnosis.enough ? (
+                  <p className="text-zinc-400">{brief.diagnosis.reason}</p>
+                ) : (
+                  <ul className="mt-0.5 space-y-0.5">
+                    {brief.diagnosis.findings.map((f, i) => (
+                      <li key={i} className={f.kind === 'hypothesis' ? 'text-amber-300/90' : 'text-zinc-300'}>
+                        <span className="text-zinc-500">{f.kind === 'hypothesis' ? 'Hipótese: ' : 'Fato: '}</span>{f.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
             )}
             <section>

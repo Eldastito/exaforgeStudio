@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 import { LossMarginService } from "./LossMarginService.js";
 import { PnlReconciliationService } from "./PnlReconciliationService.js";
 import { AnalyticsService } from "./AnalyticsService.js";
@@ -53,13 +54,20 @@ export class InventorySnapshotAdapter {
     try {
       const sc = safe(() => RetailImpactService.stockCapital(orgId) as any, null);
       const estoqueBaixo = countSafe("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ? AND quantity_available > 0 AND low_stock_threshold > 0 AND quantity_available <= low_stock_threshold", orgId);
-      const rupturas = countSafe("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ? AND quantity_available <= 0", orgId);
+      const zerados = countSafe("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ? AND quantity_available = 0", orgId);
+      const negativos = countSafe("SELECT COUNT(*) c FROM inventory_items WHERE organization_id = ? AND quantity_available < 0", orgId);
+      // PRD Fase 1 §6: em fim de coleção saldo zero NÃO é ruptura (é fim de ciclo) — não alimenta o Diretor IA como problema.
+      const sellout = RetailReplenishmentStrategyService.strategy(orgId) === "collection_sellout";
       return {
         available: true, source: "InventorySnapshotAdapter",
         capitalTotal: { value: Number(sc?.totalCapital) || 0, basis: "fact", source: "RetailImpactService" },
         semGiro: { value: Number(sc?.slowMoverCapital) || 0, itens: Number(sc?.slowMoverCount) || 0, basis: "fact", source: "RetailImpactService" },
         estoqueBaixo: { itens: estoqueBaixo, basis: "fact" },
-        rupturas: { itens: rupturas, basis: "fact" },
+        rupturas: sellout
+          ? { itens: null, basis: "n/a", motivo: "collection_sellout: saldo zero é fim normal de ciclo, não ruptura" }
+          : { itens: zerados + negativos, basis: "fact" },
+        fimDeCiclo: { itens: sellout ? zerados : null, basis: sellout ? "fact" : "n/a" },
+        saldoNegativo: { itens: negativos, basis: "fact" },
       };
     } catch (e) { return fail("InventorySnapshotAdapter", e); }
   }

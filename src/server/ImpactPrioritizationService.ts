@@ -82,7 +82,7 @@ const ACTION_MAP: Record<string, { actionType: string; label: string }> = {
   meta_nao_batida_recorrente: { actionType: "create_task", label: "Rever metas/execução da loja abaixo da meta" },
   fechamento_atrasado_recorrente: { actionType: "create_task", label: "Cobrar o fechamento no prazo" },
   retail_reserve_low: { actionType: "create_task", label: "Reabastecer a reserva antes de esgotar" },
-  retail_store_stockout: { actionType: "create_task", label: "Repor o estoque da loja (rupturas ativas)" },
+  retail_store_stockout: { actionType: "create_task", label: "Investigar o saldo negativo da loja (divergência de estoque)" },
   retail_transfer_suggested: { actionType: "retail_transfer", label: "Transferir da loja com sobra para a loja com falta" },
   retail_seller_concentration: { actionType: "create_task", label: "Distribuir vendas / formar mais vendedores" },
   producao_atrasada_recorrente: { actionType: "create_task", label: "Atacar o gargalo de produção (capacidade/material)" },

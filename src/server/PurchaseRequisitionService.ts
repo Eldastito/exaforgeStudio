@@ -2,6 +2,7 @@ import db from "./db.js";
 import { v4 as uuidv4 } from "uuid";
 import { NotificationService } from "./NotificationService.js";
 import { chat } from "./llm.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
  * Reposição inteligente (Fase 1 do "ZappFlow Supply"). Varre o estoque, encontra
@@ -52,7 +53,8 @@ export class PurchaseRequisitionService {
         AND (ii.quantity_available - COALESCE(ii.quantity_reserved,0)) <= ii.low_stock_threshold
     `).all(orgId) as any[];
 
-    return rows.map(r => {
+    // PRD Fase 1 §5/§6: fim de coleção NÃO gera sugestão de recompra (exceto peça com meta de estoque).
+    return rows.filter(r => RetailReplenishmentStrategyService.suggestsRepurchase(orgId, r.product_service_id)).map(r => {
       const stock = (r.quantity_available || 0) - (r.quantity_reserved || 0);
       const s = this.suggestForItem(orgId, {
         productId: r.product_service_id, variantId: r.variant_id,

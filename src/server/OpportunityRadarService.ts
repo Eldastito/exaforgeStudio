@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { RecoveryRadarService } from "./RecoveryRadarService.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
  * Radar de Oportunidades Disfarçadas — Tier 2 (Carlos Domingos, ADR-046).
@@ -118,6 +119,8 @@ export const OpportunityRadarService = {
     } catch { return; }
 
     for (const r of rows) {
+      // PRD Fase 1 §6: em fim de coleção, zerar/repor não vira "aumente o estoque mínimo" (exceto peça com meta).
+      if (!RetailReplenishmentStrategyService.suggestsRepurchase(orgId, r.product_id)) continue;
       this.upsert(orgId, {
         category: "stock_out",
         title: `Reposição frequente: ${r.product_name}`,

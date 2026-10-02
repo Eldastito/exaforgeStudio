@@ -10,6 +10,11 @@
  * Escopo: silencia SÓ a sugestão de recompra (padrão `produto_ruptura_recorrente`). NÃO toca a oportunidade de
  * TRANSFERÊNCIA (`RetailFloorReplenishmentService`: zerou aqui + sobra em outra loja = dinheiro) nem o diagnóstico de
  * estoque NEGATIVO (divergência de dado ≠ fim de coleção). Um resolver, N consumidores. Isola por org.
+ *
+ * Estado do SALDO (PRD §5/§6) — UMA definição pra todos os detectores (`stockState`/`classify`):
+ *   saldo > 0 → `in_cycle` (produto em ciclo) · saldo = 0 → `cycle_end` (collection_sellout: fim NORMAL do ciclo, sem
+ *   alerta nem recompra · continuous: ruptura) · saldo < 0 → `negative` (anomalia: investigar, em QUALQUER estratégia)
+ *   · saldo ausente → `unknown` (null ≠ zero: sem dado nunca vira "zerou").
  */
 import db from "./db.js";
 import { RetailStockPolicyService } from "./RetailStockPolicyService.js";
@@ -18,7 +23,32 @@ import { logAuthEvent } from "./auditLog.js";
 export type ReplenishmentStrategy = "continuous_replenishment" | "collection_sellout";
 export const STRATEGIES: ReplenishmentStrategy[] = ["continuous_replenishment", "collection_sellout"];
 
+export type StockState = "in_cycle" | "cycle_end" | "negative" | "unknown";
+
 export class RetailReplenishmentStrategyService {
+  /** Estado puro do saldo (sem estratégia). Ausente/NaN → `unknown`, nunca zero. */
+  static stockState(qty: number | null | undefined): StockState {
+    if (qty === null || qty === undefined || qty === ("" as any)) return "unknown";
+    const n = Number(qty);
+    if (!Number.isFinite(n)) return "unknown";
+    return n > 0 ? "in_cycle" : n === 0 ? "cycle_end" : "negative";
+  }
+
+  /**
+   * Como a EMPRESA deve tratar este saldo: `problem` (vale alertar/recomprar?) e o rótulo humano. Negativo é sempre
+   * anomalia a investigar; zero só é problema em reposição contínua.
+   */
+  static classify(orgId: string, qty: number | null | undefined): { state: StockState; problem: boolean; label: string } {
+    const state = this.stockState(qty);
+    const strat = this.strategy(orgId);
+    if (state === "unknown") return { state, problem: false, label: "Sem saldo informado" };
+    if (state === "negative") return { state, problem: true, label: "Saldo negativo — investigar" };
+    if (state === "cycle_end") return strat === "collection_sellout"
+      ? { state, problem: false, label: "Fim de ciclo da peça (zerou) — normal" }
+      : { state, problem: true, label: "Sem estoque — ruptura" };
+    return { state, problem: false, label: "Em ciclo" };
+  }
+
   static strategy(orgId: string): ReplenishmentStrategy {
     try {
       const r = db.prepare(`SELECT retail_replenishment_strategy AS s FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;

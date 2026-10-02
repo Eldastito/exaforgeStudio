@@ -1,3 +1,4 @@
+import { formatBRL } from '@/src/lib/metric';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Check, RefreshCw, Lightbulb } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
@@ -13,7 +14,7 @@ import SignalBriefDialog from '@/src/components/SignalBriefDialog';
 // Núcleo — visível para toda org, consome /api/insights e /api/actions.
 // ============================================================================
 
-const brl = (n: any) => `R$ ${Number(n || 0).toFixed(2).replace('.', ',')}`;
+const brl = (v: any) => formatBRL(v);   // milhar com ponto; null/ausente = "—" (nunca R$ 0,00)
 
 const SEV: Record<string, { label: string; cls: string }> = {
   critical: { label: 'crítico', cls: 'text-red-300 bg-red-500/10 border-red-500/30' },
@@ -94,7 +95,15 @@ function PrioritiesPanel() {
   const sev = data?.bySeverity || {};
   const byDomain: Record<string, number> = data?.byDomain || {};
   const ledger = data?.ledgerTotals || null;
-  const domains = useMemo(() => Object.keys(byDomain).sort((a, b) => (byDomain[b] || 0) - (byDomain[a] || 0)), [byDomain]);
+  // Chips só dos assuntos que a lista MOSTRA, com o nome em português e a contagem do que está na tela (antes: nome técnico + total geral).
+  const domainChips = useMemo(() => {
+    const m = new Map<string, { label: string; n: number }>();
+    for (const p of priorities) {
+      const cur = m.get(p.domain) || { label: p.presentation?.domainLabel || 'Outros', n: 0 };
+      cur.n += 1; m.set(p.domain, cur);
+    }
+    return Array.from(m.entries()).sort((a, b) => b[1].n - a[1].n);
+  }, [priorities]);
   const shown = domainFilter === 'all' ? priorities : priorities.filter((p) => p.domain === domainFilter);
   const openActions = actions.filter(a => a.status !== 'done' && a.status !== 'cancelled');
 
@@ -123,15 +132,21 @@ function PrioritiesPanel() {
         )}
 
         {/* Filtro por domínio (só aparece quando há mais de um domínio com sinal). */}
-        {domains.length > 1 && (
+        {domainChips.length > 1 && (
           <div className="mb-3 flex items-center gap-1.5 flex-wrap">
             <button onClick={() => setDomainFilter('all')} className={`rounded-full border px-2.5 py-0.5 text-[11px] ${domainFilter === 'all' ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:bg-zinc-800'}`}>Todos ({priorities.length})</button>
-            {domains.map((d) => (
-              <button key={d} onClick={() => setDomainFilter(d)} className={`rounded-full border px-2.5 py-0.5 text-[11px] ${domainFilter === d ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:bg-zinc-800'}`}>{domLabel(d)} ({byDomain[d]})</button>
+            {domainChips.map(([d, c]) => (
+              <button key={d} onClick={() => setDomainFilter(d)} className={`rounded-full border px-2.5 py-0.5 text-[11px] ${domainFilter === d ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:bg-zinc-800'}`}>{c.label} ({c.n})</button>
             ))}
           </div>
         )}
 
+        {((data?.openCount || 0) > priorities.length || (data?.technicalOpen || 0) > 0) && (
+          <p className="mb-2 text-[11px] text-zinc-500">
+            Mostrando os {priorities.length} mais importantes{(data?.openCount || 0) > priorities.length ? ` de ${data.openCount} assuntos abertos` : ''}.
+            {(data?.technicalOpen || 0) > 0 ? ` Há também ${data.technicalOpen} alerta(s) técnico(s) de automações — não entram nessas contagens.` : ''}
+          </p>
+        )}
         <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">O que atacar primeiro</h3>
         {shown.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">Nenhuma prioridade agora. Clique em <strong>“Analisar agora”</strong> — a IA varre o negócio inteiro e traz o que importa.</div>

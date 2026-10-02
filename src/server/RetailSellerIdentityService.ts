@@ -329,11 +329,11 @@ export class RetailSellerIdentityService {
       let primaryTaken = intoHasPrimary;
       for (const a of acts) {
         const has = db.prepare(`SELECT 1 FROM retail_seller_store_assignments WHERE organization_id = ? AND seller_id = ? AND store_id = ? AND active = 1`).get(orgId, intoId, a.store_id);
-        if (has) db.prepare(`UPDATE retail_seller_store_assignments SET active = 0, effective_to = CURRENT_TIMESTAMP WHERE id = ?`).run(a.id);
+        if (has) db.prepare(`UPDATE retail_seller_store_assignments SET active = 0, effective_to = CURRENT_TIMESTAMP, via_merge_of = ? WHERE id = ?`).run(fromId, a.id);
         else {
           const keepPrimary = a.is_primary && !primaryTaken ? 1 : 0;
           if (keepPrimary) primaryTaken = true;
-          db.prepare(`UPDATE retail_seller_store_assignments SET seller_id = ?, is_primary = ? WHERE id = ?`).run(intoId, keepPrimary, a.id);
+          db.prepare(`UPDATE retail_seller_store_assignments SET seller_id = ?, is_primary = ?, via_merge_of = ? WHERE id = ?`).run(intoId, keepPrimary, fromId, a.id);
         }
       }
     });
@@ -342,7 +342,7 @@ export class RetailSellerIdentityService {
     return { merged: true, intoId, fromId, aliases: this.listAliases(orgId, intoId) };
   }
 
-  /** Desfaz a fusão: reativa `from` e remove os aliases que a fusão criou. As lotações movidas ficam onde estão (seguro). */
+  /** Desfaz a fusão: reativa `from` e remove os aliases que a fusão criou. As lotações que a fusão moveu/encerrou voltam pra origem. */
   static unmerge(orgId: string, fromId: string, actorId?: string | null): any {
     const from = this.seller(orgId, fromId);
     if (!from || !from.merged_into_seller_id) throw new Error("Este vendedor não está fundido.");
@@ -352,6 +352,24 @@ export class RetailSellerIdentityService {
       // aliases que `from` tinha antes da fusão voltam pra ele
       db.prepare(`UPDATE retail_seller_aliases SET seller_id = ?, via_merge_of = NULL WHERE organization_id = ? AND via_merge_of = ?`).run(fromId, orgId, fromId);
       db.prepare(`UPDATE retail_sellers SET merged_into_seller_id = NULL, merged_at = NULL, active = 1, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, fromId);
+      // lotações que a fusão moveu/encerrou voltam pra `from` (a que a fusão encerrou só reativa a de `from`; a movida volta de `into`)
+      const moved = db.prepare(`SELECT id, seller_id, is_primary FROM retail_seller_store_assignments WHERE organization_id = ? AND via_merge_of = ?`).all(orgId, fromId) as any[];
+      let fromHasPrimary = false;
+      for (const a of moved) {
+        if (a.seller_id === fromId) {
+          // era a duplicata (já tinha a loja) — reativa só se `from` não tem lotação viva nessa loja
+          const st = db.prepare(`SELECT store_id FROM retail_seller_store_assignments WHERE id = ?`).get(a.id) as any;
+          const live = db.prepare(`SELECT 1 FROM retail_seller_store_assignments WHERE organization_id = ? AND seller_id = ? AND store_id = ? AND active = 1 AND id <> ?`).get(orgId, fromId, st.store_id, a.id);
+          if (live) db.prepare(`UPDATE retail_seller_store_assignments SET via_merge_of = NULL WHERE id = ?`).run(a.id);
+          else db.prepare(`UPDATE retail_seller_store_assignments SET active = 1, effective_to = NULL, via_merge_of = NULL WHERE id = ?`).run(a.id);
+        } else {
+          db.prepare(`UPDATE retail_seller_store_assignments SET seller_id = ?, via_merge_of = NULL WHERE id = ?`).run(fromId, a.id);
+        }
+      }
+      // exatamente uma principal ativa por vendedor devolvido (a primeira, se nenhuma marcada)
+      const acts = db.prepare(`SELECT id, is_primary FROM retail_seller_store_assignments WHERE organization_id = ? AND seller_id = ? AND active = 1 AND assignment_type IS NOT 'temporaria' AND assignment_type IS NOT 'cobertura_ferias' ORDER BY is_primary DESC, rowid`).all(orgId, fromId) as any[];
+      fromHasPrimary = acts.some((x) => x.is_primary);
+      if (acts.length && !fromHasPrimary) db.prepare(`UPDATE retail_seller_store_assignments SET is_primary = 1 WHERE id = ?`).run(acts[0].id);
     });
     tx();
     try { logAuthEvent(orgId, actorId || "system", fromId, "RETAIL_SELLER_UNMERGED", { intoId }); } catch { /* noop */ }

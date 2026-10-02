@@ -402,9 +402,8 @@ function InsightsTab() {
                 {isOpen && (
                   <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-[11px] text-zinc-400">
                     <div className="grid gap-1 sm:grid-cols-2">
-                      <div><span className="text-zinc-500">Tipo do sinal:</span> <span className="font-mono text-zinc-300">{p.signalType || '—'}</span></div>
+                      <div><span className="text-zinc-500">Assunto:</span> <span className="text-zinc-300">{p.presentation?.domainLabel || '—'}</span></div>
                       <div><span className="text-zinc-500">Confiança:</span> <span className="text-zinc-300">{p.confidence != null ? `${Math.round(Number(p.confidence) * 100)}%` : '—'}</span></div>
-                      <div className="sm:col-span-2"><span className="text-zinc-500">Fonte:</span> <span className="font-mono text-zinc-300">{p.source || '—'}</span></div>
                     </div>
                     {p.evidence && Object.keys(p.evidence).length > 0 ? (
                       <div className="mt-2">

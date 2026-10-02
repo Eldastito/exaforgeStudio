@@ -97,6 +97,38 @@ const CATALOG: Record<string, Entry> = {
     title: "As vendas estão concentradas em poucos produtos", meaning: "Depender de poucos itens aumenta o risco se a procura cair.",
     actionLabel: "Revisar o mix", actionWillDo: "Cria uma tarefa para diversificar o que é destaque.", affected: "no",
   },
+  pet_vaccination_due: {
+    title: "Há vacinas de pets vencidas ou perto de vencer", meaning: "Os tutores precisam ser avisados para o pet não ficar sem proteção.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "no",
+  },
+  pet_treatment_due: {
+    title: "Há vermífugo ou antipulgas de pets para renovar", meaning: "O tratamento preventivo está vencido ou perto de vencer.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "no",
+  },
+  pet_grooming_return_due: {
+    title: "Há pets que já deveriam voltar para banho e tosa", meaning: "Pelo intervalo do serviço, o retorno previsto está chegando ou passou.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "no",
+  },
+  production_order_late: {
+    title: "Uma ordem de produção está atrasada", meaning: "O prazo combinado para concluir a produção passou.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
+  },
+  production_material_shortage: {
+    title: "Falta material para a produção", meaning: "O estoque de algum insumo não cobre o que a produção precisa.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
+  },
+  goods_receipt_divergence: {
+    title: "O recebimento de mercadoria não bate com o pedido", meaning: "A quantidade ou o valor recebido é diferente do que foi comprado.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
+  },
+  goods_receipt_no_invoice: {
+    title: "Mercadoria recebida sem nota fiscal", meaning: "A mercadoria entrou mas a nota fiscal não foi registrada.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
+  },
+  lucro_sem_caixa: {
+    title: "O resultado aparece, mas o caixa não acompanha", meaning: "Há lucro no papel sem o dinheiro correspondente entrar.",
+    actionLabel: "Ver detalhes e decidir", actionWillDo: "Abre os detalhes para você decidir o que fazer.", affected: "yes",
+  },
   // ── Metas e pessoas ─────────────────────────────────────────────────────
   retail_store_below_quota: {
     title: (ev) => inStore(ev, "A loja está abaixo da meta"), meaning: "O resultado do período está atrás da meta combinada.",
@@ -113,7 +145,7 @@ const CATALOG: Record<string, Entry> = {
       return n && n >= 2 ? `${who} — ${n}º mês seguido abaixo da meta` : `${who} — abaixo da meta neste mês`;
     },
     meaning: "Meses fechados consecutivos abaixo da meta (meses sem meta ou com férias não contam).",
-    actionLabel: "Analisar desempenho", actionWillDo: "Cruza vendas, ticket e peças da pessoa para mostrar onde está perdendo resultado.", affected: "yes",
+    actionLabel: "Ver desempenho e decidir", actionWillDo: "Mostra vendas, ticket, peças e dias escalados da pessoa contra o período anterior (fato separado de hipótese) para você decidir o que fazer.", affected: "yes",
   },
   retail_seller_concentration: {
     title: "Poucas pessoas concentram as vendas", meaning: "Se uma delas faltar, o resultado cai.",

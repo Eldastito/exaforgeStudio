@@ -121,7 +121,7 @@ export class SellerGoalStreakService {
       // os `streak` meses abaixo mais recentes (os anteriores a um mês que bateu a meta não fazem parte da sequência)
       const shown = p.months.filter((m) => m.status === "below").slice(0, Math.min(p.streak, 3)).reverse();
       for (const m of shown) lines.push(`${cap(monthLabel(m.month))} — ${formatMetric(m.attainment, { unit: "pct" })}`);
-      if (p.offerAnalysis) lines.push("Posso analisar o desempenho para identificar onde está perdendo resultado?");
+      if (p.offerAnalysis) lines.push(`Para ver onde está perdendo resultado, peça: "analisar desempenho de ${p.name}".`);
     }
     return lines.join("\n");
   }

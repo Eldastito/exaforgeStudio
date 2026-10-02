@@ -19,6 +19,7 @@
  * causa é do panorama; a ferramenta responde CONSULTA (quanto/quem/quando).
  * `llmFn` é injetável pros testes rodarem offline.
  */
+import { resolveSellerInText } from "./ExecutiveDecisionTools.js";
 import db from "./db.js";
 import { chat } from "./llm.js";
 import { logAuthEvent } from "./auditLog.js";
@@ -68,6 +69,11 @@ export class ExecutiveQueryRouterService {
   // ── 1) Detecção determinística ────────────────────────────────────────────
   static detect(orgId: string, question: string): { tool: string; args: Record<string, any> } | null {
     const ql = norm(question);
+    // PRD §18 — diagnóstico de UM vendedor ("analisar desempenho de Maria"): ANTES da saída analítica abaixo.
+    // A ferramenta resolve o nome (ou pergunta de quem) — nunca chuta.
+    if (/(analis|diagnostic|avali|ver|como (esta|anda|foi)).{0,25}desempenho/.test(ql) && (/vendedor|vendedora/.test(ql) || !!resolveSellerInText(orgId, question).id)) {
+      return { tool: "diagnostico_vendedor", args: { text: question } };
+    }
     // Análise de causa é do panorama (contexto amplo), não de ferramenta.
     if (/(por ?que|explique|analis|caiu|cairam|motivo|diagnostic)/.test(ql)) return null;
 

@@ -20,6 +20,7 @@ import { presentSignal } from "./SignalLanguage.js";
 import { SignalInvestigationService } from "./SignalInvestigationService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
+import { SellerDiagnosisService } from "./SellerDiagnosisService.js";
 
 // Lista branca: chave de evidência → rótulo humano. Qualquer outra chave é ignorada (nada técnico vaza pra tela).
 const EVIDENCE_LABELS: Record<string, string> = {
@@ -40,6 +41,8 @@ export type SignalBrief = {
   basis?: string | null;
   cause?: { known: boolean; text: string; confidencePct: number | null; basis: "hypothesis" | null; alternatives: string[] };
   evidence?: Array<{ label: string; value: string }>;
+  /** S5 (§18): diagnóstico do vendedor (só sinais de vendedor, só com visão completa — traz R$). Fato × hipótese rotulados. */
+  diagnosis?: { enough: boolean; reason?: string; findings: Array<{ kind: "fact" | "hypothesis"; text: string }> };
   impact?: { amount: number | null; unit: string | null; basis: string | null; restricted: boolean } | null;
   recommendation?: { label: string; willDo: string };
   governance?: string;
@@ -89,12 +92,26 @@ export class SignalBriefService {
         : { amount: null, unit: sig.impact_unit || null, basis: BASIS_LABEL[String(sig.basis)] || null, restricted: true };
     }
 
+    // diagnóstico do vendedor (S5) — só sinais nominais de vendedor; dinheiro → só com visão completa (§73)
+    let diagnosis: SignalBrief["diagnosis"];
+    if (fullVisibility && (sig.signal_type === "seller_goal_streak" || sig.signal_type === "retail_seller_below_quota")) {
+      try {
+        const sid = sig.source_entity_type === "seller"
+          ? sig.source_entity_id
+          : (db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND user_id = ? AND merged_into_seller_id IS NULL`).get(orgId, sig.source_entity_id) as any)?.id;
+        if (sid) {
+          const d = SellerDiagnosisService.diagnose(orgId, sid, new Date().toISOString().slice(0, 10));
+          if (d.found) diagnosis = { enough: d.enough, reason: d.reason, findings: d.findings };
+        }
+      } catch { /* diagnóstico indisponível: o briefing segue sem ele */ }
+    }
+
     return {
       found: true, signalId,
       understood: `Entendi o que aconteceu: ${pres.title}.`,
       meaning: pres.meaning, operationAffected: pres.operationAffected, domainLabel: pres.domainLabel, severity: sig.severity,
       basis: BASIS_LABEL[String(sig.basis)] || null,
-      cause, evidence, impact,
+      cause, evidence, diagnosis, impact,
       recommendation: { label: pres.actionLabel, willDo: pres.actionWillDo },
       governance: "Se você disser que sim, eu crio a ação. Se a sua regra de aprovação exigir, ela fica aguardando você — nada é executado sem passar por essa regra.",
       question: "Quer que eu execute?",

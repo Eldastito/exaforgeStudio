@@ -12287,6 +12287,8 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_manager_can_approve INTEGER DEFAULT 0`); } catch(e){}
   // Fusão de vendedor reversível: lotação movida/encerrada pela fusão guarda de quem veio, p/ o unmerge devolver (S1b).
   try { db.exec(`ALTER TABLE retail_seller_store_assignments ADD COLUMN via_merge_of TEXT`); } catch(e){}
+  // Avisos de exceção do varejo na Central de Saúde (loja sem escala / vendedores a identificar) — NASCE LIGADO (decisão do dono, 02/10); desligável.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_exception_signals_enabled INTEGER DEFAULT 1`); } catch(e){}
   // Meta MENSAL por loja/competência como DADO (PRD Fase 1 §12). Distinta da cota diária (que segue vindo da planilha/distribuição).
   db.exec(`
     CREATE TABLE IF NOT EXISTS retail_store_monthly_goals (

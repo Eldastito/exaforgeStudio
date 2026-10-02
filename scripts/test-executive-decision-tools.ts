@@ -86,7 +86,8 @@ async function main() {
   const bangu = store(P, "Bangu"), carioca = store(P, "Carioca");
   db.prepare(`INSERT INTO retail_store_quotas (id, organization_id, store_id, quota_date, quota_amount) VALUES (?, ?, ?, ?, 2000)`).run(randomUUID(), P, bangu, d);
   db.prepare(`INSERT INTO retail_store_quotas (id, organization_id, store_id, quota_date, quota_amount) VALUES (?, ?, ?, ?, 3000)`).run(randomUUID(), P, carioca, d);
-  db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, ?, 'mat:1', 'Ana', 'work')`).run(randomUUID(), P, carioca, d);   // Bangu sem escala
+  db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, ?, 'mat:1', 'Ana', 'work')`).run(randomUUID(), P, carioca, d);
+  db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, date(?, '-5 days'), 'mat:2', 'Rui', 'work')`).run(randomUUID(), P, bangu, d);   // Bangu usa escala mas hoje está sem
   const calm = T.panoramaOperacao(P, d).summary || "";
   check("panorama traz as lojas de hoje e a exceção 'Bangu está sem escala' (e a operação sob controle quando nada exige ação)", /Panorama da operação/.test(calm) && /Bangu/.test(calm) && /Bangu está sem escala/.test(calm) && /sob controle/.test(calm), calm);
   BusinessSignalService.publish(P, { domain: "retail_ops", signalType: "retail_store_stockout", severity: "risk", basis: "fact", confidence: 0.9, impactAmount: 4, impactUnit: "units", sourceService: "test", sourceEntityType: "retail_store", sourceEntityId: bangu, evidence: { store: "Bangu", alerts: 4 }, dedupeKey: `t:stockout:${bangu}` } as any);

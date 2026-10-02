@@ -123,6 +123,17 @@ const CATALOG: Record<string, Entry> = {
     title: (ev) => inStore(ev, "O fechamento do dia não foi enviado"), meaning: "Sem o fechamento não dá para conferir venda, meta e dinheiro.",
     actionLabel: "Cobrar fechamento", actionWillDo: "Envia o pedido de fechamento ao responsável da loja.", affected: "yes",
   },
+  // S4c-2 (PRD §26) — exceções que viram assunto da Central de Saúde (RetailExceptionSignalService).
+  retail_store_no_schedule: {
+    title: (ev) => (ev?.store ? `${ev.store} está sem escala hoje` : "Há loja sem escala hoje"),
+    meaning: "Sem a escala do dia não dá para saber quem atende, nem calcular a cota de cada vendedor.",
+    actionLabel: "Montar a escala", actionWillDo: "Cria uma tarefa para lançar a escala de hoje da loja.", affected: "yes",
+  },
+  retail_sellers_unidentified: {
+    title: (ev) => (Number(ev?.count) === 1 ? "1 vendedor ainda precisa ser identificado" : `${Number(ev?.count) > 0 ? Number(ev.count) : "Alguns"} vendedores ainda precisam ser identificados`),
+    meaning: "Há matrículas vendendo sem nome confirmado: a comissão e as metas dessas pessoas ficam incompletas.",
+    actionLabel: "Identificar vendedores", actionWillDo: "Cria uma tarefa para dar nome a cada matrícula que vende sem identificação.", affected: "no",
+  },
   retail_writeback_backlog: {
     title: "Há vendas esperando baixa no caixa", meaning: "Baixas pendentes deixam o estoque e o caixa desatualizados.",
     actionLabel: "Lançar as baixas", actionWillDo: "Cria uma tarefa para lançar as baixas pendentes.", affected: "yes",

@@ -21,7 +21,7 @@ import { CashForecastService } from "./CashForecastService.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
 import { DecisionActionService } from "./DecisionActionService.js";
 import { NegativeStockDiagnosisService } from "./NegativeStockDiagnosisService.js";
-import { RetailDayBriefService } from "./RetailDayBriefService.js";
+import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
 import { RetailQuestionTools } from "./RetailQuestionTools.js";
 
 type Res = { ok: boolean; tool: string; summary?: string; data?: any; clarify?: string };
@@ -144,14 +144,17 @@ export class ExecutiveDecisionTools {
       const m = RetailQuestionTools.metaDoDia(orgId, date);
       if (m.summary) { parts.push(`Lojas hoje:\n${m.summary}`); data.lojas = m.data ?? null; }
     } catch { /* sem varejo: segue */ }
+    const shownTypes = new Set<string>();
     try {
       const att = BusinessHealthService.attention(orgId);
+      for (const i of att.items) if (i.signalType) shownTypes.add(i.signalType);
       data.atencao = att.count;
       if (att.count > 0) parts.push(`${att.count} assunto${att.count === 1 ? "" : "s"} precisa${att.count === 1 ? "" : "m"} de atenção:\n${att.items.slice(0, 5).map((i, n) => `${n + 1}. ${i.title}`).join("\n")}`);
       else parts.push("Nenhuma ação humana necessária — operação sob controle.");
     } catch { /* atenção indisponível: não afirma "sob controle" */ }
     try {
-      const ex = RetailDayBriefService.morningExceptions(orgId, date);
+      // O que já saiu na lista de atenção (como sinal) não repete aqui; o que ainda não virou sinal (o publicador roda de hora em hora) entra.
+      const ex = RetailExceptionSignalService.items(orgId, date).filter((x) => !shownTypes.has(x.type)).map((x) => x.text);
       if (ex.length) { parts.push(`Exceções: ${ex.join(" ")}`); data.excecoes = ex; }
     } catch { /* sem varejo */ }
     try {

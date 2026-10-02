@@ -32,7 +32,7 @@ import { onlyDigits } from "./phoneMatch.js";
 import { officialSaleSourceOf, officialSaleSql } from "./RetailSalesPolicy.js";
 import { RetailClosingService } from "./RetailOpsService.js";
 import { RetailMonthlyGoalService } from "./RetailMonthlyGoalService.js";
-import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
+import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
 import { combineMetrics, formatMetric, known, ratioMetric, unknown, notComputed, type Metric } from "../lib/metric.js";
 
 export const DEFAULT_NIGHT_TIME = "22:30";         // padrão da rede (lojas sem closing_brief_time) — hora de São Paulo
@@ -93,19 +93,8 @@ export class RetailDayBriefService {
    * identificados". Honesto: só fala de escala se a org USA escala (há alguma entrada cadastrada) — org sem escala não é cobrada.
    */
   static morningExceptions(orgId: string, date: string): string[] {
-    const out: string[] = [];
-    try {
-      const usesSchedule = !!db.prepare(`SELECT 1 FROM retail_schedule_entries WHERE organization_id = ? LIMIT 1`).get(orgId);
-      if (usesSchedule) {
-        const semEscala = storesOpenOn(orgId, date).filter((st) => !db.prepare(`SELECT 1 FROM retail_schedule_entries WHERE organization_id = ? AND store_id = ? AND work_date = ? AND status = 'work' LIMIT 1`).get(orgId, st.id, date));
-        for (const st of semEscala) out.push(`${st.name} está sem escala.`);
-      }
-    } catch { /* best-effort */ }
-    try {
-      const n = RetailSellerIdentityService.unidentified(orgId).length;
-      if (n > 0) out.push(n === 1 ? "1 vendedor ainda precisa ser identificado." : `${n} vendedores ainda precisam ser identificados.`);
-    } catch { /* best-effort */ }
-    return out;
+    // Fonte única (S4c-2): a mesma definição que gera os assuntos da Central de Saúde. Org sem escala não é cobrada; folga geral não é "sem escala".
+    try { return RetailExceptionSignalService.items(orgId, date).map((x) => x.text); } catch { return []; }
   }
 
   /** Linhas pro resumo da manhã (vazio quando não há cota cadastrada — 0-regressão). */

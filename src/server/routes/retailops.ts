@@ -101,6 +101,7 @@ import { RetailCommissionService } from "../RetailCommissionService.js";
 import { RetailCommissionRaceService } from "../RetailCommissionRaceService.js";
 import { RetailAfternoonBriefService } from "../RetailAfternoonBriefService.js";
 import { RetailMonthlyGoalService } from "../RetailMonthlyGoalService.js";
+import { RetailExceptionSignalService } from "../RetailExceptionSignalService.js";
 import { RetailDayBriefService, DEFAULT_NIGHT_TIME } from "../RetailDayBriefService.js";
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
@@ -2371,6 +2372,12 @@ router.delete("/monthly-goals", requireNetworkScope, (req: AuthRequest, res): an
   try { res.json({ ok: RetailMonthlyGoalService.clear(orgId, String(req.body?.storeId || req.query.storeId || ""), String(req.body?.month || req.query.month || ""), req.user?.userId) }); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
+// S4c-2 — avisos de exceção na Central de Saúde ("sem escala", "vendedores a identificar"): NASCE LIGADO; o dono pode desligar. owner/co-admin sem loja.
+router.put("/exception-signals/enabled", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: RetailExceptionSignalService.setEnabled(orgId, !!req.body?.enabled) });
+});
 router.put("/night-brief/enabled", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -2385,6 +2392,7 @@ router.get("/brief-settings", requireNetworkScope, (req: AuthRequest, res): any 
   res.json({
     afternoonEnabled: RetailAfternoonBriefService.enabled(orgId),
     nightEnabled: RetailDayBriefService.enabled(orgId),
+    exceptionSignalsEnabled: RetailExceptionSignalService.enabled(orgId),
     defaultNightTime: DEFAULT_NIGHT_TIME,
     recipients: RetailDayBriefService.recipients(orgId).length,
     stores: RetailStoreService.list(orgId).filter((s: any) => s.active).map((s: any) => ({ id: s.id, name: s.name, closingBriefTime: s.closing_brief_time || null })),

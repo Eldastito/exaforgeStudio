@@ -303,7 +303,7 @@ export class BusinessHealthService {
    * corrigiu nem chega aqui — sinal resolvido não está aberto). Nada inventado: se a leitura falhar, 0 itens
    * e a síntese cai no comportamento anterior.
    */
-  static attention(orgId: string): { count: number; items: Array<{ signalId: string; title: string; actionLabel: string; severity: string; domainLabel: string }>; technicalHidden: number } {
+  static attention(orgId: string): { count: number; items: Array<{ signalId: string; signalType?: string; title: string; actionLabel: string; severity: string; domainLabel: string }>; technicalHidden: number } {
     try {
       const global: any[] = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 200, perDomain: 200, skipGoals: true })?.global || [];
       const OWNER_SEV = new Set(["attention", "risk", "critical"]);
@@ -315,7 +315,7 @@ export class BusinessHealthService {
       });
       return {
         count: rel.length,
-        items: rel.slice(0, 5).map((p) => ({ signalId: p.signalId, title: p.presentation?.title || "Ponto de atenção", actionLabel: p.presentation?.actionLabel || "Ver detalhes e decidir", severity: String(p.severity), domainLabel: p.presentation?.domainLabel || "Seu negócio" })),
+        items: rel.slice(0, 5).map((p) => ({ signalId: p.signalId, signalType: p.signalType, title: p.presentation?.title || "Ponto de atenção", actionLabel: p.presentation?.actionLabel || "Ver detalhes e decidir", severity: String(p.severity), domainLabel: p.presentation?.domainLabel || "Seu negócio" })),
         technicalHidden,
       };
     } catch { return { count: 0, items: [], technicalHidden: 0 }; }

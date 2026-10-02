@@ -485,7 +485,7 @@ function RetailBriefsCard() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const toggle = async (path: string, key: 'afternoonEnabled' | 'nightEnabled', label: string) => {
+  const toggle = async (path: string, key: 'afternoonEnabled' | 'nightEnabled' | 'exceptionSignalsEnabled', label: string) => {
     setBusy(true);
     try {
       const next = !cfg[key];
@@ -532,6 +532,13 @@ function RetailBriefsCard() {
             <div className="text-[12px] text-zinc-400">Cada loja vai no resumo do seu horário; o último inclui a rede.</div>
           </div>
           <Switch on={!!cfg.nightEnabled} onClick={() => toggle('/api/retailops/night-brief/enabled', 'nightEnabled', 'Fechamento da noite')} label="Fechamento da noite por loja" />
+        </div>
+        <div className="flex items-center justify-between gap-3 border-t border-emerald-500/15 pt-3">
+          <div className="min-w-0">
+            <div className="text-[13px] text-zinc-100">Avisos aqui na Central de Saúde</div>
+            <div className="text-[12px] text-zinc-400">Mostra como assunto quando uma loja está sem escala no dia ou há vendedores sem nome. Vem ligado; desligue se não quiser.</div>
+          </div>
+          <Switch on={cfg.exceptionSignalsEnabled !== false} onClick={() => toggle('/api/retailops/exception-signals/enabled', 'exceptionSignalsEnabled', 'Avisos de exceção')} label="Avisos de exceção na Central de Saúde" />
         </div>
       </div>
       <div className="mt-3 border-t border-emerald-500/15 pt-3">

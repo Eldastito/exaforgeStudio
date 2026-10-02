@@ -568,6 +568,7 @@
     "test:gestor-sales-routing": "tsx scripts/test-gestor-sales-routing.ts",
     "test:executive-decision-tools": "tsx scripts/test-executive-decision-tools.ts",
     "test:signal-brief": "tsx scripts/test-signal-brief.ts",
+    "test:retail-exception-signals": "tsx scripts/test-retail-exception-signals.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",
     "test:unknown-not-zero": "tsx scripts/test-unknown-not-zero.ts",

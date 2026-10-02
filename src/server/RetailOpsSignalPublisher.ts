@@ -5,6 +5,7 @@ import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailTransferService } from "./RetailTransferService.js";
 import { haversineKm } from "./geo.js";
+import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
 
 /**
  * RetailOpsSignalPublisher — conecta as OPERAÇÕES de varejo (loja virtual,
@@ -225,6 +226,25 @@ export class RetailOpsSignalPublisher {
           evidence: { seller: top.sellerName, pct: round2(pct * 100), totalSales: totalSellerSales, windowDays },
           dedupeKey: `retail_ops:seller_concentration`,
         });
+      }
+    }
+
+    // ── Exceções do dia → Central de Saúde (PRD Fase 1 §26): loja sem escala e vendedores a identificar ──
+    // Fonte única em RetailExceptionSignalService (a mesma do resumo da manhã/panorama). Nasce LIGADO e é desligável; desligado,
+    // não entra em `current` e o auto-resolve abaixo fecha o que já estava aberto.
+    if (RetailExceptionSignalService.enabled(orgId)) {
+      // `publish` em cima de um sinal já RESOLVIDO não o reabre (dedupe): sinal que se auto-resolve e RECORRE precisa de `reopenByDedupe`
+      // (padrão do projeto; só reabre `resolved` — o `dismissed` humano é respeitado, §65). Sem isso "vendedores a identificar" sumiria
+      // pra sempre depois da primeira resolução.
+      const pubExc = (sig: any) => { pub(sig); try { BusinessSignalService.reopenByDedupe(orgId, sig.dedupeKey); } catch { /* noop */ } };
+      for (const x of RetailExceptionSignalService.items(orgId, asOf)) {
+        if (x.type === "retail_store_no_schedule") {
+          pubExc({ domain: "retail_ops", signalType: "retail_store_no_schedule", severity: "attention", impactAmount: null, impactUnit: null,
+            sourceEntityType: "retail_store", sourceEntityId: x.storeId, evidence: { store: x.storeName, date: asOf }, dedupeKey: `retail_ops:no_schedule:${x.storeId}:${asOf}` });
+        } else {
+          pubExc({ domain: "retail_ops", signalType: "retail_sellers_unidentified", severity: "attention", impactAmount: null, impactUnit: null,
+            sourceEntityType: "organization", sourceEntityId: orgId, evidence: { count: x.count }, dedupeKey: `retail_ops:sellers_unidentified` });
+        }
       }
     }
 

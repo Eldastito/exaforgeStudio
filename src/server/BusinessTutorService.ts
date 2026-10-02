@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { EXCEPTION_SIGNAL_TYPES } from "./RetailExceptionSignalService.js";
 import { BusinessHealthService } from "./BusinessHealthService.js";
 import { ImpactPrioritizationService } from "./ImpactPrioritizationService.js";
 import { ComigoHealthService } from "./ComigoHealthService.js";
@@ -101,9 +102,10 @@ export class BusinessTutorService {
     }
 
     // F1.6a: varejo com cota do dia cadastrada recebe "quanto cada loja tem que vender hoje" (sem cota → nada muda).
+    let exceptionsShownAbove = false;
     try {
       const cota = RetailDayBriefService.morningLines(orgId, FalaTuBriefingDigestService.spParts(new Date()).dateSP);
-      if (cota.length) lines.push("", ...cota);
+      if (cota.length) { lines.push("", ...cota); exceptionsShownAbove = true; }
     } catch { /* best-effort: o resumo da manhã não cai por causa da cota */ }
 
     // Sinais da operação (ADR-136): leva o Pareto de TODOS os domínios ao briefing
@@ -111,7 +113,9 @@ export class BusinessTutorService {
     // porque caixa/recebíveis já entram nas prioridades da Central de Saúde acima.
     try {
       const ops = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 6 })
-        .global.filter((p: any) => p.domain !== "finance");
+        .global.filter((p: any) => p.domain !== "finance")
+        // As exceções "sem escala"/"vendedores a identificar" já saíram acima (⚠️) quando há meta do dia — não repete como sinal.
+        .filter((p: any) => !(exceptionsShownAbove && EXCEPTION_SIGNAL_TYPES.includes(p.signalType)));
       if (ops.length) {
         lines.push("");
         lines.push("*🔎 Sinais da operação:*");

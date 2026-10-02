@@ -91,6 +91,8 @@ async function main() {
   check("manhã: 'Meta de hoje por loja' com as metas e a da rede (5.000)", /Meta de hoje por loja/.test(ml) && /• Bangu: R\$ 2\.000/.test(ml) && /• Rede: R\$ 5\.000/.test(ml));
   check("manhã: org que NÃO usa escala não recebe 'sem escala'", !/sem escala/.test(ml));
   db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, ?, 'mat:1', 'Ana', 'work')`).run(randomUUID(), M, s2, D);
+  // Bangu USA escala (lançou dias atrás) mas hoje ficou sem nenhuma entrada → é "sem escala". Loja que NUNCA lançou escala não seria cobrada (S4c-2).
+  db.prepare(`INSERT INTO retail_schedule_entries (id, organization_id, store_id, work_date, seller_key, seller_name, status) VALUES (?, ?, ?, date(?, '-5 days'), 'mat:2', 'Rui', 'work')`).run(randomUUID(), M, s1, D);
   ml = B.morningLines(M, D).join("\n");
   check("manhã: org que usa escala → 'Bangu está sem escala.' (Carioca tem escala, não aparece)", /Bangu está sem escala\./.test(ml) && !/Carioca está sem escala/.test(ml));
   db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name) VALUES (?, ?, '7777', NULL)`).run(randomUUID(), M);

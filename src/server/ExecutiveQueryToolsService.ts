@@ -23,6 +23,7 @@ import { BusinessGoalService } from "./BusinessGoalService.js";
 import { FinancialLedgerService } from "./FinancialLedgerService.js";
 import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailQuestionTools } from "./RetailQuestionTools.js";
+import { ExecutiveDecisionTools } from "./ExecutiveDecisionTools.js";
 
 export interface ExecutiveToolDef {
   name: string;
@@ -138,6 +139,17 @@ export class ExecutiveQueryToolsService {
       description: "Simula comprar estoque de R$ X: cobertura em dias e capital que tende a empatar. Serve: 'posso comprar R$ 180 mil'. Só o valor total entra na conta (entrada/prazo não).",
       args: [{ name: "amount", description: "Valor da compra em R$ (número)", required: true }, { name: "ignored", description: "Lista do que a pergunta citou e não é modelado (entrada, prazo)" }],
     },
+    // PRD Fase 1 §24/§25 — decisão (motor existente DecisionEngine) e panorama da operação (código em ExecutiveDecisionTools).
+    {
+      name: "analisar_decisao", money: true,
+      description: "Analisa uma DECISÃO de compra/investimento ('estou pensando em comprar R$ 180 mil, 30% de entrada e o resto em 60 dias — vale a pena?') com o motor de decisão: riscos, premissas frágeis, caixa vs. entrada/prazo e recomendação advisória. Não executa nada.",
+      args: [{ name: "text", description: "A pergunta como o gestor escreveu (extraio valor, entrada e prazo)", required: true }],
+    },
+    {
+      name: "panorama_operacao", money: true,
+      description: "Panorama da operação hoje: lojas (meta/vendido), o que precisa de atenção, exceções (sem escala, vendedores a identificar), aprovações pendentes e divergência de estoque. Serve: 'como está minha operação'.",
+      args: [],
+    },
     {
       name: "catalogo_produto", money: true,
       description: "Preço e (quando controlado) estoque geral de um produto do catálogo.",
@@ -180,6 +192,8 @@ export class ExecutiveQueryToolsService {
           return RetailQuestionTools.rankingVendedores(orgId, p.from, p.to, p.label);
         }
         case "divergencia_estoque": return RetailQuestionTools.divergenciaEstoque(orgId);
+        case "analisar_decisao": return ExecutiveDecisionTools.analisarDecisao(orgId, { text: String(args.text || "") });
+        case "panorama_operacao": return ExecutiveDecisionTools.panoramaOperacao(orgId);
         case "simular_compra": return RetailQuestionTools.simularCompra(orgId, Number(args.amount) || null, Array.isArray(args.ignored) ? args.ignored : []);
       }
     } catch (e) {

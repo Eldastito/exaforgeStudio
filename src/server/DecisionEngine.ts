@@ -126,7 +126,8 @@ export class DecisionEngine {
     const amount = Number(input.impactAmount) || 0;
     const fin = evidence?.internalEvidence?.finance;
     const finOk = fin && fin.available !== false;
-    const caixa = finOk ? Number(fin?.caixa?.value) || 0 : 0;
+    // Caixa só conta como liquidez quando é SALDO (não a soma de vendas registradas — `caixa.reliable === false`).
+    const caixa = finOk && fin?.caixa?.reliable !== false ? Number(fin?.caixa?.value) || 0 : 0;
     const survivalDays = finOk && fin?.previsaoCaixa?.survivalDays != null ? Number(fin.previsaoCaixa.survivalDays) : null;
 
     // 1) Pressão de caixa (decisões que gastam).
@@ -143,6 +144,17 @@ export class DecisionEngine {
         threshold: "saldo projetado < 0 nas próximas semanas",
         mitigation: "Faseie o desembolso e/ou antecipe recebíveis antes de comprometer o valor cheio.",
         dedupeKey: `${dtype}:cash_pressure`,
+      });
+    }
+
+    // 1b) Sem saldo de caixa confiável: não dá pra afirmar que o caixa suporta o desembolso (null ≠ "tem folga").
+    if (spends && finOk && fin?.caixa?.reliable === false) {
+      risks.push({
+        description: `Sem saldo de caixa confiável: o ZapFlow só tem as vendas/entradas registradas (nenhuma saída lançada), então não dá pra afirmar que o caixa suporta ${brl(amount)}.`,
+        probability: "medium", severity: "attention",
+        leadingIndicator: "saldo_real_caixa", threshold: "saldo real desconhecido",
+        mitigation: "Informe o saldo real do caixa (ou lance as saídas) antes de comprometer o valor.",
+        dedupeKey: `${dtype}:cash_unknown`,
       });
     }
 
@@ -212,7 +224,7 @@ export class DecisionEngine {
     const fin = evidence?.internalEvidence?.finance;
     const finOk = fin && fin.available !== false;
     const support: string[] = [];
-    if (finOk && Number(fin?.caixa?.value) > 0) support.push(`Caixa atual positivo (${brl(fin.caixa.value)}).`);
+    if (finOk && fin?.caixa?.reliable !== false && Number(fin?.caixa?.value) > 0) support.push(`Caixa atual positivo (${brl(fin.caixa.value)}).`);
     if (finOk && fin?.dre?.margemPct != null) support.push(`Margem atual de ${fin.dre.margemPct}%.`);
     if (scenarios?.ok) support.push(`Cenário base projeta ${brl(scenarios.base.value)} (upside até ${brl(scenarios.aggressive.value)}).`);
     if (evidence?.confidence != null) support.push(`Confiança das evidências: ${Math.round(evidence.confidence * 100)}%.`);
@@ -255,7 +267,8 @@ export class DecisionEngine {
 
   /** Síntese determinística: postura + porquê (advisória — gate real é o RBAC). */
   private static synthesize(level: any, out: any, learningPrior?: any): any {
-    const highRisks = (out.premortem?.risks || []).filter((r: any) => r.probability === "high" || r.severity === "risk" || r.severity === "critical");
+    // Liquidez DESCONHECIDA (caixa que não é saldo) num gasto relevante conta como risco alto: "não sei se o caixa suporta" não é "sem riscos".
+    const highRisks = (out.premortem?.risks || []).filter((r: any) => r.probability === "high" || r.severity === "risk" || r.severity === "critical" || String(r.dedupeKey || "").endsWith(":cash_unknown"));
     const redFlags = (out.redTeam?.challenges || []).filter((c: any) => c.severity === "risk" || c.severity === "critical");
 
     let stance: string;

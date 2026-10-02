@@ -86,9 +86,11 @@ async function main() {
   check("com negativo: 'Sim — N ocorrência(s) em M loja(s)' agrupado por causa (F1.3)", /^Sim — 1 ocorrência em 1 loja/.test(div) && /Produto sem nenhuma entrada/.test(div), div);
 
   // posso comprar
-  const buy = (await ask("Posso comprar R$ 180 mil, com 30% de entrada e 60 dias?"))!;
+  const buy = (await ask("Posso comprar R$ 180 mil em mercadoria?"))!;
   check("'Posso comprar?' usa o simulador: sem dado de giro diz que não sabe (não finge cobertura)", /Ainda não tenho velocidade de venda/.test(buy), buy);
-  check("entrada e prazo citados são declarados como NÃO modelados (não fingem entrar na conta)", /considero só o valor total/.test(buy) && /a entrada/.test(buy) && /prazo/.test(buy));
+  // S4b (PRD §24): com entrada/prazo a pergunta é uma DECISÃO → motor de decisão (analisar_decisao), que trata entrada e prazo como condições
+  // declaradas em vez de "não modelados" (o simulador de estoque só vê o total). Ver test:executive-decision-tools.
+  check("com entrada e prazo a pergunta vira análise de decisão (não o simulador)", R.detect(A, "Posso comprar R$ 180 mil, com 30% de entrada e 60 dias?")?.tool === "analisar_decisao" && R.detect(A, "Posso comprar R$ 180 mil em mercadoria?")?.tool === "simular_compra");
   check("sem valor: pergunta de volta (não chuta)", /Qual o valor da compra/.test((await ask("Posso comprar estoque agora?"))!));
   check("parseMoneyPt: R$ 180 mil · 180k · R$ 180.000,50 · 1,5 milhão", parseMoneyPt("R$ 180 mil") === 180000 && parseMoneyPt("180k") === 180000 && parseMoneyPt("R$ 180.000,50") === 180000.5 && parseMoneyPt("1,5 milhão") === 1500000 && parseMoneyPt("sem número") === null);
 

@@ -43,7 +43,10 @@ async function main() {
 
   // ===================== Roteamento por impacto =====================
   const orgA = mkOrg();
-  F.recordEvent(orgA, { direction: "in", amount: 5000 }); // caixa 5000 (finance disponível)
+  // caixa 5000 (finance disponível): entrada 6000 − saída 1000. Precisa de uma SAÍDA lançada pra ser SALDO ("Caixa honesto", #1794):
+  // só entradas registradas não são saldo e o motor não as trata como liquidez.
+  F.recordEvent(orgA, { direction: "in", amount: 6000 });
+  F.recordEvent(orgA, { direction: "out", amount: 1000 });
 
   // L1 (R$300): NÃO dispara análise profunda.
   const low = E.analyze(orgA, { title: "Enviar follow-up", decisionType: "generic", impactAmount: 300, impactUnit: "BRL" });
@@ -58,6 +61,10 @@ async function main() {
   // Pre-Mortem: risco de caixa presente + campos monitoráveis completos.
   const cash = hi.premortem.risks.find((r: any) => r.dedupeKey === "purchase:cash_pressure");
   check("premortem: risco de pressão de caixa presente", !!cash && cash.probability === "high");
+  // Sem saldo confiável (só entradas registradas, nenhuma saída): não afirma liquidez NEM pressão — diz que não sabe.
+  const orgU = mkOrg(); F.recordEvent(orgU, { direction: "in", amount: 5000 });
+  const unk = E.analyze(orgU, { title: "Comprar coleção nova", decisionType: "purchase", impactAmount: 150000, impactUnit: "BRL", severity: "risk" });
+  check("sem saldo confiável: o motor avisa que não sabe o saldo (não trata vendas registradas como liquidez)", !!unk.premortem.risks.find((r: any) => r.dedupeKey === "purchase:cash_unknown") && !/Caixa atual positivo/.test((unk.advocate?.support || []).join(" ")));
   check("premortem: todo risco tem indicador líder + limiar + mitigação", hi.premortem.risks.every((r: any) => r.leadingIndicator && r.threshold && r.mitigation));
   check("premortem: risco de demanda presente", hi.premortem.risks.some((r: any) => r.dedupeKey === "purchase:demand_below_expected"));
 

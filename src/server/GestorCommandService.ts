@@ -65,7 +65,11 @@ export class GestorCommandService {
     if ((mm = m.match(/^(aprovar|aprova|aprovado)\s+(\d+)/))) return { intent: "aprovar", index: parseInt(mm[2], 10) };
     if ((mm = m.match(/^(dispensar|dispensa|rejeitar|rejeita|recusar|recusa)\s+(\d+)/))) return { intent: "rejeitar", index: parseInt(mm[2], 10) };
     if (/(aprova[çc][õo]es|aprovacoes|pend[êe]ncias|o que.*aprovar|aguardando aprova)/.test(m)) return { intent: "aprovacoes" };
-    if (/(^|\b)(saldo|caixa|quanto tenho|dinheiro)(\b|$)/.test(m)) return { intent: "saldo" };
+    // "dinheiro"/"caixa"/"quanto tenho" = saldo do caixa — MAS "Quanto vendemos em dinheiro hoje?" é pergunta de VENDA, não de saldo
+    // (antes respondia "Caixa atual: R$ …", que é outro número). Frase de venda/faturamento sai do atalho e cai na pergunta de negócio
+    // (Diretor IA). A palavra "saldo" explícita continua sendo saldo.
+    const asksSales = /(^|\b)(vend\w*|fatur\w*|receita)(\b|$)/.test(m);
+    if (/(^|\b)saldo(\b|$)/.test(m) || (!asksSales && /(^|\b)(caixa|quanto tenho|dinheiro)(\b|$)/.test(m))) return { intent: "saldo" };
     if (/(a\s*receber|receb[ií]veis|vencidos?|cobran[çc]a)/.test(m)) return { intent: "a_receber" };
     if (/(a\s*pagar|pagar|contas? a pagar|fornecedor)/.test(m)) return { intent: "a_pagar" };
     // "prioridades" só com frase clara — evita colidir com pergunta de tarefas

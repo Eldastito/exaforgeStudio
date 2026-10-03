@@ -84,12 +84,12 @@ async function main() {
   t = T.build(A, owner, { now: NOW });
   check(`no máximo ${MAX_PRIORITIES} prioridades; o excedente vira só contagem`, t.priorities.length === MAX_PRIORITIES && t.moreCount >= 1, `${t.priorities.length}/${t.moreCount}`);
   check("toda prioridade tem título, causa e verbo específicos", t.priorities.every(p => p.title && p.cause && p.verb && p.viewMode), JSON.stringify(t.priorities.map(p => p.verb)));
-  check("ordem: decisão antes de risco", t.priorities[0].kind === "decision" && t.priorities.slice(1).every(p => p.kind === "risk" || p.kind === "signal"));
+  check("ordem: decisão antes de risco", t.priorities[0].kind === "decision" && t.priorities[1]?.kind === "risk" && t.priorities.map(p => p.weight).every((w, i, a) => i === 0 || a[i - 1] >= w), JSON.stringify(t.priorities.map(p => p.kind)));
 
   // exceção sem escala (escala existe nos últimos 31 dias, mas não hoje) — nomeia a loja no verbo
   const ex = T.build(A, owner, { now: NOW });
   const exAll = (ex.priorities.length + ex.moreCount);
-  check("exceção 'sem escala' é candidata (entra no total de assuntos)", exAll >= 5, String(exAll));
+  check("exceção 'sem escala' é candidata (entra no total de assuntos)", exAll >= 4, String(exAll));
   const onlyEx = (() => { db.prepare(`UPDATE business_signals SET status='dismissed' WHERE organization_id = ?`).run(A); db.prepare(`UPDATE decision_actions SET status='rejected' WHERE organization_id = ?`).run(A); return T.build(A, owner, { now: NOW }); })();
   check("sem decisão/risco: a exceção sobe e o verbo nomeia a loja", onlyEx.priorities.some(p => p.kind === "exception" && /Cadastrar a escala de (Grande Rio|Bangu)/.test(p.verb)), JSON.stringify(onlyEx.priorities.map(p => p.verb)));
 
@@ -101,6 +101,14 @@ async function main() {
   check("bloco de rede do gerente é marcado como escopo parcial (UI diz 'Suas lojas', não 'Rede'); dono não", gv.network?.scoped === true && T.build(A, owner, { now: NOW }).network?.scoped === false, String(gv.network?.scoped));
   check("valor recuperado nunca é R$ 0: sem valor > 0 vira null (null≠zero)", T.build(A, owner, { now: NOW }).resolved.valueRecovered === null || /[1-9]/.test(T.build(A, owner, { now: NOW }).resolved.valueRecovered!.text));
 
+  // sinais IGUAIS viram 1 prioridade com contagem (não ocupam as 3 vagas) + as telas novas têm barra de rolagem própria (main é overflow-hidden)
+  const GRP = `org_${randomUUID().slice(0, 6)}`; db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'X', 'active')`).run(randomUUID(), GRP);
+  for (const k of ["a", "b", "c"]) BS.publish(GRP, { domain: "finance", signalType: "cash_low", severity: "critical", basis: "fact", confidence: 0.9, sourceService: "test", dedupeKey: `g-${k}`, impactAmount: 9000, impactUnit: "BRL", evidence: {} });
+  const gt = T.build(GRP, userFor(GRP, "owner"), { now: NOW });
+  check("3 sinais idênticos → 1 prioridade com '(3 ocorrências)'", gt.priorities.length === 1 && /3 ocorrências/.test(gt.priorities[0].title), JSON.stringify(gt.priorities.map(p => p.title)));
+  const appSrc = fs.readFileSync("src/App.tsx", "utf8");
+  check("Hoje/Executando/Resultados/Empresa renderizam dentro de contêiner com rolagem (overflow-y-auto)", ["hoje:TodayView", "executando:ExecutingView", "resultados:ResultsView", "empresa:CompanyView"].every(x => { const [v, c] = x.split(":"); return new RegExp(`viewMode === '${v}' && <div className="flex-1 min-w-0 overflow-y-auto"><${c} />`).test(appSrc); }));
+
   // ── (8) isolamento ──
   const ot = T.build(OTHER, userFor(OTHER, "owner"), { now: NOW });
   check("isolamento: outra org não vê nada da org A", ot.priorities.length === 0 && ot.network === null);
@@ -109,7 +117,7 @@ async function main() {
   const ux = fs.readFileSync("src/server/routes/ux.ts", "utf8");
   check("rota GET /api/ux/today montada", /router\.get\("\/today"/.test(ux));
   const app = fs.readFileSync("src/App.tsx", "utf8");
-  check("App renderiza TodayView no viewMode 'hoje'", /viewMode === 'hoje' && <TodayView \/>/.test(app));
+  check("App renderiza TodayView no viewMode 'hoje'", /viewMode === 'hoje' && <div className="flex-1 min-w-0 overflow-y-auto"><TodayView \/><\/div>/.test(app));
 
   console.log(failures === 0 ? "\nTODOS OS CHECKS PASSARAM" : `\n${failures} FALHA(S)`);
   process.exit(failures ? 1 : 0);

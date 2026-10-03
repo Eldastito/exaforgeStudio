@@ -107,7 +107,7 @@ async function main() {
   // ── (10) fiação ──
   check("rota GET /api/ux/integration-status montada", /router\.get\("\/integration-status"/.test(fs.readFileSync("src/server/routes/ux.ts", "utf8")));
   const nav = fs.readFileSync("src/lib/navCatalog.ts", "utf8"), app = fs.readFileSync("src/App.tsx", "utf8");
-  check("nav 'Empresa' abre a tela própria; App renderiza CompanyView", /key: 'empresa', label: 'Empresa', viewMode: 'empresa'/.test(nav) && /viewMode === 'empresa' && <CompanyView \/>/.test(app));
+  check("nav 'Empresa' abre a tela própria; App renderiza CompanyView", /key: 'empresa', label: 'Empresa', viewMode: 'empresa'/.test(nav) && /viewMode === 'empresa' && <div className="flex-1 min-w-0 overflow-y-auto"><CompanyView \/><\/div>/.test(app));
   const view = fs.readFileSync("src/features/CompanyView.tsx", "utf8");
   check("telas técnicas preservadas: 'Integrações' e 'Canais e I.A.' seguem no catálogo e a Empresa linka o modo avançado", /viewMode: 'integrations'/.test(nav) && /viewMode: 'channels'/.test(nav) && /advancedViewMode/.test(view) && /setViewMode\('channels'/.test(view));
 

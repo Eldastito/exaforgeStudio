@@ -103,7 +103,7 @@ async function main() {
   // ── (9) fiação ──
   const ux = fs.readFileSync("src/server/routes/ux.ts", "utf8");
   check("rota GET /api/ux/executing-board montada", /router\.get\("\/executing-board"/.test(ux));
-  check("App renderiza ExecutingView no viewMode 'executando'", /viewMode === 'executando' && <ExecutingView \/>/.test(fs.readFileSync("src/App.tsx", "utf8")));
+  check("App renderiza ExecutingView no viewMode 'executando'", /viewMode === 'executando' && <div className="flex-1 min-w-0 overflow-y-auto"><ExecutingView \/><\/div>/.test(fs.readFileSync("src/App.tsx", "utf8")));
 
   console.log(failures === 0 ? "\nTODOS OS CHECKS PASSARAM" : `\n${failures} FALHA(S)`);
   process.exit(failures ? 1 : 0);

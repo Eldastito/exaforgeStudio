@@ -636,10 +636,10 @@ export default function App() {
           {viewMode === 'missoes' && <MissionsView />}
           {viewMode === 'juridico' && <LegalAdvisorView />}
           {viewMode === 'caixa' && <CashView />}
-          {viewMode === 'hoje' && <TodayView />}
-          {viewMode === 'executando' && <ExecutingView />}
-          {viewMode === 'resultados' && <ResultsView />}
-          {viewMode === 'empresa' && <CompanyView />}
+          {viewMode === 'hoje' && <div className="flex-1 min-w-0 overflow-y-auto"><TodayView /></div>}
+          {viewMode === 'executando' && <div className="flex-1 min-w-0 overflow-y-auto"><ExecutingView /></div>}
+          {viewMode === 'resultados' && <div className="flex-1 min-w-0 overflow-y-auto"><ResultsView /></div>}
+          {viewMode === 'empresa' && <div className="flex-1 min-w-0 overflow-y-auto"><CompanyView /></div>}
           {viewMode === 'saude' && <HealthCenterView />}
           {viewMode === 'insights' && <InsightsView />}
           {viewMode === 'reservas' && <ReservasView />}

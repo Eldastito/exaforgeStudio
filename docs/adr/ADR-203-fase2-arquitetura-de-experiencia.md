@@ -51,3 +51,7 @@ Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedN
 
 ## Status F2.6 — EM PR
 `IntegrationStatusService` + `GET /api/ux/integration-status` + `CompanyView` (Empresa). `test:integration-status` (20). Runbook: seção F2.6.
+
+
+## Status F2.7 — pronta localmente
+RetailOps 19 abas → 5 grupos atrás da flag (`retailOpsGroups` + `RetailOpsView`). `test:retail-ops-groups` (14). Runbook: seção F2.7.

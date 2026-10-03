@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { useStore } from '@/src/store/useStore';
+import { RETAIL_TAB_GROUPS, groupOfTab } from '@/src/lib/retailOpsGroups';
+import { trackView } from '@/src/lib/uxTelemetry';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, weeksOfMonthLocal, daysBetween, addMonths } from './retailDateUtils';
@@ -959,6 +962,13 @@ function StoreResultTab() {
 
 export function RetailOpsView() {
   const [tab, setTab] = useState<RetailTab>('insights');
+  // ADR-203 F2.7 — com o menu simplificado ligado, as 19 abas aparecem agrupadas por propósito (5 grupos → abas do grupo).
+  // Flag desligada = a lista plana de sempre (0-regressão). As abas e o conteúdo são exatamente os mesmos.
+  const simplified = useStore(s => s.simplifiedNavEnabled);
+  const activeGroup = groupOfTab(tab) || RETAIL_TAB_GROUPS[0];
+  const tabBtn = ({ key, label, icon: Icon }: { key: RetailTab; label: string; icon: any }) => (
+    <button key={key} onClick={() => { if (simplified) trackView('retailops_aba', key); setTab(key); }} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
+  );
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
       <div className="mb-4">
@@ -966,11 +976,23 @@ export function RetailOpsView() {
         <h2 className="zf-page-title flex items-center gap-2"><Store className="w-6 h-6" style={{ color: 'var(--color-flow)' }} /> Operação da Rede</h2>
         <p className="text-zinc-400 text-sm mt-1">Fechamento diário, comissão, conferência com o sistema, estoque e cobrança da equipe.</p>
       </div>
-      <div className="mb-5 flex flex-wrap gap-2">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
-        ))}
-      </div>
+      {simplified ? (
+        <div className="mb-5 space-y-3" data-testid="retailops-groups">
+          <div className="flex flex-wrap gap-2">
+            {RETAIL_TAB_GROUPS.map(g => (
+              <button key={g.key} onClick={() => { trackView('retailops_grupo', g.key); setTab(g.tabs[0] as RetailTab); }} title={g.hint}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${activeGroup.key === g.key ? 'bg-teal-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>{g.label}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activeGroup.tabs.map(k => TABS.find(t => t.key === k)).filter(Boolean).map(t => tabBtn(t as { key: RetailTab; label: string; icon: any }))}
+          </div>
+        </div>
+      ) : (
+        <div className="mb-5 flex flex-wrap gap-2">
+          {TABS.map(tabBtn)}
+        </div>
+      )}
       {tab === 'insights' && <InsightsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'malote' && <MaloteTab />}

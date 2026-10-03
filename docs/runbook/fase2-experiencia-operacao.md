@@ -83,3 +83,20 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 - **Sem segredos:** token, client id/secret, base URL e rede nunca saem (o técnico fica no modo avançado). **Só gestor** (owner/admin): os demais recebem `restricted`. Isolado por org.
 - **Ajustes da empresa** (atalhos para abas de Configurações que já existem): Dados da empresa · Equipe e permissões · Autonomia da IA · Plano e cobrança · Módulos e menu.
 - Fora desta fatia: o modo normal só cobre Alterdata + canais (os outros conectores — Sicredi, Google, etc. — seguem só no modo avançado); "objetivos" da empresa ainda não têm tela própria.
+
+## F2.7 — Operação da Rede: 19 abas → 5 grupos
+
+Só frontend (`src/lib/retailOpsGroups.ts` + `RetailOpsView`). **Com o menu simplificado ligado**, as 19 abas aparecem em 5 grupos por propósito e, ao escolher um grupo, só as abas dele (até 4). **Com a flag desligada, a lista plana de sempre** (0-regressão). Nenhuma aba foi removida, renomeada ou alterada; o conteúdo de cada uma é exatamente o mesmo.
+
+| Grupo | Abas |
+| --- | --- |
+| Fechar o dia | Fechamento diário · Malote / Depósitos · Divergência · Recebíveis (cartão) |
+| Vendas e metas | Resultado por loja · Mais vendidos · Metas do vendedor · Precificar |
+| Equipe | Escala & cotas · Vendedores da loja · Comissão · Equipe & cobrança |
+| Estoque e reposição | Estoque negativo · Reposição (grade) · Transferências · Loja virtual → PDV |
+| Clientes e inteligência | Insights · Clientes (PDV) · Padrões (IA) |
+
+- A aba padrão continua sendo "Insights" (grupo "Clientes e inteligência"); o grupo ativo sempre acompanha a aba aberta.
+- `test:retail-ops-groups` falha se uma aba some, duplica, é inventada, ou se o grupo passa de 5 abas.
+- Telemetria: troca de grupo/aba emite `view_opened` (`retailops_grupo` / `retailops_aba`) — grava só com `ux_telemetry_enabled`.
+- Fora desta fatia: as abas internas continuam com a mesma complexidade (ex.: Fechamento diário); só a navegação entre elas foi simplificada.

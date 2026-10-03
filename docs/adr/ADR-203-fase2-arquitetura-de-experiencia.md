@@ -35,3 +35,7 @@ Build + typecheck + testes + regressão; desktop e mobile; Owner/Gerente/Vendedo
 
 ## Status F2.2 — EM PR
 Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedNav` + `navCatalog` + toggle em Configurações → Módulos + `PUT /api/entitlements/simplified-navigation`). Destinos dos 5 itens são interinos. `test:simplified-navigation` (24). Runbook: seção F2.2.
+
+
+## Status F2.3 — pronta localmente (aguarda merge da F2.2 para abrir PR)
+`TodayCockpitService` + `GET /api/ux/today` + `TodayView`. `test:today-cockpit` (24). Gap: "resolvido automaticamente hoje" sem data no ledger. Runbook: seção F2.3.

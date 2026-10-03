@@ -99,14 +99,13 @@ export interface PrimaryNav { key: 'hoje' | 'falatu' | 'executando' | 'resultado
 
 /**
  * Os 5 itens de 1º nível, cada um apontando para uma tela JÁ existente (destino interino —
- * F2.3..F2.6 trocam por telas dedicadas). Só aparecem se o destino é visível sob o gate legado
+ * Hoje já é tela própria (F2.3); F2.4..F2.6 trocam os demais). Só aparecem se o destino é visível sob o gate legado
  * (RBAC/plano preservados, RN-F2-3). "Empresa" = gestor.
  */
 export function primaryNav(c: NavCtx): PrimaryNav[] {
   const ok = (vm: string) => NAV_CATALOG.find(e => e.viewMode === vm)?.visible(c) === true;
   const out: PrimaryNav[] = [];
-  const hoje = ok('saude') ? 'saude' : 'insights';
-  out.push({ key: 'hoje', label: 'Hoje', viewMode: hoje });
+  out.push({ key: 'hoje', label: 'Hoje', viewMode: 'hoje' });   // F2.3 — tela própria (cockpit por exceção)
   if (ok('falatu')) out.push({ key: 'falatu', label: 'FalaTu', viewMode: 'falatu' });
   const exec = ok('missoes') ? 'missoes' : ok('tarefas') ? 'tarefas' : null;
   if (exec) out.push({ key: 'executando', label: 'Executando', viewMode: exec });

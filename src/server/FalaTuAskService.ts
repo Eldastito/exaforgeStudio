@@ -36,6 +36,7 @@ import { RetailScheduleTemplateService } from "./RetailScheduleTemplateService.j
 import { ExecutiveAdvisorService } from "./ExecutiveAdvisorService.js";
 import { RecoveryAssessmentService } from "./RecoveryAssessmentService.js";
 import { RecoveryPlanService } from "./RecoveryPlanService.js";
+import { isDecisionInquiry } from "./ConversationalIntentRules.js";
 
 export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable" | "financial_recovery";
 
@@ -170,6 +171,9 @@ export class FalaTuAskService {
     // Despesa primeiro: "lança a despesa de R$200 com fornecedor Y" é registro
     // financeiro GOVERNADO (dinheiro que sai), não captura de nota. needsMoney
     // porque expõe/escreve dinheiro (§73).
+    // F2.1 (ADR-203): "estou pensando em comprar R$ 180 mil… o fornecedor quer 30% de entrada… analisa" é PERGUNTA DE DECISÃO — a
+    // palavra "fornecedor" não pode transformá-la em lançamento de despesa. Vai pro motor de decisão (open_question → router).
+    if (isDecisionInquiry(t)) return { kind: "open_question", date: null, needsMoney: true };
     if (!isQuestion && EXPENSE_KW_RE.test(t) && AMOUNT_CUE_RE.test(t)) {
       return { kind: "record_expense", date: null, needsMoney: true };
     }

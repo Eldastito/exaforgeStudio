@@ -17,6 +17,9 @@ import { SellerGoalStreakService } from "./SellerGoalStreakService.js";
 import { RetailSellerSalesService } from "./RetailSellerSalesService.js";
 import { NegativeStockDiagnosisService } from "./NegativeStockDiagnosisService.js";
 import { DecisionSimulatorService } from "./DecisionSimulatorService.js";
+import { RetailImpactService } from "./RetailImpactService.js";
+import { CampaignService } from "./CampaignService.js";
+import db from "./db.js";
 import { combineMetrics, formatMetric, known, type Metric } from "../lib/metric.js";
 
 type Res = { ok: boolean; tool: string; summary?: string; data?: any; clarify?: string };
@@ -37,6 +40,16 @@ export function parseMoneyPt(text: string): number | null {
   if (!n) return null;
   const v = Number(n[1].replace(/\./g, "").replace(",", "."));
   return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/** RN-F2-7: a venda "até agora" vem do PDV (parcial) — diz até que horas o dado vale e se está atrasado. Só quando há parcial no texto. */
+function pdvStamp(orgId: string, rows: Array<{ basis?: string }>): string {
+  if (!rows.some((r) => r.basis !== "fechamento")) return "";
+  try {
+    const f = RetailAfternoonBriefService.freshness(orgId);
+    if (!f.dataAsOf || !f.hhmm) return "";
+    return `\nÚltimo dado do PDV confirmado às ${f.hhmm}${f.stale ? " — ATRASADO: a venda de agora pode estar maior que a mostrada" : ""}.`;
+  } catch { return ""; }
 }
 
 export class RetailQuestionTools {
@@ -69,7 +82,7 @@ export class RetailQuestionTools {
         ? `- ${r.storeName}: vendeu ${brl(v)} de ${brl(cota)} — META BATIDA (${tag}).`
         : `- ${r.storeName}: vendeu ${brl(v)} de ${brl(cota)} — falta ${brl(Math.round((cota - v) * 100) / 100)} (${tag}).`;
     });
-    return { ok: true, tool: "meta_do_dia", data: { date, rows }, summary: `Meta do dia ${date.slice(8, 10)}/${date.slice(5, 7)} por loja:\n${lines.join("\n")}` };
+    return { ok: true, tool: "meta_do_dia", data: { date, rows }, summary: `Meta do dia ${date.slice(8, 10)}/${date.slice(5, 7)} por loja:\n${lines.join("\n")}${pdvStamp(orgId, rows)}` };
   }
 
   /** "Quanto vendemos em dinheiro hoje?" */
@@ -81,7 +94,7 @@ export class RetailQuestionTools {
     const total = rows.length > 1
       ? (tot.fact.state === "value" ? `\nTotal em dinheiro: ${brl(tot.fact)}.` : (tot.partialFact !== null ? `\nTotal NÃO calculado (há loja sem dado); só das lojas com dado: ${brl(tot.partialFact)}.` : ""))
       : "";
-    return { ok: true, tool: "dinheiro_do_dia", data: { date, rows }, summary: `Venda em dinheiro, ${date.slice(8, 10)}/${date.slice(5, 7)}:\n${lines.join("\n")}${total}` };
+    return { ok: true, tool: "dinheiro_do_dia", data: { date, rows }, summary: `Venda em dinheiro, ${date.slice(8, 10)}/${date.slice(5, 7)}:\n${lines.join("\n")}${total}${pdvStamp(orgId, rows)}` };
   }
 
   /** "Quem está há dois meses sem bater meta?" */
@@ -113,6 +126,68 @@ export class RetailQuestionTools {
     const r = DecisionSimulatorService.buyStock(orgId, { amount });
     const nota = ignored.length ? `\nObs.: considero só o valor total da compra — ${ignored.join(" e ")} não entra(m) nesta conta (não simulo o que não modelo).` : "";
     return { ok: !!r.ok, tool: "simular_compra", data: r, summary: `${r.veredito || r.message || "Não consegui simular."}${nota}` };
+  }
+
+  /**
+   * F2.1 — "Qual loja está com pior/melhor desempenho?": % da META MENSAL já FECHADA (fechamentos enviados até ontem — `monthToDate`, S6),
+   * ao lado de quanto do mês já passou. NUNCA calcula "atingimento" sobre dia sem fechamento nem inventa meta: loja sem meta mensal ou
+   * sem nenhum fechamento enviado vai numa linha à parte. Ordena do pior pro melhor (ou o inverso se `best`).
+   */
+  static rankingLojas(orgId: string, date: string, opts: { best?: boolean } = {}): Res {
+    const mtd = RetailDayBriefService.monthToDate(orgId, date);
+    const stores = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    if (!stores.length) return { ok: true, tool: "ranking_lojas", summary: "Não há loja ativa cadastrada." };
+    const day = Number(date.slice(8, 10)), dim = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)), 0).getDate();
+    if (day <= 1) return { ok: true, tool: "ranking_lojas", summary: "Hoje é o 1º dia do mês: ainda não há fechamento do mês para comparar as lojas." };
+    const elapsed = Math.round(((day - 1) / dim) * 100);
+    const ranked: Array<{ name: string; sold: number; goal: number; pct: number }> = [];
+    const semMeta: string[] = [], semFechamento: string[] = [];
+    for (const st of stores) {
+      const m = mtd.get(st.id);
+      if (!m || !(m.goal! > 0)) { semMeta.push(st.name); continue; }
+      if (m.closedDays <= 0) { semFechamento.push(st.name); continue; }
+      ranked.push({ name: st.name, sold: m.sold, goal: m.goal!, pct: Math.round((m.sold / m.goal!) * 100) });
+    }
+    ranked.sort((a, b) => (opts.best ? b.pct - a.pct : a.pct - b.pct));
+    if (!ranked.length) return { ok: true, tool: "ranking_lojas", summary: `Ainda não dá para comparar as lojas: ${semMeta.length ? `sem meta mensal cadastrada (${semMeta.join(", ")})` : "nenhuma tem fechamento enviado no mês"}.` };
+    const lines = ranked.map((r, i) => `${i + 1}. ${r.name}: ${brl(r.sold)} de ${brl(r.goal)} (${r.pct}% da meta)`);
+    const extra: string[] = [];
+    if (semFechamento.length) extra.push(`Sem fechamento enviado no mês: ${semFechamento.join(", ")}.`);
+    if (semMeta.length) extra.push(`Sem meta mensal cadastrada: ${semMeta.join(", ")}.`);
+    return {
+      ok: true, tool: "ranking_lojas", data: { ranked, semMeta, semFechamento, elapsedPct: elapsed },
+      summary: `${opts.best ? "Melhores" : "Piores"} lojas no mês, em % da meta mensal (só fechamentos já enviados até ontem; ${elapsed}% do mês já passou):\n${lines.join("\n")}${extra.length ? `\n${extra.join(" ")}` : ""}\nÉ % do que foi FECHADO — dia sem fechamento enviado não conta como venda zero.`,
+    };
+  }
+
+  /**
+   * F2.1 — "Mostra os produtos parados": só afirma "parado" quando o sistema ENXERGA as saídas (S9 `giroMeasured`); senão diz que o giro
+   * não é medido (null ≠ zero) em vez de listar como fato. Item sem custo cadastrado aparece sem valor ("—").
+   */
+  static produtosParados(orgId: string): Res {
+    const sc: any = RetailImpactService.stockCapital(orgId);
+    if (!sc || !(Number(sc.itemsInStock) > 0)) return { ok: true, tool: "produtos_parados", summary: "Não há estoque cadastrado para avaliar." };
+    if (sc.giroMeasured === false) {
+      return { ok: true, tool: "produtos_parados", data: { giroMeasured: false }, summary: `Não consigo afirmar o que está parado: o sistema não recebe as saídas de estoque dos últimos ${sc.slowMoverDays || 60} dias (o estoque vem direto do ERP), então "sem saída registrada" não prova "sem venda". Capital em estoque a custo (só itens com custo cadastrado): ${brl(Number(sc.totalCapital) || 0)}.` };
+    }
+    const list: any[] = Array.isArray(sc.slowMovers) ? sc.slowMovers : [];
+    if (!list.length) return { ok: true, tool: "produtos_parados", data: { giroMeasured: true }, summary: `Nenhum produto com saldo e sem saída nos últimos ${sc.slowMoverDays || 60} dias.` };
+    const top = list.slice(0, 10);
+    const lines = top.map((s) => `- ${s.label || s.name}: ${s.quantity} un · ${Number(s.avgCost) > 0 ? brl(Number(s.capital)) : "— (sem custo cadastrado)"}`);
+    const unknown = list.filter((s) => !(Number(s.avgCost) > 0)).length;
+    return { ok: true, tool: "produtos_parados", data: { giroMeasured: true, count: list.length }, summary: `Sem saída há mais de ${sc.slowMoverDays || 60} dias (${list.length} item(ns); capital parado ${brl(Number(sc.slowMoverCapital) || 0)}${unknown ? `, soma só o que tem custo` : ""}):\n${lines.join("\n")}${list.length > top.length ? `\n…e mais ${list.length - top.length}.` : ""}` };
+  }
+
+  /**
+   * F2.1 — "Crie uma campanha para quem não compra há 90 dias": PRÉVIA honesta do segmento (clientes que já compraram e estão há N dias
+   * sem comprar, respeitando opt-out e contato válido) — NÃO cria nem envia nada. Criar o rascunho é um passo explícito em Campanhas
+   * (que nunca dispara sozinha), até a continuidade de conversa da F2.8 permitir o "pode criar".
+   */
+  static propostaCampanha(orgId: string, days: number | null): Res {
+    if (!days) return { ok: true, tool: "proposta_campanha", clarify: "Para quem? Diga há quantos dias o cliente não compra (ex.: \"clientes que não compram há 90 dias\")." };
+    const audience = CampaignService.resolveSegment(orgId, { inactiveDays: days });
+    if (!audience.length) return { ok: true, tool: "proposta_campanha", data: { days, audience: 0 }, summary: `Não encontrei cliente que já comprou e está há mais de ${days} dias sem comprar (com contato válido e que aceita receber mensagens). Nada a criar.` };
+    return { ok: true, tool: "proposta_campanha", data: { days, audience: audience.length }, summary: `Encontrei ${audience.length} cliente(s) que já compraram e estão há mais de ${days} dias sem comprar (só quem tem contato válido e não saiu das mensagens de marketing).\nNada foi criado nem enviado. Em Campanhas você cria o rascunho para esse público, revisa a mensagem e só então dispara.` };
   }
 }
 

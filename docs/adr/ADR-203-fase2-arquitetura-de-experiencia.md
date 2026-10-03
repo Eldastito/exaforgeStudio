@@ -1,6 +1,6 @@
 # ADR-203 — ZapFlow Fase 2: Arquitetura de Experiência, Simplificação Radical e Gestão Conversacional
 
-**Estado:** **F2.0 FECHADA (doc-only)** — análise + plano. F2.1+ aguardam as decisões D1–D5 do dono (ver §5 e `docs/prd/ANALISE-PRD-FASE2-vs-CODEBASE.md` §6).
+**Estado:** **F2.0 FECHADA (doc-only)** · **F2.1 EM PR** (roteador de intenções do FalaTu — `ConversationalIntentRules`, `ranking_lojas`/`produtos_parados`/`proposta_campanha`, carimbo de frescor do PDV; `test:falatu-intent-router` 24; runbook `docs/runbook/fase2-experiencia-operacao.md`). **Decisões D1–D5: o dono aceitou as recomendações** (Executando = fachada com Missões como seção · F2.1 antes da navegação · rótulo "Atendimento Digital" · Hoje com meta mensal + parcial · flag só na TOULON, Owner valida desktop+mobile, Gerente/Vendedor em org de teste).
 **Cliente-piloto:** TOULON. **Base:** Fase 1 concluída (S1–S9) + prints reais de 02/10/2026.
 **Análise:** `docs/prd/ANALISE-PRD-FASE2-vs-CODEBASE.md` (matriz PRD→código + probe executável das 19 frases do PRD).
 

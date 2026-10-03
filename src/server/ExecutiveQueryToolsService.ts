@@ -135,6 +135,21 @@ export class ExecutiveQueryToolsService {
       args: [],
     },
     {
+      name: "ranking_lojas", money: true,
+      description: "Ranking das lojas pelo % da META MENSAL já fechada (só fechamentos enviados; nunca vende zero por dia sem fechamento). Serve: 'qual loja está com pior desempenho', 'qual a melhor loja'.",
+      args: [{ name: "best", description: "true = melhores primeiro (default: piores primeiro)" }],
+    },
+    {
+      name: "produtos_parados", money: true,
+      description: "Produtos parados em estoque (sem saída). Só afirma quando o sistema enxerga as saídas de estoque; senão diz que o giro não é medido. Serve: 'mostra os produtos parados'.",
+      args: [],
+    },
+    {
+      name: "proposta_campanha", money: false,
+      description: "PRÉVIA de campanha para clientes que não compram há N dias (conta o público; não cria nem envia). Serve: 'crie uma campanha para quem não compra há 90 dias'.",
+      args: [{ name: "days", description: "Dias sem comprar (número)", required: true }],
+    },
+    {
       name: "simular_compra", money: true,
       description: "Simula comprar estoque de R$ X: cobertura em dias e capital que tende a empatar. Serve: 'posso comprar R$ 180 mil'. Só o valor total entra na conta (entrada/prazo não).",
       args: [{ name: "amount", description: "Valor da compra em R$ (número)", required: true }, { name: "ignored", description: "Lista do que a pergunta citou e não é modelado (entrada, prazo)" }],
@@ -197,6 +212,9 @@ export class ExecutiveQueryToolsService {
           return RetailQuestionTools.rankingVendedores(orgId, p.from, p.to, p.label);
         }
         case "divergencia_estoque": return RetailQuestionTools.divergenciaEstoque(orgId);
+        case "ranking_lojas": return RetailQuestionTools.rankingLojas(orgId, hojeTz(), { best: args.best === true || args.best === "true" });
+        case "produtos_parados": return RetailQuestionTools.produtosParados(orgId);
+        case "proposta_campanha": return RetailQuestionTools.propostaCampanha(orgId, Number(args.days) > 0 ? Math.floor(Number(args.days)) : null);
         case "analisar_decisao": return ExecutiveDecisionTools.analisarDecisao(orgId, { text: String(args.text || "") });
         case "diagnostico_vendedor": return diagnosticoVendedor(orgId, { text: String(args.text || "") });
         case "panorama_operacao": return ExecutiveDecisionTools.panoramaOperacao(orgId);

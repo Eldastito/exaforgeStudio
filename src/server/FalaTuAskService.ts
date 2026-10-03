@@ -371,11 +371,20 @@ export class FalaTuAskService {
    * resposta. `user` traz role/role_profile_id pro gate de dinheiro. `opts.now`
    * permite injetar a data nos testes.
    */
-  static async answer(orgId: string, user: any, question: string, opts: { now?: Date } = {}): Promise<FalaTuAskResult> {
+  static async answer(orgId: string, user: any, question: string, opts: { now?: Date; contextStoreId?: string | null } = {}): Promise<FalaTuAskResult> {
     const q = String(question || "").trim();
     const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
     if (!q) {
       return { kind: "open_question", answer: "Faça uma pergunta sobre o seu negócio (ex.: \"quanto vendi em dinheiro hoje?\" ou \"quem está de folga amanhã?\").", date: null, grounded: true, moneyRestricted: false };
+    }
+    // ADR-203 F2.8 — CONTINUIDADE ("Por quê?", "E a Carioca?", "E ontem?") + ESCOPO por papel + CONTEXTO da loja. Determinístico, sem LLM;
+    // sem continuação/escopo aplicável devolve null e o fluxo abaixo é EXATAMENTE o de sempre (0-regressão).
+    {
+      const { FalaTuConversationService } = await import("./FalaTuConversationService.js");
+      const canMoney = this.canSeeMoney(orgId, user);
+      const turn = FalaTuConversationService.followUp(orgId, user, q, { canSeeMoney: canMoney, now: (opts.now || new Date()).getTime() })
+        || FalaTuConversationService.scoped(orgId, user, q, { contextStoreId: opts.contextStoreId, canSeeMoney: canMoney, now: (opts.now || new Date()).getTime() });
+      if (turn) return { kind: "open_question", answer: turn.text, date: null, grounded: turn.grounded, moneyRestricted: !!turn.moneyRestricted, data: turn.data };
     }
     const cls = this.classify(q, today);
 
@@ -426,7 +435,7 @@ export class FalaTuAskService {
    * `opts.source` marca o canal (whatsapp/falatu_web) pro item ser confirmável
    * no fluxo do canal certo.
    */
-  static async converse(orgId: string, user: any, text: string, opts: { now?: Date; source?: string } = {}): Promise<FalaTuAskResult> {
+  static async converse(orgId: string, user: any, text: string, opts: { now?: Date; source?: string; contextStoreId?: string | null } = {}): Promise<FalaTuAskResult> {
     const t = String(text || "").trim();
     const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
     const cls = this.classify(t, today);
@@ -518,7 +527,7 @@ export class FalaTuAskService {
       };
     }
 
-    if (cls.kind !== "record") return this.answer(orgId, user, t, { now: opts.now });
+    if (cls.kind !== "record") return this.answer(orgId, user, t, { now: opts.now, contextStoreId: opts.contextStoreId });
 
     const userId = user?.userId || user?.id;
     const content = t.replace(RECORD_RE, "").trim();

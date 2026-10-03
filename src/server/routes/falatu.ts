@@ -93,8 +93,17 @@ router.post("/capture", async (req: AuthRequest, res): Promise<any> => {
 // roteamento (pergunta × gravação × query direta × agentes de IA) e o
 // role-gate de dinheiro (§73) vivem no service. Valida só forma aqui.
 router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
-  const { question, audio } = req.body || {};
+  const { question, audio, context } = req.body || {};
   let q = typeof question === "string" ? question.trim() : "";
+  // ADR-203 F2.8 — contexto corrente da conversa: a loja escolhida. Validada contra a org e o escopo do usuário (nunca confia no cliente).
+  let contextStoreId: string | null = null;
+  if (context && typeof context.storeId === "string" && context.storeId) {
+    const { FalaTuConversationService } = await import("../FalaTuConversationService.js");
+    if (!FalaTuConversationService.storeById(req.organizationId!, context.storeId) || !FalaTuConversationService.canAccessStore(req.organizationId!, req.user, context.storeId)) {
+      return res.status(400).json({ error: "Loja inválida para esta conta." });
+    }
+    contextStoreId = context.storeId;
+  }
   // F8 — VOZ: o dono FALA a pergunta em vez de digitar. Transcreve o áudio
   // (mesmo Whisper da captura, ADR-102) e usa a transcrição como pergunta.
   if (audio !== undefined) {
@@ -110,10 +119,11 @@ router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   }
   if (!q) return res.status(400).json({ error: "Envie a pergunta (texto ou áudio)." });
   try {
-    const result = await FalaTuAskService.converse(req.organizationId!, req.user, q);
+    const result = await FalaTuAskService.converse(req.organizationId!, req.user, q, { contextStoreId });
     // Devolve a `question` (transcrita, quando veio de áudio) pra UI mostrar o
     // que foi entendido.
-    res.json({ ...result, question: q });
+    const { FalaTuConversationService: Conv } = await import("../FalaTuConversationService.js");
+    res.json({ ...result, question: q, continuable: !!Conv.last(req.organizationId!, req.user) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

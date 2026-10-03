@@ -55,3 +55,7 @@ Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedN
 
 ## Status F2.7 — pronta localmente
 RetailOps 19 abas → 5 grupos atrás da flag (`retailOpsGroups` + `RetailOpsView`). `test:retail-ops-groups` (14). Runbook: seção F2.7.
+
+
+## Status F2.8 — EM PR
+`FalaTuConversationService` + `/api/falatu/ask {context}` + 4 grupos no FalaTu + chips de continuidade. `test:falatu-conversation` (28). Runbook: seção F2.8.

@@ -58,6 +58,7 @@ import { LegalAdvisorView } from '@/src/features/LegalAdvisorView';
 import { CashView } from '@/src/features/CashView';
 import { HealthCenterView } from '@/src/features/HealthCenterView';
 import { TodayView } from '@/src/features/TodayView';
+import { ExecutingView } from '@/src/features/ExecutingView';
 import { InsightsView } from '@/src/features/InsightsView';
 import { ComigoView } from '@/src/features/ComigoView';
 import { LoginView } from '@/src/features/LoginView';
@@ -200,9 +201,9 @@ export default function App() {
   // Polling do probe: a cada 30 s normalmente; a cada 8 s quando o tempo real
   // está caído, pra classificar rápido (realtime_degraded × api_degraded).
   // Roda imediatamente ao montar e sempre que `socketUp` muda.
-  // F2.3 — 'hoje' só existe com o menu simplificado; flag desligada (depois de carregar) volta pro legado.
+  // F2.3/F2.4 — 'hoje' e 'executando' só existem com o menu simplificado; flag desligada (depois de carregar) volta pro legado.
   useEffect(() => {
-    if (enabledModules !== null && viewMode === 'hoje' && !simplifiedNavEnabled) setViewMode('saude');
+    if (enabledModules !== null && (viewMode === 'hoje' || viewMode === 'executando') && !simplifiedNavEnabled) setViewMode('saude');
   }, [viewMode, simplifiedNavEnabled, enabledModules, setViewMode]);
 
   useEffect(() => {
@@ -488,6 +489,7 @@ export default function App() {
              {viewMode === 'juridico' && 'Consultora Jurídica'}
              {viewMode === 'caixa' && 'Caixa'}
              {viewMode === 'hoje' && 'Hoje'}
+             {viewMode === 'executando' && 'Executando'}
              {viewMode === 'saude' && 'Central de Saúde'}
              {viewMode === 'insights' && 'Insights'}
              {viewMode === 'reservas' && 'Reservas'}
@@ -623,6 +625,7 @@ export default function App() {
           {viewMode === 'juridico' && <LegalAdvisorView />}
           {viewMode === 'caixa' && <CashView />}
           {viewMode === 'hoje' && <TodayView />}
+          {viewMode === 'executando' && <ExecutingView />}
           {viewMode === 'saude' && <HealthCenterView />}
           {viewMode === 'insights' && <InsightsView />}
           {viewMode === 'reservas' && <ReservasView />}

@@ -39,3 +39,7 @@ Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedN
 
 ## Status F2.3 — pronta localmente (aguarda merge da F2.2 para abrir PR)
 `TodayCockpitService` + `GET /api/ux/today` + `TodayView`. `test:today-cockpit` (24). Gap: "resolvido automaticamente hoje" sem data no ledger. Runbook: seção F2.3.
+
+
+## Status F2.4 — pronta localmente (aguarda merge da F2.3)
+`ExecutingBoardService` + `GET /api/ux/executing-board` + `ExecutingView`. `test:executing-board` (21). Runbook: seção F2.4.

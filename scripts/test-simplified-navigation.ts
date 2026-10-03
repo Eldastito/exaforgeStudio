@@ -69,11 +69,10 @@ async function main() {
 
   // ── (4) 1º nível ──
   const keys = (c: any) => C.primaryNav(c).map(p => p.key).join(",");
-  check("vendedor sem módulos: Hoje·Resultados (sem Empresa/FalaTu/Executando)", keys(base) === "hoje,resultados", keys(base));
+  check("vendedor sem módulos: Hoje·Executando·Resultados (sem Empresa/FalaTu)", keys(base) === "hoje,executando,resultados", keys(base));
   const owner = { ...base, isManager: true, falatuEnabled: true, isModuleEnabled: () => true };
   check("dono completo: Hoje·FalaTu·Executando·Resultados·Empresa", keys(owner) === "hoje,falatu,executando,resultados,empresa", keys(owner));
-  check("Executando → Missões quando o Mission Layer está ligado", C.primaryNav({ ...owner, missionLayerEnabled: true }).find(p => p.key === "executando")!.viewMode === "missoes");
-  check("Executando → Tarefas sem Missões", C.primaryNav(owner).find(p => p.key === "executando")!.viewMode === "tarefas");
+  check("Executando é tela própria (F2.4), com ou sem Missões/Tarefas", C.primaryNav(owner).find(p => p.key === "executando")!.viewMode === "executando" && C.primaryNav({ ...owner, missionLayerEnabled: true }).find(p => p.key === "executando")!.viewMode === "executando" && C.primaryNav(base).some(p => p.key === "executando"));
   check("FalaTu some sem flag da org (mesmo gate do legado)", !keys({ ...owner, falatuEnabled: false }).includes("falatu"));
   check("Empresa só gestor", !keys({ ...owner, isManager: false }).includes("empresa") && keys({ ...base, isManager: true }).includes("empresa"));
   check("Hoje é tela própria (F2.3), sempre disponível", C.primaryNav({ ...base, canAccessModule: () => false })[0].viewMode === "hoje");

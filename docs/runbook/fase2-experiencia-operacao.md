@@ -72,3 +72,14 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 - **Dinheiro role-gated:** sem visão completa → `restricted` (sem números do varejo), mas os resultados NÃO monetários do ledger seguem. **Escopo de loja:** gerente preso a lojas só vê as dele e NÃO recebe a leitura da rede inteira.
 - **Rótulo:** o antigo "Dashboard" (tickets/leads/IA/handoffs — universo digital) agora se chama **"Atendimento Digital"** no menu legado, no menu simplificado, no cabeçalho e no título da tela. "Venda da rede" é outro indicador (RN-F2-5).
 - Fora desta fatia: KPIs só-digitais dentro do Atendimento Digital (§21) — a tela segue como está, só o rótulo mudou. Estoque/financeiro no Resultados ficam para depois (a tela cobre rede→lojas→equipe).
+
+## F2.6 — Empresa + Integrações/Canais em modo normal × avançado
+
+`GET /api/ux/integration-status` (`IntegrationStatusService`) → tela `CompanyView` (viewMode `empresa`, destino do item "Empresa" da nav simplificada, só gestor). COMPÕE read-only `AlterdataReadinessService.compute` + `AlterdataConnectorService.publicSettings` + tabela `channels`. Sem tabela/motor/flag nova, sem chamada externa.
+
+- **Modo normal (a tela Empresa):** por conexão — estado (🟢 Conectada · 🟡 Precisa de atenção · 🔴 Parada · ⚪ Não configurada), "última sincronização às HH:MM", o que chega (Estoque e compras · Preços · Vendas · Clientes…), "N filiais requerem atenção" e até 3 pendências com a ação sugerida. Canais: conectado × "desconectado — precisa reconectar".
+- **Modo avançado = as telas técnicas que já existiam** ("Integrações" e "Canais e I.A."), preservadas (RN-F2-1) e a um clique ("Modo avançado (detalhes técnicos)"). Nada foi removido nem duplicado.
+- **Honesto:** sem token = Parada; token ok mas NUNCA sincronizou = atenção ("Ainda não sincronizou"), nunca "Conectada"; sync com mais de 4× o intervalo (mín. 1h) = atenção + carimbo; módulo que a política do Alterdata não suporta nem aparece. "N filiais" conta filiais DISTINTAS com recurso falhando na última sync.
+- **Sem segredos:** token, client id/secret, base URL e rede nunca saem (o técnico fica no modo avançado). **Só gestor** (owner/admin): os demais recebem `restricted`. Isolado por org.
+- **Ajustes da empresa** (atalhos para abas de Configurações que já existem): Dados da empresa · Equipe e permissões · Autonomia da IA · Plano e cobrança · Módulos e menu.
+- Fora desta fatia: o modo normal só cobre Alterdata + canais (os outros conectores — Sicredi, Google, etc. — seguem só no modo avançado); "objetivos" da empresa ainda não têm tela própria.

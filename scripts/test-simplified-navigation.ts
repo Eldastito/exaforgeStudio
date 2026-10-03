@@ -76,7 +76,7 @@ async function main() {
   check("Executando → Tarefas sem Missões", C.primaryNav(owner).find(p => p.key === "executando")!.viewMode === "tarefas");
   check("FalaTu some sem flag da org (mesmo gate do legado)", !keys({ ...owner, falatuEnabled: false }).includes("falatu"));
   check("Empresa só gestor", !keys({ ...owner, isManager: false }).includes("empresa") && keys({ ...base, isManager: true }).includes("empresa"));
-  check("Hoje cai em Insights quando Central de Saúde é negada", C.primaryNav({ ...base, canAccessModule: () => false })[0].viewMode === "insights");
+  check("Hoje é tela própria (F2.3), sempre disponível", C.primaryNav({ ...base, canAccessModule: () => false })[0].viewMode === "hoje");
 
   // ── (5) Explorar ──
   const g = C.exploreGroups(owner);

@@ -16,9 +16,18 @@ import { UxTelemetryService } from "../UxTelemetryService.js";
 import { MobileReadinessService } from "../MobileReadinessService.js";
 import { LegacyReductionService } from "../LegacyReductionService.js";
 import { UxPreferencesService } from "../UxPreferencesService.js";
+import { TodayCockpitService } from "../TodayCockpitService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
+
+// GET /api/ux/today — ADR-203 F2.3: o "Hoje" como cockpit por exceção (≤3 prioridades com causa+verbo,
+// rede com frescor do PDV, resolvido em 24h). Composição read-only; role-scoped; dinheiro role-gated.
+router.get("/today", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(TodayCockpitService.build(orgId, req.user)); } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
 
 // GET /api/ux/executing — processos ativos agrupados por objetivo.
 router.get("/executing", (req: AuthRequest, res): any => {

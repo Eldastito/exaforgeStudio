@@ -34,8 +34,18 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 
 **Como ligar (só TOULON):** Configurações → Módulos → "Menu simplificado (piloto)" (owner/admin), ou `PUT /api/entitlements/simplified-navigation {"enabled":true}`. Desligar volta ao menu completo; nada é apagado.
 
-**Destinos interinos (trocados nas F2.3–F2.6):** Hoje→Central de Saúde (ou Insights) · FalaTu→FalaTu · Executando→Missões (com Mission Layer) ou Tarefas · Resultados→Diretor IA (ou Relatórios) · Empresa→Configurações (só gestor).
+**Destinos interinos (trocados nas F2.3–F2.6):** Hoje→tela própria (F2.3, cockpit por exceção) · FalaTu→FalaTu · Executando→Missões (com Mission Layer) ou Tarefas · Resultados→Diretor IA (ou Relatórios) · Empresa→Configurações (só gestor).
 
 **Garantias:** `src/lib/navCatalog.ts` espelha cada tela do `Sidebar.tsx` com o MESMO gate (módulo/permissão/vertical/master/gestor); `test:simplified-navigation` falha se uma tela do legado sumir do catálogo ou mudar de gate. Item sem permissão some (nunca cadeado).
 
 **Telemetria:** `src/lib/uxTelemetry.ts` envia `view_opened` (surface+tela, nunca conteúdo). O servidor só grava com `ux_telemetry_enabled` (opt-in LGPD) — a F2.2 NÃO liga essa flag; decisão do dono antes da F2.9.
+
+## F2.3 — Hoje (cockpit por exceção)
+
+`GET /api/ux/today` (`TodayCockpitService`) COMPÕE `FalaTuHomeService.home` + parcial do PDV (`RetailAfternoonBriefService`) + exceções do varejo (`RetailExceptionSignalService`) + `SignalLanguage.presentSignal`. Nada é recalculado (PRD §39). Tela: `TodayView` (viewMode `hoje`, destino do item "Hoje" da nav simplificada).
+
+- **≤3 prioridades**, cada uma com título, **causa** (o fato que a gerou) e **verbo específico** ("Aprovar ou recusar", "Cadastrar a escala de Bangu"). O excedente vira só `moreCount`. Ordem: decisão que VOCÊ pode aprovar › risco crítico › risco › exceção operacional › meta atrasada › oportunidade.
+- **Rede (D4):** meta do mês + já fechado + falta no mês (só soma quando TODAS as lojas com meta têm fechamento — senão "—", nunca "vendeu 0") + parcial do PDV do dia com "último dado às HH:MM" e aviso de ATRASADO (>90 min). Sem meta diária inventada.
+- **Dinheiro role-gated:** `network` e valor recuperado só para visão completa do negócio; escopo de loja respeitado.
+- **Gap conhecido:** "Resolvido automaticamente hoje" (PRD §4) NÃO é entregue — `business_signals` não grava a data da auto-resolução. A tela mostra "casos resolvidos nas últimas 24h" (ações concluídas). Adicionar a data exigiria coluna nova; decisão pendente.
+- Flag desligada com `viewMode='hoje'` salvo: o app volta para a Central de Saúde.

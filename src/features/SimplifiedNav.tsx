@@ -5,10 +5,10 @@
  * alcançável em Explorar sob o MESMO gate de RBAC/plano (RN-F2-1/3). Destinos dos 5 itens são
  * interinos (telas existentes) — F2.3..F2.6 trocam por telas dedicadas.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sun, Mic, Rocket, TrendingUp, Building2, Compass, ChevronDown, Search } from 'lucide-react';
 import { exploreGroups, primaryNav, type NavCtx } from '@/src/lib/navCatalog';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction, trackSearchMiss } from '@/src/lib/uxTelemetry';
 
 const ICON: Record<string, React.ReactNode> = {
   hoje: <Sun className="h-4 w-4" />, falatu: <Mic className="h-4 w-4" />, executando: <Rocket className="h-4 w-4" />,
@@ -20,13 +20,20 @@ export function SimplifiedNav({ ctx, viewMode, onNavigate }: { ctx: NavCtx; view
   const [q, setQ] = useState('');
   const primary = primaryNav(ctx);
   const groups = exploreGroups(ctx, q);
-  const go = (vm: string, surface: string) => { trackView(surface, vm); onNavigate(vm); };
+  // busca sem resultado = sinal de que falta um atalho/nome; registra QUE aconteceu (nunca o que foi digitado), uma vez por busca
+  const lastMiss = useRef('');
+  useEffect(() => {
+    const t = q.trim();
+    if (t.length >= 3 && groups.length === 0 && lastMiss.current !== t) { lastMiss.current = t; trackSearchMiss(); }
+  }, [q, groups.length]);
+  // a ABERTURA da tela é registrada uma vez pelo App (view_opened); aqui só COMO chegou: pelo 1º nível ou pelo Explorar
+  const go = (vm: string, from: string) => { trackAction(from, vm); onNavigate(vm); };
   const item = (active: boolean) => `w-full zf-nav-item ${active ? 'zf-nav-item-active' : ''}`;
 
   return (
     <nav className="space-y-1" data-testid="simplified-nav">
       {primary.map(p => (
-        <button key={p.key} className={item(viewMode === p.viewMode)} onClick={() => go(p.viewMode, p.key)}>
+        <button key={p.key} className={item(viewMode === p.viewMode)} onClick={() => go(p.viewMode, 'nav_primario')}>
           {ICON[p.key]}{p.label}
         </button>
       ))}
@@ -45,7 +52,7 @@ export function SimplifiedNav({ ctx, viewMode, onNavigate }: { ctx: NavCtx; view
             <div key={g.group}>
               <p className="px-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">{g.label}</p>
               {g.items.map(e => (
-                <button key={e.viewMode} className={item(viewMode === e.viewMode)} onClick={() => go(e.viewMode, 'explorar')}>{e.label}</button>
+                <button key={e.viewMode} className={item(viewMode === e.viewMode)} onClick={() => go(e.viewMode, 'nav_explorar')}>{e.label}</button>
               ))}
             </div>
           ))}

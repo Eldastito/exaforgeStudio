@@ -1697,6 +1697,9 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
 
           {/* ADR-203 F2.2 — toggle do menu simplificado (Hoje · FalaTu · Executando · Resultados · Empresa). */}
           <SimplifiedNavSection />
+
+          {/* ADR-203 F2.9 — consentimento da coleta de uso do menu (LGPD §84). Default DESLIGADO. */}
+          <UxTelemetrySection />
         </div>
       )}
     </>
@@ -1735,6 +1738,43 @@ function SimplifiedNavSection() {
         <div className="pr-4">
           <p className="text-sm font-medium text-zinc-100">Menu por necessidade</p>
           <p className="text-xs text-zinc-500">Mostra só Hoje, FalaTu, Executando, Resultados e Empresa; todo o resto fica em “Explorar”. Reversível: desligar volta ao menu completo e não apaga nada.</p>
+        </div>
+        <button onClick={toggle} disabled={saving}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-600' : 'bg-zinc-700'} ${saving ? 'opacity-60' : ''}`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ADR-203 F2.9 — liga/desliga a coleta de USO do menu (`ux_telemetry_enabled`, opt-in LGPD §84; default desligado). Registra só QUAL
+// tela foi aberta e cliques — nunca o conteúdo, nunca o que foi digitado. Desligar para de coletar (não apaga o já coletado).
+function UxTelemetrySection() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    apiFetch('/api/ux/telemetry/enablement').then(r => r.ok ? r.json() : null).then(d => setEnabled(d ? !!d.enabled : null)).catch(() => setEnabled(null));
+  }, []);
+  if (enabled === null) return null;
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/ux/telemetry/enablement', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível alterar.'); return; }
+      setEnabled(!!d.enabled);
+      toast.success(d.enabled ? 'Medição de uso ativada.' : 'Medição de uso desativada.');
+    } catch { toast.error('Erro ao salvar.'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div>
+      <p className="text-sm font-semibold text-teal-300 mb-2 flex items-center gap-2"><Rocket className="w-4 h-4" /> Medir o uso do menu (piloto)</p>
+      <div className="flex items-center justify-between rounded-xl border border-teal-800/40 bg-teal-950/10 p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium text-zinc-100">Medição de uso</p>
+          <p className="text-xs text-zinc-500">Registra só quais telas a equipe abre e onde clica, para saber se o menu simplificado ajuda — nunca o conteúdo nem o que for digitado. Desligada por padrão; ao desligar, para de coletar (não apaga o que já foi coletado). O resultado aparece em Empresa.</p>
         </div>
         <button onClick={toggle} disabled={saving}
           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-600' : 'bg-zinc-700'} ${saving ? 'opacity-60' : ''}`}>

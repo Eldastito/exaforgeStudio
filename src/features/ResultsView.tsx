@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, HelpCircle, ChevronDown, Lightbulb } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction } from '@/src/lib/uxTelemetry';
 
 interface MT { state: string; text: string; reason: string | null }
 interface PT { venda: MT; cota: MT; atingimento: MT }
@@ -43,7 +43,7 @@ const StoreRow: React.FC<{ s: Store }> = ({ s }) => {
   const toggle = () => {
     setOpen(o => !o);
     if (!u && !err) {
-      trackView('resultados_entender', 'resultados');
+      trackAction('resultados_entender', 'loja');
       apiFetch(`/api/ux/results-story/store/${s.storeId}/understand`).then(r => r.ok ? r.json() : Promise.reject()).then(setU).catch(() => setErr(true));
     }
   };
@@ -89,7 +89,6 @@ export function ResultsView() {
   useEffect(() => {
     let alive = true;
     apiFetch('/api/ux/results-story').then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (alive) setData(d); }).catch(() => { if (alive) setError(true); });
-    trackView('resultados', 'resultados');
     return () => { alive = false; };
   }, []);
   if (error) return <div className="p-6 text-sm text-slate-400">Não consegui carregar os Resultados agora. Tente de novo em instantes.</div>;

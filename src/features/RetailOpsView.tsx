@@ -3,7 +3,7 @@ import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Sc
 import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
 import { RETAIL_TAB_GROUPS, groupOfTab } from '@/src/lib/retailOpsGroups';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction } from '@/src/lib/uxTelemetry';
 import { toast } from '@/src/lib/toast';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { isoLocal, todayStr, weeksOfMonthLocal, daysBetween, addMonths } from './retailDateUtils';
@@ -967,7 +967,7 @@ export function RetailOpsView() {
   const simplified = useStore(s => s.simplifiedNavEnabled);
   const activeGroup = groupOfTab(tab) || RETAIL_TAB_GROUPS[0];
   const tabBtn = ({ key, label, icon: Icon }: { key: RetailTab; label: string; icon: any }) => (
-    <button key={key} onClick={() => { if (simplified) trackView('retailops_aba', key); setTab(key); }} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
+    <button key={key} onClick={() => { if (simplified) trackAction('retailops_aba', key); setTab(key); }} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>
   );
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950">
@@ -980,7 +980,7 @@ export function RetailOpsView() {
         <div className="mb-5 space-y-3" data-testid="retailops-groups">
           <div className="flex flex-wrap gap-2">
             {RETAIL_TAB_GROUPS.map(g => (
-              <button key={g.key} onClick={() => { trackView('retailops_grupo', g.key); setTab(g.tabs[0] as RetailTab); }} title={g.hint}
+              <button key={g.key} onClick={() => { trackAction('retailops_grupo', g.key); setTab(g.tabs[0] as RetailTab); }} title={g.hint}
                 className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${activeGroup.key === g.key ? 'bg-teal-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>{g.label}</button>
             ))}
           </div>

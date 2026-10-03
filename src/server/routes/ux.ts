@@ -5,7 +5,7 @@
  * role-gated (§73) no próprio service. Aditivo — nenhuma rota anterior mudou.
  */
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { ExecutionResultsService } from "../ExecutionResultsService.js";
 import { AdaptiveOnboardingService } from "../AdaptiveOnboardingService.js";
 import { InferredSettingsService } from "../InferredSettingsService.js";
@@ -20,6 +20,7 @@ import { TodayCockpitService } from "../TodayCockpitService.js";
 import { ExecutingBoardService } from "../ExecutingBoardService.js";
 import { ResultsStoryService } from "../ResultsStoryService.js";
 import { IntegrationStatusService } from "../IntegrationStatusService.js";
+import { UxPilotReportService } from "../UxPilotReportService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -49,6 +50,24 @@ router.get("/results-story/store/:storeId/understand", (req: AuthRequest, res): 
     if (!r) return res.status(404).json({ error: "Loja não encontrada." });
     res.json(r);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET/PUT /api/ux/telemetry/enablement — ADR-203 F2.9: o CONSENTIMENTO da coleta de uso (LGPD §84). owner/admin; default DESLIGADO;
+// desligar não apaga o já coletado. Fica ANTES de qualquer gate que dependa da flag (senão o dono nunca a ligaria).
+router.get("/telemetry/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  res.json({ enabled: UxTelemetryService.enabled(req.organizationId!) });
+});
+router.put("/telemetry/enablement", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(UxTelemetryService.setEnabled(req.organizationId!, req.body?.enabled === true || req.body?.enabled === 1)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ux/pilot-report?days=14 — ADR-203 F2.9: como a equipe está usando o menu simplificado (agregado, só gestor, advisório).
+router.get("/pilot-report", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query.days === "string" ? Number(req.query.days) : undefined;
+  try { res.json(UxPilotReportService.build(orgId, req.user, { days })); } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/ux/integration-status — ADR-203 F2.6: modo NORMAL das Integrações/Canais (conectada? última sync? o que chega?

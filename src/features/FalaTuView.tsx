@@ -4,7 +4,7 @@ import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
 import { FALATU_GROUPS, falatuGroupOf } from '@/src/lib/falatuGroups';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction } from '@/src/lib/uxTelemetry';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
 import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 
@@ -790,6 +790,7 @@ export function FalaTuView() {
     const q = (typeof override === 'string' ? override : askQuestion).trim();
     if (!q || askBusy) return;
     setAskBusy(true);
+    trackAction('falatu_pergunta', typeof override === 'string' ? 'continuacao' : ctxStoreId ? 'com_loja' : 'geral');   // só QUE perguntou, nunca o texto
     try {
       const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q, ...(ctxStoreId ? { context: { storeId: ctxStoreId } } : {}) }) });
       setAskThread((prev) => [{ id: mkAskId(), q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted, continuable: !!r?.continuable }, ...prev]);
@@ -904,7 +905,7 @@ export function FalaTuView() {
             {FALATU_GROUPS.map((g) => {
               const active = (falatuGroupOf(tab) || FALATU_GROUPS[0]).key === g.key;
               return (
-                <button key={g.key} title={g.hint} onClick={() => { trackView('falatu_grupo', g.key); setTab(g.tabs[0] as typeof tab); }}
+                <button key={g.key} title={g.hint} onClick={() => { trackAction('falatu_grupo', g.key); setTab(g.tabs[0] as typeof tab); }}
                   className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${active ? 'bg-violet-600 text-white' : 'text-ft-text-muted hover:text-ft-text'}`}>{g.label}</button>
               );
             })}

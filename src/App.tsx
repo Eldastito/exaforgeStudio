@@ -61,6 +61,7 @@ import { TodayView } from '@/src/features/TodayView';
 import { ExecutingView } from '@/src/features/ExecutingView';
 import { ResultsView } from '@/src/features/ResultsView';
 import { CompanyView } from '@/src/features/CompanyView';
+import { trackView } from '@/src/lib/uxTelemetry';
 import { InsightsView } from '@/src/features/InsightsView';
 import { ComigoView } from '@/src/features/ComigoView';
 import { LoginView } from '@/src/features/LoginView';
@@ -203,6 +204,13 @@ export default function App() {
   // Polling do probe: a cada 30 s normalmente; a cada 8 s quando o tempo real
   // está caído, pra classificar rápido (realtime_degraded × api_degraded).
   // Roda imediatamente ao montar e sempre que `socketUp` muda.
+  const modulesReady = enabledModules !== null;
+  // ADR-203 F2.9 — UMA abertura de tela por troca de viewMode (nome = viewMode, o mesmo que o LegacyReductionService compara).
+  // O servidor só grava com `ux_telemetry_enabled` (opt-in); sem a flag é no-op.
+  useEffect(() => {
+    if (authed && modulesReady) trackView(viewMode);
+  }, [viewMode, authed, modulesReady]);
+
   // F2.3–F2.6 — 'hoje', 'executando', 'resultados' e 'empresa' só existem com o menu simplificado; flag desligada (depois de carregar) volta pro legado.
   useEffect(() => {
     if (enabledModules !== null && (viewMode === 'hoje' || viewMode === 'executando' || viewMode === 'resultados' || viewMode === 'empresa') && !simplifiedNavEnabled) setViewMode('saude');

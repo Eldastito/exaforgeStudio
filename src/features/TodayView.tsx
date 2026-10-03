@@ -8,7 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction } from '@/src/lib/uxTelemetry';
 
 interface MetricText { state: string; text: string; reason: string | null }
 interface Priority { id: string; kind: string; title: string; cause: string; verb: string; viewMode: string; severity: string | null }
@@ -41,7 +41,6 @@ export function TodayView() {
   useEffect(() => {
     let alive = true;
     apiFetch('/api/ux/today').then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (alive) setData(d); }).catch(() => { if (alive) setError(true); });
-    trackView('hoje', 'hoje');
     return () => { alive = false; };
   }, []);
 
@@ -67,7 +66,7 @@ export function TodayView() {
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-slate-100">{p.title}</p>
                   <p className="mt-1 text-sm text-slate-400">{p.cause}</p>
-                  <button onClick={() => { trackView('hoje_acao', p.viewMode); setViewMode(p.viewMode as any); }}
+                  <button onClick={() => { trackAction('hoje_acao', p.viewMode); setViewMode(p.viewMode as any); }}
                     className="mt-3 inline-flex items-center gap-2 rounded-lg bg-teal-500/15 px-3 py-1.5 text-sm font-medium text-teal-300 hover:bg-teal-500/25">
                     {p.verb}<ArrowRight className="h-4 w-4" />
                   </button>

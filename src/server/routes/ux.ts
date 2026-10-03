@@ -18,6 +18,7 @@ import { LegacyReductionService } from "../LegacyReductionService.js";
 import { UxPreferencesService } from "../UxPreferencesService.js";
 import { TodayCockpitService } from "../TodayCockpitService.js";
 import { ExecutingBoardService } from "../ExecutingBoardService.js";
+import { ResultsStoryService } from "../ResultsStoryService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -28,6 +29,25 @@ router.get("/today", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(TodayCockpitService.build(orgId, req.user)); } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ux/results-story?date= — ADR-203 F2.5: "Resultados" do todo ao detalhe (conclusão → rede → lojas) sobre os fechamentos
+// já enviados. Composição read-only; dinheiro role-gated; escopo de loja respeitado.
+router.get("/results-story", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ResultsStoryService.build(orgId, req.user, { date: typeof req.query.date === "string" ? req.query.date : undefined })); } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ux/results-story/store/:storeId/understand?date= — "Entender": por que a loja está assim (fato × hipótese).
+router.get("/results-story/store/:storeId/understand", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const r = ResultsStoryService.understand(orgId, req.user, String(req.params.storeId), { date: typeof req.query.date === "string" ? req.query.date : undefined });
+    if (!r) return res.status(404).json({ error: "Loja não encontrada." });
+    res.json(r);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/ux/executing-board — ADR-203 F2.4: "Executando" em 4 etapas (precisa de você · em andamento · aguardando · concluído)

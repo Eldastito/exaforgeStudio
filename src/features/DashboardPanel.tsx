@@ -414,7 +414,7 @@ export function DashboardPanel() {
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: 'var(--color-success)' }} /> Ao vivo
               </span>
             </div>
-            <h2 className="zf-page-title">Performance de Atendimento</h2>
+            <h2 className="zf-page-title">Atendimento Digital</h2>
             <p className="mt-1 text-sm text-slate-400">Métricas de SLA, conversão e produtividade da IA em tempo real.</p>
           </div>
 

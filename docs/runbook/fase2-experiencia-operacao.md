@@ -60,3 +60,15 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 - **Concluído (7 dias):** com a garantia dita — "Resultado confirmado" só quando `OutcomeAssuranceService` prova; senão "Executado — resultado ainda não confirmado" (DONE ≠ RESULTADO).
 - Escopo: missões só gestor + Mission Layer ligado; tarefa de outra pessoa só gestor; domínio invisível some; R$ só com visão completa (vendedor recebe `restricted`). Cada lane: até 8 itens + `total`.
 - "Missões" continua inteira em Explorar e há atalho "Ver todas as missões" quando disponível (D1).
+
+## F2.5 — Resultados (conclusão → rede → lojas → Entender) + "Atendimento Digital"
+
+`GET /api/ux/results-story[?date=]` e `GET /api/ux/results-story/store/:storeId/understand` (`ResultsStoryService`) → tela `ResultsView` (viewMode `resultados`, destino do item "Resultados" da nav simplificada; sempre presente). COMPÕE `RetailDayBriefService.nightSnapshot` (fechamentos já enviados: dia/semana/mês, meta mensal), `SellerDiagnosisService` e `ExecutionResultsService.results` (o que o ZappFlow resolveu). Sem tabela/motor/flag nova. Data padrão = ontem (SP).
+
+- **Conclusão primeiro**, derivada: "No mês, a rede está em X% da meta (R$ a de R$ b). N lojas ficaram abaixo da meta em DD/MM." Sem fechamento/meta do mês suficiente → sem conclusão + o motivo (nunca inventada).
+- **Lojas** com quem precisa de atenção no topo: abaixo › sem dado › bateu. Loja sem fechamento OU sem cota do dia vai para "sem dado" — NUNCA para "abaixo"; sem fechamento = "—", nunca "vendeu 0".
+- **Entender** (por loja): períodos dia/semana/mês + até 3 pessoas da equipe que mais caíram em 30 dias, com FATO × HIPÓTESE (hipótese nunca vira causa comprovada; sem culpa).
+- Uma definição por indicador: aqui é o fechamento; o parcial do PDV continua só no Hoje.
+- **Dinheiro role-gated:** sem visão completa → `restricted` (sem números do varejo), mas os resultados NÃO monetários do ledger seguem. **Escopo de loja:** gerente preso a lojas só vê as dele e NÃO recebe a leitura da rede inteira.
+- **Rótulo:** o antigo "Dashboard" (tickets/leads/IA/handoffs — universo digital) agora se chama **"Atendimento Digital"** no menu legado, no menu simplificado, no cabeçalho e no título da tela. "Venda da rede" é outro indicador (RN-F2-5).
+- Fora desta fatia: KPIs só-digitais dentro do Atendimento Digital (§21) — a tela segue como está, só o rótulo mudou. Estoque/financeiro no Resultados ficam para depois (a tela cobre rede→lojas→equipe).

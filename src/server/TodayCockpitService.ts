@@ -58,7 +58,7 @@ export interface TodayCockpit {
   generatedAt: string;
 }
 
-const mt = (m: Metric): MetricText => ({ state: m.state, text: formatMetric(m), reason: (m as any).reason ?? null });
+export const mt = (m: Metric): MetricText => ({ state: m.state, text: formatMetric(m), reason: (m as any).reason ?? null });
 const brl = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
 export class TodayCockpitService {

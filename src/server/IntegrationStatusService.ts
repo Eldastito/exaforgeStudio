@@ -42,6 +42,24 @@ export interface IntegrationStatus {
 
 const STATE_LABEL: Record<IntState, string> = { ok: "Conectada", attention: "Precisa de atenção", down: "Parada", not_configured: "Não configurada" };
 const FLOW_LABEL: Record<string, string> = { supply: "Estoque e compras", price: "Preços", sales: "Vendas", crm: "Clientes", catalog: "Produtos", ecommerce: "Loja virtual", guardian: "Acesso" };
+// Linguagem de dono: o código do bloqueio vira frase simples; o texto técnico nunca vai pra tela.
+const PLAIN: Record<string, { text: string; action: string }> = {
+  PROFILE_MISSING: { text: "A conexão com o ERP ainda não foi configurada.", action: "Abra o modo avançado e preencha os dados da conexão." },
+  CREDENTIALS_MISSING: { text: "Falta a senha de acesso ao ERP.", action: "Informe as credenciais no modo avançado." },
+  REDE_MISSING: { text: "Falta informar a rede no ERP.", action: "Preencha no modo avançado." },
+  FILIAIS_MISSING: { text: "Nenhuma loja foi ligada ao ERP.", action: "Cadastre as filiais no modo avançado." },
+  PRICE_TABLE_MISSING: { text: "Falta informar a tabela de preços.", action: "Preencha no modo avançado." },
+  TOKEN_MISSING: { text: "A conexão com o ERP ainda não foi autorizada.", action: "Autorize no modo avançado." },
+  TOKEN_EXPIRED: { text: "A autorização do ERP venceu.", action: "Renove no modo avançado." },
+  PROD_NOT_VALIDATED: { text: "A conexão ainda não foi validada para uso real.", action: "Valide no modo avançado." },
+  CRM_LGPD_UNAPPROVED: { text: "A importação de clientes está ligada sem a aprovação de privacidade (LGPD).", action: "Registre a aprovação no modo avançado." },
+  BACKUP_ADVISORY: { text: "Faça um backup antes da primeira sincronização.", action: "Veja o modo avançado." },
+};
+const plainIssue = (b: { code: string; module?: string; action: string }): { text: string; action: string } => {
+  if (PLAIN[b.code]) return PLAIN[b.code];
+  if (/^MODULE_.+_FAILING$/.test(b.code)) return { text: `A sincronização de ${FLOW_LABEL[String(b.module)] || "um dos fluxos"} está falhando.`, action: "Confira os detalhes no modo avançado." };
+  return { text: "Há um ponto de atenção na integração.", action: "Confira os detalhes no modo avançado." };
+};
 const OK_RES = new Set(["ready", "empty_but_valid", "skipped_by_policy"]);
 const KIND: Array<[RegExp, string]> = [[/whats/i, "WhatsApp"], [/insta/i, "Instagram"], [/face|messenger/i, "Facebook"], [/telegram/i, "Telegram"], [/email|mail/i, "E-mail"]];
 const kindOf = (provider: string) => KIND.find(([re]) => re.test(provider))?.[1] || "Canal";
@@ -93,6 +111,8 @@ export class IntegrationStatusService {
 
     const flows: IntFlow[] = rd.modules
       .filter((m) => m.policy !== "unsupported" && m.policy !== "disabled")
+      .filter((m) => m.module !== "guardian")                              // acesso/autenticação não é fluxo de negócio
+      .filter((m) => m.lastStatus !== null || m.policy === "required")      // "ainda não chegou" só pro que é obrigatório (ruído nos demais)
       .map((m) => ({ key: m.module, label: FLOW_LABEL[m.module] || m.module, lastAt: m.lastRunAt, state: (m.lastStatus === null ? "pending" : m.ok ? "ok" : "attention") as IntFlow["state"] }));
 
     const badFiliais = new Set(rd.resources.filter((r) => r.filial && !OK_RES.has(r.status)).map((r) => r.filial));
@@ -100,7 +120,7 @@ export class IntegrationStatusService {
     const attentionText = attentionCount > 0 ? `${attentionCount} ${attentionCount === 1 ? "filial requer" : "filiais requerem"} atenção` : null;
 
     const blockers = rd.blockers.filter((b) => b.severity === "blocker");
-    const issues = blockers.slice(0, 3).map((b) => ({ text: b.message, action: b.action }));
+    const issues = blockers.slice(0, 3).map(plainIssue);
     if (stale && issues.length < 3) issues.push({ text: `Não sincroniza desde ${hhmmSP(lastSyncAt as string) ? `as ${hhmmSP(lastSyncAt as string)}` : "há muito tempo"}.`, action: "Confira a conexão no modo avançado." });
 
     let state: IntState;

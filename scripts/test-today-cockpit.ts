@@ -98,6 +98,8 @@ async function main() {
   db.prepare(`INSERT INTO user_stores (organization_id, user_id, store_id) VALUES (?,?,?)`).run(A, gerente.userId, grande);
   const gv = T.build(A, gerente, { now: NOW });
   check("gerente preso à Grande Rio NÃO vê a exceção de Bangu", !gv.priorities.some(p => /Bangu/.test(p.verb)), JSON.stringify(gv.priorities.map(p => p.verb)));
+  check("bloco de rede do gerente é marcado como escopo parcial (UI diz 'Suas lojas', não 'Rede'); dono não", gv.network?.scoped === true && T.build(A, owner, { now: NOW }).network?.scoped === false, String(gv.network?.scoped));
+  check("valor recuperado nunca é R$ 0: sem valor > 0 vira null (null≠zero)", T.build(A, owner, { now: NOW }).resolved.valueRecovered === null || /[1-9]/.test(T.build(A, owner, { now: NOW }).resolved.valueRecovered!.text));
 
   // ── (8) isolamento ──
   const ot = T.build(OTHER, userFor(OTHER, "owner"), { now: NOW });

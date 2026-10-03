@@ -17,7 +17,7 @@ interface Cockpit {
   network: null | {
     freshness: { hhmm: string | null; stale: boolean };
     monthGoal: MetricText; monthClosed: MetricText; monthRemaining: MetricText; todayPartial: MetricText;
-    coverage: { stores: number; withMonthGoal: number; withClosing: number };
+    coverage: { stores: number; withMonthGoal: number; withClosing: number }; scoped: boolean;
   };
   resolved: { count: number; valueRecovered: MetricText | null; windowHours: number };
 }
@@ -79,9 +79,9 @@ export function TodayView() {
       )}
 
       {n && (
-        <section aria-label="Rede" className="space-y-3">
+        <section aria-label={n.scoped ? "Suas lojas" : "Rede"} className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-200">Rede</h3>
+            <h3 className="text-sm font-semibold text-slate-200">{n.scoped ? 'Suas lojas' : 'Rede'}</h3>
             <span className={`inline-flex items-center gap-1 text-xs ${n.freshness.stale ? 'text-amber-300' : 'text-slate-500'}`}>
               {n.freshness.stale ? <AlertTriangle className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
               {n.freshness.hhmm ? `Último dado do PDV às ${n.freshness.hhmm}${n.freshness.stale ? ' — pode estar atrasado' : ''}` : 'PDV ainda não sincronizou'}

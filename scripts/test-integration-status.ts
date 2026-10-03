@@ -89,6 +89,8 @@ async function main() {
   const b = r.integrations[0];
   check("2 filiais DISTINTAS com recurso falhando → '2 filiais requerem atenção' (a 003 com 2 falhas conta 1 vez)", b.attentionCount === 2 && b.attentionText === "2 filiais requerem atenção", b.attentionText || "");
   check("com filial falhando o estado é ATENÇÃO e o fluxo 'Estoque e compras' acusa atenção", b.state === "attention" && b.flows.find(f => f.label === "Estoque e compras")?.state === "attention");
+  check("problemas em linguagem de dono: nada de '(required)', 'server_error' ou código técnico", b.issues.length > 0 ? b.issues.every(i => !/required|server_error|ALTERDATA_API|MODULE_/.test(i.text + i.action)) : true, JSON.stringify(b.issues));
+  check("fluxos sem ruído: 'Acesso' (guardian) nunca aparece", !b.flows.some(f => f.label === "Acesso" || f.key === "guardian"), JSON.stringify(b.flows.map(f => f.label)));
   const ONE = `org_${randomUUID().slice(0, 6)}`; cfg(ONE, true);
   const h1 = L.begin(ONE, "homolog", "manual", "u");
   h1.record({ module: "supply", resource: "Referencia", required: true, status: "ready", imported: 1 });

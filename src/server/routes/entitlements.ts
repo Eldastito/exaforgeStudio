@@ -9,7 +9,7 @@
  * chamar essas rotas em vez de compor localmente ModuleService + Permission.
  */
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { EntitlementService, type EntitlementAction } from "../EntitlementService.js";
 import { NavigationManifestService } from "../NavigationManifestService.js";
 import { PermissionService } from "../PermissionService.js";
@@ -38,6 +38,7 @@ router.get("/me", (req: AuthRequest, res): any => {
       hasProfile: PermissionService.hasProfile(orgId, req.user),
       falatuEnabled: FalaTuService.orgEnabled(orgId),
       missionLayerEnabled: MissionService.isEnabled(orgId),   // ADR-189 F13 — mostra "Missões" no menu
+      simplifiedNavEnabled: NavigationManifestService.isSimplified(orgId),   // ADR-203 F2.2 — nav simplificada (flag por org)
       vertical: org.vertical || null,
       planId: org.plan_id || null,
       defaultLandingView: org.default_landing_view || null,
@@ -74,6 +75,16 @@ router.get("/navigation-manifest", (req: AuthRequest, res): any => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET/PUT /api/entitlements/simplified-navigation — ADR-203 F2.2. Liga/desliga a nav simplificada
+// (Hoje · FalaTu · Executando · Resultados · Empresa + Explorar). owner/admin; reversível; nada é apagado.
+router.get("/simplified-navigation", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  res.json({ enabled: NavigationManifestService.isSimplified(req.organizationId!) });
+});
+router.put("/simplified-navigation", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(NavigationManifestService.setSimplified(req.organizationId!, req.body?.enabled === true || req.body?.enabled === 1)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/entitlements/resource/:key?action=view|use|enable|buy|execute

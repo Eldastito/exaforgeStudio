@@ -48,6 +48,20 @@ export class NavigationManifestService {
     return (ModuleService.MODULE_META as any)?.[key] || CORE_LABELS[key] || { label: key, desc: "" };
   }
 
+  /** ADR-203 F2.2 — a flag `simplified_navigation_enabled` (default 0). Só diz ao frontend SE
+   * renderiza a nav simplificada; reversível, nunca apaga nada (RN-F2-1/2). */
+  static isSimplified(orgId: string): boolean {
+    try {
+      const r = db.prepare(`SELECT COALESCE(simplified_navigation_enabled,0) e FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
+      return !!r?.e;
+    } catch { return false; }
+  }
+
+  static setSimplified(orgId: string, enabled: boolean): { enabled: boolean } {
+    db.prepare(`UPDATE organization_settings SET simplified_navigation_enabled = ? WHERE organization_id = ?`).run(enabled ? 1 : 0, orgId);
+    return { enabled: this.isSimplified(orgId) };
+  }
+
   /** Manifesto de navegação do usuário: necessidade-primeiro + Explorar filtrado. */
   static forUser(orgId: string, user: any): NavigationManifest {
     const org = db.prepare(

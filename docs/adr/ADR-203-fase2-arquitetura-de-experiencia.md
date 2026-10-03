@@ -31,3 +31,7 @@ D1 Executando × Missões (proposta: Executando é a fachada; Missões vira seç
 ## 6. Evidências exigidas por fatia (checklist do PRD)
 
 Build + typecheck + testes + regressão; desktop e mobile; Owner/Gerente/Vendedor; telemetria registrada; screenshots **de org de teste semeada** (Playwright/Chromium) — a validação na TOULON real depende dos prints do dono; pendências explicitadas no runbook.
+
+
+## Status F2.2 — EM PR
+Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedNav` + `navCatalog` + toggle em Configurações → Módulos + `PUT /api/entitlements/simplified-navigation`). Destinos dos 5 itens são interinos. `test:simplified-navigation` (24). Runbook: seção F2.2.

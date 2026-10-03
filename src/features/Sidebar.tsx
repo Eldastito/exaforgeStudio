@@ -4,9 +4,11 @@ import { useStore } from '@/src/store/useStore';
 import { ZappFlowMark } from '@/src/brand/ZappFlowMark';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { apiFetch } from '@/src/lib/api';
+import { SimplifiedNav } from '@/src/features/SimplifiedNav';
+import type { NavCtx } from '@/src/lib/navCatalog';
 
 export function Sidebar() {
-  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, missionLayerEnabled, vertical } = useStore();
+  const { viewMode, setViewMode, sidebarOpen, setSidebarOpen, isModuleEnabled, canAccessModule, isMasterAdmin, falatuEnabled, missionLayerEnabled, simplifiedNavEnabled, vertical } = useStore();
   const { user, logout } = useAuth();
   // ADR-199 (UI): a entrada "Grupo" só aparece pro DONO de um grupo — /api/groups devolve
   // os grupos que a IDENTIDADE da sessão POSSUI. Gerente (não é dono de grupo) recebe
@@ -65,6 +67,9 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto py-4">
         <div className="px-4 pb-2">
           <p className="px-2 text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Workspace</p>
+          {simplifiedNavEnabled ? (
+            <SimplifiedNav ctx={{ isModuleEnabled, canAccessModule, isMasterAdmin, isManager, falatuEnabled, missionLayerEnabled, vertical, groupAvailable, coachAvailable } as NavCtx} viewMode={viewMode} onNavigate={(vm) => setViewMode(vm as any)} />
+          ) : (
           <nav className="space-y-1">
              {canAccessModule('saude_negocio') && <NavItem icon={<HeartPulse />} label="Central de Saúde" active={viewMode === 'saude'} onClick={() => setViewMode('saude')} />}
              <NavItem icon={<Lightbulb />} label="Insights" active={viewMode === 'insights'} onClick={() => setViewMode('insights')} />
@@ -141,6 +146,7 @@ export function Sidebar() {
                <NavItem icon={<Mic />} label="FalaTu" active={viewMode === 'falatu'} onClick={() => setViewMode('falatu')} />
              )}
           </nav>
+          )}
         </div>
         
         <div className="px-4 pt-4">

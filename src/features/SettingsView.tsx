@@ -1694,9 +1694,54 @@ function ModulesPanel({ onUpgrade }: { onUpgrade?: () => void }) {
               visível. Consome GET/PUT /api/missions/enablement (owner/admin; F18, alcançável com a
               flag OFF). Só renderiza pra quem pode togglar — non-owner/admin recebe 403 → null. */}
           <MissionPilotSection />
+
+          {/* ADR-203 F2.2 — toggle do menu simplificado (Hoje · FalaTu · Executando · Resultados · Empresa). */}
+          <SimplifiedNavSection />
         </div>
       )}
     </>
+  );
+}
+
+// ADR-203 F2.2 — liga/desliga `simplified_navigation_enabled` (opt-in por org, reversível:
+// desligar volta ao menu completo, nada é apagado). owner/admin; demais recebem 403 → null.
+function SimplifiedNavSection() {
+  const loadEntitlements = useStore(s => s.loadEntitlements);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    apiFetch('/api/entitlements/simplified-navigation')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setEnabled(d ? !!d.enabled : null))
+      .catch(() => setEnabled(null));
+  }, []);
+  if (enabled === null) return null;
+  const toggle = async () => {
+    setSaving(true);
+    try {
+      const r = await apiFetch('/api/entitlements/simplified-navigation', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d?.error || 'Não foi possível alterar.'); return; }
+      setEnabled(!!d.enabled);
+      await loadEntitlements();
+      toast.success(d.enabled ? 'Menu simplificado ativado.' : 'Menu completo restaurado.');
+    } catch { toast.error('Erro ao salvar.'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div>
+      <p className="text-sm font-semibold text-teal-300 mb-2 flex items-center gap-2"><Rocket className="w-4 h-4" /> Menu simplificado (piloto)</p>
+      <div className="flex items-center justify-between rounded-xl border border-teal-800/40 bg-teal-950/10 p-4">
+        <div className="pr-4">
+          <p className="text-sm font-medium text-zinc-100">Menu por necessidade</p>
+          <p className="text-xs text-zinc-500">Mostra só Hoje, FalaTu, Executando, Resultados e Empresa; todo o resto fica em “Explorar”. Reversível: desligar volta ao menu completo e não apaga nada.</p>
+        </div>
+        <button onClick={toggle} disabled={saving}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${enabled ? 'bg-emerald-600' : 'bg-zinc-700'} ${saving ? 'opacity-60' : ''}`}>
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+    </div>
   );
 }
 

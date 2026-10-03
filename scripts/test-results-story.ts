@@ -100,7 +100,7 @@ async function main() {
   check("Dashboard rebatizado 'Atendimento Digital' (menu simplificado, menu legado, título e cabeçalho)", /viewMode: 'dashboard', label: 'Atendimento Digital'/.test(nav) && /label="Atendimento Digital" active=\{viewMode === 'dashboard'\}/.test(fs.readFileSync("src/features/Sidebar.tsx", "utf8")) && /Atendimento Digital<\/h2>/.test(fs.readFileSync("src/features/DashboardPanel.tsx", "utf8")) && /dashboard' && 'Atendimento Digital'/.test(fs.readFileSync("src/App.tsx", "utf8")));
   const ux = fs.readFileSync("src/server/routes/ux.ts", "utf8");
   check("rotas /results-story e /results-story/store/:storeId/understand montadas", /router\.get\("\/results-story"/.test(ux) && /\/results-story\/store\/:storeId\/understand/.test(ux));
-  check("App renderiza ResultsView no viewMode 'resultados'; nav aponta 'Resultados' para a tela própria", /viewMode === 'resultados' && <ResultsView \/>/.test(fs.readFileSync("src/App.tsx", "utf8")) && /viewMode: 'resultados'/.test(nav));
+  check("App renderiza ResultsView no viewMode 'resultados'; nav aponta 'Resultados' para a tela própria", /viewMode === 'resultados' && <div className="flex-1 min-w-0 overflow-y-auto"><ResultsView \/><\/div>/.test(fs.readFileSync("src/App.tsx", "utf8")) && /viewMode: 'resultados'/.test(nav));
 
   console.log(failures === 0 ? "\nTODOS OS CHECKS PASSARAM" : `\n${failures} FALHA(S)`);
   process.exit(failures ? 1 : 0);

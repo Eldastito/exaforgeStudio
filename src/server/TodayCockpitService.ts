@@ -111,7 +111,22 @@ export class TodayCockpitService {
 
     cands.sort((a, b) => b.weight - a.weight);
     const seen = new Set<string>();
-    const unique = cands.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+    const deduped = cands.filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+    // Sinais IGUAIS (mesmo título+causa) viram UMA prioridade com a contagem — senão "Uma integração falhou" ×3
+    // ocupa as 3 vagas e esconde o resto (visto na TOULON). Só risco/sinal; decisão e exceção têm verbo próprio.
+    const groupN = new Map<string, number>();
+    const gkey = (c: TodayPriority) => `${c.title}|${c.cause}|${c.viewMode}`;
+    for (const c of deduped) if (c.kind === "risk" || c.kind === "signal") groupN.set(gkey(c), (groupN.get(gkey(c)) || 0) + 1);
+    const gseen = new Set<string>();
+    const unique: TodayPriority[] = [];
+    for (const c of deduped) {
+      if (c.kind !== "risk" && c.kind !== "signal") { unique.push(c); continue; }
+      const k = gkey(c);
+      if (gseen.has(k)) continue;
+      gseen.add(k);
+      const n = groupN.get(k) || 1;
+      unique.push(n > 1 ? { ...c, title: `${c.title} (${n} ocorrências)` } : c);
+    }
     const priorities = unique.slice(0, MAX_PRIORITIES);
 
     return {

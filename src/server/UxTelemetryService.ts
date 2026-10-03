@@ -19,7 +19,8 @@ import { randomUUID } from "crypto";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 
 // Whitelist de eventos (§80) — nada fora disso é gravado.
-const CORE_EVENT_TYPES = ["view_opened", "action_clicked", "approval_completed", "clarification_requested", "first_value"];
+// "search_no_result" (ADR-203 F2.9): buscou no Explorar e não achou — grava SÓ que aconteceu, nunca o que foi digitado.
+const CORE_EVENT_TYPES = ["view_opened", "action_clicked", "approval_completed", "clarification_requested", "first_value", "search_no_result"];
 // ADR-169 F16 — eventos beauty pra observability da Beauty AI + dashboard
 // master de adoção do funil visual (§80 + PRD Beauty §33). Cada nome é
 // STATELESS + minimizado (RN-BS-05 — sem foto/prompt no log; só rótulos).
@@ -49,6 +50,12 @@ export class UxTelemetryService {
   static enabled(orgId: string): boolean {
     const r = db.prepare(`SELECT COALESCE(ux_telemetry_enabled,0) e FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
     return !!(r && Number(r.e));
+  }
+
+  /** ADR-203 F2.9 — o CONSENTIMENTO (§84): liga/desliga a coleta. Default 0; desligar NÃO apaga o já coletado (só para de coletar). */
+  static setEnabled(orgId: string, on: boolean): { enabled: boolean } {
+    db.prepare(`UPDATE organization_settings SET ux_telemetry_enabled = ? WHERE organization_id = ?`).run(on ? 1 : 0, orgId);
+    return { enabled: this.enabled(orgId) };
   }
 
   /**

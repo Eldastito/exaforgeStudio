@@ -59,3 +59,7 @@ RetailOps 19 abas → 5 grupos atrás da flag (`retailOpsGroups` + `RetailOpsVie
 
 ## Status F2.8 — EM PR
 `FalaTuConversationService` + `/api/falatu/ask {context}` + 4 grupos no FalaTu + chips de continuidade. `test:falatu-conversation` (28). Runbook: seção F2.8.
+
+
+## Status F2.9 — EM PR (última fatia da Fase 2)
+Consentimento da medição (default OFF) + `UxPilotReportService` + painel em Empresa + correção dos nomes de tela (legado × substituta) + roteiro `docs/runbook/fase2-piloto-toulon.md`. `test:ux-pilot` (27). Runbook: seção F2.9.

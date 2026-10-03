@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, Hand, Loader2, ArrowRight } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useStore } from '@/src/store/useStore';
-import { trackView } from '@/src/lib/uxTelemetry';
+import { trackAction } from '@/src/lib/uxTelemetry';
 
 interface Item {
   id: string; kind: string; title: string; state: string; tone: string; detail: string | null; at: string | null;
@@ -31,7 +31,6 @@ export function ExecutingView() {
   useEffect(() => {
     let alive = true;
     apiFetch('/api/ux/executing-board').then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (alive) setData(d); }).catch(() => { if (alive) setError(true); });
-    trackView('executando', 'executando');
     return () => { alive = false; };
   }, []);
 
@@ -48,7 +47,7 @@ export function ExecutingView() {
             {lane.items.length === 0 ? <p className="text-sm text-slate-500">{l.empty}</p> : (
               <div className="space-y-2">
                 {lane.items.map(it => (
-                  <button key={`${it.kind}:${it.id}`} onClick={() => { trackView('executando_abrir', it.viewMode); setViewMode(it.viewMode as any); }}
+                  <button key={`${it.kind}:${it.id}`} onClick={() => { trackAction('executando_abrir', it.viewMode); setViewMode(it.viewMode as any); }}
                     className="zf-panel-subtle flex w-full items-start gap-3 p-3 text-left hover:border-teal-500/40">
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-slate-100">{it.title}</p>

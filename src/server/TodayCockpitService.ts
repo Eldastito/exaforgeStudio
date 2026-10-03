@@ -46,6 +46,7 @@ export interface TodayNetwork {
   monthRemaining: MetricText;
   todayPartial: MetricText;    // parcial do PDV até agora — NÃO é fechamento
   coverage: { stores: number; withMonthGoal: number; withClosing: number };
+  scoped: boolean;             // true = o usuário vê só parte das lojas (gerente de loja)
 }
 export interface TodayCockpit {
   greeting: string;
@@ -122,8 +123,8 @@ export class TodayCockpitService {
       network: full ? this.network(orgId, user, dateSP, now) : null,
       resolved: {
         count: home.resolvedSinceYesterday.count,
-        valueRecovered: full && home.resolvedSinceYesterday.valueRecovered !== null
-          ? { state: "value", text: brl(home.resolvedSinceYesterday.valueRecovered), reason: null } : null,
+        valueRecovered: full && (home.resolvedSinceYesterday.valueRecovered ?? 0) > 0
+          ? { state: "value", text: brl(home.resolvedSinceYesterday.valueRecovered as number), reason: null } : null,
         windowHours: 24,
       },
       generatedAt: now.toISOString(),
@@ -156,6 +157,7 @@ export class TodayCockpitService {
         todayPartial: known.length === 0 ? m("unknown", "—", "sem vendas do PDV sincronizadas hoje")
           : m(known.length === partialStores.length ? "value" : "estimate", brl(sum(known.map((x) => x.value as number))) + (known.length === partialStores.length ? "" : " (parcial: nem todas as lojas)"), null),
         coverage: { stores: stores.length, withMonthGoal: withGoal.length, withClosing: closed.length },
+        scoped: stores.length < snap.stores.length,
       };
     } catch { return null; }
   }

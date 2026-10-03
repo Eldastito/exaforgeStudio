@@ -117,7 +117,10 @@ export class FalaTuConversationService {
         lines.push("Quem mais caiu nos últimos 30 dias:");
         for (const t of u.team) {
           lines.push(`• ${t.name}${t.salesDeltaPct !== null ? ` (vendas ${t.salesDeltaPct}%)` : ""}`);
-          for (const f of t.findings.slice(0, 3)) lines.push(`   ${f.kind === "hypothesis" ? "Hipótese: " : ""}${f.text}`);
+          // fatos primeiro, MAS a hipótese nunca é cortada (RN-F2: fato ≠ hipótese precisa aparecer junto)
+          const facts = t.findings.filter((f) => f.kind !== "hypothesis").slice(0, 2);
+          const hyps = t.findings.filter((f) => f.kind === "hypothesis").slice(0, 1);
+          for (const f of [...facts, ...hyps]) lines.push(`   ${f.kind === "hypothesis" ? "Hipótese: " : ""}${f.text}`);
         }
       } else lines.push("Nenhuma pessoa da equipe com queda de vendas mensurável nos últimos 30 dias.");
       lines.push("Fato é número do sistema; hipótese é leitura possível dele, não causa comprovada.");

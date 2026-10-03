@@ -77,7 +77,7 @@ export const NAV_CATALOG: NavEntry[] = [
   { viewMode: 'areas', label: 'Áreas de Atend.', group: 'administracao', visible: mod('areas') },
   { viewMode: 'contacts', label: 'Contatos', group: 'vendas', visible: always },
   { viewMode: 'integrations', label: 'Integrações', group: 'administracao', visible: mod('integracoes') },
-  { viewMode: 'dashboard', label: 'Dashboard', group: 'ia', visible: always },
+  { viewMode: 'dashboard', label: 'Atendimento Digital', group: 'ia', visible: always },
   { viewMode: 'caixa', label: 'Caixa', group: 'financeiro', visible: c => c.canAccessModule('financeiro') },
   { viewMode: 'reports', label: 'Relatórios', group: 'ia', visible: always },
   { viewMode: 'juridico', label: 'Consultora Jurídica', group: 'administracao', visible: always },
@@ -109,8 +109,8 @@ export function primaryNav(c: NavCtx): PrimaryNav[] {
   if (ok('falatu')) out.push({ key: 'falatu', label: 'FalaTu', viewMode: 'falatu' });
   // F2.4 — fachada única sobre ações, processos, missões e tarefas; sempre disponível (lane vazia é honesta).
   out.push({ key: 'executando', label: 'Executando', viewMode: 'executando' });
-  const res = ok('diretor') ? 'diretor' : 'reports';
-  out.push({ key: 'resultados', label: 'Resultados', viewMode: res });
+  // F2.5 — Resultados: conclusão → rede → lojas → Entender (tela própria, sempre disponível).
+  out.push({ key: 'resultados', label: 'Resultados', viewMode: 'resultados' });
   if (c.isManager || c.isMasterAdmin) out.push({ key: 'empresa', label: 'Empresa', viewMode: 'settings' });
   return out;
 }

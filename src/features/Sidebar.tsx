@@ -111,7 +111,7 @@ export function Sidebar() {
              {mod('areas') && <NavItem icon={<Users2 />} label="Áreas de Atend." active={viewMode === 'areas'} onClick={() => setViewMode('areas')} />}
              <NavItem icon={<Users />} label="Contatos" active={viewMode === 'contacts'} onClick={() => setViewMode('contacts')} />
              {mod('integracoes') && <NavItem icon={<Link2 />} label="Integrações" active={viewMode === 'integrations'} onClick={() => setViewMode('integrations')} />}
-             <NavItem icon={<BarChart3 />} label="Dashboard" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
+             <NavItem icon={<BarChart3 />} label="Atendimento Digital" active={viewMode === 'dashboard'} onClick={() => setViewMode('dashboard')} />
              {canAccessModule('financeiro') && <NavItem icon={<Wallet />} label="Caixa" active={viewMode === 'caixa'} onClick={() => setViewMode('caixa')} />}
              <NavItem icon={<LineChart />} label="Relatórios" active={viewMode === 'reports'} onClick={() => setViewMode('reports')} />
              <NavItem icon={<Scale />} label="Consultora Jurídica" active={viewMode === 'juridico'} onClick={() => setViewMode('juridico')} />

@@ -43,3 +43,7 @@ Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedN
 
 ## Status F2.4 — pronta localmente (aguarda merge da F2.3)
 `ExecutingBoardService` + `GET /api/ux/executing-board` + `ExecutingView`. `test:executing-board` (21). Runbook: seção F2.4.
+
+
+## Status F2.5 — pronta localmente
+`ResultsStoryService` + `/api/ux/results-story[/store/:id/understand]` + `ResultsView`; Dashboard → "Atendimento Digital". `test:results-story` (25). Runbook: seção F2.5.

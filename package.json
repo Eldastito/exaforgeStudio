@@ -576,6 +576,7 @@
     "test:falatu-intent-router": "tsx scripts/test-falatu-intent-router.ts",
     "test:simplified-navigation": "tsx scripts/test-simplified-navigation.ts",
     "test:today-cockpit": "tsx scripts/test-today-cockpit.ts",
+    "test:executing-board": "tsx scripts/test-executing-board.ts",
     "test:retail-exception-signals": "tsx scripts/test-retail-exception-signals.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",

@@ -49,3 +49,14 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 - **Dinheiro role-gated:** `network` e valor recuperado só para visão completa do negócio; escopo de loja respeitado.
 - **Gap conhecido:** "Resolvido automaticamente hoje" (PRD §4) NÃO é entregue — `business_signals` não grava a data da auto-resolução. A tela mostra "casos resolvidos nas últimas 24h" (ações concluídas). Adicionar a data exigiria coluna nova; decisão pendente.
 - Flag desligada com `viewMode='hoje'` salvo: o app volta para a Central de Saúde.
+
+## F2.4 — Executando (4 etapas)
+
+`GET /api/ux/executing-board` (`ExecutingBoardService`) → tela `ExecutingView` (viewMode `executando`, destino do item "Executando" da nav simplificada; sempre presente). Fachada ÚNICA sobre ações/aprovações, processos por objetivo (`ExecutionResultsService.executing`), missões e tarefas. Missão = Tarefa = Ação: o mesmo cartão; o tipo interno só decide o link.
+
+- **Precisa de você:** decisão que VOCÊ pode aprovar, missão aguardando aprovação, ação que FALHOU (falha é de 1ª classe).
+- **Em andamento:** objetivos com processo ativo, ações aprovadas (sem duplicar o objetivo do mesmo fio), missões em andamento/em risco, tarefas "fazendo".
+- **Aguardando:** executada esperando confirmação externa (`action_confirmations` pendente — NUNCA vai para Concluído), aprovação de outro perfil, missão bloqueada/pronta/planejando, tarefas "na fila" (prazo vencido sinalizado).
+- **Concluído (7 dias):** com a garantia dita — "Resultado confirmado" só quando `OutcomeAssuranceService` prova; senão "Executado — resultado ainda não confirmado" (DONE ≠ RESULTADO).
+- Escopo: missões só gestor + Mission Layer ligado; tarefa de outra pessoa só gestor; domínio invisível some; R$ só com visão completa (vendedor recebe `restricted`). Cada lane: até 8 itens + `total`.
+- "Missões" continua inteira em Explorar e há atalho "Ver todas as missões" quando disponível (D1).

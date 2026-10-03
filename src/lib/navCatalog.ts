@@ -107,8 +107,8 @@ export function primaryNav(c: NavCtx): PrimaryNav[] {
   const out: PrimaryNav[] = [];
   out.push({ key: 'hoje', label: 'Hoje', viewMode: 'hoje' });   // F2.3 — tela própria (cockpit por exceção)
   if (ok('falatu')) out.push({ key: 'falatu', label: 'FalaTu', viewMode: 'falatu' });
-  const exec = ok('missoes') ? 'missoes' : ok('tarefas') ? 'tarefas' : null;
-  if (exec) out.push({ key: 'executando', label: 'Executando', viewMode: exec });
+  // F2.4 — fachada única sobre ações, processos, missões e tarefas; sempre disponível (lane vazia é honesta).
+  out.push({ key: 'executando', label: 'Executando', viewMode: 'executando' });
   const res = ok('diretor') ? 'diretor' : 'reports';
   out.push({ key: 'resultados', label: 'Resultados', viewMode: res });
   if (c.isManager || c.isMasterAdmin) out.push({ key: 'empresa', label: 'Empresa', viewMode: 'settings' });

@@ -17,6 +17,7 @@ import { MobileReadinessService } from "../MobileReadinessService.js";
 import { LegacyReductionService } from "../LegacyReductionService.js";
 import { UxPreferencesService } from "../UxPreferencesService.js";
 import { TodayCockpitService } from "../TodayCockpitService.js";
+import { ExecutingBoardService } from "../ExecutingBoardService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -27,6 +28,14 @@ router.get("/today", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(TodayCockpitService.build(orgId, req.user)); } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ux/executing-board — ADR-203 F2.4: "Executando" em 4 etapas (precisa de você · em andamento · aguardando · concluído)
+// unificando ações, processos, missões e tarefas. Composição read-only; role-scoped; dinheiro role-gated.
+router.get("/executing-board", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(ExecutingBoardService.build(orgId, req.user)); } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/ux/executing — processos ativos agrupados por objetivo.

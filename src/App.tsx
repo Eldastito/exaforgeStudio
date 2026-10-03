@@ -60,6 +60,7 @@ import { HealthCenterView } from '@/src/features/HealthCenterView';
 import { TodayView } from '@/src/features/TodayView';
 import { ExecutingView } from '@/src/features/ExecutingView';
 import { ResultsView } from '@/src/features/ResultsView';
+import { CompanyView } from '@/src/features/CompanyView';
 import { InsightsView } from '@/src/features/InsightsView';
 import { ComigoView } from '@/src/features/ComigoView';
 import { LoginView } from '@/src/features/LoginView';
@@ -202,9 +203,9 @@ export default function App() {
   // Polling do probe: a cada 30 s normalmente; a cada 8 s quando o tempo real
   // está caído, pra classificar rápido (realtime_degraded × api_degraded).
   // Roda imediatamente ao montar e sempre que `socketUp` muda.
-  // F2.3/F2.4/F2.5 — 'hoje', 'executando' e 'resultados' só existem com o menu simplificado; flag desligada (depois de carregar) volta pro legado.
+  // F2.3–F2.6 — 'hoje', 'executando', 'resultados' e 'empresa' só existem com o menu simplificado; flag desligada (depois de carregar) volta pro legado.
   useEffect(() => {
-    if (enabledModules !== null && (viewMode === 'hoje' || viewMode === 'executando' || viewMode === 'resultados') && !simplifiedNavEnabled) setViewMode('saude');
+    if (enabledModules !== null && (viewMode === 'hoje' || viewMode === 'executando' || viewMode === 'resultados' || viewMode === 'empresa') && !simplifiedNavEnabled) setViewMode('saude');
   }, [viewMode, simplifiedNavEnabled, enabledModules, setViewMode]);
 
   useEffect(() => {
@@ -492,6 +493,7 @@ export default function App() {
              {viewMode === 'hoje' && 'Hoje'}
              {viewMode === 'executando' && 'Executando'}
              {viewMode === 'resultados' && 'Resultados'}
+             {viewMode === 'empresa' && 'Empresa'}
              {viewMode === 'saude' && 'Central de Saúde'}
              {viewMode === 'insights' && 'Insights'}
              {viewMode === 'reservas' && 'Reservas'}
@@ -629,6 +631,7 @@ export default function App() {
           {viewMode === 'hoje' && <TodayView />}
           {viewMode === 'executando' && <ExecutingView />}
           {viewMode === 'resultados' && <ResultsView />}
+          {viewMode === 'empresa' && <CompanyView />}
           {viewMode === 'saude' && <HealthCenterView />}
           {viewMode === 'insights' && <InsightsView />}
           {viewMode === 'reservas' && <ReservasView />}

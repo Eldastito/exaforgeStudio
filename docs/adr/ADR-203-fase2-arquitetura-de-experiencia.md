@@ -47,3 +47,7 @@ Navegação simplificada atrás de `simplified_navigation_enabled` (`SimplifiedN
 
 ## Status F2.5 — pronta localmente
 `ResultsStoryService` + `/api/ux/results-story[/store/:id/understand]` + `ResultsView`; Dashboard → "Atendimento Digital". `test:results-story` (25). Runbook: seção F2.5.
+
+
+## Status F2.6 — EM PR
+`IntegrationStatusService` + `GET /api/ux/integration-status` + `CompanyView` (Empresa). `test:integration-status` (20). Runbook: seção F2.6.

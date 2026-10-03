@@ -111,7 +111,7 @@ export function primaryNav(c: NavCtx): PrimaryNav[] {
   out.push({ key: 'executando', label: 'Executando', viewMode: 'executando' });
   // F2.5 — Resultados: conclusão → rede → lojas → Entender (tela própria, sempre disponível).
   out.push({ key: 'resultados', label: 'Resultados', viewMode: 'resultados' });
-  if (c.isManager || c.isMasterAdmin) out.push({ key: 'empresa', label: 'Empresa', viewMode: 'settings' });
+  if (c.isManager || c.isMasterAdmin) out.push({ key: 'empresa', label: 'Empresa', viewMode: 'empresa' });
   return out;
 }
 

@@ -19,6 +19,7 @@ import { UxPreferencesService } from "../UxPreferencesService.js";
 import { TodayCockpitService } from "../TodayCockpitService.js";
 import { ExecutingBoardService } from "../ExecutingBoardService.js";
 import { ResultsStoryService } from "../ResultsStoryService.js";
+import { IntegrationStatusService } from "../IntegrationStatusService.js";
 
 const router = Router();
 const actor = (req: AuthRequest) => req.user?.userId;
@@ -48,6 +49,14 @@ router.get("/results-story/store/:storeId/understand", (req: AuthRequest, res): 
     if (!r) return res.status(404).json({ error: "Loja não encontrada." });
     res.json(r);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/ux/integration-status — ADR-203 F2.6: modo NORMAL das Integrações/Canais (conectada? última sync? o que chega?
+// quantas filiais precisam de atenção?). Só gestor; sem segredos; o técnico segue nas telas avançadas.
+router.get("/integration-status", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(IntegrationStatusService.simple(orgId, req.user)); } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/ux/executing-board — ADR-203 F2.4: "Executando" em 4 etapas (precisa de você · em andamento · aguardando · concluído)

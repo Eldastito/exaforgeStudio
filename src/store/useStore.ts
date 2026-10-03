@@ -144,6 +144,7 @@ type AppState = {
   isMasterAdmin: boolean;                      // operador da plataforma (ADR-106) — controla o menu só-plataforma
   falatuEnabled: boolean;                      // org ligou o FalaTu? (flag opt-in ADR-151 Fatia 2)
   missionLayerEnabled: boolean;                // org ligou o Mission Layer? (flag opt-in ADR-189)
+  simplifiedNavEnabled: boolean;               // org ligou a nav simplificada? (flag opt-in ADR-203 F2.2)
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -323,6 +324,7 @@ export const useStore = create<AppState>((set, get) => ({
         isMasterAdmin: !!meta.isMasterAdmin,
         falatuEnabled: !!meta.falatuEnabled,
         missionLayerEnabled: !!meta.missionLayerEnabled,
+        simplifiedNavEnabled: !!meta.simplifiedNavEnabled,
       });
       const landing = meta.defaultLandingView;
       if (landing && !localStorage.getItem('zappflow_view')) {
@@ -352,6 +354,7 @@ export const useStore = create<AppState>((set, get) => ({
   isMasterAdmin: false,
   falatuEnabled: false,
   missionLayerEnabled: false,
+  simplifiedNavEnabled: false,
   loadPermissions: async () => {
     // Delegado — /api/entitlements/me já traz `meta.permissions` + hasProfile
     // + isMasterAdmin + falatuEnabled em uma única chamada. Mantido pra não

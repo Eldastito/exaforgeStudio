@@ -27,3 +27,15 @@ Operação e homologação por fatia. Cada item = 1 PR, com o que mudou, como co
 - **"Quanto falta para a Grande Rio?" usa a COTA DO DIA**; a TOULON usa meta mensal e hoje não cadastra cota diária — a resposta diz "cota do dia não cadastrada" em vez de inventar (decisão D4 do PRD).
 - "Qual loja está pior" compara % da meta **fechada**, que pode estar incompleta no meio do mês; o texto avisa. Não é ranking de performance "corrigido por loja grande/pequena" — a meta mensal já normaliza o tamanho.
 - A resposta final pode ainda ser reescrita pelo LLM (`phrase`), mas só sobre os fatos da ferramenta.
+
+## F2.2 — Navegação simplificada atrás da flag (ADR-203)
+
+**O que é:** menu de 1º nível com 5 superfícies (Hoje · FalaTu · Executando · Resultados · Empresa) + "Explorar" (todo o resto, agrupado, com busca). Só renderiza quando `organization_settings.simplified_navigation_enabled = 1`; com a flag OFF (default) o `Sidebar` legado é o mesmo de antes (0-regressão).
+
+**Como ligar (só TOULON):** Configurações → Módulos → "Menu simplificado (piloto)" (owner/admin), ou `PUT /api/entitlements/simplified-navigation {"enabled":true}`. Desligar volta ao menu completo; nada é apagado.
+
+**Destinos interinos (trocados nas F2.3–F2.6):** Hoje→Central de Saúde (ou Insights) · FalaTu→FalaTu · Executando→Missões (com Mission Layer) ou Tarefas · Resultados→Diretor IA (ou Relatórios) · Empresa→Configurações (só gestor).
+
+**Garantias:** `src/lib/navCatalog.ts` espelha cada tela do `Sidebar.tsx` com o MESMO gate (módulo/permissão/vertical/master/gestor); `test:simplified-navigation` falha se uma tela do legado sumir do catálogo ou mudar de gate. Item sem permissão some (nunca cadeado).
+
+**Telemetria:** `src/lib/uxTelemetry.ts` envia `view_opened` (surface+tela, nunca conteúdo). O servidor só grava com `ux_telemetry_enabled` (opt-in LGPD) — a F2.2 NÃO liga essa flag; decisão do dono antes da F2.9.

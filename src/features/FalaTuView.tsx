@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FC, ty
 import { Mic, Square, Send, ImageIcon, Loader2, Check, X, ListTodo, CalendarDays, Brain, Sun, Inbox, Receipt, Plug, Copy, Trash2, ShieldAlert, PhoneCall, MessageCircle, Share2 } from 'lucide-react';
 import { toast } from '@/src/lib/toast';
 import { apiFetch } from '@/src/lib/api';
+import { useStore } from '@/src/store/useStore';
+import { FALATU_GROUPS, falatuGroupOf } from '@/src/lib/falatuGroups';
+import { trackView } from '@/src/lib/uxTelemetry';
 import { enqueueCapture, isNetworkError, pendingFalatuCount } from '@/src/lib/falatu/offlineQueue';
 import { FalatuLogo } from '@/src/components/brand/FalatuLogo';
 
@@ -304,7 +307,15 @@ export function FalaTuView() {
   // na tela (POST /api/falatu/ask). Thread mais recente no topo.
   const [askQuestion, setAskQuestion] = useState('');
   const [askBusy, setAskBusy] = useState(false);
-  const [askThread, setAskThread] = useState<{ id: string; q: string; answer: string; grounded: boolean; restricted: boolean }[]>([]);
+  const [askThread, setAskThread] = useState<{ id: string; q: string; answer: string; grounded: boolean; restricted: boolean; continuable?: boolean }[]>([]);
+  // ADR-203 F2.8 — contexto corrente da conversa: sobre qual loja? ('' = todas). Só aparece com 2+ lojas visíveis ao usuário.
+  const [ctxStores, setCtxStores] = useState<{ id: string; name: string }[]>([]);
+  const [ctxStoreId, setCtxStoreId] = useState('');
+  const simplified = useStore(s => s.simplifiedNavEnabled);
+  useEffect(() => {
+    // lojas que o usuário PODE ver (o servidor já filtra pelo escopo); sem lojas/1 loja → sem seletor
+    apiFetch('/api/retailops/stores').then(r => r.ok ? r.json() : null).then(d => setCtxStores(Array.isArray(d?.stores) ? d.stores.filter((x: any) => x?.id && x?.name).map((x: any) => ({ id: String(x.id), name: String(x.name) })) : [])).catch(() => setCtxStores([]));
+  }, []);
   // F13 — persistência TEMPORÁRIA (só neste aparelho, não vai pro servidor) +
   // limpeza automática no dia seguinte. Chave namespaced por org+usuário pra não
   // vazar consulta entre contas no mesmo navegador. hydrated evita o 1º efeito
@@ -775,13 +786,13 @@ export function FalaTuView() {
     toast.success('Número verificado! Protocolo pronto pra usar. ✅');
   });
 
-  const sendAsk = useCallback(async () => {
-    const q = askQuestion.trim();
+  const sendAsk = useCallback(async (override?: string) => {
+    const q = (typeof override === 'string' ? override : askQuestion).trim();
     if (!q || askBusy) return;
     setAskBusy(true);
     try {
-      const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
-      setAskThread((prev) => [{ id: mkAskId(), q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted }, ...prev]);
+      const r = await api('/ask', { method: 'POST', body: JSON.stringify({ question: q, ...(ctxStoreId ? { context: { storeId: ctxStoreId } } : {}) }) });
+      setAskThread((prev) => [{ id: mkAskId(), q, answer: r?.answer || '', grounded: !!r?.grounded, restricted: !!r?.moneyRestricted, continuable: !!r?.continuable }, ...prev]);
       setAskQuestion('');
       // F4 — se foi um pedido de GRAVAR, virou item pendente: recarrega o Inbox
       // pra o card de confirmação já aparecer na aba.
@@ -791,7 +802,7 @@ export function FalaTuView() {
     } finally {
       setAskBusy(false);
     }
-  }, [askQuestion, askBusy, loadPending]);
+  }, [askQuestion, askBusy, loadPending, ctxStoreId]);
 
   // F13 — restaura o histórico do dia ao montar; do dia anterior → limpa.
   useEffect(() => {
@@ -886,6 +897,30 @@ export function FalaTuView() {
       {/* Input da foto da nota (Fatia 4) fica fora das abas: o clique vem de
           qualquer lista aberta via checkListIdRef. */}
       <input ref={checkFileRef} type="file" accept="image/*" className="hidden" onChange={onCheckImage} />
+      {simplified ? (
+        // ADR-203 F2.8 (§11) — 1º nível: Conversar · Para mim · Organizar · Mais. As abas e o conteúdo são os mesmos.
+        <div className="space-y-2" data-testid="falatu-groups">
+          <div className="flex flex-wrap gap-1 rounded-xl border border-ft-border bg-ft-surface p-1">
+            {FALATU_GROUPS.map((g) => {
+              const active = (falatuGroupOf(tab) || FALATU_GROUPS[0]).key === g.key;
+              return (
+                <button key={g.key} title={g.hint} onClick={() => { trackView('falatu_grupo', g.key); setTab(g.tabs[0] as typeof tab); }}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${active ? 'bg-violet-600 text-white' : 'text-ft-text-muted hover:text-ft-text'}`}>{g.label}</button>
+              );
+            })}
+          </div>
+          {(falatuGroupOf(tab)?.tabs.length || 0) > 1 && (
+            <div className="flex flex-wrap gap-1">
+              {(falatuGroupOf(tab)?.tabs || []).map((id) => TABS.find((t) => t.id === id)).filter(Boolean).map((t) => (
+                <button key={t!.id} onClick={() => setTab(t!.id)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm ${tab === t!.id ? 'bg-violet-600/30 text-ft-text border border-violet-500/50' : 'text-ft-text-muted hover:text-ft-text border border-ft-border'}`}>
+                  {t!.icon} {t!.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="flex flex-wrap gap-1 rounded-xl border border-ft-border bg-ft-surface p-1">
         {TABS.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -894,6 +929,7 @@ export function FalaTuView() {
           </button>
         ))}
       </div>
+      )}
 
       {tab === 'inbox' && (
         <>
@@ -972,6 +1008,15 @@ export function FalaTuView() {
         <>
           <div className="rounded-xl border border-ft-border bg-ft-surface p-4 space-y-3">
             <p className="text-sm text-ft-text-muted">Converse com o seu negócio — <strong className="text-ft-text">pergunte</strong> e eu respondo com o dado real (<em>"quanto vendi em dinheiro hoje?"</em>, <em>"quem está de folga amanhã?"</em>), ou peça pra <strong className="text-ft-text">gravar</strong> algo (<em>"anota ligar pro contador amanhã"</em>) — você confirma antes de salvar.</p>
+            {ctxStores.length >= 2 && (
+              <div className="flex flex-wrap items-center gap-1.5" data-testid="falatu-context">
+                <span className="text-xs text-ft-text-faint">Sobre:</span>
+                {[{ id: '', name: 'Todas as lojas' }, ...ctxStores].map((st) => (
+                  <button key={st.id || 'all'} onClick={() => setCtxStoreId(st.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs ${ctxStoreId === st.id ? 'bg-violet-600 text-white' : 'border border-ft-border text-ft-text-muted hover:text-ft-text'}`}>{st.name}</button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <input value={askQuestion} onChange={(e) => setAskQuestion(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendAsk()}
                 disabled={askRecording}
@@ -1011,6 +1056,14 @@ export function FalaTuView() {
                 <p className={`text-sm whitespace-pre-wrap ${t.restricted ? 'text-ft-on-amber' : 'text-ft-text-muted'}`}>{t.answer}</p>
                 {!t.grounded && !t.restricted && (
                   <p className="text-[11px] text-ft-text-faint">Resposta da IA a partir do panorama do negócio.</p>
+                )}
+                {t.continuable && t.id === askThread[0]?.id && (
+                  <div className="flex flex-wrap gap-1.5 pt-1" data-testid="falatu-followups">
+                    {['Por quê?', 'E ontem?'].map((f) => (
+                      <button key={f} onClick={() => sendAsk(f)} disabled={askBusy}
+                        className="rounded-full border border-violet-500/40 px-2.5 py-1 text-xs text-violet-200 hover:bg-violet-500/10 disabled:opacity-50">{f}</button>
+                    ))}
+                  </div>
                 )}
                 <div className="flex items-center gap-2 pt-1.5">
                   <button onClick={() => shareAnswer(t)} title="Compartilhar (WhatsApp, e-mail, apps…)"

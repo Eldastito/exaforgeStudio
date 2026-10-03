@@ -580,6 +580,7 @@
     "test:results-story": "tsx scripts/test-results-story.ts",
     "test:integration-status": "tsx scripts/test-integration-status.ts",
     "test:retail-ops-groups": "tsx scripts/test-retail-ops-groups.ts",
+    "test:falatu-conversation": "tsx scripts/test-falatu-conversation.ts",
     "test:retail-exception-signals": "tsx scripts/test-retail-exception-signals.ts",
     "test:retail-replenishment-strategy": "tsx scripts/test-retail-replenishment-strategy.ts",
     "test:fase1-homologacao": "tsx scripts/test-fase1-homologacao.ts",

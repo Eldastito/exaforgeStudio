@@ -100,3 +100,17 @@ Só frontend (`src/lib/retailOpsGroups.ts` + `RetailOpsView`). **Com o menu simp
 - `test:retail-ops-groups` falha se uma aba some, duplica, é inventada, ou se o grupo passa de 5 abas.
 - Telemetria: troca de grupo/aba emite `view_opened` (`retailops_grupo` / `retailops_aba`) — grava só com `ux_telemetry_enabled`.
 - Fora desta fatia: as abas internas continuam com a mesma complexidade (ex.: Fechamento diário); só a navegação entre elas foi simplificada.
+
+## F2.8 — FalaTu: 2º nível, contexto, escopo por papel e continuidade
+
+`FalaTuConversationService` (servidor) + `src/lib/falatuGroups.ts` + `FalaTuView`. Sem tabela/motor/flag nova; sem LLM nessas camadas (determinístico antes de IA).
+
+**1) 1º nível (§11)** — com o menu simplificado ligado, as 9 abas do FalaTu aparecem em 4 grupos: **Conversar** (Perguntar) · **Para mim** (Inbox, Briefing) · **Organizar** (Tarefas, Agenda, Listas, Memória) · **Mais** (Plugues, Protocolos). Flag desligada = as 9 abas planas de sempre. Nada removido.
+
+**2) Contexto corrente (§29)** — na aba Conversar, com 2+ lojas visíveis, aparece "Sobre: Todas as lojas · Grande Rio · Carioca · Bangu". A loja escolhida vai em `POST /api/falatu/ask {context:{storeId}}` e vira o padrão ("Quanto falta para bater a meta hoje?" → daquela loja). **Loja citada na frase vence o contexto; "rede/todas as lojas" ignora o contexto.** O servidor valida a loja (da org + no escopo do usuário) — nunca confia no cliente.
+
+**3) Escopo por papel (§30), imposto no SERVIDOR** — quem está preso a lojas (`user_stores`, ADR-173): pergunta sem loja = a loja dele (1 loja) ou "De qual loja?" (várias); loja citada fora do escopo = recusa; **comparativos da rede** (`ranking_lojas`, `panorama_operacao`, `ranking_vendedores`, `vendedores_abaixo_meta`, `divergencia_estoque`, `produtos_parados`) = recusa ("é do dono ou do gestor da rede"). *Mudança de comportamento intencional:* antes, esses usuários recebiam respostas da rede inteira pelo FalaTu.
+
+**4) Continuidade (§13)** — "Por quê?" (o **Entender** da F2.5: períodos da loja + quem mais caiu, fato × hipótese, sem culpa), "E a Bangu?" (mesma ferramenta, outra loja), "E hoje?/ontem/semana/mês" (outro período). Chips "Por quê?" e "E ontem?" aparecem sob a última resposta continuável. Sem resposta anterior, passou 20 min, ou mudou de assunto → **não continua** (volta a tratar como pergunta nova); "Por quê?" sem loja na resposta anterior PERGUNTA de qual loja.
+
+**Limites honestos:** a memória da conversa é **do processo** (por org+usuário, 20 min, nada gravado em banco — LGPD) — reiniciar o servidor a esquece; "Por quê?" só existe para respostas de LOJA (ferramentas com `store`: meta do dia, dinheiro do dia, vendas, metas abaixo da cota, estoque); briefings (manhã/16h/noite) **dentro** do FalaTu e continuidade a partir do briefing (§12–§13) NÃO entraram; a loja do contexto é escolhida no chip do FalaTu — as demais telas não a compartilham (não há "loja corrente" global no app).

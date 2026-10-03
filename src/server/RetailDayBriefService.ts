@@ -114,18 +114,21 @@ export class RetailDayBriefService {
 
   // ── F1.6c — fechamento da noite ────────────────────────────────────────────
   private static period(dates: string[], closingByDate: Map<string, number>, quotaByDate: Map<string, number>): Period {
-    let venda = 0, cota = 0, haveClosing = 0, haveQuota = 0, missing = 0;
+    let venda = 0, cota = 0, haveClosing = 0, haveQuota = 0, missing = 0, closedNoQuota = 0;
     for (const d of dates) {
       const q = quotaByDate.get(d);
       const c = closingByDate.get(d);
-      if (c !== undefined) { venda += c; haveClosing += 1; }
+      if (c !== undefined) { venda += c; haveClosing += 1; if (q === undefined) closedNoQuota += 1; }
       if (q !== undefined) { cota += q; haveQuota += 1; if (c === undefined && q > 0) missing += 1; }
     }
     const partial = haveClosing ? round2(venda) : null;
     const vendaM = !haveClosing ? unknown("sem fechamento no período", { unit: "brl" })
       : missing > 0 ? notComputed(`faltam fechamentos de ${missing} dia(s)`, { unit: "brl" })
       : known(round2(venda), { unit: "brl", source: "fechamento (folha)" });
-    const cotaM = haveQuota ? known(round2(cota), { unit: "brl", source: "cota" }) : unknown("cota não cadastrada no período", { unit: "brl" });
+    // Dia VENDIDO sem cota cadastrada: somar a venda dele e não a cota inflaria o atingimento (ex.: 188%). Cota parcial ≠ cota → não calcula.
+    const cotaM = !haveQuota ? unknown("cota não cadastrada no período", { unit: "brl" })
+      : closedNoQuota > 0 ? notComputed(`faltam cotas de ${closedNoQuota} dia(s) com fechamento`, { unit: "brl" })
+      : known(round2(cota), { unit: "brl", source: "cota" });
     return { venda: vendaM, cota: cotaM, atingimento: ratioMetric(vendaM, cotaM, { unit: "pct" }), partial, missingDays: missing };
   }
 

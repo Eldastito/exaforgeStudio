@@ -126,6 +126,19 @@ async function main() {
   check("falha de envio não marca como entregue: o próximo tick retenta e entrega", threw && retry.sent === 1 && attempts === 2);
   check("isolamento: nada da org C na mensagem da A (e vice-versa)", !sent.some(([, t]) => /Loja C/.test(t)) && B.nightSnapshot(O2, D).stores.length === 1 && B.nightSnapshot(O2, D).stores[0].storeName === "Loja C" && !B.nightText(B.nightSnapshot(O2, D)).includes("Grande Rio"));
 
+  // ── cota PARCIAL não infla o atingimento (achado nos prints da Fase 2: "Semana 188,6%") ──
+  const Q = `org_Q_${randomUUID().slice(0, 6)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'X', 'active')`).run(randomUUID(), Q);
+  db.prepare(`UPDATE organization_settings SET retail_official_sale_source = 'folha' WHERE organization_id = ?`).run(Q);
+  const lojaQ = store(Q, "Loja Q");
+  quota(Q, lojaQ, "2026-09-21", 1000); closing(Q, lojaQ, "2026-09-21", 1000);
+  closing(Q, lojaQ, "2026-09-22", 1000);                 // vendeu, mas SEM cota cadastrada nesse dia
+  closing(Q, lojaQ, "2026-09-23", 1000);
+  const lq = B.nightSnapshot(Q, "2026-09-23").stores.find((x: any) => x.storeName === "Loja Q")!;
+  check("dia vendido sem cota: a cota da semana vira 'não calculada' (nunca soma venda de 3 dias contra cota de 1)", lq.week.cota.state === "not_computed" && /2 dia/.test(String(lq.week.cota.reason)), JSON.stringify(lq.week.cota));
+  check("…e o atingimento da semana NÃO é calculado (antes saía 300%)", lq.week.atingimento.state !== "value", JSON.stringify(lq.week.atingimento));
+  check("a venda da semana segue como fato (3.000) — só a cota é que não fecha", lq.week.venda.state === "value" && lq.week.venda.value === 3000);
+
   console.log("\n=== PRD Fase 1 · F1.6a/c: cota da manhã e fechamento da noite ===");
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok || !r.detail ? "" : ` — ${r.detail}`}`);
   console.log(`\n${results.length - failures}/${results.length} verificações OK`);

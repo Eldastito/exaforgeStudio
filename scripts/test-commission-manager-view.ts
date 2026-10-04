@@ -47,5 +47,8 @@ check("dono: painel de propostas pendentes aparece só no modo rede (antes da co
 check("dono: vê O QUE MUDA campo a campo contra o plano em vigor antes de confirmar", /commission\/plan\?storeId=/.test(owner) && /O que muda/.test(owner));
 check("dono: confirma (com aviso) ou recusa com MOTIVO — as rotas só da rede", /proposals\/\$\{p\.id\}\/\$\{action\}/.test(owner) && /Motivo da recusa/.test(owner));
 
+const goals = block("function MonthlyGoalsCard(", "\nfunction ");
+check("meta mensal: gerente (canEdit:false) não vê entrada/Salvar/Remover e ganha 'A meta está errada?' que contesta", /\{canEdit && <input/.test(goals) && /\{canEdit && <button disabled=\{busy === r\.storeId \|\| !\(vals/.test(goals) && /canEdit && r\.goalAmount !== null/.test(goals) && /\{!canEdit && <button[^\n]*dispute\(r\.storeId\)/.test(goals) && /monthly-goals\/dispute/.test(goals));
+
 console.log(`\n${failures === 0 ? "✅" : "❌"} commission-manager-view: ${failures === 0 ? "todos os checks" : failures + " falha(s)"}`);
 process.exit(failures === 0 ? 0 : 1);

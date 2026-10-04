@@ -2449,8 +2449,19 @@ router.get("/monthly-goals", requireRole("owner", "admin"), (req: AuthRequest, r
     const goals = RetailMonthlyGoalService.list(orgId, month);
     const stores = (db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
       .map((st) => ({ storeId: st.id, storeName: st.name, goalAmount: goals.find((g) => g.storeId === st.id)?.goalAmount ?? null }));
-    res.json({ month, stores: keepMine(req, stores, (x: any) => x.storeId) }); // gerente de loja: só a meta da loja dele
+    // gerente de loja: só a meta da loja dele, SOMENTE LEITURA (`canEdit:false`) — quem define é o dono; ele confere e contesta.
+    res.json({ month, canEdit: scopeOf(req).unrestricted, stores: keepMine(req, stores, (x: any) => x.storeId) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+// Gerente (ou dono) CONTESTA a meta mensal de uma loja: avisa o dono e a loja (sinal na espinha); não altera a meta.
+router.post("/monthly-goals/dispute", requireOwnerAdmin, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const st = commissionStoreFor(req, req.body?.storeId ?? null);
+  if ("error" in st) return res.status(403).json({ error: st.error });
+  if (!st.storeId) return res.status(400).json({ error: "Escolha a loja." });
+  try { res.status(201).json(RetailMonthlyGoalService.dispute(orgId, { storeId: st.storeId, month: String(req.body?.month || ""), note: String(req.body?.note || "") }, req.user?.userId)); }
+  catch (e: any) { res.status(e.message === "Loja não encontrada." ? 404 : 400).json({ error: e.message }); }
 });
 router.put("/monthly-goals", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

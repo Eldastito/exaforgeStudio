@@ -5798,11 +5798,12 @@ function ScheduleTab() {
 // a cota diária continua vindo da planilha/distribuição. Só aparece pra quem enxerga a rede (a rota recusa os demais).
 function MonthlyGoalsCard({ month }: { month: string }) {
   const [rows, setRows] = useState<Array<{ storeId: string; storeName: string; goalAmount: number | null }> | null>(null);
+  const [canEdit, setCanEdit] = useState(true); // gerente de loja vê só a da loja dele e NÃO edita: confere e contesta
   const [vals, setVals] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(() => {
     apiFetch(`/api/retailops/monthly-goals?month=${encodeURIComponent(month)}`).then(r => (r.ok ? r.json() : null)).then(d => {
-      if (d && Array.isArray(d.stores)) { setRows(d.stores); setVals({}); } else setRows(null);
+      if (d && Array.isArray(d.stores)) { setRows(d.stores); setCanEdit(d.canEdit !== false); setVals({}); } else setRows(null);
     }).catch(() => setRows(null));
   }, [month]);
   useEffect(() => { load(); }, [load]);
@@ -5815,6 +5816,16 @@ function MonthlyGoalsCard({ month }: { month: string }) {
       const res = await apiFetch('/api/retailops/monthly-goals', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month, goalAmount: v }) });
       const d = await res.json().catch(() => ({}));
       if (res.ok) { toast.success('Meta mensal salva.'); load(); } else toast.error(d.error || 'Não foi possível salvar.');
+    } finally { setBusy(null); }
+  };
+  const dispute = async (storeId: string) => {
+    const note = window.prompt('O que está errado nesta meta? (ex.: "a meta de outubro é R$ 80.000")', '');
+    if (note === null) return;
+    setBusy(storeId);
+    try {
+      const res = await apiFetch('/api/retailops/monthly-goals/dispute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month, note }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) toast.success('Aviso enviado ao dono. Quando ele corrigir, você é avisado.'); else toast.error(d.error || 'Não foi possível avisar.');
     } finally { setBusy(null); }
   };
   const clear = async (storeId: string) => {
@@ -5833,9 +5844,10 @@ function MonthlyGoalsCard({ month }: { month: string }) {
           <div key={r.storeId} className="flex flex-wrap items-center gap-2 text-[12px] text-zinc-300">
             <span className="w-44 truncate">{r.storeName}</span>
             <span className="w-32 text-zinc-400 tabular-nums">{r.goalAmount === null ? 'não cadastrada' : `R$ ${formatMoneyBR(r.goalAmount)}`}</span>
-            <input inputMode="decimal" placeholder="meta do mês" value={vals[r.storeId] || ''} onChange={e => setVals(v => ({ ...v, [r.storeId]: maskMoneyBRInput(e.target.value) }))} className="w-36 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
-            <button disabled={busy === r.storeId || !(vals[r.storeId] || '').trim()} onClick={() => save(r.storeId)} className="rounded-md bg-emerald-600/80 hover:bg-emerald-600 px-2 py-1 text-xs text-white disabled:opacity-40">Salvar</button>
-            {r.goalAmount !== null && <button disabled={busy === r.storeId} onClick={() => clear(r.storeId)} className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Remover</button>}
+            {!canEdit && <button disabled={busy === r.storeId} onClick={() => dispute(r.storeId)} className="rounded-md border border-amber-500/40 px-2 py-1 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-40">A meta está errada?</button>}
+            {canEdit && <input inputMode="decimal" placeholder="meta do mês" value={vals[r.storeId] || ''} onChange={e => setVals(v => ({ ...v, [r.storeId]: maskMoneyBRInput(e.target.value) }))} className="w-36 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />}
+            {canEdit && <button disabled={busy === r.storeId || !(vals[r.storeId] || '').trim()} onClick={() => save(r.storeId)} className="rounded-md bg-emerald-600/80 hover:bg-emerald-600 px-2 py-1 text-xs text-white disabled:opacity-40">Salvar</button>}
+            {canEdit && r.goalAmount !== null && <button disabled={busy === r.storeId} onClick={() => clear(r.storeId)} className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Remover</button>}
           </div>
         ))}
       </div>

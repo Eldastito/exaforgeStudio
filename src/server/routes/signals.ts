@@ -1,3 +1,4 @@
+import { StoreSignalScopeService } from "../StoreSignalScopeService.js";
 import { Router } from "express";
 import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
@@ -35,7 +36,7 @@ router.get("/attention", (req: AuthRequest, res): any => {
   const limit = req.query?.limit ? Number(req.query.limit) : undefined;
   // F3.2 — ?correlate=1 força o colapso de situações; omitido segue a flag da org.
   const correlate = req.query?.correlate === "1" || req.query?.correlate === "true" ? true : undefined;
-  res.json(BusinessSignalService.attention(orgId, { limit, correlate }));
+  res.json(BusinessSignalService.attention(orgId, { limit, correlate, hideSignalIds: StoreSignalScopeService.hiddenFor(orgId, req.user) }));
 });
 
 // PRD 2 F3.1 — GET /api/signals/correlations — situações: sinais abertos do

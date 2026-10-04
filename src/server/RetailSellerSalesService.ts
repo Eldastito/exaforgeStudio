@@ -172,7 +172,7 @@ export class RetailSellerSalesService {
    * org. Dinheiro → a ROTA é role-gated (§73). Nunca inventa: só o que está em
    * `retail_seller_sales`.
    */
-  static networkTopSellers(orgId: string, start: string, end: string, limit = 10): Array<{ sellerName: string; matricula: string | null; storeName: string | null; sales: number; pecas: number }> {
+  static networkTopSellers(orgId: string, start: string, end: string, limit = 10, restrictStoreIds?: string[]): Array<{ sellerName: string; matricula: string | null; storeName: string | null; sales: number; pecas: number }> {
     const rows = db.prepare(
       `SELECT COALESCE(NULLIF(ss.matricula, ''), LOWER(TRIM(ss.seller_name))) AS seller_key,
               ss.seller_name, ss.matricula, rs.name AS mapped_name,
@@ -181,9 +181,9 @@ export class RetailSellerSalesService {
          FROM retail_seller_sales ss
          LEFT JOIN retail_sellers rs ON rs.organization_id = ss.organization_id AND rs.matricula = ss.matricula
          LEFT JOIN retail_stores st ON st.id = ss.store_id AND st.organization_id = ss.organization_id
-        WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ?
+        WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ?${restrictStoreIds ? (restrictStoreIds.length ? ` AND ss.store_id IN (${restrictStoreIds.map(() => "?").join(",")})` : " AND 1 = 0") : ""}
         GROUP BY seller_key, ss.store_id`
-    ).all(orgId, start, end) as any[];
+    ).all(orgId, start, end, ...(restrictStoreIds || [])) as any[];
     const bySeller = new Map<string, { sellerName: string; matricula: string | null; sales: number; pecas: number; topStore: string | null; topStoreSales: number }>();
     const idCtx = RetailSellerIdentityService.context(orgId); // F1.1b: fusão/alias unifica a pessoa no ranking
     for (const r of rows) {

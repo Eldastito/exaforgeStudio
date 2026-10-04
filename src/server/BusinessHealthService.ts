@@ -308,12 +308,13 @@ export class BusinessHealthService {
    * corrigiu nem chega aqui — sinal resolvido não está aberto). Nada inventado: se a leitura falhar, 0 itens
    * e a síntese cai no comportamento anterior.
    */
-  static attention(orgId: string): { count: number; items: Array<{ signalId: string; signalType?: string; title: string; actionLabel: string; severity: string; domainLabel: string }>; technicalHidden: number } {
+  static attention(orgId: string, hideSignalIds?: Set<string> | null): { count: number; items: Array<{ signalId: string; signalType?: string; title: string; actionLabel: string; severity: string; domainLabel: string }>; technicalHidden: number } {
     try {
       const global: any[] = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 200, perDomain: 200, skipGoals: true })?.global || [];
       const OWNER_SEV = new Set(["attention", "risk", "critical"]);
       let technicalHidden = 0;
       const rel = global.filter((p) => {
+        if (hideSignalIds?.has(p.signalId)) return false;                                       // gerente de loja: sinais de outras lojas
         if (!OWNER_SEV.has(String(p.severity))) return false;                                   // info = acompanhamento, não grita
         if (p.presentation?.audience === "technical" && p.severity === "attention") { technicalHidden += 1; return false; } // técnico só se risco/crítico
         return true;
@@ -327,13 +328,13 @@ export class BusinessHealthService {
   }
 
   /** Payload da tela: status + gatilhos + frase-síntese + top-3 + Impact Ledger. */
-  static overview(orgId: string, minCash = 0) {
+  static overview(orgId: string, minCash = 0, hideSignalIds?: Set<string> | null) {
     const st = this.status(orgId, minCash);
     const priorities = this.priorities(orgId, { cash: st.cash, forecast: st.forecast, loss: st.loss, owner: st.owner });
     const open = this.openTitles(orgId);
     const label: Record<StatusLevel, string> = { saudavel: "Saudável", atencao: "Atenção", risco: "Risco", critico: "Crítico" };
     let synthesis: string;
-    const attention = this.attention(orgId);
+    const attention = this.attention(orgId, hideSignalIds);
     // Saudável só no caixa NÃO é "sem alertas": a síntese lê a mesma fonte da lista de atenção (F1.7a).
     if (st.status === "saudavel") synthesis = attention.count === 0
       ? "Nenhuma ação humana necessária. Operação sob controle."

@@ -18,6 +18,7 @@ import { DecisionActionService } from "./DecisionActionService.js";
 import { ProcessRuntimeService } from "./ProcessRuntimeService.js";
 import { PermissionService } from "./PermissionService.js";
 import { DOMAIN_MODULE } from "./ContextProjectionService.js";
+import { StoreSignalScopeService } from "./StoreSignalScopeService.js";
 
 const SEV_WEIGHT: Record<string, number> = { critical: 100, risk: 70, attention: 40, info: 10 };
 // Sinais de OPORTUNIDADE por tipo (heurística determinística, documentada).
@@ -86,15 +87,20 @@ export class SmartInboxService {
     const now = opts.now || Date.now();
     const cats: Record<InboxCategory, InboxItem[]> = { needsApproval: [], needsDecision: [], risk: [], opportunity: [], inExecution: [], resolved: [], info: [] };
 
+    // Gerente de loja: ações nascidas de sinal de OUTRA loja não são dele.
+    const hiddenActions = StoreSignalScopeService.hiddenActionsFor(orgId, user);
+    const myActions = (status: string) => DecisionActionService.list(orgId, { status }).filter((a: any) => !hiddenActions?.has(a.id));
     // Ações → aprovação / decisão / resolvido
-    for (const a of DecisionActionService.list(orgId, { status: "awaiting_approval" })) cats.needsApproval.push(this.actionItem(a, "needsApproval", now));
-    for (const a of DecisionActionService.list(orgId, { status: "proposed" })) cats.needsDecision.push(this.actionItem(a, "needsDecision", now));
-    for (const a of DecisionActionService.list(orgId, { status: "done" })) {
+    for (const a of myActions("awaiting_approval")) cats.needsApproval.push(this.actionItem(a, "needsApproval", now));
+    for (const a of myActions("proposed")) cats.needsDecision.push(this.actionItem(a, "needsDecision", now));
+    for (const a of myActions("done")) {
       if (a.completed_at && now - new Date(a.completed_at).getTime() <= RESOLVED_WINDOW_MS) cats.resolved.push(this.actionItem(a, "resolved", now));
     }
 
     // Sinais → risco / oportunidade / informação
-    for (const s of BusinessSignalService.attention(orgId, { limit: 100 }).items) {
+    // Gerente de loja: só os sinais da(s) loja(s) dele (o feed é da empresa inteira).
+    const hideSignalIds = StoreSignalScopeService.hiddenFor(orgId, user);
+    for (const s of BusinessSignalService.attention(orgId, { limit: 100, hideSignalIds }).items) {
       if (s.severity === "critical" || s.severity === "risk") cats.risk.push(this.signalItem(s, "risk"));
       else if (OPP_RE.test(String(s.type || ""))) cats.opportunity.push(this.signalItem(s, "opportunity"));
       else cats.info.push(this.signalItem(s, "info"));

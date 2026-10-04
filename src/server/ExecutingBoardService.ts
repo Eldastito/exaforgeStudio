@@ -22,6 +22,7 @@ import { FalaTuApprovalService } from "./FalaTuApprovalService.js";
 import { ExecutionResultsService } from "./ExecutionResultsService.js";
 import { MissionService } from "./MissionService.js";
 import { OutcomeAssuranceService } from "./OutcomeAssuranceService.js";
+import { StoreSignalScopeService } from "./StoreSignalScopeService.js";
 import { ContextProjectionService } from "./ContextProjectionService.js";
 
 export const LANE_LIMIT = 8;
@@ -67,13 +68,14 @@ export class ExecutingBoardService {
     const money = (amount: any, unit: any) => (amount == null ? null : full ? { amount: Number(amount), unit: unit || "BRL", restricted: false } : { amount: null, unit: unit || "BRL", restricted: true });
 
     const lanes: Record<Lane, BoardItem[]> = { needsYou: [], running: [], waiting: [], done: [] };
+    const hiddenActions = StoreSignalScopeService.hiddenActionsFor(orgId, user); // gerente de loja: ações de OUTRA loja não são dele
 
     // ── Ações (decisões) ──
     const pending = new Set((db.prepare(`SELECT action_id FROM action_confirmations WHERE organization_id = ? AND status = 'pending'`).all(orgId) as any[]).map((r) => r.action_id));
     const approvals = FalaTuApprovalService.pending(orgId, user).items;
     const approvalIds = new Set<string>();
     for (const a of approvals) {
-      if (!ContextProjectionService.canSeeDomain(orgId, user, a.domain)) continue;
+      if (!ContextProjectionService.canSeeDomain(orgId, user, a.domain) || hiddenActions?.has(a.actionId)) continue;
       approvalIds.add(a.actionId);
       const base = { id: a.actionId, kind: "action" as const, title: String(a.title), at: null, impact: money(a.expectedImpact, a.impactUnit), assurance: null };
       if (a.canApprove) lanes.needsYou.push({ ...base, state: "Precisa de você", tone: "needs_you", detail: a.why || null, viewMode: "falatu" });
@@ -93,7 +95,7 @@ export class ExecutingBoardService {
         WHERE organization_id = ? AND (status IN ('approved','failed') OR (status = 'done' AND datetime(completed_at) >= datetime('now', ?)))
         ORDER BY datetime(COALESCE(completed_at, created_at)) DESC LIMIT 100`).all(orgId, `-${RECENT_DONE_DAYS} days`) as any[];
     for (const a of recent) {
-      if (!ContextProjectionService.canSeeDomain(orgId, user, a.domain) || approvalIds.has(a.id)) continue;
+      if (!ContextProjectionService.canSeeDomain(orgId, user, a.domain) || approvalIds.has(a.id) || hiddenActions?.has(a.id)) continue;
       const base = { id: a.id, kind: "action" as const, title: String(a.title), impact: money(a.expected_impact, a.impact_unit), viewMode: "falatu" };
       if (a.status === "failed") lanes.needsYou.push({ ...base, state: "Falhou", tone: "failed", detail: "Não deu certo — precisa de uma decisão sua.", at: asDate(a.completed_at || a.created_at), assurance: null });
       else if (a.status === "approved") {

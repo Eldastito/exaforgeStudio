@@ -965,6 +965,14 @@ export function RetailOpsView() {
   // ADR-203 F2.7 — com o menu simplificado ligado, as 19 abas aparecem agrupadas por propósito (5 grupos → abas do grupo).
   // Flag desligada = a lista plana de sempre (0-regressão). As abas e o conteúdo são exatamente os mesmos.
   const simplified = useStore(s => s.simplifiedNavEnabled);
+  // Barra "Pergunte ou procure" (ADR-203 §35): "comissão" abre esta tela JÁ na aba certa. Só aceita abas que existem.
+  const pendingRetailTab = useStore(s => s.pendingRetailTab);
+  const setPendingRetailTab = useStore(s => s.setPendingRetailTab);
+  useEffect(() => {
+    if (!pendingRetailTab) return;
+    if (TABS.some(t => t.key === pendingRetailTab)) setTab(pendingRetailTab as RetailTab);
+    setPendingRetailTab(null);
+  }, [pendingRetailTab, setPendingRetailTab]);
   const activeGroup = groupOfTab(tab) || RETAIL_TAB_GROUPS[0];
   const tabBtn = ({ key, label, icon: Icon }: { key: RetailTab; label: string; icon: any }) => (
     <button key={key} onClick={() => { if (simplified) trackAction('retailops_aba', key); setTab(key); }} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === key ? 'bg-indigo-600 text-white' : 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}><Icon className="w-4 h-4" /> {label}</button>

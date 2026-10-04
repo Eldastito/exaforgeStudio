@@ -124,3 +124,6 @@ Só frontend (`src/lib/retailOpsGroups.ts` + `RetailOpsView`). **Com o menu simp
 
 ## F2.10 — o briefing vira conversa
 Depois que o briefing das 16h, da noite ou da manhã sai por WhatsApp, o dono pode responder "Por quê?" (explica a loja destacada) ou "E a Carioca?" (mesma pergunta, outra loja) — o contexto vale por 4h e só para quem recebeu a mensagem. Se nenhuma loja está comprovadamente abaixo da meta, o FalaTu pergunta de qual loja (nunca escolhe uma). Memória em processo: um restart do servidor apaga o contexto e o FalaTu volta a perguntar a loja. Teste: `npm run test:briefing-conversation`.
+
+## F2.11 — barra "Pergunte ou procure"
+Só com o menu simplificado ligado. Digite uma pergunta ("quanto vendi hoje?") e Enter envia ao FalaTu (abre "Conversar" já com a resposta); digite o nome de uma tela ou aba ("comissão", "escala", "estoque") e Enter abre — a aba certa da Operação da Rede quando for o caso. Contatos continuam na lista. Se o usuário não tem FalaTu, a opção Perguntar não aparece. Teste: `npm run test:command-bar`.

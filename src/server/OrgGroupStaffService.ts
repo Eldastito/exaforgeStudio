@@ -1,8 +1,6 @@
 import db from "./db.js";
 import { OrgGroupService } from "./OrgGroupService.js";
-import { PermissionService } from "./PermissionService.js";
-import { bumpSecurityVersion } from "./middleware/auth.js";
-import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
+import { UserOrgMoveService } from "./UserOrgMoveService.js";
 
 /**
  * OrgGroupStaffService — ADR-199 (extensão): equipe do grupo e REMANEJAMENTO de
@@ -95,43 +93,10 @@ export class OrgGroupStaffService {
     if (!members.has(toOrgId)) return { ok: false, code: "target_not_in_group" };   // destino fora do grupo
     if (fromOrgId === toOrgId) return { ok: false, code: "same_org" };
 
-    // Colisão: destino não pode já ter um usuário ATIVO com o mesmo e-mail
-    // (UNIQUE(organization_id, email) — mover cairia em constraint).
-    if (user.email) {
-      const clash = db.prepare(
-        `SELECT 1 FROM users u WHERE u.organization_id = ? AND u.email = ? AND u.id != ? AND ${ACTIVE}`
-      ).get(toOrgId, user.email, userId);
-      if (clash) return { ok: false, code: "email_exists_in_target" };
-    }
-
-    // Escopo de loja: org destino com lojas de varejo EXIGE ≥1 loja dela (nunca deixa o gerente irrestrito).
-    const destStoreIds = new Set((db.prepare("SELECT id FROM retail_stores WHERE organization_id = ?").all(toOrgId) as any[]).map((r) => String(r.id)));
-    const wantedStores = Array.from(new Set((input.storeIds || []).map(String).filter(Boolean)));
-    if (destStoreIds.size > 0 && wantedStores.length === 0) return { ok: false, code: "store_required" };
-    if (wantedStores.some((id) => !destStoreIds.has(id))) return { ok: false, code: "store_not_in_target" };
-
-    // Perfil equivalente na loja destino: mapeia pelo system_key do perfil atual
-    // (ex.: 'gerente' → o perfil 'gerente' da loja destino). Sem perfil atual → null.
-    let destProfileId: string | null = null;
-    if (user.role_profile_id) {
-      const srcKey = (db.prepare("SELECT system_key FROM role_profiles WHERE id = ?").get(user.role_profile_id) as any)?.system_key || null;
-      if (srcKey) {
-        PermissionService.seedSystemProfiles(toOrgId); // garante os templates na destino (idempotente)
-        destProfileId = (db.prepare("SELECT id FROM role_profiles WHERE organization_id = ? AND system_key = ?").get(toOrgId, srcKey) as any)?.id || null;
-      }
-    }
-
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE users SET organization_id = ?, role_profile_id = ? WHERE id = ?").run(toOrgId, destProfileId, userId);
-      // Escopo de loja (ADR-173) é por-org: as linhas da origem não valem na destino.
-      try { db.prepare("DELETE FROM user_stores WHERE user_id = ?").run(userId); } catch { /* tabela pode não existir em legado */ }
-      // …e o vínculo NOVO entra na mesma transação (atômico: ou move já com loja, ou não move).
-      if (wantedStores.length) RetailStoreScopeService.setForUser(toOrgId, userId, wantedStores, input.actorUserId || undefined);
-    });
-    tx();
-
-    // Revoga a sessão atual (token velho claim a org de origem) — força relogin na nova.
-    bumpSecurityVersion(userId);
+    // O resto (colisão de e-mail, escopo de loja obrigatório, perfil equivalente, user_stores e sessão) é a mesma
+    // regra de qualquer remanejamento de usuário entre empresas — fonte única em UserOrgMoveService.
+    const moved = UserOrgMoveService.move({ userId, toOrgId, storeIds: input.storeIds, actorUserId: input.actorUserId, allowOwnerRole: true });
+    if (!moved.ok) return { ok: false, code: moved.code };
     return { ok: true, fromOrgId };
   }
 }

@@ -1660,6 +1660,52 @@ function UsersManagementPanel() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [resettingId, setResettingId] = useState<string | null>(null);
+  // Mover usuário de empresa (gerente cadastrado na empresa errada): empresa destino + loja(s) dele.
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [orgOptions, setOrgOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [moveOrg, setMoveOrg] = useState('');
+  const [moveStores, setMoveStores] = useState<Array<{ id: string; name: string }>>([]);
+  const [moveChosen, setMoveChosen] = useState<string[]>([]);
+  const [moveBusy, setMoveBusy] = useState(false);
+
+  const openMove = async (u: any) => {
+    setMovingId(movingId === u.id ? null : u.id); setMoveOrg(''); setMoveStores([]); setMoveChosen([]);
+    if (orgOptions.length) return;
+    try {
+      const r = await fetch('/api/admin/organizations');
+      const d = await r.json();
+      setOrgOptions((Array.isArray(d) ? d : []).map((o: any) => ({ id: o.organization_id, name: o.business_name || o.organization_id })));
+    } catch { /* lista vazia: o select mostra só o placeholder */ }
+  };
+  const pickMoveOrg = async (orgId: string) => {
+    setMoveOrg(orgId); setMoveChosen([]); setMoveStores([]);
+    if (!orgId) return;
+    try {
+      const r = await fetch(`/api/admin/organizations/${orgId}/retail-stores`);
+      const d = await r.json();
+      setMoveStores(Array.isArray(d?.stores) ? d.stores : []);
+    } catch { setMoveStores([]); }
+  };
+  const MOVE_ERR: Record<string, string> = {
+    cannot_move_owner: 'Não é possível mover o dono da empresa.', cannot_move_master_admin: 'Master admin não pode ser movido.',
+    same_org: 'O usuário já está nessa empresa.', email_exists_in_target: 'Já existe usuário com esse e-mail na empresa destino.',
+    store_required: 'Escolha a(s) loja(s) dele na empresa destino — sem isso ele veria todas.', store_not_in_target: 'Alguma loja escolhida não é da empresa destino.',
+    target_not_found: 'Empresa destino não encontrada.', user_deleted: 'Usuário removido.',
+  };
+  const handleMove = async (u: any) => {
+    if (!moveOrg || moveBusy) return;
+    const dest = orgOptions.find((o) => o.id === moveOrg)?.name || moveOrg;
+    if (!(await confirmDialog(`Mover ${u.email} para "${dest}"? Ele sai de "${u.org_name || 'a empresa atual'}", perde o acesso a ela e precisa entrar de novo.`, { confirmText: 'Mover' }))) return;
+    setMoveBusy(true);
+    try {
+      const r = await fetch(`/api/admin/users/${u.id}/move-org`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toOrgId: moveOrg, storeIds: moveChosen }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(MOVE_ERR[d?.error] || `Falha: ${d?.error || r.status}`); return; }
+      toast.success('Usuário movido. Ele precisa entrar de novo — já na empresa nova.');
+      setMovingId(null); load();
+    } catch (e: any) { toast.error(e?.message || 'Erro ao mover'); }
+    finally { setMoveBusy(false); }
+  };
   const [newPassword, setNewPassword] = useState('');
 
   const load = async (search = q) => {
@@ -1786,6 +1832,14 @@ function UsersManagementPanel() {
                     >
                       <Lock className="w-3 h-3 inline mr-1" /> Redefinir senha
                     </button>
+                    {u.global_status !== 'deleted' && u.role !== 'owner' && (
+                      <button
+                        onClick={() => openMove(u)}
+                        className="text-xs px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20"
+                      >
+                        Mover de empresa
+                      </button>
+                    )}
                     {u.global_status !== 'deleted' && (
                       <button
                         onClick={() => handleDelete(u)}
@@ -1796,6 +1850,36 @@ function UsersManagementPanel() {
                     )}
                   </td>
                 </tr>
+                {movingId === u.id && (
+                  <tr className="bg-zinc-950/60"><td colSpan={6} className="px-3 py-3 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-zinc-400">Mover {u.email} (hoje em "{u.org_name || '—'}") para:</span>
+                      <select value={moveOrg} onChange={(e) => pickMoveOrg(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded p-1.5 text-sm text-zinc-100 min-w-[220px]">
+                        <option value="">Escolha a empresa destino…</option>
+                        {orgOptions.filter((o) => o.id !== u.organization_id).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    </div>
+                    {moveOrg && moveStores.length > 0 && (
+                      <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                        <p className="text-xs text-amber-300 mb-1.5">Em qual(is) loja(s) ele vai trabalhar? Ele só verá e alterará a(s) loja(s) marcada(s).</p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {moveStores.map((st) => (
+                            <label key={st.id} className="inline-flex items-center gap-1.5 text-xs text-zinc-200">
+                              <input type="checkbox" checked={moveChosen.includes(st.id)}
+                                onChange={(e) => setMoveChosen((cur) => (e.target.checked ? [...cur, st.id] : cur.filter((x) => x !== st.id)))} />
+                              {st.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Button onClick={() => handleMove(u)} disabled={!moveOrg || moveBusy || (moveStores.length > 0 && moveChosen.length === 0)} className="bg-sky-600 hover:bg-sky-700 text-white text-xs disabled:opacity-40">{moveBusy ? 'Movendo…' : 'Mover'}</Button>
+                      <Button onClick={() => setMovingId(null)} variant="outline" className="text-xs border-zinc-700 bg-zinc-800 text-zinc-300">Cancelar</Button>
+                    </div>
+                    <p className="text-[11px] text-zinc-500">O login é o mesmo; a empresa antiga deixa de valer pra ele. A sessão atual cai e ele entra de novo já na empresa nova, com o perfil equivalente e só as lojas marcadas.</p>
+                  </td></tr>
+                )}
                 {resettingId === u.id && (
                   <tr className="bg-zinc-950/60"><td colSpan={6} className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-2">

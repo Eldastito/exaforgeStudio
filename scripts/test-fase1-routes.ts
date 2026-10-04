@@ -147,8 +147,11 @@ async function main() {
     ["PATCH", "/commission/runs/abc/items/def", {}], ["DELETE", "/commission/runs/abc/items/def"], ["PUT", "/commission/plan", {}], ["POST", "/commission/race/run", {}],
   ];
   const comLeaks = [];
-  for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "admin", b, GER); if (r.status !== 403) comLeaks.push(`${m} ${p.split("?")[0]}→${r.status}`); }
-  check(`gerente-admin: as ${comRoutes.length} rotas da aba Comissão (leitura E escrita: regras, apuração, aprovar, plano, vendas por vendedor) respondem 403`, comLeaks.length === 0, comLeaks.join(" | "));
+  // Decisão do dono (TOULON, 04/10): o GERENTE da loja LÊ as vendas por vendedor da PRÓPRIA loja (`/pdv-sellers`, `/seller-sales`),
+  // filtradas pelo escopo dele e SEM comissão (provado em test:retail-manager-read-scope). O resto da aba Comissão segue 403.
+  const mgrMayRead = new Set(["GET /pdv-sellers", "GET /seller-sales"]);
+  for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "admin", b, GER); const k = `${m} ${p.split("?")[0]}`; if (mgrMayRead.has(k) ? r.status !== 200 : r.status !== 403) comLeaks.push(`${k}→${r.status}`); }
+  check(`gerente-admin: a aba Comissão (regras, apuração, aprovar, plano, escrita) responde 403 nas ${comRoutes.length - mgrMayRead.size} rotas; só a LEITURA de vendas por vendedor da própria loja abre (200 filtrado)`, comLeaks.length === 0, comLeaks.join(" | "));
   const comOk = [];
   for (const who of [["owner", "u_owner"], ["admin", COADMIN]] as const) for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, who[0], b, who[1]); if (r.status === 403 || r.status === 401) comOk.push(`${who[0]} ${m} ${p.split("?")[0]}→${r.status}`); }
   check("owner e co-admin sem loja: nenhuma delas é barrada (pode dar 400/404 de validação, nunca 403/401) — 0-regressão", comOk.length === 0, comOk.join(" | "));

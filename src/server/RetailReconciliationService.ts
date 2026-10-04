@@ -179,7 +179,7 @@ export class RetailReconciliationService {
    * (com system_total do Alterdata) — informado × sistema × divergência — e um
    * resumo. `onlyDivergent` filtra só as divergências. Isolado por org.
    */
-  static report(orgId: string, month: string, onlyDivergent = false): any {
+  static report(orgId: string, month: string, onlyDivergent = false, restrictStoreIds?: string[]): any {
     const start = `${month}-01`, end = `${month}-31`;
     const rows = (db.prepare(
       `SELECT c.store_id, s.name AS store_name, c.closing_date, c.informed_total, c.system_total, c.divergence_status
@@ -199,6 +199,8 @@ export class RetailReconciliationService {
         status: r.divergence_status || (informed > 0 ? "ok" : "pending_informed"),
       };
     });
+    // Gerente de loja (escopo restrito): só as lojas dele — o resumo abaixo é recalculado sobre elas.
+    if (restrictStoreIds) { const ok = new Set(restrictStoreIds); for (let i = rows.length - 1; i >= 0; i--) if (!ok.has(rows[i].storeId)) rows.splice(i, 1); }
     const divergent = rows.filter((r) => r.status === "divergent");
     const summary = {
       reconciledCount: rows.length,

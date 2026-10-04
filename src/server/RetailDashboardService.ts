@@ -149,7 +149,7 @@ export class RetailDashboardService {
   }
 
   /** Acumulado do MÊS ('YYYY-MM'). */
-  static monthly(orgId: string, month: string): any {
+  static monthly(orgId: string, month: string, restrictStoreIds?: string[]): any {
     const start = `${month}-01`;
     const end = `${month}-31`; // datas são strings YYYY-MM-DD; BETWEEN cobre o mês
     const totalSales = num((db.prepare(`SELECT COALESCE(SUM(informed_total),0) AS s FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND status != 'rejected'`).get(orgId, start, end) as any)?.s);
@@ -163,6 +163,13 @@ export class RetailDashboardService {
     ).all(orgId, start, end) as any[];
     const closingsCount = num((db.prepare(`SELECT COUNT(*) AS c FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ?`).get(orgId, start, end) as any)?.c);
     const commissionEstimate = RetailCommissionService.estimateTotal(orgId, start, end);
+    if (restrictStoreIds) {
+      // Gerente de loja (escopo restrito): só as lojas dele. A comissão estimada é da REDE inteira → não vai (null ≠ 0).
+      const ok = new Set(restrictStoreIds);
+      const mine = perStore.filter((r) => ok.has(r.store_id));
+      const mineClosings = restrictStoreIds.length ? num((db.prepare(`SELECT COUNT(*) AS c FROM retail_daily_closings WHERE organization_id = ? AND closing_date BETWEEN ? AND ? AND store_id IN (${restrictStoreIds.map(() => "?").join(",")})`).get(orgId, start, end, ...restrictStoreIds) as any)?.c) : 0;
+      return { month, totalSales: mine.reduce((a, r) => a + num(r.sales), 0), closingsCount: mineClosings, commissionEstimate: null, perStore: mine };
+    }
     return { month, totalSales, closingsCount, commissionEstimate, perStore };
   }
 

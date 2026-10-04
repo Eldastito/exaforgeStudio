@@ -19,7 +19,7 @@ const cents = (value: unknown) => Math.round((Number(value) || 0) * 100);
 const money = (value: number) => value / 100;
 
 export class RetailMoneyAuditService {
-  static day(orgId: string, date: string) {
+  static day(orgId: string, date: string, restrictStoreIds?: string[]) {
     // Dia ainda dentro da janela em que o TEF "engorda" o caixa da Alterdata
     // (caso 19/09: resumo lido cedo veio sem o bloco de débito): diferença
     // informado × sistema aqui é PROVAVELMENTE leitura parcial, não erro.
@@ -31,8 +31,10 @@ export class RetailMoneyAuditService {
       return daysAgo >= 0 && daysAgo <= 2;
     })();
     const sellerRows = RetailCommissionService.salesBySellerStore(orgId, date, date);
-    const stores = db.prepare(`SELECT id, name, code, COALESCE(seller_source, 'pdv') AS seller_source
+    const allStores = db.prepare(`SELECT id, name, code, COALESCE(seller_source, 'pdv') AS seller_source
       FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    // Gerente de loja (escopo restrito): só as lojas dele.
+    const stores = restrictStoreIds ? allStores.filter((s) => restrictStoreIds.includes(s.id)) : allStores;
     const rows = stores.map((s) => {
       const c = db.prepare(`SELECT status, source, informed_total, system_total, quota_amount, details_json, system_turnos_json
         FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date = ?`).get(orgId, s.id, date) as any;
@@ -125,6 +127,8 @@ export class RetailMoneyAuditService {
     // Autenticação da Alterdata morta = nenhum dia novo recebe system_total.
     // O banner na conferência é onde o dono descobre ANTES de divergir tudo.
     const connector = { authError: AlterdataConnectorService.getAuthFailure(orgId) };
+    // Filiais órfãs e o estado do conector são da REDE: o gerente de loja não recebe.
+    if (restrictStoreIds) return { date, stores: rows, orphanFiliais: [], connector: { authError: null } };
     return { date, stores: rows, orphanFiliais, connector };
   }
 }

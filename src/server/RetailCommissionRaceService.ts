@@ -474,11 +474,12 @@ export class RetailCommissionRaceService {
    * restringe a UMA loja, mas o prêmio de desvio da REDE sempre considera
    * todas (senão o ranking mentiria).
    */
-  static raceMonth(orgId: string, month: string, opts?: { storeId?: string | null; preview?: boolean }): any {
+  static raceMonth(orgId: string, month: string, opts?: { storeId?: string | null; preview?: boolean; restrictStoreIds?: string[] }): any {
     if (!/^\d{4}-\d{2}$/.test(month)) throw new Error("month deve ser YYYY-MM");
     const weeks = this.weeksOfMonthFor(orgId, month);
     const { start: mStart, end: mEnd } = this.monthRange(month);
-    const stores = db.prepare(`SELECT id, name, manager_user_id FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[];
+    const stores = (db.prepare(`SELECT id, name, manager_user_id FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(orgId) as any[])
+      .filter((st) => !opts?.restrictStoreIds || opts.restrictStoreIds.includes(st.id)); // gerente de loja: só a(s) dele(s)
 
     const monthRows = RetailCommissionService.salesBySellerStore(orgId, mStart, mEnd);
     const weekRowsCache = weeks.map((w) => RetailCommissionService.salesBySellerStore(orgId, w.start, w.end));
@@ -824,7 +825,7 @@ export class RetailCommissionRaceService {
     // SURFACEAMOS a lacuna como pendência acionável: o gestor atribui a loja no
     // lançamento/pedido e a comissão passa a aparecer. Isolado por org; só na
     // visão de rede (sem filtro de loja) — uma venda sem loja não é de loja X.
-    const unassignedRows = opts?.storeId ? [] : monthRows.filter((r) => !r.storeId);
+    const unassignedRows = (opts?.storeId || opts?.restrictStoreIds) ? [] : monthRows.filter((r) => !r.storeId);
     const unassigned = unassignedRows.length
       ? {
           reason: "sem_loja",
@@ -857,6 +858,7 @@ export class RetailCommissionRaceService {
     for (const r of monthRows) {
       if (!(r as any).doubleSourced) continue;
       if (opts?.storeId && r.storeId !== opts.storeId) continue;
+      if (opts?.restrictStoreIds && (!r.storeId || !opts.restrictStoreIds.includes(r.storeId))) continue; // gerente de loja
       const k = r.storeId || `semLoja:${r.storeName}`;
       const g = dsBystore.get(k) || { storeId: r.storeId, storeName: r.storeName, sellers: [] };
       g.sellers.push({ sellerName: r.sellerName, matricula: r.matricula, sales: r.sales, salesBySource: (r as any).salesBySource || {} });

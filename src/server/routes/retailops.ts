@@ -3,6 +3,7 @@
  * `retail` (ModuleService.MODULE_BY_ROUTE["retailops"]). Fase A: cadastro de
  * lojas. Fases seguintes acrescentam cotas, fechamentos, tarefas, etc.
  */
+import { StoreSignalScopeService } from "../StoreSignalScopeService.js";
 import { Router } from "express";
 import db from "../db.js";
 import multer from "multer";
@@ -59,6 +60,26 @@ const inQuery = (k = "storeId"): StoreResolver => (req) => [req.query[k] == null
  * inteira são filtradas aqui — dono e admin sem loja (irrestritos) passam intactos (`null` = sem restrição).
  */
 const restrictIds = (req: AuthRequest): string[] | null => { const sc = scopeOf(req); return sc.unrestricted ? null : sc.storeIds; };
+/**
+ * Rotas do PDV pela FILIAL (`?store=<código>`): o gerente de loja só lê a(s) filial(is) da(s) loja(s) dele. Com uma só
+ * filial, ela é forçada (o "todas as lojas" vira a loja dele); com várias, exige escolher. Dono/co-admin passam intactos.
+ */
+const scopeFilial = (req: AuthRequest, res: any, next: any): any => {
+  const sc = scopeOf(req);
+  if (sc.unrestricted) return next();
+  const codes = sc.storeCodes;
+  if (!codes.length) return res.status(403).json({ error: "A sua loja ainda não tem código de filial; peça ao dono para cadastrar." });
+  const given = String(req.query.store || "").trim();
+  if (given) return codes.includes(given) ? next() : res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
+  if (codes.length === 1) { (req.query as any).store = codes[0]; return next(); }
+  return res.status(403).json({ error: "Escolha a loja (store=<filial>)." });
+};
+/** Sinais retail da(s) loja(s) do gerente (`source_entity_type='retail_store'`) — o resto do feed da rede NÃO é dele. */
+const mySignalIds = (orgId: string, ids: string[]): Set<string> => {
+  if (!ids.length) return new Set();
+  const rows = db.prepare(`SELECT id FROM business_signals WHERE organization_id = ? AND source_entity_type = 'retail_store' AND source_entity_id IN (${ids.map(() => "?").join(",")})`).all(orgId, ...ids) as any[];
+  return new Set(rows.map((r) => r.id));
+};
 const keepMine = <T,>(req: AuthRequest, rows: T[], pick: (r: T) => unknown): T[] => {
   const ids = restrictIds(req);
   return ids ? rows.filter((r) => { const v = pick(r); return typeof v === "string" && ids.includes(v); }) : rows;
@@ -249,8 +270,9 @@ router.get("/patterns", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({
     enabled: RetailPatternMemoryService.isEnabled(orgId),
-    patterns: RetailPatternMemoryService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }),
-    typeStats: RetailPatternMemoryService.allTypeStats(orgId),
+    // Padrões aprendidos são da REDE (evidência de várias lojas): o gerente de loja não os recebe.
+    patterns: restrictIds(req) ? [] : RetailPatternMemoryService.list(orgId, { status: req.query.status ? String(req.query.status) : undefined }),
+    typeStats: restrictIds(req) ? [] : RetailPatternMemoryService.allTypeStats(orgId),
   });
 });
 
@@ -280,6 +302,10 @@ router.get("/insights", (req: AuthRequest, res): any => {
   // source_entity_id=<storeId>. IDs desses sinais entram numa `signalWhitelist`
   // pra prioritize considerar só eles quando o dono foca uma loja.
   let signalWhitelist: Set<string> | null = null;
+  const mineInsights = restrictIds(req);
+  if (mineInsights && storeId && !mineInsights.includes(storeId)) return res.status(403).json({ error: "store_out_of_scope" });
+  // Gerente de loja: só os sinais das lojas dele (antes via o feed da REDE inteira: "166 risco" de outras lojas).
+  if (mineInsights && !storeId) signalWhitelist = mySignalIds(orgId, mineInsights);
   if (storeId) {
     const rows = db.prepare(
       `SELECT id FROM business_signals
@@ -289,8 +315,9 @@ router.get("/insights", (req: AuthRequest, res): any => {
     signalWhitelist = new Set(rows.map((r) => r.id));
   }
   const allPriorities = ImpactPrioritizationService.prioritize(orgId, { globalLimit: 32 })?.global || [];
-  const priorities = signalWhitelist ? allPriorities.filter((p: any) => signalWhitelist!.has(p.signalId)) : allPriorities.slice(0, 8);
-  const patterns = RetailPatternMemoryService.list(orgId, { status: "validated" });
+  const priorities = signalWhitelist ? allPriorities.filter((p: any) => signalWhitelist!.has(p.signalId)).slice(0, 8) : allPriorities.slice(0, 8);
+  // Padrões aprendidos são da REDE (evidência de várias lojas): o gerente de loja não os recebe.
+  const patterns = mineInsights ? [] : RetailPatternMemoryService.list(orgId, { status: "validated" });
   const open = BusinessSignalService.list(orgId, { status: "open" });
   const openFiltered = signalWhitelist ? open.filter((s: any) => signalWhitelist!.has(s.id)) : open;
   const bySeverity: Record<string, number> = { critical: 0, risk: 0, attention: 0, info: 0 };
@@ -358,7 +385,7 @@ router.get("/insights/top-sellers", requireRole("owner", "admin"), (req: AuthReq
   const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || "")) ? String(req.query.from) : `${date.slice(0, 7)}-01`;
   const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || "")) ? String(req.query.to) : date;
   const limit = Math.min(20, Math.max(1, Number(req.query.limit) || 10));
-  res.json({ from, to, sellers: RetailSellerSalesService.networkTopSellers(orgId, from, to, limit) });
+  res.json({ from, to, sellers: RetailSellerSalesService.networkTopSellers(orgId, from, to, limit, restrictIds(req) ?? undefined) });
 });
 
 // Age a partir de um insight: propõe a AÇÃO recomendada do sinal (kernel C2).
@@ -370,6 +397,8 @@ router.post("/insights/act", requireRole("owner", "admin"), (req: AuthRequest, r
   const signalId = String(req.body?.signalId || "");
   const sig = db.prepare("SELECT * FROM business_signals WHERE organization_id = ? AND id = ? AND status = 'open'").get(orgId, signalId) as any;
   if (!sig) return res.status(404).json({ error: "Sinal não encontrado ou já resolvido." });
+  // Gerente preso a loja só age sobre sinal visível a ele (nunca de outra loja).
+  if (StoreSignalScopeService.hiddenFor(orgId, req.user)?.has(String(sig.id))) return res.status(404).json({ error: "Sinal não encontrado ou já resolvido." });
   const action = ImpactPrioritizationService.actionFor(sig.signal_type);
   try {
     const proposed = DecisionActionService.propose(orgId, {
@@ -396,14 +425,15 @@ router.post("/insights/act", requireRole("owner", "admin"), (req: AuthRequest, r
 router.get("/insights/actions", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const mineActions = restrictIds(req); // gerente de loja: só as ações dos sinais da(s) loja(s) dele
   const actions = db.prepare(
     `SELECT a.id, a.title, a.domain, a.action_type, a.status, a.expected_impact, a.impact_unit, a.result_amount, a.created_at, a.approval_policy, a.approval_role
        FROM decision_actions a
        JOIN business_signals s ON s.id = a.signal_id
-      WHERE a.organization_id = ? AND s.source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')
+      WHERE a.organization_id = ? AND s.source_service IN ('RetailOpsSignalPublisher','RetailPatternMemoryService')${mineActions ? (mineActions.length ? ` AND s.source_entity_type = 'retail_store' AND s.source_entity_id IN (${mineActions.map(() => "?").join(",")})` : " AND 1 = 0") : ""}
       ORDER BY CASE a.status WHEN 'awaiting_approval' THEN 0 WHEN 'approved' THEN 1 WHEN 'done' THEN 2 ELSE 3 END, a.created_at DESC
       LIMIT 50`
-  ).all(orgId) as any[];
+  ).all(orgId, ...(mineActions || [])) as any[];
   res.json({ actions });
 });
 
@@ -415,9 +445,10 @@ router.get("/online-reserve", (req: AuthRequest, res): any => {
     enabled: RetailOnlineReserveService.isEnabled(orgId),
     onlineStoreId: RetailOnlineReserveService.getOnlineStoreId(orgId),
     defaultSellerUserId: RetailOnlineReserveService.getDefaultOnlineSeller(orgId),
-    users: db.prepare("SELECT id, name, email FROM users WHERE organization_id = ? AND global_status = 'active' ORDER BY name").all(orgId),
-    reserves: RetailOnlineReserveService.listReserves(orgId, req.query.storeId ? String(req.query.storeId) : undefined),
-    pending: RetailOnlineReserveService.listPending(orgId, { storeId: req.query.storeId ? String(req.query.storeId) : undefined }),
+    // Gerente de loja: sem a lista de usuários da empresa e só as reservas/baixas da(s) loja(s) dele.
+    users: restrictIds(req) ? [] : db.prepare("SELECT id, name, email FROM users WHERE organization_id = ? AND global_status = 'active' ORDER BY name").all(orgId),
+    reserves: keepMine(req, RetailOnlineReserveService.listReserves(orgId, req.query.storeId ? String(req.query.storeId) : undefined), (r: any) => r.store_id),
+    pending: keepMine(req, RetailOnlineReserveService.listPending(orgId, { storeId: req.query.storeId ? String(req.query.storeId) : undefined }), (w: any) => w.store_id),
   });
 });
 
@@ -489,7 +520,7 @@ router.post("/patterns/learn", requireNetworkScope, async (req: AuthRequest, res
 router.get("/receiving", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ receipts: RetailReceivingService.listReceipts(orgId, req.query.status ? String(req.query.status) : undefined) });
+  res.json({ receipts: keepMine(req, RetailReceivingService.listReceipts(orgId, req.query.status ? String(req.query.status) : undefined), (r: any) => r.store_id) });
 });
 
 router.get("/receiving/:id", requireStoreAccess(ofReceipt), (req: AuthRequest, res): any => {
@@ -661,7 +692,7 @@ const closingUpload = multer({
 // CHECKLIST VIVO de implantação (19/09/2026 — Guia de Implantação Varejo):
 // derivado por query, read-only; a Central de Saúde mostra o que falta e onde
 // resolver. Owner/admin: é o estado de CONFIGURAÇÃO da org inteira.
-router.get("/setup-checklist", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+router.get("/setup-checklist", requireNetworkScope, async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -845,7 +876,7 @@ router.get("/stores-result", requireNetworkScope, (req: AuthRequest, res): any =
 
 // MAIS VENDIDOS por produto (PDV — itens das vendas): quantidade e valor por
 // produto no período, com o nome do produto do catálogo. ?store filtra a filial.
-router.get("/pdv-top-products", (req: AuthRequest, res): any => {
+router.get("/pdv-top-products", scopeFilial, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -931,7 +962,7 @@ router.get("/pdv-top-products", (req: AuthRequest, res): any => {
 // DRILL-DOWN "vendas do dia" — linhas INDIVIDUAIS do PDV, CADA UMA com a DATA da
 // venda (as abas Mais vendidos/Por vendedor mostram só totais do período). Filtra
 // por produto (código do ERP), vendedor (CAI_USUARIO) e/ou loja. Isolado por org.
-router.get("/pdv-sale-lines", (req: AuthRequest, res): any => {
+router.get("/pdv-sale-lines", scopeFilial, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -996,7 +1027,7 @@ function normalizeCardBrand(cod: any): { raw: string; label: string; matched: bo
 // Conferência PDV × Adquirente (Fase R1): confronta as parcelas registradas
 // pela loja (Alterdata) com o que o adquirente (Sicredi) confirma. Categoriza
 // match / diverge / só PDV / só adquirente por (NSU, parcela).
-router.get("/card-acquirer/reconciliation", (req: AuthRequest, res): any => {
+router.get("/card-acquirer/reconciliation", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -1042,7 +1073,7 @@ router.post("/card-acquirer/sync-sicredi", requireNetworkScope, async (req: Auth
 // líquido (o que entra), taxa retida — + totais do período. ?store filtra
 // filial; ?detailed=1 devolve a linha-a-linha com bandeira normalizada +
 // parcela + valor + vencimento pra conferência com o extrato do banco.
-router.get("/pdv-card-receivables", (req: AuthRequest, res): any => {
+router.get("/pdv-card-receivables", scopeFilial, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const start = String(req.query.start || "").slice(0, 10);
@@ -2036,12 +2067,14 @@ solutionOp("archive", (o, id, req) => ManagerSolutionService.archive(o, id, req.
 router.get("/stock-policies", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({
-    policies: RetailStockPolicyService.list(orgId, {
-      storeId: req.query.storeId !== undefined ? String(req.query.storeId) : undefined,
-      productId: req.query.productId ? String(req.query.productId) : undefined,
-    }),
+  const mineStockPolicy = restrictIds(req);
+  if (mineStockPolicy && req.query.storeId !== undefined && String(req.query.storeId) !== "" && !mineStockPolicy.includes(String(req.query.storeId))) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
+  const policies = RetailStockPolicyService.list(orgId, {
+    storeId: req.query.storeId !== undefined ? String(req.query.storeId) : undefined,
+    productId: req.query.productId ? String(req.query.productId) : undefined,
   });
+  // Gerente de loja: as políticas DA loja dele e as da rede (sem loja = padrão da empresa), nunca as de outra loja.
+  res.json({ policies: mineStockPolicy ? policies.filter((p: any) => !p.store_id || mineStockPolicy.includes(p.store_id)) : policies });
 });
 
 router.post("/stock-policies", requireNetworkScope, (req: AuthRequest, res): any => {
@@ -2063,7 +2096,7 @@ router.delete("/stock-policies/:id", requireNetworkScope, (req: AuthRequest, res
 router.get("/stock/alerts", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json({ alerts: RetailInventoryService.listAlerts(orgId, String(req.query.status || "open")) });
+  res.json({ alerts: keepMine(req, RetailInventoryService.listAlerts(orgId, String(req.query.status || "open")), (a: any) => a.store_id) });
 });
 
 // Ajuste de saldo por loja (permite negativo → gera alerta). owner/admin.
@@ -2888,7 +2921,7 @@ router.get("/dashboard/monthly", (req: AuthRequest, res): any => {
 });
 
 // Impact Ledger (ADR-085): valor COMPROVADO em R$ + atividade do mês.
-router.get("/impact", (req: AuthRequest, res): any => {
+router.get("/impact", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
@@ -2896,14 +2929,14 @@ router.get("/impact", (req: AuthRequest, res): any => {
 });
 
 // Capital parado em estoque + produtos sem giro (fato, não estimativa).
-router.get("/impact/stock-capital", (req: AuthRequest, res): any => {
+router.get("/impact/stock-capital", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailImpactService.stockCapital(orgId, Number(req.query.days) || 60));
 });
 
 // Painel de valor consolidado (comprovado + atividade + capital parado).
-router.get("/impact/summary", (req: AuthRequest, res): any => {
+router.get("/impact/summary", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
@@ -2911,7 +2944,7 @@ router.get("/impact/summary", (req: AuthRequest, res): any => {
 });
 
 // Valor ESTIMADO (tempo devolvido + ruptura evitada) — premissa à vista.
-router.get("/impact/estimated", (req: AuthRequest, res): any => {
+router.get("/impact/estimated", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
@@ -2925,7 +2958,7 @@ router.get("/impact/estimated", (req: AuthRequest, res): any => {
 });
 
 // Baseline dia-0: comparação "antes → agora" (capital parado, alertas, adoção).
-router.get("/impact/baseline", (req: AuthRequest, res): any => {
+router.get("/impact/baseline", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailImpactService.baseline(orgId));
@@ -2939,7 +2972,7 @@ router.post("/impact/baseline/capture", requireNetworkScope, (req: AuthRequest, 
 });
 
 // Tendência: série histórica do painel de valor/adoção (últimos N dias).
-router.get("/impact/trend", (req: AuthRequest, res): any => {
+router.get("/impact/trend", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ days: Number(req.query.days) || 30, series: RetailImpactService.getTrend(orgId, Number(req.query.days) || 30) });

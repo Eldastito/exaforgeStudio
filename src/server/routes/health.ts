@@ -8,6 +8,7 @@ import { MessageProviderService } from "../MessageProviderService.js";
 import { SkillOsObservabilityService } from "../SkillOsObservabilityService.js";
 import db from "../db.js";
 import { ChannelBindingService } from "../ChannelBindingService.js";
+import { StoreSignalScopeService } from "../StoreSignalScopeService.js";
 
 // Central de Saúde e Decisão (ADR-126) — síntese: status + 3 prioridades do dia.
 // Rota core (não é módulo opcional): disponível em todas as verticais.
@@ -18,7 +19,8 @@ router.get("/", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const minCash = Number(req.query?.minCash) || 0;
-  res.json(BusinessHealthService.overview(orgId, minCash));
+  // Gerente de loja (admin COM loja): só os sinais da(s) loja(s) dele no "precisam de atenção".
+  res.json(BusinessHealthService.overview(orgId, minCash, StoreSignalScopeService.hiddenFor(orgId, req.user)));
 });
 
 // GET /api/health-center/survival-index — placar 0-100 + faixa + composição + histórico.

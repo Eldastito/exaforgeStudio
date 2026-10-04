@@ -106,7 +106,7 @@ export class BusinessSignalService {
    * Normaliza a severidade das 2 fontes numa escala única (critical>risk>
    * attention>info) e devolve totais por severidade/domínio + itens ordenados.
    */
-  static attention(orgId: string, opts: { limit?: number; correlate?: boolean } = {}): {
+  static attention(orgId: string, opts: { limit?: number; correlate?: boolean; hideSignalIds?: Set<string> | null } = {}): {
     generatedAt: string;
     total: number;
     bySeverity: Record<string, number>;
@@ -149,6 +149,7 @@ export class BusinessSignalService {
       `SELECT * FROM business_signals WHERE organization_id = ? AND status = 'open' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`
     ).all(orgId) as any[]) {
       if (collapsed.has(r.id)) continue;
+      if (opts.hideSignalIds?.has(r.id)) continue; // gerente de loja: sinais das outras lojas não são dele
       items.push({
         source: "signal", id: r.id, domain: r.domain, type: r.signal_type, severity: norm(r.severity),
         summary: shortSummary(r.signal_type, r.evidence_json), basis: r.basis ?? null, impactAmount: r.impact_amount ?? null, impactUnit: r.impact_unit ?? null,

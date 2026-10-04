@@ -590,6 +590,7 @@
     "test:fase1-routes": "tsx scripts/test-fase1-routes.ts",
     "test:retail-store-write-scope": "tsx scripts/test-retail-store-write-scope.ts",
     "test:retail-manager-read-scope": "tsx scripts/test-retail-manager-read-scope.ts",
+    "test:store-signal-scope": "tsx scripts/test-store-signal-scope.ts",
     "test:admin-user-move-org": "tsx scripts/test-admin-user-move-org.ts",
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
     "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",

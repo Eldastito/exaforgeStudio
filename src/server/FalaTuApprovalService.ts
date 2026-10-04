@@ -9,6 +9,7 @@
  *   - a autorização usa a MESMA porta (`DecisionActionService.canApprove`) da
  *     rota core — o Fala Tu NÃO pode virar bypass de permissão (§30/CA13).
  */
+import { StoreSignalScopeService } from "./StoreSignalScopeService.js";
 import { DecisionActionService } from "./DecisionActionService.js";
 
 function br(n: number | null | undefined): string {
@@ -40,7 +41,10 @@ export class FalaTuApprovalService {
 
   /** Aprovações aguardando — cada uma como card, com o flag de permissão do usuário. */
   static pending(orgId: string, user: any): { total: number; items: any[] } {
+    // Gerente preso a loja não vê (nem decide) ação nascida de sinal de OUTRA loja (StoreSignalScopeService).
+    const hidden = StoreSignalScopeService.hiddenActionsFor(orgId, user);
     const items = DecisionActionService.list(orgId, { status: "awaiting_approval" })
+      .filter((a: any) => !hidden || !hidden.has(String(a.id)))
       .map((a) => this.card(a, DecisionActionService.canApprove(orgId, user, a)));
     return { total: items.length, items };
   }

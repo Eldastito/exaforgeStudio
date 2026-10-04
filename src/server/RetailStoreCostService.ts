@@ -793,8 +793,9 @@ export class RetailStoreCostService {
    * CMV) em LOTE — agregados por store_id numa consulta cada — e monta cada loja
    * com a MESMA regra (`assembleStoreResult`, pura). Resultado idêntico, sem N+1.
    */
-  static allStoresResult(orgId: string, period = new Date().toISOString().slice(0, 7)) {
-    const stores = RetailStoreService.list(orgId).filter((s: any) => s.active === 1 || s.active === true);
+  static allStoresResult(orgId: string, period = new Date().toISOString().slice(0, 7), restrictStoreIds?: string[]) {
+    // `restrictStoreIds` (gerente preso a loja): só as lojas dele, e `totals` somam SÓ elas — nunca o total da rede.
+    const stores = RetailStoreService.list(orgId).filter((s: any) => (s.active === 1 || s.active === true) && (!restrictStoreIds || restrictStoreIds.includes(s.id)));
     // Insumos em lote (5 consultas fixas, não 5×N).
     const revenueAll = this.monthlyRevenueAll(orgId, period);
     const salesCountAll = this.monthlySalesCountAll(orgId, period);

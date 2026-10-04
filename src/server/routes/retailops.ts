@@ -865,9 +865,10 @@ router.put("/stores/:id/financial-settings", requireNetworkScope, (req: AuthRequ
 
 // Resultado gerencial + ponto de equilíbrio de UMA loja no mês (?period=YYYY-MM).
 // SEC-F13: lucro/margem absolutos são owner/admin (§73).
-router.get("/stores/:id/result", requireNetworkScope, (req: AuthRequest, res): any => {
+router.get("/stores/:id/result", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!storeAllowed(req, req.params.id)) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." }); // gerente: só a dele (decisão do dono, 04/10)
   const period = String(req.query.period || "").slice(0, 7) || undefined;
   const key = `store-result:${req.params.id}:${period || "current"}`;
   const cached = RetailAnalyticsCache.get(orgId, key);
@@ -883,12 +884,14 @@ router.get("/stores/:id/result", requireNetworkScope, (req: AuthRequest, res): a
 // Resultado de TODAS as lojas + totais da rede (?period=YYYY-MM). Hífen no path
 // para não colidir com /stores/:id (senão :id capturaria "result").
 // SEC-F13: lucro/margem da rede são owner/admin (§73).
-router.get("/stores-result", requireNetworkScope, (req: AuthRequest, res): any => {
+router.get("/stores-result", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const period = String(req.query.period || "").slice(0, 7) || undefined;
-  return analyticsCached(res, orgId, `stores-result:${period || "current"}`,
-    () => RetailStoreCostService.allStoresResult(orgId, period));
+  // Gerente de loja (decisão do dono, 04/10): vê o resultado da PRÓPRIA loja; `totals` soma só as lojas dele.
+  const mine = restrictIds(req);
+  return analyticsCached(res, orgId, `stores-result:${period || "current"}${mine ? `:s:${[...mine].sort().join(",")}` : ""}`,
+    () => RetailStoreCostService.allStoresResult(orgId, period, mine ?? undefined));
 });
 
 // MAIS VENDIDOS por produto (PDV — itens das vendas): quantidade e valor por

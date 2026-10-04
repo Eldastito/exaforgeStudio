@@ -63,3 +63,6 @@ RetailOps 19 abas → 5 grupos atrás da flag (`retailOpsGroups` + `RetailOpsVie
 
 ## Status F2.9 — EM PR (última fatia da Fase 2)
 Consentimento da medição (default OFF) + `UxPilotReportService` + painel em Empresa + correção dos nomes de tela (legado × substituta) + roteiro `docs/runbook/fase2-piloto-toulon.md`. `test:ux-pilot` (27). Runbook: seção F2.9.
+
+## Status F2.10 — EM PR (PRD §13: o briefing vira conversa)
+Conferência pós-F2.9 (PRD §12–13): os 3 rituais já saíam (manhã = resumo do Tutor com "Meta de hoje por loja"; 16h; noite — por WhatsApp, opt-in), mas **não deixavam contexto**: responder "Por quê?" à mensagem caía em "de qual loja?". Agora cada envio PLANTA o contexto do destinatário (`FalaTuConversationService.seedFromBriefing`, 4h de validade — o briefing é lido tarde): 16h destaca a loja abaixo do ritmo (senão a de menor atingimento ainda abaixo da meta); noite destaca a de menor atingimento comprovado (sem fechamento: **não inventa** — o "Por quê?" pergunta a loja); manhã planta a "meta do dia". "E a Carioca?" funciona nos três. Memória em processo (some no restart). `test:briefing-conversation` (12). **Fora desta fatia:** barra global "Pergunte ou procure" (PRD §35) e entrega por e-mail/push dos briefings de 16h e da noite.

@@ -168,6 +168,11 @@ export class BusinessTutorService {
     const { text } = this.morningBrief(orgId);
     await opts.send(phone, text);
     db.prepare("UPDATE organization_settings SET tutor_wa_last_morning = ? WHERE organization_id = ?").run(dateSP, orgId);
+    // §13 — o resumo da manhã continua em conversa: planta o contexto do dono ("E a Carioca?" → a meta do dia da Carioca). Best-effort.
+    try {
+      const owner = db.prepare("SELECT id FROM users WHERE organization_id = ? AND role IN ('owner','admin') AND COALESCE(global_status,'active') = 'active' AND phone IS NOT NULL AND phone <> '' ORDER BY (role='owner') DESC LIMIT 1").get(orgId) as any;
+      if (owner?.id) import("./FalaTuConversationService.js").then((m) => m.FalaTuConversationService.seedFromBriefing(orgId, owner.id, { tool: "meta_do_dia", args: {}, storeId: null }, opts.now.getTime())).catch(() => {});
+    } catch { /* noop */ }
     return { sent: true, phone, text };
   }
 

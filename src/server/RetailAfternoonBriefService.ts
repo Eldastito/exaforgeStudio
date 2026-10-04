@@ -228,6 +228,20 @@ export class RetailAfternoonBriefService {
     catch (e: any) { if (e?.code !== "SQLITE_CONSTRAINT_UNIQUE") throw e; }
   }
 
+  /**
+   * §13 — a mensagem das 16h continua em conversa: destaca a loja que merece o "Por quê?" (abaixo do ritmo; senão a de menor
+   * atingimento ainda abaixo da meta; senão nenhuma → o FalaTu pergunta de qual loja). Best-effort: nunca derruba o envio.
+   */
+  private static seedConversation(orgId: string, userId: string, snap: AfternoonSnapshot, now: Date): void {
+    try {
+      const below = snap.stores.find((st) => st.pace.status === "below");
+      const lowest = [...snap.stores].filter((st) => st.atingimento.state === "value" && (st.atingimento.value as number) < 100)
+        .sort((a, b) => (a.atingimento.value as number) - (b.atingimento.value as number))[0];
+      const pick = below || lowest || null;
+      import("./FalaTuConversationService.js").then((m) => m.FalaTuConversationService.seedFromBriefing(orgId, userId, { tool: "vendas_por_loja", args: { period: "hoje" }, storeId: pick?.storeId ?? null }, now.getTime())).catch(() => {});
+    } catch { /* noop */ }
+  }
+
   /** Só há o que dizer se alguma loja tem meta ou vendas hoje (dia sem nada não gera mensagem). */
   static hasContent(s: AfternoonSnapshot): boolean {
     return s.stores.some((st) => st.meta.state === "value" || st.vendido.state === "value");
@@ -245,6 +259,7 @@ export class RetailAfternoonBriefService {
       if (!opts.force && this.alreadySent(orgId, r.userId, dateSP)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
       await opts.send(r.phone, text);            // só marca DEPOIS do envio (falhou → retenta no próximo tick)
       this.markSent(orgId, r.userId, dateSP);
+      this.seedConversation(orgId, r.userId, snap, opts.now);
       out.sent += 1;
     }
     if (!out.sent && !out.skipped) out.reasons.push("no_recipient");

@@ -145,6 +145,10 @@ type AppState = {
   falatuEnabled: boolean;                      // org ligou o FalaTu? (flag opt-in ADR-151 Fatia 2)
   missionLayerEnabled: boolean;                // org ligou o Mission Layer? (flag opt-in ADR-189)
   simplifiedNavEnabled: boolean;               // org ligou a nav simplificada? (flag opt-in ADR-203 F2.2)
+  pendingAsk: string | null;                   // pergunta vinda da barra "Pergunte ou procure": o FalaTu a envia ao abrir (ADR-203 §35)
+  setPendingAsk: (q: string | null) => void;
+  pendingRetailTab: string | null;             // atalho da barra: abre a Operação da Rede já numa aba (ex.: comissao)
+  setPendingRetailTab: (t: string | null) => void;
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -355,6 +359,10 @@ export const useStore = create<AppState>((set, get) => ({
   falatuEnabled: false,
   missionLayerEnabled: false,
   simplifiedNavEnabled: false,
+  pendingAsk: null,
+  setPendingAsk: (q) => set({ pendingAsk: q }),
+  pendingRetailTab: null,
+  setPendingRetailTab: (t) => set({ pendingRetailTab: t }),
   loadPermissions: async () => {
     // Delegado — /api/entitlements/me já traz `meta.permissions` + hasProfile
     // + isMasterAdmin + falatuEnabled em uma única chamada. Mantido pra não

@@ -805,6 +805,16 @@ export function FalaTuView() {
     }
   }, [askQuestion, askBusy, loadPending, ctxStoreId]);
 
+  // ADR-203 §35 — pergunta vinda da barra "Pergunte ou procure": abre "Conversar" e envia (uma vez; espera se já há resposta em curso).
+  const pendingAsk = useStore(s => s.pendingAsk);
+  const setPendingAsk = useStore(s => s.setPendingAsk);
+  useEffect(() => {
+    if (!pendingAsk || askBusy) return;
+    setTab('ask');
+    setPendingAsk(null);
+    void sendAsk(pendingAsk);
+  }, [pendingAsk, askBusy, sendAsk, setPendingAsk]);
+
   // F13 — restaura o histórico do dia ao montar; do dia anterior → limpa.
   useEffect(() => {
     try {

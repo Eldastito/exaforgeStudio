@@ -6,13 +6,13 @@
  * interinos (telas existentes) — F2.3..F2.6 trocam por telas dedicadas.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Sun, Mic, Rocket, TrendingUp, Building2, Compass, ChevronDown, Search } from 'lucide-react';
+import { Sun, Mic, Rocket, TrendingUp, Building2, Store, Compass, ChevronDown, Search } from 'lucide-react';
 import { exploreGroups, primaryNav, type NavCtx } from '@/src/lib/navCatalog';
 import { trackAction, trackSearchMiss } from '@/src/lib/uxTelemetry';
 
 const ICON: Record<string, React.ReactNode> = {
   hoje: <Sun className="h-4 w-4" />, falatu: <Mic className="h-4 w-4" />, executando: <Rocket className="h-4 w-4" />,
-  resultados: <TrendingUp className="h-4 w-4" />, empresa: <Building2 className="h-4 w-4" />,
+  resultados: <TrendingUp className="h-4 w-4" />, empresa: <Building2 className="h-4 w-4" />, rede: <Store className="h-4 w-4" />,
 };
 
 export function SimplifiedNav({ ctx, viewMode, onNavigate }: { ctx: NavCtx; viewMode: string; onNavigate: (vm: string) => void }) {

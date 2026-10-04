@@ -22,6 +22,8 @@ import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
 import { ResultsStoryService } from "./ResultsStoryService.js";
 
 export const CONVERSATION_TTL_MS = 20 * 60_000;
+/** Contexto plantado por um BRIEFING (manhã/16h/noite): o gestor lê a mensagem horas depois e responde "Por quê?" — 20 min não serve. */
+export const BRIEFING_TTL_MS = 4 * 60 * 60_000;
 /** Ferramentas que aceitam `store` — as únicas em que "e a Carioca?" faz sentido. */
 export const STORE_TOOLS = new Set(["meta_do_dia", "dinheiro_do_dia", "vendas_por_loja", "metas_abaixo_cota", "estoque_loja"]);
 /** Ferramentas que olham a REDE inteira — fora do alcance de quem está preso a lojas. */
@@ -29,7 +31,7 @@ export const NETWORK_TOOLS = new Set(["ranking_lojas", "panorama_operacao", "ran
 /** Só estas aceitam `period`. */
 const PERIOD_TOOLS = new Set(["vendas_por_loja", "metas_abaixo_cota"]);
 
-interface Turn { tool: string; args: Record<string, any>; storeId: string | null; at: number }
+interface Turn { tool: string; args: Record<string, any>; storeId: string | null; at: number; ttl?: number }
 const memory = new Map<string, Turn>();
 const key = (orgId: string, userId: string) => `${orgId}::${userId}`;
 const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
@@ -42,10 +44,19 @@ export class FalaTuConversationService {
     const uid = uidOf(user); if (!uid) return;
     memory.set(key(orgId, uid), { tool: turn.tool, args: { ...turn.args }, storeId: turn.storeId ?? null, at: now });
   }
+  /**
+   * ADR-203 §13 — o BRIEFING vira conversa: ao enviar a mensagem das 16h/da noite/da manhã, planta o contexto do destinatário
+   * (qual ferramenta, qual período, qual loja destacada) para "Por quê?" e "E a Carioca?" continuarem NA resposta dele ao WhatsApp.
+   * Só planta (nunca responde nem inventa): sem loja destacada, o "Por quê?" PERGUNTA de qual loja. Memória em processo (some no restart).
+   */
+  static seedFromBriefing(orgId: string, userId: string, turn: { tool: string; args?: Record<string, any>; storeId?: string | null }, now = Date.now()): void {
+    if (!userId) return;
+    memory.set(key(orgId, userId), { tool: turn.tool, args: { ...(turn.args || {}) }, storeId: turn.storeId ?? null, at: now, ttl: BRIEFING_TTL_MS });
+  }
   static last(orgId: string, user: any, now = Date.now()): Turn | null {
     const t = memory.get(key(orgId, uidOf(user)));
     if (!t) return null;
-    if (now - t.at > CONVERSATION_TTL_MS) { memory.delete(key(orgId, uidOf(user))); return null; }
+    if (now - t.at > (t.ttl ?? CONVERSATION_TTL_MS)) { memory.delete(key(orgId, uidOf(user))); return null; }
     return t;
   }
   static forget(orgId: string, user: any): void { memory.delete(key(orgId, uidOf(user))); }

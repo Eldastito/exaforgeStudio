@@ -317,6 +317,15 @@ export class RetailDayBriefService {
    * resumo SÓ das lojas daquele horário (+ "Rede" no último) e envia a owner/admin com telefone — uma vez por (usuário, dia, horário).
    * Só marca como enviado DEPOIS do envio (falhou → retenta no próximo passe). `force` (prévia/manual) envia todos os horários, sem janela/dedupe.
    */
+  /** §13 — o fechamento da noite continua em conversa: destaca a loja de menor atingimento ainda abaixo da meta (senão nenhuma → o FalaTu pergunta a loja). */
+  private static seedConversation(orgId: string, userId: string, stores: NightStore[], now: Date): void {
+    try {
+      const lowest = [...stores].filter((st) => st.atingimento.state === "value" && (st.atingimento.value as number) < 100)
+        .sort((a, b) => (a.atingimento.value as number) - (b.atingimento.value as number))[0];
+      import("./FalaTuConversationService.js").then((m) => m.FalaTuConversationService.seedFromBriefing(orgId, userId, { tool: "vendas_por_loja", args: { period: "hoje" }, storeId: lowest?.storeId ?? null }, now.getTime())).catch(() => {});
+    } catch { /* noop */ }
+  }
+
   static async runPass(orgId: string, opts: { now: Date; send: (phone: string, text: string) => any; force?: boolean }): Promise<{ sent: number; skipped: number; reasons: string[] }> {
     const out = { sent: 0, skipped: 0, reasons: [] as string[] };
     if (!this.enabled(orgId)) return out;
@@ -335,6 +344,7 @@ export class RetailDayBriefService {
         if (!opts.force && this.alreadySent(orgId, r.userId, key)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
         await opts.send(r.phone, text);            // só marca DEPOIS do envio (falhou → retenta no próximo passe)
         this.markSent(orgId, r.userId, key);
+        this.seedConversation(orgId, r.userId, mine, opts.now);
         out.sent += 1;
       }
     }

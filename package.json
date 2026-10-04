@@ -594,6 +594,7 @@
     "test:retail-commission-governance": "tsx scripts/test-retail-commission-governance.ts",
     "test:commission-manager-view": "tsx scripts/test-commission-manager-view.ts",
     "test:monthly-goal-dispute": "tsx scripts/test-monthly-goal-dispute.ts",
+    "test:briefing-conversation": "tsx scripts/test-briefing-conversation.ts",
     "test:admin-user-move-org": "tsx scripts/test-admin-user-move-org.ts",
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
     "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",

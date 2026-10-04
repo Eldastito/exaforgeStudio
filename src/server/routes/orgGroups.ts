@@ -172,7 +172,7 @@ router.get("/:groupId/staff", requireRole("owner", "admin"), (req: AuthRequest, 
 
 /**
  * Remaneja um gerente entre lojas do grupo (MOVE o mesmo usuário/login). Só o dono do
- * grupo. Body: { userId, toOrgId }. O serviço valida origem/destino no grupo, nunca move
+ * grupo. Body: { userId, toOrgId, storeIds }. `storeIds` é OBRIGATÓRIO quando a org destino tem lojas de varejo. O serviço valida origem/destino no grupo, nunca move
  * o dono, reatribui o perfil equivalente na destino e revoga a sessão antiga (relogin).
  */
 router.post("/:groupId/transfer-user", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
@@ -187,11 +187,13 @@ router.post("/:groupId/transfer-user", requireRole("owner", "admin"), (req: Auth
   const toOrgId = String(req.body?.toOrgId || "");
   if (!userId || !toOrgId) return res.status(400).json({ error: "userId e toOrgId obrigatórios" });
 
-  const r = OrgGroupStaffService.transferUser({ groupId, ownerIdentityId: identityId, userId, toOrgId, actorUserId: req.user!.userId });
+  const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
+  const r = OrgGroupStaffService.transferUser({ groupId, ownerIdentityId: identityId, userId, toOrgId, storeIds, actorUserId: req.user!.userId });
   if (!r.ok) {
     const map: Record<string, number> = {
       not_group_owner: 404, user_not_found: 404, user_not_in_group: 404, target_not_in_group: 404,
       cannot_move_owner: 403, same_org: 400, email_exists_in_target: 409,
+      store_required: 400, store_not_in_target: 400,
     };
     return res.status(map[r.code || ""] || 400).json({ error: r.code || "transfer_failed" });
   }

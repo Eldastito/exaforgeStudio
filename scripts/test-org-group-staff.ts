@@ -84,6 +84,25 @@ async function main() {
   const gIso = STAFF.transferUser({ groupId: g.id, ownerIdentityId: "outra-identidade", userId: uMgrA, toOrgId: A });
   check("3.4 não-dono do grupo → recusa (isolamento)", gIso.ok === false && gIso.code === "not_group_owner");
 
+  // ── 4. escopo de loja OBRIGATÓRIO na transferência (gerente nunca cai "irrestrito") ──
+  const { RetailStoreScopeService: SCOPE } = await import("../src/server/RetailStoreScopeService.js");
+  const mkStore = (org: string, name: string) => { const id = randomUUID(); db.prepare(`INSERT INTO retail_stores (id, organization_id, name, code, active) VALUES (?, ?, ?, ?, 1)`).run(id, org, name, name.slice(0, 4).toUpperCase()); return id; };
+  const C = `org_${randomUUID().slice(0, 8)}`;
+  db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status) VALUES (?, ?, 'TOULON', 'active')`).run(randomUUID(), C);
+  GRP.addMember(g.id, C);
+  const carioca = mkStore(C, "Carioca"), bangu = mkStore(C, "Bangu"), foreign = mkStore(OUT, "Loja de fora");
+  const uMgr2 = mkUser(A, "gerente.2@toulon.com", "manager", null);
+  const noStore = STAFF.transferUser({ groupId: g.id, ownerIdentityId: ownerIdentity, userId: uMgr2, toOrgId: C });
+  check("4.1 destino com lojas SEM storeIds → recusa 'store_required'", noStore.ok === false && noStore.code === "store_required");
+  check("4.2 …e NADA mudou (continua na origem — atômico)", (db.prepare("SELECT organization_id FROM users WHERE id = ?").get(uMgr2) as any).organization_id === A);
+  const badStore = STAFF.transferUser({ groupId: g.id, ownerIdentityId: ownerIdentity, userId: uMgr2, toOrgId: C, storeIds: [foreign] });
+  check("4.3 loja de OUTRA org → recusa 'store_not_in_target'", badStore.ok === false && badStore.code === "store_not_in_target");
+  const okMove = STAFF.transferUser({ groupId: g.id, ownerIdentityId: ownerIdentity, userId: uMgr2, toOrgId: C, storeIds: [carioca] });
+  check("4.4 com a loja certa → move", okMove.ok === true);
+  const sc = SCOPE.allowed(C, uMgr2, "admin");
+  check("4.5 o gerente nasce RESTRITO só à Carioca (não vê Bangu)", sc.unrestricted === false && sc.storeIds.length === 1 && sc.storeIds[0] === carioca && !SCOPE.canAccessStore(C, uMgr2, "admin", bangu));
+  check("4.6 listStaff expõe as lojas de varejo da org destino (p/ a UI exigir)", STAFF.listStaff(g.id, ownerIdentity).find((x) => x.organizationId === C)!.retailStores.map((r) => r.id).sort().join() === [carioca, bangu].sort().join());
+
   // Nota: o guard de colisão de e-mail no destino ("email_exists_in_target") só é
   // ACIONÁVEL no schema de produção pós-ADR-199 F0c-1 (UNIQUE(organization_id, email)).
   // No schema default do teste, users.email é UNIQUE GLOBAL — a colisão nem se

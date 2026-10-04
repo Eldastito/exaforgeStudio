@@ -127,7 +127,7 @@ async function main() {
   const range = "start=2026-09-01&end=2026-09-30";
   const netRoutes: Array<[string, string, any?]> = [
     ["GET", `/commission/report?${range}`], ["GET", "/afternoon-brief"], ["GET", "/day-brief"], ["GET", "/seller-goal-streaks"],
-    ["GET", "/sellers/identity/suggestions"], ["GET", "/commission/policies"], ["PUT", "/night-brief/enabled", { enabled: false }],
+    ["GET", "/sellers/identity/suggestions"], ["PUT", "/night-brief/enabled", { enabled: false }],
     ["PUT", "/stock/replenishment-strategy", { strategy: "continuous_replenishment" }],
   ];
   const leaks = [];
@@ -149,7 +149,7 @@ async function main() {
   const comLeaks = [];
   // Decisão do dono (TOULON, 04/10): o GERENTE da loja LÊ as vendas por vendedor da PRÓPRIA loja (`/pdv-sellers`, `/seller-sales`),
   // filtradas pelo escopo dele e SEM comissão (provado em test:retail-manager-read-scope). O resto da aba Comissão segue 403.
-  const mgrMayRead = new Set(["GET /pdv-sellers", "GET /seller-sales"]);
+  const mgrMayRead = new Set(["GET /pdv-sellers", "GET /seller-sales", "GET /commission/plan"]); // plano da PRÓPRIA loja (04/10); proposta/aprovação em test:retail-commission-governance
   for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "admin", b, GER); const k = `${m} ${p.split("?")[0]}`; if (mgrMayRead.has(k) ? r.status !== 200 : r.status !== 403) comLeaks.push(`${k}→${r.status}`); }
   check(`gerente-admin: a aba Comissão (regras, apuração, aprovar, plano, escrita) responde 403 nas ${comRoutes.length - mgrMayRead.size} rotas; só a LEITURA de vendas por vendedor da própria loja abre (200 filtrado)`, comLeaks.length === 0, comLeaks.join(" | "));
   const comOk = [];

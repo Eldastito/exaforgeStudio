@@ -17,6 +17,7 @@ import { randomUUID } from "crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailCommissionRaceService } from "./RetailCommissionRaceService.js";
+import { RetailCommissionGovernanceService } from "./RetailCommissionGovernanceService.js";
 
 export type ProposalStatus = "draft" | "pending_confirmation" | "confirmed" | "archived";
 const SOURCES = ["manual", "ai_import"];
@@ -38,6 +39,9 @@ export class RetailCommissionPolicyService {
     return r;
   }
 
+  /** Lê UMA proposta (a rota usa pra checar loja/autor antes de deixar o gerente mexer). */
+  static get(orgId: string, id: string): any { return shape(this.row(orgId, id)) || null; }
+
   /** Cria a proposta (draft, ou já pending_confirmation com `submit`). NÃO toca no plano vigente. */
   static propose(orgId: string, input: { storeId?: string | null; month?: string | null; config: any; source?: string; sourceRef?: string | null; note?: string | null; submit?: boolean }, actorId?: string | null): any {
     RetailCommissionRaceService.assertPlanShape(input.config);
@@ -54,6 +58,7 @@ export class RetailCommissionPolicyService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${input.submit ? "CURRENT_TIMESTAMP" : "NULL"})`
     ).run(id, orgId, storeId, month, JSON.stringify(input.config), status, source, input.sourceRef ?? null, input.note ?? null, actorId || null);
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_COMMISSION_POLICY_PROPOSED", { storeId, month, source, status }); } catch { /* noop */ }
+    if (status === "pending_confirmation") RetailCommissionGovernanceService.notifyPending(orgId, shape(this.row(orgId, id)));
     return shape(this.row(orgId, id));
   }
 
@@ -63,6 +68,7 @@ export class RetailCommissionPolicyService {
     if (r.status !== "draft") throw new Error(`invalid_transition: só rascunho pode ser enviado (está ${r.status}).`);
     db.prepare(`UPDATE retail_commission_policy_proposals SET status = 'pending_confirmation', submitted_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(orgId, id);
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_COMMISSION_POLICY_SUBMITTED", {}); } catch { /* noop */ }
+    RetailCommissionGovernanceService.notifyPending(orgId, shape(this.row(orgId, id)));
     return shape(this.row(orgId, id));
   }
 
@@ -81,6 +87,7 @@ export class RetailCommissionPolicyService {
       db.prepare(`UPDATE retail_commission_policy_proposals SET status = 'confirmed', confirmed_by = ?, confirmed_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(actorId, orgId, id);
     })();
     try { logAuthEvent(orgId, actorId, id, "RETAIL_COMMISSION_POLICY_CONFIRMED", { storeId: r.store_id, month: r.year_month, source: r.source }); } catch { /* noop */ }
+    RetailCommissionGovernanceService.notifyDecided(orgId, shape(this.row(orgId, id)), "confirmed", actorId);
     return shape(this.row(orgId, id));
   }
 
@@ -90,6 +97,7 @@ export class RetailCommissionPolicyService {
     if (r.status === "confirmed" || r.status === "archived") throw new Error(`invalid_transition: proposta ${r.status} não pode ser arquivada.`);
     db.prepare(`UPDATE retail_commission_policy_proposals SET status = 'archived', archived_by = ?, archived_at = CURRENT_TIMESTAMP, archive_reason = ? WHERE organization_id = ? AND id = ?`).run(actorId || null, reason ? String(reason).slice(0, 300) : null, orgId, id);
     try { logAuthEvent(orgId, actorId || "system", id, "RETAIL_COMMISSION_POLICY_ARCHIVED", { reason: reason || null }); } catch { /* noop */ }
+    RetailCommissionGovernanceService.notifyDecided(orgId, shape(this.row(orgId, id)), "archived", actorId || null, reason);
     return shape(this.row(orgId, id));
   }
 

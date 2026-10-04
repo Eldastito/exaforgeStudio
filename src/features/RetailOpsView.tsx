@@ -4688,8 +4688,10 @@ function CommissionImportPanel({ storeId, month, onApplied }: { storeId: string;
   );
 }
 
-function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: string; onClose: () => void }) {
-  const [storeId, setStoreId] = useState('');
+function RacePlanModal({ stores, month, onClose, manager }: { stores: any[]; month: string; onClose: () => void; manager?: boolean }) {
+  // Gerente de loja: só vê/propõe a regra DA LOJA dele; salvar vira PROPOSTA que o dono confirma (nada paga antes).
+  const [storeId, setStoreId] = useState(manager && stores.length === 1 ? String(stores[0].id) : '');
+  const [note, setNote] = useState('');
   const [plan, setPlan] = useState<any | null>(null);
   const [source, setSource] = useState('');
   const [effectiveMonth, setEffectiveMonth] = useState<string | null>(null);
@@ -4720,6 +4722,13 @@ function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: strin
       // Salva POR COMPETÊNCIA: a regra vale só pro mês selecionado na corrida
       // (setembro com P.A novo não recalcula agosto). Meses sem regra própria
       // continuam no plano legado/padrão.
+      if (manager) {
+        if (!storeId) { toast.error('Escolha a loja.'); return; }
+        const pr = await apiFetch('/api/retailops/commission/policies/proposals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId, month, config: plan, note: note.trim() || null, submit: true }) });
+        if (pr.ok) { toast.success('Proposta enviada ao dono. A regra atual continua valendo até ele confirmar.'); onClose(); }
+        else { const d = await pr.json().catch(() => ({})); toast.error(d.error || 'Falha ao enviar a proposta.'); }
+        return;
+      }
       const res = await apiFetch('/api/retailops/commission/plan', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId: storeId || null, month, config: plan }) });
       if (res.ok) { toast.success(`Plano de ${month} salvo para ${storeId ? 'a loja' : 'a rede toda'}.`); onClose(); }
       else { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Falha ao salvar o plano.'); }
@@ -4743,17 +4752,21 @@ function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: strin
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4" onClick={e => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-zinc-100">Configurar a corrida de {month}</h3>
+          <h3 className="font-semibold text-zinc-100">{manager ? `Propor mudança na comissão de ${month}` : `Configurar a corrida de ${month}`}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
         <div className="mb-3 flex items-center gap-2">
           <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100">
-            <option value="">Rede toda (padrão)</option>
+            {!manager && <option value="">Rede toda (padrão)</option>}
+            {manager && stores.length !== 1 && <option value="">Escolha a loja…</option>}
             {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <span className="text-[11px] text-zinc-500">plano em uso: {source === 'store' ? 'próprio da loja' : source === 'network' ? 'da rede' : 'padrão (planilha CARIOCA)'}{effectiveMonth ? ` · competência ${effectiveMonth}` : ' · sem competência (vale todo mês)'} — salvar grava a regra SÓ de {month}.</span>
         </div>
-        <CommissionImportPanel storeId={storeId} month={month} onApplied={() => load(storeId)} />
+        {manager
+          ? <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-200">Sua mudança <strong>não vale na hora</strong>: vai para o dono confirmar. Enquanto isso a regra atual continua pagando.
+              <input value={note} onChange={e => setNote(e.target.value)} maxLength={200} placeholder="Por que está pedindo a mudança? (opcional)" className="mt-2 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" /></div>
+          : <CommissionImportPanel storeId={storeId} month={month} onApplied={() => load(storeId)} />}
         {!plan ? <div className="text-sm text-zinc-500">Carregando…</div> : (
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
@@ -4802,16 +4815,128 @@ function RacePlanModal({ stores, month, onClose }: { stores: any[]; month: strin
         )}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={save} disabled={saving || !plan} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : (storeId ? 'Salvar plano da loja' : 'Salvar plano da rede')}</button>
+          <button onClick={save} disabled={saving || !plan} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : manager ? 'Enviar para aprovação do dono' : (storeId ? 'Salvar plano da loja' : 'Salvar plano da rede')}</button>
         </div>
       </div>
     </div>
   );
 }
 
-function RaceSection({ stores }: { stores: any[] }) {
+// Dono: propostas de mudança de comissão das lojas esperando a confirmação dele. Mostra O QUE MUDA (campo a campo
+// contra o plano em vigor) antes de confirmar — confirmar às cegas seria assinar de olho fechado.
+function OwnerCommissionProposals({ stores }: { stores: any[] }) {
+  const [items, setItems] = useState<any[]>([]);
+  const [diffs, setDiffs] = useState<Record<string, Array<{ path: string; from: any; to: any }>>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const flat = (o: any, pre = ''): Record<string, any> => {
+    const out: Record<string, any> = {};
+    if (Array.isArray(o)) o.forEach((v, i) => Object.assign(out, flat(v, `${pre}[${i + 1}]`)));
+    else if (o && typeof o === 'object') for (const k of Object.keys(o)) Object.assign(out, flat(o[k], pre ? `${pre} › ${k}` : k));
+    else out[pre] = o;
+    return out;
+  };
+  const load = async () => {
+    const d = await apiFetch('/api/retailops/commission/policies?status=pending_confirmation').then(r => r.ok ? r.json() : null).catch(() => null);
+    const list: any[] = (Array.isArray(d?.proposals) ? d.proposals : []).filter((p: any) => p.storeId);
+    setItems(list);
+    const next: typeof diffs = {};
+    await Promise.all(list.map(async (p: any) => {
+      const cur = await apiFetch(`/api/retailops/commission/plan?storeId=${p.storeId}${p.month ? `&month=${p.month}` : ''}`).then(r => r.ok ? r.json() : null).catch(() => null);
+      const a = flat(cur?.plan || {}), b = flat(p.config || {});
+      next[p.id] = Object.keys(b).filter(k => String(a[k]) !== String(b[k])).map(k => ({ path: k, from: a[k], to: b[k] }));
+    }));
+    setDiffs(next);
+  };
+  useEffect(() => { load(); }, []);
+  if (items.length === 0) return null;
+  const decide = async (p: any, action: 'confirm' | 'archive') => {
+    let reason: string | null = null;
+    if (action === 'archive') { reason = window.prompt('Motivo da recusa (o gerente vai ver):', '') ; if (reason === null) return; }
+    else if (!window.confirm('Confirmar? A mudança passa a valer para o pagamento da loja.')) return;
+    setBusy(p.id);
+    try {
+      const r = await apiFetch(`/api/retailops/commission/policies/proposals/${p.id}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
+      if (r.ok) { toast.success(action === 'confirm' ? 'Confirmada — já vale.' : 'Recusada — o gerente foi avisado.'); load(); }
+      else { const d = await r.json().catch(() => ({})); toast.error(d.error || 'Falha ao decidir.'); }
+    } finally { setBusy(null); }
+  };
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3" data-testid="owner-commission-proposals">
+      <div className="text-sm font-medium text-amber-100">Propostas de comissão aguardando você ({items.length})</div>
+      <p className="mt-1 text-[11px] text-amber-200/80">Enquanto você não confirmar, a regra atual da loja continua pagando.</p>
+      <div className="mt-2 space-y-2">
+        {items.map((p: any) => (
+          <div key={p.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-[12px] text-zinc-200">{stores.find((s: any) => s.id === p.storeId)?.name || 'Loja'}{p.month ? ` · ${p.month}` : ''}<span className="text-zinc-500"> · {new Date(p.createdAt).toLocaleDateString('pt-BR')}</span>{p.note && <span className="text-zinc-400"> — “{p.note}”</span>}</div>
+              <div className="flex gap-2">
+                <button disabled={busy === p.id} onClick={() => decide(p, 'confirm')} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Confirmar</button>
+                <button disabled={busy === p.id} onClick={() => decide(p, 'archive')} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50">Recusar</button>
+              </div>
+            </div>
+            <div className="mt-1.5 text-[11px] text-zinc-400">
+              {(diffs[p.id] || []).length === 0 ? 'Nenhuma diferença de valor contra o plano em vigor.' : <>
+                <span className="text-zinc-500">O que muda ({(diffs[p.id] || []).length}):</span>
+                <ul className="mt-0.5 space-y-0.5">{(diffs[p.id] || []).slice(0, 12).map(d => <li key={d.path}><span className="text-zinc-500">{d.path}:</span> {String(d.from ?? '—')} → <strong className="text-amber-200">{String(d.to ?? '—')}</strong></li>)}</ul>
+                {(diffs[p.id] || []).length > 12 && <span className="text-zinc-600">… e mais {(diffs[p.id] || []).length - 12}</span>}
+              </>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MyCommissionProposals({ stores }: { stores: any[] }) {
+  const { user } = useAuth();
+  const [items, setItems] = useState<any[] | null>(null);
+  const load = async () => {
+    const d = await apiFetch('/api/retailops/commission/policies').then(r => r.ok ? r.json() : null).catch(() => null);
+    setItems(Array.isArray(d?.proposals) ? d.proposals : []);
+  };
+  useEffect(() => { load(); }, []);
+  const withdraw = async (id: string) => {
+    if (!window.confirm('Retirar esta proposta?')) return;
+    const r = await apiFetch(`/api/retailops/commission/policies/proposals/${id}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Retirada pelo gerente' }) });
+    if (r.ok) { toast.success('Proposta retirada.'); load(); } else toast.error('Não foi possível retirar.');
+  };
+  const LABEL: Record<string, { t: string; c: string }> = {
+    draft: { t: 'Rascunho', c: 'border-zinc-600 text-zinc-300' },
+    pending_confirmation: { t: 'Aguardando o dono', c: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
+    confirmed: { t: 'Confirmada — já vale', c: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' },
+    archived: { t: 'Recusada / retirada', c: 'border-zinc-700 bg-zinc-800/40 text-zinc-400' },
+  };
+  return (
+    <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="text-sm font-medium text-zinc-200">Minhas propostas de mudança</div>
+      {items === null ? <div className="mt-2 text-[12px] text-zinc-500">Carregando…</div>
+        : items.length === 0 ? <div className="mt-2 text-[12px] text-zinc-500">Nenhuma proposta ainda. Use <strong>Propor mudança</strong> na corrida acima.</div>
+        : <div className="mt-2 space-y-1.5">{items.map((p: any) => {
+            const st = LABEL[p.status] || { t: p.status, c: 'border-zinc-700 text-zinc-400' };
+            const mine = p.createdBy === ((user as any)?.id || (user as any)?.userId);
+            return (
+              <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                <div className="min-w-0 text-[12px] text-zinc-300">
+                  {stores.find((s: any) => s.id === p.storeId)?.name || 'Loja'}{p.month ? ` · ${p.month}` : ''}
+                  <span className="text-zinc-500"> · {new Date(p.createdAt).toLocaleDateString('pt-BR')}</span>
+                  {p.note && <div className="truncate text-[11px] text-zinc-500">“{p.note}”</div>}
+                  {p.status === 'archived' && p.archiveReason && <div className="text-[11px] text-zinc-500">Motivo: {p.archiveReason}</div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[11px] ${st.c}`}>{st.t}</span>
+                  {mine && (p.status === 'pending_confirmation' || p.status === 'draft') && <button onClick={() => withdraw(p.id)} className="rounded-lg border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800">Retirar</button>}
+                </div>
+              </div>
+            );
+          })}</div>}
+    </div>
+  );
+}
+
+function RaceSection({ stores, manager }: { stores: any[]; manager?: boolean }) {
   const [month, setMonth] = useState(() => todayStr().slice(0, 7));
-  const [storeId, setStoreId] = useState('');
+  const [storeId, setStoreId] = useState(manager && stores.length === 1 ? String(stores[0].id) : '');
   const [race, setRace] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [planModal, setPlanModal] = useState(false);
@@ -4857,18 +4982,18 @@ function RaceSection({ stores }: { stores: any[] }) {
         <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><TrendingUp className="w-4 h-4 text-indigo-400" /> Corrida do mês (cota + P.A + semanal + desvio)</div>
         <input type="month" value={month} onChange={e => setMonth(e.target.value.slice(0, 7))} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100" />
         <select value={storeId} onChange={e => setStoreId(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-100">
-          <option value="">Todas as lojas</option>
+          {!manager && <option value="">Todas as lojas</option>}
           {stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <button onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Apurar</button>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => setPlanModal(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><Pencil className="w-3.5 h-3.5" /> Configurar corrida</button>
-          {race && <button onClick={createRun} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> Gerar prévia p/ aprovação</button>}
+          <button onClick={() => setPlanModal(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"><Pencil className="w-3.5 h-3.5" /> {manager ? 'Propor mudança' : 'Configurar corrida'}</button>
+          {race && !manager && <button onClick={createRun} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> Gerar prévia p/ aprovação</button>}
         </div>
       </div>
       <p className="mt-1 text-[11px] text-zinc-500">O padrão da sua planilha: bateu a cota 1% · +10% 1,5% · +20% 2% · +30% 3% (vale a maior) · P.A ≥ 2,50 com cota · 1º/2º da semana · desvio de cota da rede · bloco do gerente. Cota individual vem do cadastro semanal ou da escala (cota da loja ÷ escalados). Ajuste tudo em “Configurar corrida”.</p>
 
-      <div className="mt-2"><UnidentifiedSellersCard /><SellerDuplicatesCard /></div>
+      {!manager && <div className="mt-2"><UnidentifiedSellersCard /><SellerDuplicatesCard /></div>}
 
       {/* Vendas SEM loja atribuída — não entram na corrida (por que "não confere"). */}
       {race && race.unassigned && (
@@ -4913,7 +5038,7 @@ function RaceSection({ stores }: { stores: any[] }) {
                 {st.sellers.map((s: any, i: number) => (
                   <span key={i}>{i > 0 ? ' · ' : ''}{s.sellerName}{s.matricula ? ` (${s.matricula})` : ''}: <strong>{brl(s.sales)}</strong> = {Object.entries(s.salesBySource || {}).filter(([, v]: any) => v > 0).map(([src, v]: any) => `${src} ${brl(v)}`).join(' + ')}</span>
                 ))}
-                {st.storeId && (
+                {st.storeId && !manager && (
                   <button onClick={() => markStoreManual(st.storeId, st.storeName)} className="ml-2 rounded border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-100 hover:bg-red-500/25">Marcar loja como fonte manual (ignora PDV)</button>
                 )}
               </div>
@@ -5046,7 +5171,7 @@ function RaceSection({ stores }: { stores: any[] }) {
         </div>
       )}
       {race && <div className="mt-2 text-right text-sm text-zinc-300">Total da corrida: <span className="font-semibold text-emerald-300">{brl(race.totals.grand)}</span> <span className="text-zinc-500">(vendedores {brl(race.totals.sellers)} · gerentes {brl(race.totals.managers)})</span></div>}
-      {planModal && <RacePlanModal stores={stores} month={month} onClose={() => setPlanModal(false)} />}
+      {planModal && <RacePlanModal stores={stores} month={month} manager={manager} onClose={() => setPlanModal(false)} />}
     </div>
   );
 }
@@ -5907,7 +6032,7 @@ function CommissionTab() {
         apiFetch('/api/retailops/stores').then(x => x.json()).catch(() => ({})),
         apiFetch('/api/retailops/commission/report-source').then(x => x.json()).catch(() => ({})),
       ]);
-      if ((ru as any)?.__forbidden) { setNetworkOnly(true); return; }
+      if ((ru as any)?.__forbidden) { setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : [])); setNetworkOnly(true); return; }
       setRuns(Array.isArray(r?.runs) ? r.runs : (Array.isArray(r) ? r : []));
       setRules(Array.isArray(ru?.rules) ? ru.rules : (Array.isArray(ru) ? ru : []));
       setStores(Array.isArray(st?.stores) ? st.stores : (Array.isArray(st) ? st : []));
@@ -5969,16 +6094,22 @@ function CommissionTab() {
   if (loading) return <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 
   if (networkOnly) {
+    // Gerente de loja: a MESMA corrida da rede, só da loja dele; mudar a regra = proposta que o dono confirma.
     return (
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100">
-        <p className="font-medium">Esta aba é da rede inteira.</p>
-        <p className="mt-1 text-[12px] text-amber-200/90">Ela mostra a comissão de todos os vendedores e as regras da empresa. Sua conta está restrita às suas lojas, por isso ela não aparece para você. Para acompanhar a sua loja, use o <strong>Fechamento diário</strong>.</p>
+      <div>
+        <div className="mb-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3 text-[12px] text-indigo-100">
+          <p className="font-medium">Comissão da sua loja</p>
+          <p className="mt-1 text-indigo-200/90">Aqui você vê a corrida e as regras da <strong>sua loja</strong> e pode <strong>propor mudanças</strong>. Elas só valem depois que o dono confirmar — e vocês dois são avisados.</p>
+        </div>
+        <RaceSection stores={stores} manager />
+        <MyCommissionProposals stores={stores} />
       </div>
     );
   }
 
   return (
     <div>
+      <OwnerCommissionProposals stores={stores} />
       {/* Corrida do mês (Fase G2 — modelo da planilha do cliente) */}
       <RaceSection stores={stores} />
 

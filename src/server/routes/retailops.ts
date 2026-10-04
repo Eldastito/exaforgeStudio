@@ -60,6 +60,23 @@ const inQuery = (k = "storeId"): StoreResolver => (req) => [req.query[k] == null
  * inteira são filtradas aqui — dono e admin sem loja (irrestritos) passam intactos (`null` = sem restrição).
  */
 const restrictIds = (req: AuthRequest): string[] | null => { const sc = scopeOf(req); return sc.unrestricted ? null : sc.storeIds; };
+
+// ── Comissão da PRÓPRIA loja (decisão do dono, 04/10): o gerente de loja LÊ o plano/propostas da loja dele e PROPÕE
+// mudanças; só o dono (rede inteira) confirma — `confirm`, `import`, `archive-live` e PUT do plano seguem requireNetworkScope.
+const requireOwnerAdmin = (req: AuthRequest, res: any, next: any): any => {
+  if (!["owner", "admin"].includes(String(req.user?.role || ""))) return res.status(403).json({ error: "Forbidden" });
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  next();
+};
+/** Resolve a loja do pedido para o gerente restrito: só as dele; com uma só, ela é forçada. Irrestrito → `{ unrestricted }`. */
+const commissionStoreFor = (req: AuthRequest, given: unknown): { ok: true; storeId: string | null } | { ok: false; error: string } => {
+  const sc = scopeOf(req);
+  const g = typeof given === "string" && given ? given : null;
+  if (sc.unrestricted) return { ok: true, storeId: g };
+  if (g) return sc.storeIds.includes(g) ? { ok: true, storeId: g } : { ok: false, error: "Esta loja não está entre as suas lojas." };
+  if (sc.storeIds.length === 1) return { ok: true, storeId: sc.storeIds[0] };
+  return { ok: false, error: "Escolha a loja." };
+};
 /**
  * Rotas do PDV pela FILIAL (`?store=<código>`): o gerente de loja só lê a(s) filial(is) da(s) loja(s) dele. Com uma só
  * filial, ela é forçada (o "todas as lojas" vira a loja dele); com várias, exige escolher. Dono/co-admin passam intactos.
@@ -2263,10 +2280,12 @@ router.delete("/commission/runs/:runId/items/:itemId", requireNetworkScope, (req
 
 // --- Corrida de comissão (Fase G2 — modelo CARIOCA) + escala semanal ---------
 // Plano efetivo (loja específica > rede '*' > default da planilha CARIOCA).
-router.get("/commission/plan", requireNetworkScope, (req: AuthRequest, res): any => {
+router.get("/commission/plan", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  const storeId = req.query.storeId ? String(req.query.storeId) : null;
+  const st = commissionStoreFor(req, req.query.storeId ? String(req.query.storeId) : null);
+  if ("error" in st) return res.status(403).json({ error: st.error });
+  const storeId = st.storeId;
   try { res.json(RetailCommissionRaceService.getPlan(orgId, storeId, req.query.month ? String(req.query.month) : null)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
@@ -2301,15 +2320,21 @@ router.get("/commission/race", (req: AuthRequest, res): any => {
 
 // F1.4a — ciclo de vida das políticas de comissão (owner/admin). Proposta ≠ plano vigente:
 // pendente NUNCA vira pagamento; só `confirm` (humano) promove.
-router.get("/commission/policies", requireNetworkScope, (req: AuthRequest, res): any => {
+router.get("/commission/policies", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(RetailCommissionPolicyService.list(orgId, { month: req.query.month ? String(req.query.month) : null, status: req.query.status ? String(req.query.status) : null }));
+  const all = RetailCommissionPolicyService.list(orgId, { month: req.query.month ? String(req.query.month) : null, status: req.query.status ? String(req.query.status) : null });
+  const mine = restrictIds(req);
+  // Gerente restrito: só propostas/políticas das lojas dele (a da rede inteira, `storeId` nulo, é do dono).
+  res.json(mine ? { proposals: all.proposals.filter((p: any) => p.storeId && mine.includes(p.storeId)), live: all.live.filter((p: any) => p.storeId && mine.includes(p.storeId)) } : all);
 });
-router.post("/commission/policies/proposals", requireNetworkScope, (req: AuthRequest, res): any => {
+router.post("/commission/policies/proposals", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.status(201).json(RetailCommissionPolicyService.propose(orgId, { storeId: req.body?.storeId ?? null, month: req.body?.month ?? null, config: req.body?.config, source: req.body?.source, sourceRef: req.body?.sourceRef ?? null, note: req.body?.note ?? null, submit: !!req.body?.submit }, req.user?.userId)); }
+  const st = commissionStoreFor(req, req.body?.storeId ?? null);
+  if ("error" in st) return res.status(403).json({ error: st.error });
+  // Gerente restrito só propõe pra loja dele e SEMPRE manual (a importação por IA é do dono).
+  try { res.status(201).json(RetailCommissionPolicyService.propose(orgId, { storeId: st.storeId, month: req.body?.month ?? null, config: req.body?.config, source: scopeOf(req).unrestricted ? req.body?.source : "manual", sourceRef: req.body?.sourceRef ?? null, note: req.body?.note ?? null, submit: !!req.body?.submit }, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 // F1.4b — importação por IA de regras coladas em texto: SÓ cria PROPOSTA (draft). Nunca ativa/paga; confirmar é gesto do dono.
@@ -2321,9 +2346,11 @@ router.post("/commission/policies/import", requireNetworkScope, async (req: Auth
     res.status(r.created === true ? 201 : (r.error === "llm_unavailable" ? 503 : 422)).json(r);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
-router.post("/commission/policies/proposals/:id/submit", requireNetworkScope, (req: AuthRequest, res): any => {
+router.post("/commission/policies/proposals/:id/submit", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const mine = restrictIds(req);
+  if (mine) { const pr = RetailCommissionPolicyService.get(orgId, req.params.id); if (!pr || !pr.storeId || !mine.includes(pr.storeId) || pr.createdBy !== req.user?.userId) return res.status(403).json({ error: "Você só mexe nas propostas que você mesmo criou, da sua loja." }); }
   try { res.json(RetailCommissionPolicyService.submit(orgId, req.params.id, req.user?.userId)); }
   catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });
@@ -2333,9 +2360,11 @@ router.post("/commission/policies/proposals/:id/confirm", requireNetworkScope, (
   try { res.json(RetailCommissionPolicyService.confirm(orgId, req.params.id, req.user?.userId || null)); }
   catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });
-router.post("/commission/policies/proposals/:id/archive", requireNetworkScope, (req: AuthRequest, res): any => {
+router.post("/commission/policies/proposals/:id/archive", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const mine = restrictIds(req);
+  if (mine) { const pr = RetailCommissionPolicyService.get(orgId, req.params.id); if (!pr || !pr.storeId || !mine.includes(pr.storeId) || pr.createdBy !== req.user?.userId) return res.status(403).json({ error: "Você só mexe nas propostas que você mesmo criou, da sua loja." }); }
   try { res.json(RetailCommissionPolicyService.archiveProposal(orgId, req.params.id, req.user?.userId, req.body?.reason ?? null)); }
   catch (e: any) { res.status(/invalid_transition/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });

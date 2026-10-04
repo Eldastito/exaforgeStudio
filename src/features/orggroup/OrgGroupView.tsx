@@ -273,6 +273,7 @@ function StaffTab({ groupId }: { groupId: string | null }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [moving, setMoving] = useState<string | null>(null); // userId em transferência
   const [target, setTarget] = useState<Record<string, string>>({}); // userId → toOrgId escolhido
+  const [chosen, setChosen] = useState<Record<string, string[]>>({}); // userId → lojas (da org destino) escolhidas
 
   async function load() {
     if (!groupId) { setStores([]); return; }
@@ -291,7 +292,7 @@ function StaffTab({ groupId }: { groupId: string | null }) {
     setMoving(userId); setMsg(null);
     try {
       const r = await apiFetch(`/api/groups/${groupId}/transfer-user`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toOrgId }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, toOrgId, storeIds: chosen[userId] || [] }),
       });
       const d = await r.json().catch(() => ({}));
       if (r.ok) { setMsg('Gerente remanejado. Ele precisará entrar de novo, já na nova loja.'); await load(); }
@@ -303,12 +304,14 @@ function StaffTab({ groupId }: { groupId: string | null }) {
   if (!groupId) return <Empty title="Sem grupo" msg="Adicione operações na aba Operações." />;
 
   const allStores = stores.map((s) => ({ organizationId: s.organizationId, businessName: s.businessName }));
+  const retailStoresOf = (orgId: string): { id: string; name: string }[] => stores.find((s) => s.organizationId === orgId)?.retailStores || [];
+  const needsStore = (userId: string) => !!target[userId] && retailStoresOf(target[userId]).length > 0;
 
   return (
     <div className="space-y-4">
       <p className="text-xs text-zinc-500">
         Remaneje um gerente de uma loja para outra do grupo. Ele mantém o mesmo login e passa a
-        enxergar somente a nova loja. Só o dono do grupo vê e usa esta aba.
+        enxergar somente a(s) loja(s) que você marcar. Só o dono do grupo vê e usa esta aba.
       </p>
       {msg && <p className="text-xs text-indigo-300">{msg}</p>}
       {loading ? <p className="text-sm text-zinc-500">Carregando…</p>
@@ -329,7 +332,7 @@ function StaffTab({ groupId }: { groupId: string | null }) {
                     <div className="flex items-center gap-2 shrink-0">
                       <select
                         value={target[u.userId] || ''}
-                        onChange={(e) => setTarget((p) => ({ ...p, [u.userId]: e.target.value }))}
+                        onChange={(e) => { setTarget((p) => ({ ...p, [u.userId]: e.target.value })); setChosen((p) => ({ ...p, [u.userId]: [] })); }}
                         disabled={moving === u.userId}
                         className="rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
                         title="Loja destino"
@@ -341,13 +344,27 @@ function StaffTab({ groupId }: { groupId: string | null }) {
                       </select>
                       <button
                         onClick={() => transfer(u.userId)}
-                        disabled={!target[u.userId] || moving === u.userId}
+                        disabled={!target[u.userId] || moving === u.userId || (needsStore(u.userId) && !(chosen[u.userId] || []).length)}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 px-2.5 py-1.5 text-xs font-medium text-zinc-100"
                       >
                         <ArrowRightLeft className="w-3.5 h-3.5" />
                         {moving === u.userId ? 'Movendo…' : 'Transferir'}
                       </button>
                     </div>
+                    {needsStore(u.userId) && (
+                      <div className="basis-full rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                        <p className="text-xs text-amber-300 mb-1.5">Em qual(is) loja(s) ele vai trabalhar? Ele só verá e alterará a(s) loja(s) marcada(s).</p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {retailStoresOf(target[u.userId]).map((st) => (
+                            <label key={st.id} className="inline-flex items-center gap-1.5 text-xs text-zinc-200">
+                              <input type="checkbox" checked={(chosen[u.userId] || []).includes(st.id)}
+                                onChange={(e) => setChosen((p) => { const cur = new Set(p[u.userId] || []); if (e.target.checked) cur.add(st.id); else cur.delete(st.id); return { ...p, [u.userId]: Array.from(cur) }; })} />
+                              {st.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -364,6 +381,8 @@ const TRANSFER_ERR: Record<string, string> = {
   target_not_in_group: 'A loja destino não pertence a este grupo.',
   user_not_in_group: 'Este usuário não pertence a uma loja deste grupo.',
   same_org: 'O gerente já está nesta loja.',
+  store_required: 'Escolha a(s) loja(s) dele na empresa destino — sem isso ele veria todas.',
+  store_not_in_target: 'Alguma loja escolhida não pertence à empresa destino.',
 };
 
 // ---------- Fatura (prévia) ----------

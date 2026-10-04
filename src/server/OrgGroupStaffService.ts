@@ -2,6 +2,7 @@ import db from "./db.js";
 import { OrgGroupService } from "./OrgGroupService.js";
 import { PermissionService } from "./PermissionService.js";
 import { bumpSecurityVersion } from "./middleware/auth.js";
+import { RetailStoreScopeService } from "./RetailStoreScopeService.js";
 
 /**
  * OrgGroupStaffService — ADR-199 (extensão): equipe do grupo e REMANEJAMENTO de
@@ -16,6 +17,9 @@ import { bumpSecurityVersion } from "./middleware/auth.js";
  *    para fora do grupo.
  *  - Ao mover, reatribui o perfil RBAC equivalente da loja DESTINO (mesmo system_key)
  *    para o gerente manter o nível de acesso; e limpa o escopo de loja da origem.
+ *  - ESCOPO DE LOJA OBRIGATÓRIO: se a org destino tem lojas de varejo, a transferência EXIGE
+ *    ≥1 loja dela (`storeIds`) e grava o vínculo na MESMA transação. Sem isso o gerente cairia
+ *    "sem atribuição" = irrestrito (RetailStoreScopeService.allowed) e veria a rede inteira.
  *  - Bump de `security_version` REVOGA a sessão antiga (o token velho claim a org
  *    de origem) — o gerente é forçado a relogar já na loja nova (SEC-F7).
  */
@@ -26,6 +30,8 @@ export interface GroupStaffMember {
 }
 export interface GroupStoreStaff {
   organizationId: string; businessName: string | null; users: GroupStaffMember[];
+  /** Lojas de varejo ativas desta org — o destino precisa delas pra exigir o vínculo na transferência. */
+  retailStores: { id: string; name: string }[];
 }
 
 const ACTIVE = "(u.global_status IS NULL OR u.global_status NOT IN ('blocked','deleted'))";
@@ -60,7 +66,9 @@ export class OrgGroupStaffService {
       const users = rows
         .filter((r) => r.identity_id !== ownerIdentityId) // omite o próprio dono
         .map((r) => ({ userId: r.id, name: r.name ?? null, email: r.email ?? null, role: r.role, roleProfileId: r.role_profile_id ?? null, profileName: r.profile_name ?? null }));
-      out.push({ organizationId: orgId, businessName: biz, users });
+      const retailStores = (db.prepare("SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name ASC").all(orgId) as any[])
+        .map((r) => ({ id: r.id, name: r.name }));
+      out.push({ organizationId: orgId, businessName: biz, users, retailStores });
     }
     return out;
   }
@@ -71,6 +79,7 @@ export class OrgGroupStaffService {
    */
   static transferUser(input: {
     groupId: string; ownerIdentityId: string; userId: string; toOrgId: string; actorUserId?: string | null;
+    storeIds?: string[];
   }): { ok: boolean; code?: string; fromOrgId?: string } {
     const { groupId, ownerIdentityId, userId, toOrgId } = input;
     if (!this.ownsGroup(groupId, ownerIdentityId)) return { ok: false, code: "not_group_owner" };
@@ -95,6 +104,12 @@ export class OrgGroupStaffService {
       if (clash) return { ok: false, code: "email_exists_in_target" };
     }
 
+    // Escopo de loja: org destino com lojas de varejo EXIGE ≥1 loja dela (nunca deixa o gerente irrestrito).
+    const destStoreIds = new Set((db.prepare("SELECT id FROM retail_stores WHERE organization_id = ?").all(toOrgId) as any[]).map((r) => String(r.id)));
+    const wantedStores = Array.from(new Set((input.storeIds || []).map(String).filter(Boolean)));
+    if (destStoreIds.size > 0 && wantedStores.length === 0) return { ok: false, code: "store_required" };
+    if (wantedStores.some((id) => !destStoreIds.has(id))) return { ok: false, code: "store_not_in_target" };
+
     // Perfil equivalente na loja destino: mapeia pelo system_key do perfil atual
     // (ex.: 'gerente' → o perfil 'gerente' da loja destino). Sem perfil atual → null.
     let destProfileId: string | null = null;
@@ -110,6 +125,8 @@ export class OrgGroupStaffService {
       db.prepare("UPDATE users SET organization_id = ?, role_profile_id = ? WHERE id = ?").run(toOrgId, destProfileId, userId);
       // Escopo de loja (ADR-173) é por-org: as linhas da origem não valem na destino.
       try { db.prepare("DELETE FROM user_stores WHERE user_id = ?").run(userId); } catch { /* tabela pode não existir em legado */ }
+      // …e o vínculo NOVO entra na mesma transação (atômico: ou move já com loja, ou não move).
+      if (wantedStores.length) RetailStoreScopeService.setForUser(toOrgId, userId, wantedStores, input.actorUserId || undefined);
     });
     tx();
 

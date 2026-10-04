@@ -273,10 +273,12 @@ export class RetailTransferService {
     return { count: suggestions.length, suggestions };
   }
 
-  static list(orgId: string, opts: { status?: string; limit?: number; offset?: number } = {}): any[] {
+  static list(orgId: string, opts: { status?: string; limit?: number; offset?: number; storeIds?: string[] } = {}): any[] {
     const where: string[] = ["t.organization_id = ?"];
     const args: any[] = [orgId];
     if (opts.status) { where.push("t.status = ?"); args.push(opts.status); }
+    // Gerente de loja: só transferências em que a loja DELE é origem ou destino.
+    if (opts.storeIds) { if (!opts.storeIds.length) return []; const ph = opts.storeIds.map(() => "?").join(","); where.push(`(t.origin_store_id IN (${ph}) OR t.dest_store_id IN (${ph}))`); args.push(...opts.storeIds, ...opts.storeIds); }
     const limit = Math.min(500, Math.max(1, int(opts.limit) || 100));
     const offset = Math.max(0, int(opts.offset) || 0);
     return db.prepare(
@@ -293,10 +295,11 @@ export class RetailTransferService {
   }
 
   /** Total de transferências (para paginação), com o mesmo filtro de status. */
-  static count(orgId: string, opts: { status?: string } = {}): number {
+  static count(orgId: string, opts: { status?: string; storeIds?: string[] } = {}): number {
     const where: string[] = ["organization_id = ?"];
     const args: any[] = [orgId];
     if (opts.status) { where.push("status = ?"); args.push(opts.status); }
+    if (opts.storeIds) { if (!opts.storeIds.length) return 0; const ph = opts.storeIds.map(() => "?").join(","); where.push(`(origin_store_id IN (${ph}) OR dest_store_id IN (${ph}))`); args.push(...opts.storeIds, ...opts.storeIds); }
     return Number((db.prepare(`SELECT COUNT(*) c FROM retail_stock_transfers WHERE ${where.join(" AND ")}`).get(...args) as any)?.c || 0);
   }
 }

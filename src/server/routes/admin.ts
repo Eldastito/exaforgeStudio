@@ -35,6 +35,7 @@ import { logAuthEvent } from "../auditLog.js";
 import { JobQueueService } from "../JobQueueService.js";
 import { FiscalInboundFlagService } from "../FiscalInboundFlagService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
+import { UserOrgMoveService } from "../UserOrgMoveService.js";
 import { RuntimePilotService } from "../RuntimePilotService.js";
 import { HelpKnowledgeService } from "../HelpKnowledgeService.js";
 import { eventsEnabled } from "../ContinuityService.js";
@@ -887,6 +888,33 @@ router.post("/users/:id/reset-password", async (req: AuthRequest, res): Promise<
 // DELETE /api/admin/users/:id — soft delete (global_status = 'deleted').
 // O usuário não pode fazer login mais, mas os registros históricos ficam
 // preservados por integridade referencial e LGPD (forget é fluxo separado).
+// POST /api/admin/users/:id/move-org — move o usuário (mesmo login) pra OUTRA empresa. Body: { toOrgId, storeIds? }.
+// O isolamento é por empresa: pra o gerente enxergar as lojas/Alterdata da empresa principal, o LOGIN dele precisa estar
+// nela (nunca abrir leitura entre empresas). `storeIds` é OBRIGATÓRIO quando o destino tem lojas de varejo.
+router.post("/users/:id/move-org", (req: AuthRequest, res): any => {
+  try {
+    const userId = String(req.params.id || "");
+    const toOrgId = String(req.body?.toOrgId || "");
+    if (!toOrgId) return res.status(400).json({ error: "toOrgId obrigatório" });
+    const storeIds = Array.isArray(req.body?.storeIds) ? req.body.storeIds.map(String) : [];
+    const r = UserOrgMoveService.move({ userId, toOrgId, storeIds, actorUserId: req.user?.userId || null });
+    if (!r.ok) {
+      const map: Record<string, number> = { user_not_found: 404, target_not_found: 404, user_deleted: 400, cannot_move_master_admin: 400, cannot_move_owner: 403, same_org: 400, email_exists_in_target: 409, store_required: 400, store_not_in_target: 400 };
+      return res.status(map[r.code || ""] || 400).json({ error: r.code || "move_failed" });
+    }
+    try { logAuthEvent(r.fromOrgId || null, req.user?.userId || null, userId, "ADMIN_USER_MOVED_ORG", { by_master: req.user?.email, fromOrg: r.fromOrgId, toOrg: toOrgId, stores: storeIds.length }); } catch { /* noop */ }
+    res.json({ ok: true, fromOrgId: r.fromOrgId, toOrgId });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/admin/organizations/:orgId/retail-stores — lojas ativas da empresa (pra escolher a loja do gerente ao mover).
+router.get("/organizations/:orgId/retail-stores", (req: AuthRequest, res): any => {
+  try {
+    const rows = db.prepare(`SELECT id, name FROM retail_stores WHERE organization_id = ? AND active = 1 ORDER BY name`).all(String(req.params.orgId || "")) as any[];
+    res.json({ stores: rows.map((r) => ({ id: r.id, name: r.name })) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete("/users/:id", (req: AuthRequest, res): any => {
   try {
     const id = String(req.params.id || "");

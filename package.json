@@ -592,6 +592,7 @@
     "test:retail-manager-read-scope": "tsx scripts/test-retail-manager-read-scope.ts",
     "test:store-signal-scope": "tsx scripts/test-store-signal-scope.ts",
     "test:retail-commission-governance": "tsx scripts/test-retail-commission-governance.ts",
+    "test:commission-manager-view": "tsx scripts/test-commission-manager-view.ts",
     "test:admin-user-move-org": "tsx scripts/test-admin-user-move-org.ts",
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
     "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",

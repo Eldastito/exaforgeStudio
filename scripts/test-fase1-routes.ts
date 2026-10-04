@@ -162,9 +162,8 @@ async function main() {
   for (const [m, p, b] of comRoutes) { const r = await call(m, p, A, "agent", b, "u_agent"); if (r.status !== 403) noRole.push(`${m} ${p.split("?")[0]}→${r.status}`); }
   check("perfil comum (agent): também 403 em todas", noRole.length === 0, noRole.join(" | "));
 
-  // ── finanças das lojas (resultado, custos, aluguel, taxas de maquininha): leitura E escrita, só rede ──
+  // ── finanças das lojas (custos, aluguel, taxas de maquininha): leitura E escrita, só rede ──
   const finRoutes: Array<[string, string, any?]> = [
-    ["GET", `/stores-result?period=2026-09`], ["GET", `/stores/${carioca}/result?period=2026-09`],
     ["GET", `/stores/${carioca}/costs`], ["PUT", `/stores/${carioca}/costs`, { costs: {} }],
     ["GET", `/stores/${carioca}/variable-costs`], ["PUT", `/stores/${carioca}/variable-costs`, { costs: {} }],
     ["GET", `/stores/${carioca}/financial-settings`], ["PUT", `/stores/${carioca}/financial-settings`, {}],

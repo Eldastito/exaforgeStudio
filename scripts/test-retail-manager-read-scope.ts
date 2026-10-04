@@ -134,7 +134,14 @@ async function main() {
   const sl = JSON.parse((await get("mgr", `/sellers`)).text || "{}");
   check("lista de vendedores do gerente = só os da loja dele", (sl.sellers || []).length === 1 && sl.sellers[0].name === "SellerAlfaA", JSON.stringify(sl.sellers));
   check("gerente vê o histórico mensal só da própria loja", await ownAt(`/dashboard/monthly?month=2026-10`) && JSON.parse((await get("mgr", `/dashboard/monthly?month=2026-10`)).text).commissionEstimate === null);
-  check("rota de rede continua barrada ao gerente (resultado/lucro por loja)", (await get("mgr", `/stores-result?period=month`)).status === 403);
+  // Decisão do dono (04/10): o gerente vê o RESULTADO da própria loja (lucro estimado/equilíbrio); `totals` soma só a loja dele.
+  const sr = await get("mgr", `/stores-result?period=2026-10`);
+  const srj = JSON.parse(sr.text || "{}");
+  check("gerente vê o resultado por loja SÓ da própria loja (e os totais somam só ela)", sr.status === 200 && Array.isArray(srj.perStore) && srj.perStore.length === 1 && srj.perStore[0].storeId === A && !B_MARK.test(sr.text), sr.text.slice(0, 160));
+  const srO = JSON.parse((await get("owner", `/stores-result?period=2026-10`)).text || "{}");
+  check("dono segue vendo todas as lojas no resultado (0-regressão)", Array.isArray(srO.perStore) && srO.perStore.length >= 2);
+  check("resultado de UMA loja: a dele abre (200), a de outra loja é recusada (403)", (await get("mgr", `/stores/${A}/result?period=2026-10`)).status === 200 && (await get("mgr", `/stores/${B}/result?period=2026-10`)).status === 403);
+  check("custos/aluguel/taxas da loja continuam só da rede (403 ao gerente)", (await get("mgr", `/stores/${A}/costs`)).status === 403);
 
   // ── ataque direto por id: loja B / fechamento da B / transferência B→C ──
   for (const [label, url] of [["fechamento da B", `/closings/${closingIds.B}`], ["caixa da B", `/cash/ledger?storeId=${B}&month=2026-10`], ["escala da B", `/schedule?storeId=${B}&start=2026-09-28&end=2026-10-04`], ["boletas da B", `/boletas/day?storeId=${B}&day=${D}`], ["cota de vendedor da B", `/seller-quotas?storeId=${B}&month=2026-10`]] as [string, string][]) {

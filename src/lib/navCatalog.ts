@@ -95,7 +95,7 @@ export const NAV_CATALOG: NavEntry[] = [
   { viewMode: 'falatu', label: 'FalaTu', group: 'ia', visible: c => c.isMasterAdmin || (c.falatuEnabled && c.canAccessModule('falatu')) },
 ];
 
-export interface PrimaryNav { key: 'hoje' | 'falatu' | 'executando' | 'resultados' | 'empresa'; label: string; viewMode: string; }
+export interface PrimaryNav { key: 'hoje' | 'falatu' | 'executando' | 'resultados' | 'rede' | 'empresa'; label: string; viewMode: string; }
 
 /**
  * Os 5 itens de 1º nível, cada um apontando para uma tela JÁ existente (destino interino —
@@ -111,6 +111,8 @@ export function primaryNav(c: NavCtx): PrimaryNav[] {
   out.push({ key: 'executando', label: 'Executando', viewMode: 'executando' });
   // F2.5 — Resultados: conclusão → rede → lojas → Entender (tela própria, sempre disponível).
   out.push({ key: 'resultados', label: 'Resultados', viewMode: 'resultados' });
+  // 6º item (varejo): o gerente de loja trabalha na Operação da Rede todo dia — não pode ficar escondido em Explorar.
+  if (ok('retailops')) out.push({ key: 'rede', label: 'Operação da Rede', viewMode: 'retailops' });
   if (c.isManager || c.isMasterAdmin) out.push({ key: 'empresa', label: 'Empresa', viewMode: 'empresa' });
   return out;
 }

@@ -71,8 +71,9 @@ async function main() {
   const keys = (c: any) => C.primaryNav(c).map(p => p.key).join(",");
   check("vendedor sem módulos: Hoje·Executando·Resultados (sem Empresa/FalaTu)", keys(base) === "hoje,executando,resultados", keys(base));
   const owner = { ...base, isManager: true, falatuEnabled: true, isModuleEnabled: () => true };
-  check("dono completo: Hoje·FalaTu·Executando·Resultados·Empresa", keys(owner) === "hoje,falatu,executando,resultados,empresa", keys(owner));
+  check("dono completo (varejo): Hoje·FalaTu·Executando·Resultados·Rede·Empresa", keys(owner) === "hoje,falatu,executando,resultados,rede,empresa", keys(owner));
   check("Executando é tela própria (F2.4), com ou sem Missões/Tarefas", C.primaryNav(owner).find(p => p.key === "executando")!.viewMode === "executando" && C.primaryNav({ ...owner, missionLayerEnabled: true }).find(p => p.key === "executando")!.viewMode === "executando" && C.primaryNav(base).some(p => p.key === "executando"));
+  check("Operação da Rede é 6º item só com módulo retail (e acesso)", keys({ ...owner, isModuleEnabled: (k: string) => k !== "retail" }) === "hoje,falatu,executando,resultados,empresa" && keys({ ...owner, canAccessModule: (k: string) => k !== "retail" }).indexOf("rede") < 0 && C.primaryNav(owner).find(p => p.key === "rede")!.viewMode === "retailops");
   check("FalaTu some sem flag da org (mesmo gate do legado)", !keys({ ...owner, falatuEnabled: false }).includes("falatu"));
   check("Empresa só gestor", !keys({ ...owner, isManager: false }).includes("empresa") && keys({ ...base, isManager: true }).includes("empresa"));
   check("Hoje é tela própria (F2.3), sempre disponível", C.primaryNav({ ...base, canAccessModule: () => false })[0].viewMode === "hoje");

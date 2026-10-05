@@ -9,6 +9,7 @@ import { useStore } from '@/src/store/useStore';
 import { UsersSettingsView } from './UsersSettingsView';
 import { FiscalProfilePanel } from './settings/FiscalProfilePanel';
 import { BspSettingsPanel } from './settings/BspSettingsPanel';
+import { AutonomyContractPanel } from './settings/AutonomyContractPanel';
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState('empresa');
@@ -2457,6 +2458,9 @@ function GovernancePanel() {
           <button onClick={() => exportReport('pdf')} className="text-xs rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 px-2.5 py-1.5 inline-flex items-center gap-1.5"><Download className="w-3.5 h-3.5" /> PDF</button>
         </div>
       </div>
+
+      {/* ADR-204 F3.1d — o que a IA pode fazer sozinha (piso, nível por tipo, pausa e travas) */}
+      <AutonomyContractPanel />
 
       {/* Princípios */}
       <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">

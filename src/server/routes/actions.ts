@@ -29,6 +29,13 @@ router.get("/", (req: AuthRequest, res): any => {
 const canGovernAutonomy = (req: AuthRequest): boolean =>
   !!req.organizationId && (PermissionService.isOwner(req.organizationId, req.user) || !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL));
 
+// GET /api/actions/autonomy/overview — ADR-204 F3.1d: o que a tela Empresa → Autonomia da IA mostra (piso por categoria,
+// política e nível de cada tipo, pausa e travas). Leitura p/ qualquer usuário da empresa; `canGovern` diz se pode alterar.
+router.get("/autonomy/overview", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ...ApprovalPolicyService.overview(req.organizationId), canGovern: canGovernAutonomy(req) });
+});
+
 // GET /api/actions/autonomy/status — pausas ativas + histórico recente (qualquer usuário da empresa lê; só o dono altera).
 router.get("/autonomy/status", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });

@@ -1,6 +1,6 @@
 # ADR-204 — ZapFlow Fase 3: Gestão Autônoma Progressiva, Inteligência Preditiva e Aprendizado do Negócio
 
-**Estado:** **F3.0 FECHADA (doc-only)** · **F3.1a EM PR** (piso de autonomia + níveis 0–4 derivados; D1/D2/D5 aceitas pelo dono) · demais fatias **NÃO iniciadas**.
+**Estado:** **F3.0 FECHADA (doc-only)** · **F3.1a FECHADA** (piso de autonomia + níveis 0–4, PR #1834) · **F3.1b EM PR** (snapshot da política + "por que o ZapFlow fez isso") · demais fatias **NÃO iniciadas**.
 **Cliente-piloto:** TOULON. **Base:** Fases 1 e 2 (Fase 2 encerrada por decisão do dono em 2026-10-05 **com o piloto não evidenciado** — ADR-203 §7).
 **Análise:** `docs/prd/ANALISE-PRD-FASE3-vs-CODEBASE.md` (matriz PRD→código, com evidência de arquivo e achados verificados).
 
@@ -60,9 +60,14 @@ Decisão que melhora · fonte e frescor · como o parcial é indicado · fato/es
 
 Doc-only: nenhuma linha de código alterada. Auditoria sem execução; pontos não lidos em profundidade estão listados em `ANALISE-PRD-FASE3-vs-CODEBASE.md` §6 e devem ser reconfirmados por cada fatia antes de implementar.
 
-## 9. Status F3.1a — EM PR (piso de autonomia)
+## 9. Status F3.1a — FECHADA (piso de autonomia, PR #1834)
 Primeira sub-fatia da F3.1 (a F3.1 inteira é grande demais p/ 1 PR: b = snapshot da política + "por que", c = gates no `execute` + kill switch, d = tela Empresa→IA). **Decisões do dono:** D1 (níveis 0–4 como mapa derivado, sem Nível 4), D2 (`dispatchGoverned` mantém mensagens, recusa tipo do piso), D5 (F3.1 primeiro, compras só análise).
 **Entrega:** `ApprovalPolicyService.isHumanOnly/humanOnlyTypes/isSystemActor/autonomyLevel`; piso imposto em `DecisionActionService.propose/approve`, `CommandExecutorService.execute` (recusa auditada `human_approval_missing`) e `dispatchGoverned`; rotas `GET /api/actions/autonomy-floor` e `/autonomy-level`. `test:autonomy-floor` (55). Runbook `docs/runbook/autonomia-operacao.md`.
 **Decisões de desenho:** piso por **TIPO** (o domínio `finance` carrega cobrança, que segue livre); `refund`, `asaas_pix_charge`, `collection*`, `prepare_purchase` e `retail_transfer` ficam FORA de propósito (runbook). **D8 (nova, em aberto):** travar `refund` no piso também?
 **Mudança deliberada de comportamento:** banda `allow` deixa de auto-aprovar **compra** (`create_purchase_order`); `test-autonomy-contract` teve 1 asserção ajustada com comentário. Nada mais mudou.
 **Checklist PRD §48:** decisão melhorada = nunca comprometer dinheiro/pessoas/contrato sem pessoa · fonte = `agent_policies`+`action_approvals` · nível aplicado = ≤2 p/ o piso · quem autoriza = pessoa (RBAC/ADR-159 preservado) · limite financeiro = n/a (o piso não depende de valor) · reversível = reverter o commit · auditoria = `action_execution_log.error_code` · kill switch/gates stale/snapshot = **F3.1b/c** · motor duplicado = nenhum (estende `ApprovalPolicyService`).
+
+## 10. Status F3.1b — EM PR (snapshot da política + "por que o ZapFlow fez isso?")
+Segunda sub-fatia da F3.1 (PRD §35/§36/§37, RN-F3-8). **Entrega:** coluna aditiva `decision_actions.policy_snapshot_json` gravada no `propose` (`ApprovalPolicyService.snapshot`: origem da regra, aprovações exigidas, piso aplicado, nível 0–3; best-effort, nunca bloqueia a proposta); `ExecutionTraceService.explain` + `GET /api/actions/:id/why` (recomendação+base+confiança · sinal de origem em linguagem de negócio · regra que governou · quem autorizou, pessoa × automática · executada ou "não executei porque…" · resultado); `trace` passa a trazer `policy_snapshot`. `test:action-why` (31). Runbook: seção F3.1b.
+**Decisões de desenho:** a foto é a **da época** (mudar a política depois não a altera); ação anterior ao registro **diz que não tem foto** e não é reconstruída com a política de hoje; aprovação por rótulo de sistema é dita **automática** (não finge pessoa); dinheiro role-gated e domínio invisível → 404 (reusa `ContextProjectionService`, sem regra nova de RBAC); a recusa do executor vira texto de negócio (`REFUSAL_TEXT`) — é o "Não executei porque…" do PRD §37 **visível**; o **bloqueio** por dado desatualizado/baixa confiança/teto financeiro (que gera novas recusas) é a **F3.1c**.
+**D8 segue em aberto** (`refund` fora do piso). **Checklist PRD §48:** decisão melhorada = o dono sabe por que cada ação aconteceu · fonte = `decision_actions`+`action_approvals`+`action_execution_log`+`business_signals` · parcial/desatualizado = ação legada declarada sem foto · fato/estimativa/hipótese = a base da ação é mostrada · autonomia = o nível da época · quem autoriza = mostrado · reversível = reverter o commit (coluna nullable) · auditoria = a própria explicação · motor duplicado = nenhum (estende `ExecutionTraceService`/`ApprovalPolicyService`/`UxPresentationService.confidenceBand`/`presentSignal`).

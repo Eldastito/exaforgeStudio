@@ -176,6 +176,34 @@ export class ApprovalPolicyService {
   }
 
   /**
+   * ADR-204 F3.1b (RN-F3-8) — FOTO da política que governa uma ação no momento da proposta: de onde veio a regra
+   * (banda do dono / política da org / matriz padrão), o estado do contrato, quantas pessoas precisam aprovar, se o
+   * PISO (F3.1a) apertou a regra e o nível 0–3 derivado. É o que permite responder "por que o ZapFlow fez isso?"
+   * depois, mesmo que o dono mude a política. Determinístico, sem I/O além de ler a política; nunca lança.
+   */
+  static snapshot(orgId: string, input: { domain: string; actionType: string; amount?: number | null; policy: ApprovalPolicy; requiredRole: string | null; floorApplied?: boolean }): any {
+    try {
+      const contract = this.resolveContract(orgId, { domain: input.domain, actionType: input.actionType, amount: input.amount });
+      const level = this.autonomyLevel(orgId, { domain: input.domain, actionType: input.actionType });
+      const cfg = db.prepare("SELECT 1 AS x FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ? AND active = 1").get(orgId, input.domain, input.actionType);
+      const source = contract.enforced ? "bands" : cfg ? "agent_policy" : "default_matrix";
+      return {
+        version: 1,
+        capturedAt: new Date().toISOString(),
+        source,
+        approvalPolicy: input.policy,
+        requiredRole: input.requiredRole || null,
+        requiredApprovals: this.requiredApprovals(input.policy),
+        humanOnly: this.isHumanOnly(input.actionType),
+        floorApplied: !!input.floorApplied,
+        contract: { state: contract.state, reason: contract.reason, enforced: contract.enforced, requiredRole: contract.requiredRole },
+        autonomy: { level: level.level, label: level.label, level4Blocked: level.level4Blocked, reason: level.reason },
+        amount: input.amount != null && Number.isFinite(Number(input.amount)) ? Math.abs(Number(input.amount)) : null,
+      };
+    } catch { return null; }
+  }
+
+  /**
    * ADR-159 F3 (D4) — resolve o ESTADO do Autonomy Contract para (domínio, tipo,
    * valor). Ordem de precedência:
    *   1) BANDAS valor→papel (`config_json.bands`) — o modelo D4 de 1ª classe.

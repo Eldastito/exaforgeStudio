@@ -6,6 +6,8 @@ import { CommandExecutorService } from "../CommandExecutorService.js";
 import { StepUpMfaService } from "../StepUpMfaService.js";
 import { UxPresentationService } from "../UxPresentationService.js";
 import { ApprovalPolicyService } from "../ApprovalPolicyService.js";
+import { ExecutionTraceService } from "../ExecutionTraceService.js";
+import { ContextProjectionService } from "../ContextProjectionService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -84,6 +86,17 @@ router.get("/:id/card", (req: AuthRequest, res): any => {
   const card = UxPresentationService.card(orgId, a, req.user);
   if (!card) return res.status(404).json({ error: "Ação não encontrada." });
   res.json(card);
+});
+
+// GET /api/actions/:id/why — ADR-204 F3.1b: "por que o ZapFlow fez isso?" em evidência de negócio (recomendação+base,
+// sinal de origem, política que governou, quem autorizou, execução ou "não executei porque…", resultado).
+// 404 quando o domínio é invisível ao papel (RN-UX-2); dinheiro role-gated (§73).
+router.get("/:id/why", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const a = DecisionActionService.get(orgId, req.params.id);
+  if (!a || !ContextProjectionService.canSeeDomain(orgId, req.user, a.domain)) return res.status(404).json({ error: "Ação não encontrada." });
+  res.json(ExecutionTraceService.explain(orgId, a.id, { canSeeMoney: ContextProjectionService.hasFullBusinessVisibility(orgId, req.user) }));
 });
 
 // POST /api/actions — propõe uma ação (a política define se exige aprovação).

@@ -42,5 +42,23 @@ Qualquer ação nova que comprometa dinheiro, pessoas ou contrato **deve** entra
 ### Rollback
 Aditivo e sem migração: reverter o commit restaura o comportamento anterior. Nenhuma coluna/tabela nova nesta sub-fatia.
 
+## F3.1b — "por que o ZapFlow fez isso?"
+
+Cada ação nova guarda, na hora da proposta, uma **foto da política que a governou** (`decision_actions.policy_snapshot_json`): de onde veio a regra (faixa do dono / política da empresa / regra padrão), quantas pessoas precisavam aprovar, se a trava de segurança (piso, F3.1a) apertou a regra e o nível de autonomia 0–3. É a foto **da época**: se o dono mudar a política depois, a explicação continua mostrando o que valia quando a ação nasceu.
+
+`GET /api/actions/:id/why` responde, em linguagem de negócio (não cadeia de raciocínio):
+1. **O que foi proposto** + base (fato / estimativa / influência) + confiança em palavras.
+2. **De qual ponto de atenção nasceu** (o sinal, traduzido; nunca o identificador técnico).
+3. **Qual regra governou** (a foto).
+4. **Quem autorizou**: pessoa pelo nome, ou "automaticamente, dentro da política" (nenhuma pessoa precisou aprovar). Aprovação por rótulo de sistema (`runtime`) é dita como automática — nunca finge ter sido pessoa.
+5. **Executada** ou **"Não executei porque…"** — o motivo real da recusa do executor (sem aprovação de pessoa, sem política ativa, autonomia só recomenda, modo de teste, já executada antes…).
+6. **Resultado medido** (esperado × realizado).
+
+Regras: dinheiro **role-gated** (§73) — sem visão ampla do negócio os valores vêm `null` + `restricted:true` e o texto não os repete; domínio invisível ao papel → **404** (não vaza existência); isolado por empresa. `GET /api/decision-intelligence/trace/:correlationId` passa a trazer `policy_snapshot` em cada ação.
+
+**Ação anterior à F3.1b** não tem foto: a explicação diz "não há foto do que valia na época" e **não** reconstrói a regra com a política de hoje.
+
+Aditivo (1 coluna nullable), sem migração de dados; reverter o commit restaura o comportamento anterior.
+
 ### Ainda NÃO feito (próximas sub-fatias da F3.1)
-Snapshot da política que permitiu (por que o ZapFlow fez isso) · gates de dado desatualizado/baixa confiança/teto financeiro no `execute` · kill switch por organização e por (domínio, ação) · tela Empresa→IA.
+Gates de dado desatualizado/baixa confiança/teto financeiro no `execute` (F3.1c) · kill switch por organização e por (domínio, ação) (F3.1c) · tela Empresa→IA (F3.1d).

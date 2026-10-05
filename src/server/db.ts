@@ -12308,6 +12308,10 @@ const initDb = () => {
   // S6 — distingue "resolvido pelo próprio detector" (auto) de "resolvido por uma pessoa": só o primeiro pode ser reaberto quando o problema volta.
   try { db.exec(`ALTER TABLE business_signals ADD COLUMN auto_resolved INTEGER DEFAULT 0`); } catch(e){}
 
+  // ADR-204 F3.1b — snapshot da política que governou a ação NO MOMENTO da proposta (por que foi/não foi automática,
+  // quem precisava aprovar, nível de autonomia). Aditivo e nullable: ação anterior ao registro simplesmente não tem.
+  try { db.exec(`ALTER TABLE decision_actions ADD COLUMN policy_snapshot_json TEXT`); } catch(e){}
+
 };
 
 initDb();

@@ -317,6 +317,38 @@ export class RetailDayBriefService {
    * resumo SÓ das lojas daquele horário (+ "Rede" no último) e envia a owner/admin com telefone — uma vez por (usuário, dia, horário).
    * Só marca como enviado DEPOIS do envio (falhou → retenta no próximo passe). `force` (prévia/manual) envia todos os horários, sem janela/dedupe.
    */
+  /**
+   * Fechamento da noite por NOTIFICAÇÃO (web push) — mesma opt-in (`retail_night_brief_enabled`), mesmos horários por loja, texto e janela do
+   * WhatsApp; dedupe PRÓPRIO por horário (`<dia>#<hh:mm>`, tabela de entregas do push). Destinatário = owner/admin sem loja atribuída COM
+   * subscription (a porta é a do próprio usuário). Marca só depois de ENTREGAR; planta o contexto do FalaTu. `push` injetável.
+   */
+  static async runPushPass(orgId: string, opts: { now: Date; push?: any; force?: boolean }): Promise<{ sent: number; skipped: number; reasons: string[] }> {
+    const out = { sent: 0, skipped: 0, reasons: [] as string[] };
+    if (!this.enabled(orgId)) return out;
+    const { dateSP, min } = spMinutes(opts.now);
+    const slots = this.slots(orgId, dateSP);
+    const due = opts.force ? slots : slots.filter((sl) => min >= sl.min && min < Math.min(sl.min + SLOT_WINDOW_MIN, 1440));
+    if (!due.length) return out;
+    const { RetailAfternoonBriefService } = await import("./RetailAfternoonBriefService.js");
+    const { FalaTuPushService } = await import("./FalaTuPushService.js");
+    const users = await RetailAfternoonBriefService.pushRecipients(orgId);
+    if (!users.length) return out;
+    const snap = this.nightSnapshot(orgId, dateSP);
+    for (const sl of due) {
+      const mine = snap.stores.filter((st) => sl.storeIds.includes(st.storeId));
+      if (!mine.some((st) => st.cota.state === "value" || st.venda.state === "value")) { out.skipped += 1; out.reasons.push("no_content"); continue; }
+      const payload = FalaTuPushService.briefNotification("Fechamento da noite", this.nightText(snap, { storeIds: sl.storeIds, withNetwork: sl.last }));
+      const key = `${dateSP}#${sl.time}`;
+      for (const userId of users) {
+        if (!opts.force && FalaTuPushService.alreadySent(orgId, userId, key)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
+        const r = await FalaTuPushService.sendToUser(orgId, userId, payload, { push: opts.push });
+        if (r.sent > 0) { FalaTuPushService.markSent(orgId, userId, key); this.seedConversation(orgId, userId, mine, opts.now); out.sent += 1; }
+        else { out.skipped += 1; out.reasons.push(r.reason || "push_failed"); }
+      }
+    }
+    return out;
+  }
+
   /** §13 — o fechamento da noite continua em conversa: destaca a loja de menor atingimento ainda abaixo da meta (senão nenhuma → o FalaTu pergunta a loja). */
   private static seedConversation(orgId: string, userId: string, stores: NightStore[], now: Date): void {
     try {

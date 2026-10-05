@@ -596,6 +596,7 @@
     "test:monthly-goal-dispute": "tsx scripts/test-monthly-goal-dispute.ts",
     "test:briefing-conversation": "tsx scripts/test-briefing-conversation.ts",
     "test:command-bar": "tsx scripts/test-command-bar.ts",
+    "test:retail-brief-push": "tsx scripts/test-retail-brief-push.ts",
     "test:admin-user-move-org": "tsx scripts/test-admin-user-move-org.ts",
     "test:retail-brief-switches": "tsx scripts/test-retail-brief-switches.ts",
     "test:whatsapp-recipients": "tsx scripts/test-whatsapp-recipients.ts",

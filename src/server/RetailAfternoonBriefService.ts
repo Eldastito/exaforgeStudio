@@ -242,6 +242,40 @@ export class RetailAfternoonBriefService {
     } catch { /* noop */ }
   }
 
+  /**
+   * Quem recebe a NOTIFICAÇÃO (web push) do resumo da REDE: os mesmos owner/admin sem loja atribuída (a trava por loja vale aqui também),
+   * mas a porta é a SUBSCRIPTION do próprio usuário (não exige telefone nem canal de WhatsApp).
+   */
+  static async pushRecipients(orgId: string): Promise<string[]> {
+    const { FalaTuPushService } = await import("./FalaTuPushService.js");
+    const rows = db.prepare(`SELECT id, role FROM users WHERE organization_id = ? AND role IN ('owner', 'admin') AND COALESCE(global_status, 'active') = 'active'`).all(orgId) as any[];
+    return rows.filter((r) => RetailStoreScopeService.allowed(orgId, r.id, r.role).unrestricted && FalaTuPushService.hasActiveSubscription(orgId, r.id)).map((r) => r.id);
+  }
+
+  /**
+   * Parcial das 16h por NOTIFICAÇÃO (web push) — mesma opt-in da rotina (`retail_afternoon_brief_enabled`), mesmo snapshot/texto/janela,
+   * dedupe PRÓPRIO (`<dia>#16h`, tabela de entregas do push). Só marca depois de ENTREGAR; best-effort (nunca derruba o tick).
+   * Também planta o contexto do FalaTu ("Por quê?" ao abrir o app). `push` injetável (teste sem rede).
+   */
+  static async runPushPass(orgId: string, opts: { now: Date; push?: any; force?: boolean }): Promise<{ sent: number; skipped: number; reasons: string[] }> {
+    const out = { sent: 0, skipped: 0, reasons: [] as string[] };
+    if (!this.enabled(orgId)) return out;
+    const { dateSP, hourSP } = FalaTuBriefingDigestService.spParts(opts.now);
+    if (!opts.force && (hourSP < WINDOW_START || hourSP >= WINDOW_END)) return out;
+    const snap = this.snapshot(orgId, dateSP, { now: opts.now });
+    if (!this.hasContent(snap)) { out.skipped += 1; out.reasons.push("no_content"); return out; }
+    const { FalaTuPushService } = await import("./FalaTuPushService.js");
+    const payload = FalaTuPushService.briefNotification(`Parcial das ${CUTOFF_HOUR}h`, this.text(snap));
+    const key = `${dateSP}#${CUTOFF_HOUR}h`;
+    for (const userId of await this.pushRecipients(orgId)) {
+      if (!opts.force && FalaTuPushService.alreadySent(orgId, userId, key)) { out.skipped += 1; out.reasons.push("already_sent"); continue; }
+      const r = await FalaTuPushService.sendToUser(orgId, userId, payload, { push: opts.push });
+      if (r.sent > 0) { FalaTuPushService.markSent(orgId, userId, key); this.seedConversation(orgId, userId, snap, opts.now); out.sent += 1; }
+      else { out.skipped += 1; out.reasons.push(r.reason || "push_failed"); }
+    }
+    return out;
+  }
+
   /** Só há o que dizer se alguma loja tem meta ou vendas hoje (dia sem nada não gera mensagem). */
   static hasContent(s: AfternoonSnapshot): boolean {
     return s.stores.some((st) => st.meta.state === "value" || st.vendido.state === "value");

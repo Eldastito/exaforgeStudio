@@ -34,6 +34,12 @@ const REFUSAL_TEXT: Record<string, string> = {
   action_already_executed: "o efeito já tinha sido executado antes (não repito para não duplicar)",
   no_handler: "não existe um executor cadastrado para este comando",
   handler_error: "o executor tentou realizar o efeito e falhou",
+  autonomy_paused: "o dono pausou a autonomia (kill switch) e nenhum efeito sai enquanto estiver pausado",
+  confidence_below_min: "a confiança desta ação está abaixo do mínimo que o dono exigiu para executar",
+  amount_above_limit: "o valor desta ação está acima do teto de execução definido pelo dono",
+  amount_unknown: "há um teto de execução e o valor desta ação é desconhecido, então não dá para provar que cabe no limite",
+  data_stale: "o dado em que a ação se baseia está mais velho do que o limite definido pelo dono",
+  data_freshness_unknown: "há um limite de idade do dado e a ação não informa de quando é o dado, então não dá para afirmar que está atualizado",
 };
 
 const SOURCE_TEXT: Record<string, string> = {
@@ -175,6 +181,8 @@ export class ExecutionTraceService {
       if (snap.humanOnly) parts.push("É um tipo de ação que o ZapFlow NUNCA aprova sozinho (compras, pagamentos, comissão, salário, contratos…).");
       if (snap.floorApplied) parts.push("A regra configurada permitiria aprovar automaticamente, mas essa trava de segurança não deixou.");
       if (snap.autonomy) parts.push(`Nível de autonomia: ${snap.autonomy.label}.`);
+      const gk = snap.gates ? Object.keys(snap.gates) : [];
+      if (gk.length) parts.push(`Travas de segurança ativas para executar: ${[snap.gates.minConfidence != null ? "confiança mínima" : null, snap.gates.maxExecuteAmount != null ? "teto de valor" : null, snap.gates.maxDataAgeMinutes != null ? "idade máxima do dado" : null].filter(Boolean).join(", ")}.`);
       policySummary = parts.join(" ");
     } else {
       policySummary = "Ação anterior ao registro da política: não há foto do que valia na época.";

@@ -938,6 +938,7 @@
     "test:autonomy-contract": "tsx scripts/test-autonomy-contract.ts",
     "test:autonomy-floor": "tsx scripts/test-autonomy-floor.ts",
     "test:action-why": "tsx scripts/test-action-why.ts",
+    "test:autonomy-guard": "tsx scripts/test-autonomy-guard.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

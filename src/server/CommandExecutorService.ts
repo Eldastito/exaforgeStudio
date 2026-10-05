@@ -1,6 +1,7 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
 import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
+import { AutonomyKillSwitchService } from "./AutonomyKillSwitchService.js";
 
 /**
  * CommandExecutorService — Maestro 2.0, executor GOVERNADO (ADR-136 C5 → ADR-152 F2.2).
@@ -241,6 +242,14 @@ export class CommandExecutorService {
       throw new Error(msg);
     }
 
+    // ── Kill switch (ADR-204 F3.1c): pausa do dono bloqueia TODO efeito, mesmo de ação já aprovada por pessoa.
+    const paused = AutonomyKillSwitchService.isPaused(orgId, action.domain, action.action_type);
+    if (paused) {
+      const msg = `Autonomia pausada pelo dono (${paused.scope === "org" ? "empresa inteira" : "este tipo de ação"}): ${paused.reason}`;
+      this.logRejected(orgId, actionId, attempt, handler.key, "autonomy_paused", msg, action.command_payload_json, action.correlation_id);
+      throw new Error(msg);
+    }
+
     // ── G1 + G2: política + modo de execução.
     const cfg = db.prepare(`SELECT autonomy_level, execution_mode, active FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ?`)
       .get(orgId, action.domain, action.action_type) as any;
@@ -257,6 +266,13 @@ export class CommandExecutorService {
     if (modeLevel < EXECUTION_MODE_LEVELS.approved_execution) {
       this.logRejected(orgId, actionId, attempt, handler.key, "execution_mode_blocked", `execution_mode='${cfg.execution_mode || "assisted"}' bloqueia efeito externo — precisa de 'approved_execution' ou 'autonomous'.`, action.command_payload_json, action.correlation_id);
       throw new Error(`Modo de execução bloqueia efeito externo (${cfg.execution_mode || "assisted"}).`);
+    }
+
+    // ── Travas de segurança opt-in (ADR-204 F3.1c): dado desatualizado, confiança baixa, valor acima do teto.
+    const gate = ApprovalPolicyService.evaluateGates(orgId, action);
+    if (gate) {
+      this.logRejected(orgId, actionId, attempt, handler.key, gate.code, gate.message, action.command_payload_json, action.correlation_id);
+      throw new Error(gate.message);
     }
 
     // Guardas passaram — audita a tentativa como 'executing' (com correlationId,

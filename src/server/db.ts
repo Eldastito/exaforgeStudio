@@ -12312,6 +12312,23 @@ const initDb = () => {
   // quem precisava aprovar, nível de autonomia). Aditivo e nullable: ação anterior ao registro simplesmente não tem.
   try { db.exec(`ALTER TABLE decision_actions ADD COLUMN policy_snapshot_json TEXT`); } catch(e){}
 
+  // ADR-204 F3.1c — KILL SWITCH de autonomia. Uma linha por PAUSA (histórico preservado: retomar só marca resumed_at, nunca apaga).
+  // domain/action_type NULL = a empresa inteira; domain+action_type = só aquele tipo de ação. Ativa = resumed_at IS NULL.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS autonomy_pauses (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      domain TEXT,
+      action_type TEXT,
+      reason TEXT NOT NULL,
+      paused_by TEXT,
+      paused_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      resumed_by TEXT,
+      resumed_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_autonomy_pauses_org ON autonomy_pauses (organization_id, resumed_at);
+  `);
+
 };
 
 initDb();

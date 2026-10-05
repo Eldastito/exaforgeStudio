@@ -1,5 +1,6 @@
 import db from "./db.js";
 import { randomUUID } from "crypto";
+import { AutonomyKillSwitchService } from "./AutonomyKillSwitchService.js";
 
 /**
  * ApprovalPolicyService (ADR-136, Epic 2 — C2).
@@ -145,7 +146,7 @@ export class ApprovalPolicyService {
    * (`humanOnly`) ficam travados em ≤ 2 acima de qualquer configuração.
    */
   static autonomyLevel(orgId: string, input: { domain: string; actionType: string }): {
-    level: 0 | 1 | 2 | 3; label: string; humanOnly: boolean; capped: boolean; level4Blocked: boolean; reason: string;
+    level: 0 | 1 | 2 | 3; label: string; humanOnly: boolean; capped: boolean; level4Blocked: boolean; paused: boolean; reason: string;
   } {
     const humanOnly = this.isHumanOnly(input.actionType);
     const cfg = db.prepare("SELECT autonomy_level, execution_mode, active, max_auto_amount, config_json FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ?")
@@ -171,8 +172,84 @@ export class ApprovalPolicyService {
     }
     let capped = false;
     if (humanOnly && level > 2) { level = 2; capped = true; reason = "tipo do piso (PRD §4): sempre exige aprovação de uma pessoa — a IA só analisa e prepara"; }
+    // ADR-204 F3.1c: pausa do dono (kill switch) bloqueia efeito — a IA no máximo prepara, seja qual for a política.
+    const pause = AutonomyKillSwitchService.isPaused(orgId, input.domain, input.actionType);
+    if (pause) { if (level > 2) level = 2; reason = `autonomia pausada pelo dono (${pause.reason}): nenhum efeito sai, a IA só analisa e prepara`; }
     const label = ["observar", "recomendar", "preparar", "executar dentro de limites"][level];
-    return { level, label, humanOnly, capped, level4Blocked, reason };
+    return { level, label, humanOnly, capped, level4Blocked, paused: !!pause, reason };
+  }
+
+  /**
+   * ADR-204 F3.1c (PRD §37) — TRAVAS opt-in no `execute`, configuradas POR TIPO de ação em `agent_policies.config_json.gates`:
+   *   - `minConfidence` (0–1): confiança da ação abaixo disso → não executa;
+   *   - `maxExecuteAmount` (≥0): impacto financeiro acima disso → não executa; valor DESCONHECIDO também não (não se prova que cabe no limite);
+   *   - `maxDataAgeMinutes` (>0): o dado em que a ação se baseia (`dataAsOf` no comando ou na evidência) mais velho que isso → não executa;
+   *     sem `dataAsOf` não dá pra afirmar que está fresco → não executa.
+   * Sem trava configurada = comportamento de sempre (0-regressão). Retorna `{}` quando não há nenhuma.
+   */
+  static gatesFor(orgId: string, domain: string, actionType: string): { minConfidence?: number; maxExecuteAmount?: number; maxDataAgeMinutes?: number } {
+    try {
+      const cur = db.prepare("SELECT config_json FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ? AND active = 1").get(orgId, domain, actionType) as any;
+      const g = cur?.config_json ? (JSON.parse(cur.config_json)?.gates || {}) : {};
+      const out: any = {};
+      if (Number.isFinite(Number(g.minConfidence)) && g.minConfidence != null) out.minConfidence = Number(g.minConfidence);
+      if (Number.isFinite(Number(g.maxExecuteAmount)) && g.maxExecuteAmount != null) out.maxExecuteAmount = Number(g.maxExecuteAmount);
+      if (Number.isFinite(Number(g.maxDataAgeMinutes)) && g.maxDataAgeMinutes != null) out.maxDataAgeMinutes = Number(g.maxDataAgeMinutes);
+      return out;
+    } catch { return {}; }
+  }
+
+  /**
+   * Liga/ajusta/desliga travas de um tipo de ação. `undefined` mantém, `null` limpa. EXIGE política ativa já existente:
+   * criar uma só para guardar a trava mudaria o que o `dispatchGoverned` faz (ele só semeia política quando não há nenhuma).
+   */
+  static setGates(orgId: string, domain: string, actionType: string, patch: { minConfidence?: number | null; maxExecuteAmount?: number | null; maxDataAgeMinutes?: number | null }): { minConfidence?: number; maxExecuteAmount?: number; maxDataAgeMinutes?: number } {
+    const cur = db.prepare("SELECT id, config_json FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ? AND active = 1").get(orgId, domain, actionType) as any;
+    if (!cur) throw new Error("Defina a política deste tipo de ação antes de configurar as travas de segurança.");
+    let config: any = {};
+    if (cur.config_json) { try { config = JSON.parse(cur.config_json) || {}; } catch { config = {}; } }
+    const gates: any = { ...(config.gates || {}) };
+    const num = (v: any, name: string, ok: (n: number) => boolean, msg: string) => {
+      if (v === undefined) return;
+      if (v === null) { delete gates[name]; return; }
+      const n = Number(v);
+      if (!Number.isFinite(n) || !ok(n)) throw new Error(msg);
+      gates[name] = n;
+    };
+    num(patch.minConfidence, "minConfidence", (n) => n >= 0 && n <= 1, "Confiança mínima deve estar entre 0 e 1.");
+    num(patch.maxExecuteAmount, "maxExecuteAmount", (n) => n >= 0, "O teto de execução não pode ser negativo.");
+    num(patch.maxDataAgeMinutes, "maxDataAgeMinutes", (n) => n > 0, "A idade máxima do dado deve ser maior que zero (minutos).");
+    if (Object.keys(gates).length) config.gates = gates; else delete config.gates;
+    db.prepare("UPDATE agent_policies SET config_json = ? WHERE id = ?").run(JSON.stringify(config), cur.id);
+    return this.gatesFor(orgId, domain, actionType);
+  }
+
+  /**
+   * Avalia as travas contra uma ação (linha de `decision_actions`). `null` = pode seguir. Determinístico, sem efeito.
+   * O código devolvido vira o "Não executei porque…" (ExecutionTraceService.REFUSAL_TEXT).
+   */
+  static evaluateGates(orgId: string, action: any, now: Date = new Date()): { code: string; message: string } | null {
+    const g = this.gatesFor(orgId, action.domain, action.action_type);
+    if (g.minConfidence != null) {
+      const c = action.confidence == null ? null : Number(action.confidence);
+      if (c == null || !Number.isFinite(c) || c < g.minConfidence) return { code: "confidence_below_min", message: `Confiança ${c == null ? "desconhecida" : c.toFixed(2)} abaixo do mínimo exigido (${g.minConfidence}).` };
+    }
+    if (g.maxExecuteAmount != null) {
+      if (action.expected_impact == null || !Number.isFinite(Number(action.expected_impact))) return { code: "amount_unknown", message: `Há teto de execução (${g.maxExecuteAmount}) e o valor da ação é desconhecido — não dá pra provar que cabe no limite.` };
+      if (Math.abs(Number(action.expected_impact)) > g.maxExecuteAmount) return { code: "amount_above_limit", message: `Valor ${Math.abs(Number(action.expected_impact))} acima do teto de execução (${g.maxExecuteAmount}).` };
+    }
+    if (g.maxDataAgeMinutes != null) {
+      let asOf: any = null;
+      for (const raw of [action.command_payload_json, action.evidence_json]) {
+        if (asOf || !raw) continue;
+        try { const o = JSON.parse(raw); asOf = o?.dataAsOf ?? o?.data_as_of ?? null; } catch { /* json torto → sem data */ }
+      }
+      const t = asOf ? new Date(asOf).getTime() : NaN;
+      if (!Number.isFinite(t)) return { code: "data_freshness_unknown", message: `Há limite de idade do dado (${g.maxDataAgeMinutes} min) e a ação não informa de quando é o dado — não dá pra afirmar que está atualizado.` };
+      const ageMin = (now.getTime() - t) / 60000;
+      if (ageMin > g.maxDataAgeMinutes) return { code: "data_stale", message: `Dado de ${Math.round(ageMin)} min atrás, acima do limite de ${g.maxDataAgeMinutes} min.` };
+    }
+    return null;
   }
 
   /**
@@ -198,6 +275,7 @@ export class ApprovalPolicyService {
         floorApplied: !!input.floorApplied,
         contract: { state: contract.state, reason: contract.reason, enforced: contract.enforced, requiredRole: contract.requiredRole },
         autonomy: { level: level.level, label: level.label, level4Blocked: level.level4Blocked, reason: level.reason },
+        gates: this.gatesFor(orgId, input.domain, input.actionType),
         amount: input.amount != null && Number.isFinite(Number(input.amount)) ? Math.abs(Number(input.amount)) : null,
       };
     } catch { return null; }

@@ -127,3 +127,6 @@ Depois que o briefing das 16h, da noite ou da manhã sai por WhatsApp, o dono po
 
 ## F2.11 — barra "Pergunte ou procure"
 Só com o menu simplificado ligado. Digite uma pergunta ("quanto vendi hoje?") e Enter envia ao FalaTu (abre "Conversar" já com a resposta); digite o nome de uma tela ou aba ("comissão", "escala", "estoque") e Enter abre — a aba certa da Operação da Rede quando for o caso. Contatos continuam na lista. Se o usuário não tem FalaTu, a opção Perguntar não aparece. Teste: `npm run test:command-bar`.
+
+## F2.12 — parcial das 16h e fechamento da noite por notificação
+Quem assinou a notificação no aparelho (FalaTu → Briefing → "Resumo diário por notificação") passa a receber também o parcial das 16h e o fechamento da noite, desde que a empresa tenha ligado essas rotinas (as mesmas do WhatsApp). Só dono/admin sem loja atribuída; gerente de loja não recebe o resumo da rede. Se não chegar: confira a flag da rotina, se a subscription está ativa (um endpoint morto é revogado sozinho — reative o toggle) e a janela (16h–18h). Teste: `npm run test:retail-brief-push`.

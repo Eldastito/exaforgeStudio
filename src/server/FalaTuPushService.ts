@@ -91,6 +91,20 @@ export class FalaTuPushService {
     return { subscribed: this.activeSubs(orgId, userId).length > 0, publicKey };
   }
 
+  /** O usuário tem ao menos uma subscription ativa? (A porta do push é a própria subscription — opt-in dele.) */
+  static hasActiveSubscription(orgId: string, userId: string): boolean { return this.activeSubs(orgId, userId).length > 0; }
+
+  /**
+   * Notificação dos briefings de VAREJO (16h / fechamento da noite): título fixo + corpo CURTO (a notificação é uma olhada, não o
+   * relatório): descarta a linha de título do texto, junta os blocos com " · " e corta em ~280 caracteres. O texto completo segue no
+   * WhatsApp/FalaTu — a notificação só chama pra abrir. Sem asteriscos (formatação do WhatsApp).
+   */
+  static briefNotification(title: string, text: string): { title: string; body: string; url: string } {
+    const lines = String(text || "").replace(/\*/g, "").split("\n").map((l) => l.trim());
+    const body = lines.slice(1).filter(Boolean).join(" · ");
+    return { title, body: body.length > 280 ? `${body.slice(0, 277).trimEnd()}…` : body || title, url: "/" };
+  }
+
   private static activeSubs(orgId: string, userId: string): any[] {
     return db.prepare(`SELECT * FROM falatu_push_subscriptions WHERE organization_id = ? AND user_id = ? AND revoked_at IS NULL`).all(orgId, userId);
   }
@@ -140,11 +154,11 @@ export class FalaTuPushService {
     return { title: "FalaTu — seu resumo de hoje", body: text.replace(/\*/g, ""), url: "/" };
   }
 
-  private static alreadySent(orgId: string, userId: string, dateSP: string): boolean {
+  static alreadySent(orgId: string, userId: string, dateSP: string): boolean {
     return !!db.prepare(`SELECT 1 FROM falatu_push_deliveries WHERE organization_id = ? AND user_id = ? AND briefing_date = ?`).get(orgId, userId, dateSP);
   }
 
-  private static markSent(orgId: string, userId: string, dateSP: string): void {
+  static markSent(orgId: string, userId: string, dateSP: string): void {
     try {
       db.prepare(`INSERT INTO falatu_push_deliveries (id, organization_id, user_id, briefing_date) VALUES (?, ?, ?, ?)`)
         .run(randomUUID(), orgId, userId, dateSP);

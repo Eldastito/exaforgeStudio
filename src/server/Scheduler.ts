@@ -134,6 +134,7 @@ export class Scheduler {
     // F1.6d: resumo de fechamento por loja sai no horário de CADA loja (19:30 / 22:30…) — sensível a minutos, então passe rápido (5 min),
     // não o tick horário. O serviço decide horário/janela/dedupe; org sem opt-in retorna na 1ª linha.
     await this.retailNightBriefPass().catch(e => console.error('[Scheduler] fechamento da noite falhou', e));
+    await this.retailBriefPushPass('night').catch(e => console.error('[Scheduler] notificação do fechamento da noite falhou', e));
   }
 
   /** Resolve o catálogo dos itens do PDV ainda pendentes, 1 lote por org/passe. */
@@ -700,6 +701,24 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Varejo — as MESMAS rotinas das 16h e do fechamento da noite, agora por NOTIFICAÇÃO (web push, ADR-203 §12): só orgs que ligaram a rotina
+   * E têm alguma subscription ativa; não exige canal de WhatsApp. Best-effort por org; o serviço decide janela/dedupe/destinatário.
+   */
+  static async retailBriefPushPass(kind: "afternoon" | "night") {
+    let orgs: any[] = [];
+    const flag = kind === "afternoon" ? "retail_afternoon_brief_enabled" : "retail_night_brief_enabled";
+    try { orgs = db.prepare(`SELECT organization_id FROM organization_settings WHERE ${flag} = 1 AND organization_id IN (SELECT organization_id FROM falatu_push_subscriptions WHERE revoked_at IS NULL)`).all() as any[]; } catch { return; }
+    if (!orgs.length) return;
+    const now = new Date();
+    for (const o of orgs) {
+      try {
+        if (kind === "afternoon") { const { RetailAfternoonBriefService } = await import("./RetailAfternoonBriefService.js"); await RetailAfternoonBriefService.runPushPass(o.organization_id, { now }); }
+        else { const { RetailDayBriefService } = await import("./RetailDayBriefService.js"); await RetailDayBriefService.runPushPass(o.organization_id, { now }); }
+      } catch (e) { console.error("[Retail] notificação do briefing falhou", kind, o.organization_id, e); }
+    }
+  }
+
   static async falatuBriefingDigestPass() {
     let orgs: any[] = [];
     try {
@@ -1142,6 +1161,7 @@ export class Scheduler {
     try { this.falatuBriefingPass(); } catch (e: any) { console.error('[Scheduler] sweep de briefing FalaTu falhou', e?.message); }
     await this.falatuBriefingDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por WhatsApp falhou', e));
     await this.retailAfternoonBriefPass().catch(e => console.error('[Scheduler] parcial das 16h falhou', e));
+    await this.retailBriefPushPass('afternoon').catch(e => console.error('[Scheduler] notificação do parcial das 16h falhou', e));
     await this.falatuPushDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por push falhou', e));
     await this.falatuProactiveAlertPass().catch(e => console.error('[Scheduler] alerta proativo FalaTu falhou', e));
     await this.falatuEmailDigestPass().catch(e => console.error('[Scheduler] entrega de briefing FalaTu por e-mail falhou', e));

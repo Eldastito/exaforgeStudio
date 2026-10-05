@@ -57,7 +57,10 @@ export class DecisionActionService {
     // ADR-204 F3.1a (RN-F3-2) — PISO: tipo "sempre exige pessoa" (PRD Fase 3 §4) NUNCA nasce
     // aprovado, nem com banda `allow`/política 'none'/teto de automação. O contrato acima só
     // pode ENDURECER; aqui garantimos o mínimo: aprovação de 1 pessoa.
-    if (ApprovalPolicyService.isHumanOnly(input.actionType) && policy === "none") { policy = "single"; requiredRole = requiredRole || null; }
+    let floorApplied = false;
+    if (ApprovalPolicyService.isHumanOnly(input.actionType) && policy === "none") { policy = "single"; requiredRole = requiredRole || null; floorApplied = true; }
+    // ADR-204 F3.1b: foto da política que governou ESTA ação (best-effort — nunca bloqueia a proposta).
+    const snapshot = ApprovalPolicyService.snapshot(orgId, { domain: input.domain, actionType: input.actionType, amount: input.expectedImpact, policy, requiredRole, floorApplied });
     // Política 'none' já nasce aprovada (pronta para concluir); as demais aguardam aprovação.
     const status = policy === "none" ? "approved" : "awaiting_approval";
     const id = randomUUID();
@@ -69,13 +72,13 @@ export class DecisionActionService {
     }
     if (!correlationId) correlationId = randomUUID();
     db.prepare(`INSERT INTO decision_actions
-      (id, organization_id, signal_id, domain, action_type, title, description, priority_score, expected_impact, impact_unit, basis, confidence, status, approval_policy, approval_role, assigned_to, due_at, command_type, command_payload_json, baseline_json, created_by, approved_at, correlation_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (id, organization_id, signal_id, domain, action_type, title, description, priority_score, expected_impact, impact_unit, basis, confidence, status, approval_policy, approval_role, assigned_to, due_at, command_type, command_payload_json, baseline_json, created_by, approved_at, correlation_id, policy_snapshot_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, orgId, input.signalId || null, input.domain, input.actionType, String(input.title).trim(), input.description || null,
         Number(input.priorityScore) || 0, input.expectedImpact != null ? Number(input.expectedImpact) : null, input.impactUnit || null,
         input.basis || "estimate", input.confidence != null ? Number(input.confidence) : 0.7, status, policy, requiredRole,
         input.assignedTo || null, input.dueAt || null, input.commandType || null, input.commandPayload != null ? JSON.stringify(input.commandPayload) : null,
-        input.baseline != null ? JSON.stringify(input.baseline) : null, input.createdBy || "rule", status === "approved" ? new Date().toISOString() : null, correlationId);
+        input.baseline != null ? JSON.stringify(input.baseline) : null, input.createdBy || "rule", status === "approved" ? new Date().toISOString() : null, correlationId, snapshot ? JSON.stringify(snapshot) : null);
     return this.get(orgId, id);
   }
 
@@ -85,6 +88,7 @@ export class DecisionActionService {
     a.approvals = db.prepare("SELECT id, approver_user_id, decision, reason, decided_at FROM action_approvals WHERE action_id = ? AND organization_id = ? ORDER BY decided_at ASC").all(id, orgId);
     a.outcomes = OutcomeMeasurementService.forAction(orgId, id);
     a.command_payload = a.command_payload_json ? safeParse(a.command_payload_json) : null;
+    a.policy_snapshot = a.policy_snapshot_json ? safeParse(a.policy_snapshot_json) : null;
     return a;
   }
 

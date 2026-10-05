@@ -89,5 +89,11 @@ Configuradas por tipo de ação, **só em tipos que já têm política ativa** (
 ### Rollback
 Aditivo: 1 tabela nova, sem colunas nem migração de dados. Desligar as travas = `null` em cada uma; reverter o commit restaura o comportamento anterior.
 
+## F3.1d — Tela "O que a IA pode fazer sozinha" (Configurações → Governança, atalho Empresa → "Autonomia da IA")
+`AutonomyContractPanel` só RENDERIZA `GET /api/actions/autonomy/overview` (piso por categoria em linguagem de dono · cada tipo com nível 0–3 em palavras, travas e pausa · pausa da empresa inteira) e chama as rotas já testadas de pausa/retomada/travas. Dono (ou admin master) vê os botões Pausar/Retomar/Travas; os demais veem tudo em leitura com aviso. **Não existe controle de elevar autonomia** — o nível mostrado é derivado (RN-F3-3). Dinheiro: só o teto que o próprio dono configurou.
+
+### Rollback
+Só front + 1 rota de leitura; remover o `<AutonomyContractPanel />` do `SettingsView` esconde a tela sem tocar no comportamento.
+
 ### Ainda NÃO feito
-Tela Empresa→IA (políticas, pausa e travas visíveis/editáveis) — F3.1d.
+Elevação de autonomia guiada por evidência (F3.7 — `ProgressiveAutonomyService` só propõe; humano aceita). Verificação da tela contra o app completo com autenticação real (feita só em Chromium com API simulada).

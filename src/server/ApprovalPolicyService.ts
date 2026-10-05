@@ -46,20 +46,26 @@ const FINANCIAL_OR_DESTRUCTIVE = new Set([
 // decisão D8 em aberto), `prepare_purchase`/`send_quote_request` (rascunho/cotação,
 // nível 2 — preparar é permitido) e `asaas_pix_charge` (cobrar cliente é receber).
 // Tipos novos que comprometam dinheiro/pessoas/contrato DEVEM entrar aqui.
-const HUMAN_ONLY_ACTION_TYPES = new Set([
-  // compras
-  "create_purchase_order", "choose_supplier", "confirm_purchase", "send_purchase_order",
-  // pagamentos e transferência de dinheiro
-  "issue_payment", "pay_bill", "pay_supplier", "pay_invoice", "transfer_funds", "bank_transfer", "pix_transfer", "send_pix",
-  // contratação/demissão e salário
-  "hire", "dismiss", "terminate_employee", "change_salary", "adjust_salary", "payroll_change",
-  // comissão consolidada
-  "confirm_commission", "consolidate_commission", "pay_commission", "commission_payout",
-  // desconto relevante e preço
-  "change_price", "bulk_price_change", "bulk_discount", "grant_large_discount",
-  // crédito, compromisso contratual, comunicação jurídica
-  "take_loan", "request_credit", "sign_contract", "contract_commitment", "sign_agreement", "send_legal_notice", "legal_communication",
-]);
+const HUMAN_ONLY_CATEGORIES: Record<string, { label: string; types: string[] }> = {
+  compras: { label: "Compras", types: ["create_purchase_order", "choose_supplier", "confirm_purchase", "send_purchase_order"] },
+  pagamentos: { label: "Pagamentos e transferência de dinheiro", types: ["issue_payment", "pay_bill", "pay_supplier", "pay_invoice", "transfer_funds", "bank_transfer", "pix_transfer", "send_pix"] },
+  pessoas: { label: "Contratação, demissão e salário", types: ["hire", "dismiss", "terminate_employee", "change_salary", "adjust_salary", "payroll_change"] },
+  comissao: { label: "Comissão consolidada", types: ["confirm_commission", "consolidate_commission", "pay_commission", "commission_payout"] },
+  preco: { label: "Preço e descontos relevantes", types: ["change_price", "bulk_price_change", "bulk_discount", "grant_large_discount"] },
+  credito_contrato: { label: "Empréstimo, contratos e comunicação jurídica", types: ["take_loan", "request_credit", "sign_contract", "contract_commitment", "sign_agreement", "send_legal_notice", "legal_communication"] },
+};
+const HUMAN_ONLY_ACTION_TYPES = new Set<string>(Object.values(HUMAN_ONLY_CATEGORIES).flatMap((c) => c.types));
+
+// Nome em linguagem de dono dos tipos de ação mais comuns (a tela Empresa → Autonomia da IA). Desconhecido → "Ação interna".
+const ACTION_LABELS: Record<string, string> = {
+  create_task: "Tarefas internas", internal_reminder: "Lembretes internos", register_financial_plan: "Plano financeiro",
+  prepare_campaign: "Preparar campanha", send_campaign: "Enviar campanha", prepare_purchase: "Preparar compra", send_quote_request: "Pedir cotação",
+  collection: "Cobrança", collection_followup: "Cobrança — acompanhamento", collection_resend_pix: "Cobrança — reenvio do PIX", collection_promise_followup: "Cobrança — promessa de pagamento",
+  sales_recovery_send: "Recuperação de venda", prospect_outreach_whatsapp: "Prospecção por WhatsApp", prospect_outreach_email: "Prospecção por e-mail",
+  social_publish: "Publicação em redes sociais", growth_optimization: "Otimização de conteúdo", auto_booking: "Agendamento automático",
+  refund: "Reembolso", retail_transfer: "Transferência de estoque entre lojas", retail_post_closing: "Lançamento do fechamento da loja", retail_closing_review: "Revisão do fechamento da loja",
+  order_reship: "Reenvio de pedido", ticket_assign: "Atribuir atendimento", internal_handoff: "Repasse para a equipe", customer_private_message: "Mensagem privada ao cliente",
+};
 
 // Quem aprova NÃO pode ser um rótulo de sistema ("rule", "runtime", "ai"…): o piso exige
 // uma pessoa. Os callers legítimos passam o `user.id` real.
@@ -250,6 +256,30 @@ export class ApprovalPolicyService {
       if (ageMin > g.maxDataAgeMinutes) return { code: "data_stale", message: `Dado de ${Math.round(ageMin)} min atrás, acima do limite de ${g.maxDataAgeMinutes} min.` };
     }
     return null;
+  }
+
+  /**
+   * ADR-204 F3.1d (PRD §34) — visão para a tela Empresa → Autonomia da IA, em linguagem de dono: o que SEMPRE exige uma
+   * pessoa (por categoria), cada política ativa da empresa com seu nível 0–3 (derivado) e a pausa/travas daquele tipo, e a
+   * pausa da empresa inteira. Read-only; o nível mostrado é DERIVADO da política — a tela não cria uma forma nova de elevar
+   * a autonomia (RN-F3-3). Isolado por organização.
+   */
+  static overview(orgId: string): any {
+    const rows = db.prepare("SELECT domain, action_type FROM agent_policies WHERE organization_id = ? AND active = 1 ORDER BY domain, action_type").all(orgId) as any[];
+    const policies = rows.map((r) => {
+      const lv = this.autonomyLevel(orgId, { domain: r.domain, actionType: r.action_type });
+      const pause = AutonomyKillSwitchService.isPaused(orgId, r.domain, r.action_type);
+      return {
+        domain: r.domain, actionType: r.action_type, label: ACTION_LABELS[r.action_type] || "Ação interna",
+        level: lv.level, levelLabel: lv.label, humanOnly: lv.humanOnly, paused: lv.paused,
+        pausedScope: pause ? pause.scope : null, reason: lv.reason, gates: this.gatesFor(orgId, r.domain, r.action_type),
+      };
+    });
+    return {
+      pause: AutonomyKillSwitchService.status(orgId),
+      humanOnly: Object.entries(HUMAN_ONLY_CATEGORIES).map(([key, c]) => ({ key, label: c.label, types: [...c.types] })),
+      policies,
+    };
   }
 
   /**

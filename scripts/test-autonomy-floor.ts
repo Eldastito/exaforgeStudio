@@ -57,12 +57,12 @@ async function main() {
     compras: ["create_purchase_order", "choose_supplier"], pagamentos: ["issue_payment", "pay_bill"], "transferência de dinheiro": ["transfer_funds", "pix_transfer"],
     "contratação/demissão": ["hire", "dismiss"], "alteração salarial": ["change_salary"], "comissão consolidada": ["consolidate_commission", "pay_commission"],
     "desconto relevante": ["grant_large_discount"], "preço em massa": ["bulk_price_change", "change_price"], empréstimo: ["take_loan"],
-    "compromisso contratual": ["sign_contract"], "comunicação jurídica": ["send_legal_notice"],
+    "compromisso contratual": ["sign_contract"], "reembolso/estorno (D8)": ["refund", "issue_refund"], "comunicação jurídica": ["send_legal_notice"],
   };
   for (const [cat, types] of Object.entries(cats)) check(`piso cobre ${cat} (${types.join(", ")})`, types.every((t) => P.isHumanOnly(t)));
   check("lista pública é ordenada e sem duplicata", human.length === new Set(human).size && [...human].sort().join() === human.join());
-  const free = ["collection", "collection_followup", "collection_resend_pix", "prepare_purchase", "send_quote_request", "create_task", "retail_transfer", "refund", "asaas_pix_charge", "social_publish", "sales_recovery_send", "prospect_outreach_whatsapp"];
-  check("NÃO pega cobrança/mensagem/rascunho/transferência de ESTOQUE/refund (0-regressão)", free.every((t) => !P.isHumanOnly(t)), free.filter((t) => P.isHumanOnly(t)).join());
+  const free = ["collection", "collection_followup", "collection_resend_pix", "prepare_purchase", "send_quote_request", "create_task", "retail_transfer", "asaas_pix_charge", "social_publish", "sales_recovery_send", "prospect_outreach_whatsapp"];
+  check("NÃO pega cobrança/mensagem/rascunho/transferência de ESTOQUE (0-regressão)", free.every((t) => !P.isHumanOnly(t)), free.filter((t) => P.isHumanOnly(t)).join());
   check("é por TIPO, não por domínio: `finance`+collection continua livre", !P.isHumanOnly("collection") && P.isFinancialOrDestructive("finance", "collection"));
   check("isHumanOnly tolera vazio/nulo", !P.isHumanOnly(null) && !P.isHumanOnly(undefined) && !P.isHumanOnly(""));
 
@@ -81,7 +81,9 @@ async function main() {
   const task = D.propose(A, { domain: "tasks", actionType: "create_task", title: "T" });
   check("tarefa interna segue 'none' → aprovada (0-regressão)", task.status === "approved" && task.approval_policy === "none");
   P.setBands(A, "finance", "refund", [{ upTo: 500, state: "allow" }, { upTo: null, state: "deny" }]);
-  check("refund com banda do dono segue auto-aprovando (decisão D8 em aberto, ADR-159 preservado)", D.propose(A, { domain: "finance", actionType: "refund", title: "Estorno", expectedImpact: 100 }).status === "approved");
+  const rf = D.propose(A, { domain: "finance", actionType: "refund", title: "Estorno", expectedImpact: 100 });
+  check("D8: refund com banda `allow` NÃO auto-aprova — awaiting_approval, policy ≠ none", rf.status === "awaiting_approval" && rf.approval_policy !== "none", `${rf.status}/${rf.approval_policy}`);
+  check("D8: refund não é aprovável por rótulo de sistema", throws(() => D.approve(A, rf.id, "runtime")));
 
   // ── C) approve ──
   const sys = ["runtime", "rule", "ai", "system", "scheduler", "agent:cobranca", "mission-runner", "", "   "];

@@ -42,13 +42,14 @@ const FINANCIAL_OR_DESTRUCTIVE = new Set([
 // que NÃO é comprometer dinheiro da empresa e segue como está. O piso vale acima de
 // qualquer banda `allow`, política semeada ou `max_auto_amount` — o Autonomy Contract
 // continua podendo ENDURECER (deny/escalar), nunca afrouxar abaixo daqui.
-// Fora de propósito: `refund` (banda configurada pelo dono, ADR-159, segue valendo —
-// decisão D8 em aberto), `prepare_purchase`/`send_quote_request` (rascunho/cotação,
+// D8 (dono, 2026-10): reembolso/estorno é dinheiro que SAI — entra no piso (a banda `allow` não o auto-aprova).
+// Fora de propósito: `prepare_purchase`/`send_quote_request` (rascunho/cotação,
 // nível 2 — preparar é permitido) e `asaas_pix_charge` (cobrar cliente é receber).
 // Tipos novos que comprometam dinheiro/pessoas/contrato DEVEM entrar aqui.
 const HUMAN_ONLY_CATEGORIES: Record<string, { label: string; types: string[] }> = {
   compras: { label: "Compras", types: ["create_purchase_order", "choose_supplier", "confirm_purchase", "send_purchase_order"] },
   pagamentos: { label: "Pagamentos e transferência de dinheiro", types: ["issue_payment", "pay_bill", "pay_supplier", "pay_invoice", "transfer_funds", "bank_transfer", "pix_transfer", "send_pix"] },
+  reembolso: { label: "Reembolso e estorno ao cliente", types: ["refund", "issue_refund", "customer_refund", "chargeback_refund"] },
   pessoas: { label: "Contratação, demissão e salário", types: ["hire", "dismiss", "terminate_employee", "change_salary", "adjust_salary", "payroll_change"] },
   comissao: { label: "Comissão consolidada", types: ["confirm_commission", "consolidate_commission", "pay_commission", "commission_payout"] },
   preco: { label: "Preço e descontos relevantes", types: ["change_price", "bulk_price_change", "bulk_discount", "grant_large_discount"] },

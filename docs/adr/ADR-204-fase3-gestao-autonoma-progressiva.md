@@ -1,6 +1,6 @@
 # ADR-204 — ZapFlow Fase 3: Gestão Autônoma Progressiva, Inteligência Preditiva e Aprendizado do Negócio
 
-**Estado:** **F3.0 FECHADA (doc-only: análise + este plano)** · demais fatias **NÃO iniciadas** · aguardam aprovação do dono (§5).
+**Estado:** **F3.0 FECHADA (doc-only)** · **F3.1a EM PR** (piso de autonomia + níveis 0–4 derivados; D1/D2/D5 aceitas pelo dono) · demais fatias **NÃO iniciadas**.
 **Cliente-piloto:** TOULON. **Base:** Fases 1 e 2 (Fase 2 encerrada por decisão do dono em 2026-10-05 **com o piloto não evidenciado** — ADR-203 §7).
 **Análise:** `docs/prd/ANALISE-PRD-FASE3-vs-CODEBASE.md` (matriz PRD→código, com evidência de arquivo e achados verificados).
 
@@ -59,3 +59,10 @@ Decisão que melhora · fonte e frescor · como o parcial é indicado · fato/es
 ## 8. Limites desta F3.0
 
 Doc-only: nenhuma linha de código alterada. Auditoria sem execução; pontos não lidos em profundidade estão listados em `ANALISE-PRD-FASE3-vs-CODEBASE.md` §6 e devem ser reconfirmados por cada fatia antes de implementar.
+
+## 9. Status F3.1a — EM PR (piso de autonomia)
+Primeira sub-fatia da F3.1 (a F3.1 inteira é grande demais p/ 1 PR: b = snapshot da política + "por que", c = gates no `execute` + kill switch, d = tela Empresa→IA). **Decisões do dono:** D1 (níveis 0–4 como mapa derivado, sem Nível 4), D2 (`dispatchGoverned` mantém mensagens, recusa tipo do piso), D5 (F3.1 primeiro, compras só análise).
+**Entrega:** `ApprovalPolicyService.isHumanOnly/humanOnlyTypes/isSystemActor/autonomyLevel`; piso imposto em `DecisionActionService.propose/approve`, `CommandExecutorService.execute` (recusa auditada `human_approval_missing`) e `dispatchGoverned`; rotas `GET /api/actions/autonomy-floor` e `/autonomy-level`. `test:autonomy-floor` (55). Runbook `docs/runbook/autonomia-operacao.md`.
+**Decisões de desenho:** piso por **TIPO** (o domínio `finance` carrega cobrança, que segue livre); `refund`, `asaas_pix_charge`, `collection*`, `prepare_purchase` e `retail_transfer` ficam FORA de propósito (runbook). **D8 (nova, em aberto):** travar `refund` no piso também?
+**Mudança deliberada de comportamento:** banda `allow` deixa de auto-aprovar **compra** (`create_purchase_order`); `test-autonomy-contract` teve 1 asserção ajustada com comentário. Nada mais mudou.
+**Checklist PRD §48:** decisão melhorada = nunca comprometer dinheiro/pessoas/contrato sem pessoa · fonte = `agent_policies`+`action_approvals` · nível aplicado = ≤2 p/ o piso · quem autoriza = pessoa (RBAC/ADR-159 preservado) · limite financeiro = n/a (o piso não depende de valor) · reversível = reverter o commit · auditoria = `action_execution_log.error_code` · kill switch/gates stale/snapshot = **F3.1b/c** · motor duplicado = nenhum (estende `ApprovalPolicyService`).

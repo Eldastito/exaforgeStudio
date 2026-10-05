@@ -33,6 +33,37 @@ const FINANCIAL_OR_DESTRUCTIVE = new Set([
   "delete_record", "cancel_subscription", "asaas_pix_charge",
 ]);
 
+// ADR-204 F3.1a (RN-F3-2) — PISO DE AUTONOMIA: tipos de ação que SEMPRE exigem
+// aprovação de uma PESSOA (PRD Fase 3 §4): compras, pagamentos/transferência de
+// dinheiro, contratação/demissão, salário, comissão consolidada, desconto relevante,
+// preço, crédito, compromisso contratual e comunicação jurídica. É por TIPO (não por
+// domínio): `domain==='finance'` também carrega cobrança/mensagem (ex.: `collection`),
+// que NÃO é comprometer dinheiro da empresa e segue como está. O piso vale acima de
+// qualquer banda `allow`, política semeada ou `max_auto_amount` — o Autonomy Contract
+// continua podendo ENDURECER (deny/escalar), nunca afrouxar abaixo daqui.
+// Fora de propósito: `refund` (banda configurada pelo dono, ADR-159, segue valendo —
+// decisão D8 em aberto), `prepare_purchase`/`send_quote_request` (rascunho/cotação,
+// nível 2 — preparar é permitido) e `asaas_pix_charge` (cobrar cliente é receber).
+// Tipos novos que comprometam dinheiro/pessoas/contrato DEVEM entrar aqui.
+const HUMAN_ONLY_ACTION_TYPES = new Set([
+  // compras
+  "create_purchase_order", "choose_supplier", "confirm_purchase", "send_purchase_order",
+  // pagamentos e transferência de dinheiro
+  "issue_payment", "pay_bill", "pay_supplier", "pay_invoice", "transfer_funds", "bank_transfer", "pix_transfer", "send_pix",
+  // contratação/demissão e salário
+  "hire", "dismiss", "terminate_employee", "change_salary", "adjust_salary", "payroll_change",
+  // comissão consolidada
+  "confirm_commission", "consolidate_commission", "pay_commission", "commission_payout",
+  // desconto relevante e preço
+  "change_price", "bulk_price_change", "bulk_discount", "grant_large_discount",
+  // crédito, compromisso contratual, comunicação jurídica
+  "take_loan", "request_credit", "sign_contract", "contract_commitment", "sign_agreement", "send_legal_notice", "legal_communication",
+]);
+
+// Quem aprova NÃO pode ser um rótulo de sistema ("rule", "runtime", "ai"…): o piso exige
+// uma pessoa. Os callers legítimos passam o `user.id` real.
+const SYSTEM_ACTOR = /^(rule|ai|runtime|system|scheduler|agent|autopilot|mission|playbook|process|cron|bot)([:_\-\s]|$)/i;
+
 // Matriz padrão por tipo de ação (PRD §10.2). Chave = action_type.
 const DEFAULTS: Record<string, { policy: ApprovalPolicy; role?: string }> = {
   create_task: { policy: "none" },
@@ -91,6 +122,57 @@ export class ApprovalPolicyService {
    */
   static isFinancialOrDestructive(domain: string, actionType: string): boolean {
     return FINANCIAL_OR_DESTRUCTIVE.has(actionType) || domain === "finance";
+  }
+
+  /** ADR-204 F3.1a — o tipo cai no PISO "sempre exige pessoa" (PRD Fase 3 §4)? Lista pública p/ a UI/Empresa→IA. */
+  static isHumanOnly(actionType: string | null | undefined): boolean {
+    return !!actionType && HUMAN_ONLY_ACTION_TYPES.has(String(actionType));
+  }
+  static humanOnlyTypes(): string[] { return Array.from(HUMAN_ONLY_ACTION_TYPES).sort(); }
+
+  /** O ator é um rótulo de SISTEMA (não uma pessoa)? Vazio também conta — sem identidade não há pessoa. */
+  static isSystemActor(actorId: string | null | undefined): boolean {
+    const a = String(actorId ?? "").trim();
+    return !a || SYSTEM_ACTOR.test(a);
+  }
+
+  /**
+   * ADR-204 F3.1a (D1) — nível de autonomia 0–4 do PRD, DERIVADO de
+   * `autonomy_level × execution_mode × (aprovação automática?)` — NÃO é enum novo
+   * (RN-F3-1). 0 observar · 1 recomendar · 2 preparar (aguarda autorização) ·
+   * 3 executar dentro de limites pré-autorizados · 4 autonomia avançada (NÃO habilitado
+   * nesta fase: `autonomous` aparece como 3 com `level4Blocked`). Tipos do piso
+   * (`humanOnly`) ficam travados em ≤ 2 acima de qualquer configuração.
+   */
+  static autonomyLevel(orgId: string, input: { domain: string; actionType: string }): {
+    level: 0 | 1 | 2 | 3; label: string; humanOnly: boolean; capped: boolean; level4Blocked: boolean; reason: string;
+  } {
+    const humanOnly = this.isHumanOnly(input.actionType);
+    const cfg = db.prepare("SELECT autonomy_level, execution_mode, active, max_auto_amount, config_json FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ?")
+      .get(orgId, input.domain, input.actionType) as any;
+    let level: 0 | 1 | 2 | 3 = 1;
+    let level4Blocked = false;
+    let reason = "sem política: a IA só recomenda";
+    if (cfg && Number(cfg.active)) {
+      const auto = String(cfg.autonomy_level || "suggest");
+      const mode = String(cfg.execution_mode || "assisted");
+      if (auto === "observe") { level = 0; reason = "política 'observe': a IA só observa e relata"; }
+      else if (auto === "suggest") { level = 1; reason = "política 'suggest': a IA recomenda e a pessoa decide"; }
+      else if (auto === "prepare") { level = 2; reason = "política 'prepare': a IA prepara e aguarda autorização"; }
+      else if (auto === "execute") {
+        const canEffect = mode === "approved_execution" || mode === "autonomous";
+        let autoApprove = (DEFAULTS[input.actionType] || DEFAULT_FALLBACK).policy === "none" || cfg.max_auto_amount != null;
+        try { const c = JSON.parse(cfg.config_json || "{}"); if (Array.isArray(c?.bands) && c.bands.some((b: any) => b?.state === "allow")) autoApprove = true; } catch { /* config torto */ }
+        if (!canEffect) { level = 2; reason = `execution_mode='${mode}' bloqueia efeito externo: a IA prepara e aguarda autorização`; }
+        else if (!autoApprove) { level = 2; reason = "executa só depois da aprovação de uma pessoa (sem limite pré-autorizado)"; }
+        else { level = 3; reason = "executa dentro de limite pré-autorizado pelo dono"; }
+        if (mode === "autonomous") { level4Blocked = true; reason += " — nível 4 (autonomia avançada) não habilitado nesta fase"; }
+      }
+    }
+    let capped = false;
+    if (humanOnly && level > 2) { level = 2; capped = true; reason = "tipo do piso (PRD §4): sempre exige aprovação de uma pessoa — a IA só analisa e prepara"; }
+    const label = ["observar", "recomendar", "preparar", "executar dentro de limites"][level];
+    return { level, label, humanOnly, capped, level4Blocked, reason };
   }
 
   /**

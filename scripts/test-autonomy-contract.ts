@@ -78,7 +78,10 @@ async function main() {
   // ===== C) propose IMPÕE o contrato (bandas enforced) =====
   const mk = (amount: number) => D.propose(orgA, { domain: "procurement", actionType: "create_purchase_order", title: `Compra ${amount}`, expectedImpact: amount });
   const a1 = mk(1000);
-  check("propose allow (1000): auto-aprovada (status approved, policy none)", a1.status === "approved" && a1.approval_policy === "none");
+  // ADR-204 F3.1a (RN-F3-2): compra é tipo do PISO ("sempre exige pessoa", PRD Fase 3 §4) — a banda
+  // `allow` deixou de auto-aprová-la (mudança deliberada). A auto-aprovação por banda segue valendo p/
+  // os demais tipos (ver `refund` abaixo e test-autonomy-floor).
+  check("propose allow (1000) em COMPRA: NÃO auto-aprova (piso F3.1a) — awaiting_approval, policy ≠ none", a1.status === "awaiting_approval" && a1.approval_policy !== "none");
   const a2 = mk(3000);
   check("propose require_approval (3000): awaiting + policy role + gerente", a2.status === "awaiting_approval" && a2.approval_policy === "role" && a2.approval_role === "gerente");
   const a3 = mk(9000);

@@ -5,6 +5,7 @@ import { OutcomeMeasurementService } from "../OutcomeMeasurementService.js";
 import { CommandExecutorService } from "../CommandExecutorService.js";
 import { StepUpMfaService } from "../StepUpMfaService.js";
 import { UxPresentationService } from "../UxPresentationService.js";
+import { ApprovalPolicyService } from "../ApprovalPolicyService.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -36,6 +37,33 @@ router.get("/cards", (req: AuthRequest, res): any => {
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const statuses = typeof req.query?.status === "string" ? req.query.status.split(",") : undefined;
   res.json({ cards: UxPresentationService.cards(orgId, req.user, { statuses }) });
+});
+
+// GET /api/actions/autonomy-floor — ADR-204 F3.1a: tipos de ação que SEMPRE exigem aprovação de
+// uma pessoa (PRD Fase 3 §4) + o significado dos níveis 0–4 (mapa derivado, sem enum novo).
+// Antes de /:id pra não ser capturada como id="autonomy-floor".
+router.get("/autonomy-floor", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({
+    humanOnly: ApprovalPolicyService.humanOnlyTypes(),
+    levels: [
+      { level: 0, label: "observar", meaning: "A IA identifica e relata." },
+      { level: 1, label: "recomendar", meaning: "A IA apresenta a solução; a pessoa decide." },
+      { level: 2, label: "preparar", meaning: "A IA faz o trabalho e aguarda autorização." },
+      { level: 3, label: "executar dentro de limites", meaning: "A IA executa o que o dono autorizou previamente, dentro do limite." },
+      { level: 4, label: "autonomia avançada", meaning: "Não habilitado nesta fase.", enabled: false },
+    ],
+  });
+});
+
+// GET /api/actions/autonomy-level?domain=&actionType= — nível 0–4 derivado p/ (domínio, tipo) + o porquê.
+router.get("/autonomy-level", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const domain = typeof req.query?.domain === "string" ? req.query.domain : "";
+  const actionType = typeof req.query?.actionType === "string" ? req.query.actionType : "";
+  if (!domain || !actionType) return res.status(400).json({ error: "domain e actionType são obrigatórios." });
+  res.json(ApprovalPolicyService.autonomyLevel(orgId, { domain, actionType }));
 });
 
 router.get("/:id", (req: AuthRequest, res): any => {

@@ -1,6 +1,6 @@
 # ADR-203 — ZapFlow Fase 2: Arquitetura de Experiência, Simplificação Radical e Gestão Conversacional
 
-**Estado:** **F2.0 FECHADA (doc-only)** · **F2.1 EM PR** (roteador de intenções do FalaTu — `ConversationalIntentRules`, `ranking_lojas`/`produtos_parados`/`proposta_campanha`, carimbo de frescor do PDV; `test:falatu-intent-router` 24; runbook `docs/runbook/fase2-experiencia-operacao.md`). **Decisões D1–D5: o dono aceitou as recomendações** (Executando = fachada com Missões como seção · F2.1 antes da navegação · rótulo "Atendimento Digital" · Hoje com meta mensal + parcial · flag só na TOULON, Owner valida desktop+mobile, Gerente/Vendedor em org de teste).
+**Estado:** **FASE 2 ENCERRADA (2026-10-05) — código F2.1–F2.12 em produção (main). Encerramento por DECISÃO DO DONO; o piloto TOULON (§7) NÃO foi evidenciado e segue como pendência de validação.** · F2.0 FECHADA (doc-only) · F2.1 (roteador de intenções do FalaTu — `ConversationalIntentRules`, `ranking_lojas`/`produtos_parados`/`proposta_campanha`, carimbo de frescor do PDV; `test:falatu-intent-router` 24; runbook `docs/runbook/fase2-experiencia-operacao.md`). **Decisões D1–D5: o dono aceitou as recomendações** (Executando = fachada com Missões como seção · F2.1 antes da navegação · rótulo "Atendimento Digital" · Hoje com meta mensal + parcial · flag só na TOULON, Owner valida desktop+mobile, Gerente/Vendedor em org de teste).
 **Cliente-piloto:** TOULON. **Base:** Fase 1 concluída (S1–S9) + prints reais de 02/10/2026.
 **Análise:** `docs/prd/ANALISE-PRD-FASE2-vs-CODEBASE.md` (matriz PRD→código + probe executável das 19 frases do PRD).
 
@@ -72,3 +72,11 @@ Com `simplified_navigation_enabled` LIGADA, o campo do topo (`GlobalSearch`) ofe
 
 ## Status F2.12 — EM PR (PRD §12: briefings por notificação)
 Correção da conferência: o briefing **geral** do FalaTu (manhã) já tinha as 3 portas — WhatsApp, notificação (web push) e **e-mail** (toggles na aba Briefing). Faltavam os dois rituais de **varejo**: o parcial das 16h e o fechamento da noite só saíam por WhatsApp (e exigiam canal conectado). Agora também chegam por **notificação** (`RetailAfternoonBriefService.runPushPass` / `RetailDayBriefService.runPushPass`, `Scheduler.retailBriefPushPass`): mesma opt-in da rotina (flags `retail_*_brief_enabled`), mesmo snapshot/texto/janela, **sem exigir telefone nem WhatsApp** — a porta é a subscription do próprio usuário. Corpo CURTO (a notificação chama; o relatório inteiro segue no WhatsApp/FalaTu); só owner/admin SEM loja atribuída (a trava por loja vale na notificação); dedupe próprio (`<dia>#16h`, `<dia>#<hh:mm>`) na tabela de entregas do push; só marca depois de entregar; endpoint morto (410) é revogado; planta o contexto do FalaTu. `test:retail-brief-push` (17). **Fora:** e-mail dos rituais de varejo (o toggle de e-mail existente cobre só o briefing geral da manhã).
+
+## 7. Encerramento da Fase 2 (2026-10-05)
+
+**Decisão:** o dono encerrou a Fase 2 após o merge da F2.12 (#1831). Código F2.1–F2.12 em `main`, cada fatia com teste e runbook.
+
+**O que o encerramento NÃO afirma** (checklist do PRD §6 ainda sem evidência registrada): (1) validação em **celular** (a barra "Pergunte ou procure" é só desktop `md+`); (2) validação como **vendedor**; (3) consentimento "Medir o uso do menu" ligado na TOULON (default OFF, LGPD) — sem ele não há telemetria de adoção nem base para qualquer aposentadoria de tela (RN-F2-10); (4) prints/roteiro `docs/runbook/fase2-piloto-toulon.md` executado; (5) push real das 16h/noite não exercitado fora de teste com transporte simulado.
+
+**Tratamento:** são pendências de VALIDAÇÃO, não de código. Qualquer defeito achado no piloto entra como correção pontual (bugfix), não como reabertura da fase. Nenhuma tela legada pode ser removida sem a telemetria (RN-F2-10).

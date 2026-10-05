@@ -60,5 +60,34 @@ Regras: dinheiro **role-gated** (§73) — sem visão ampla do negócio os valor
 
 Aditivo (1 coluna nullable), sem migração de dados; reverter o commit restaura o comportamento anterior.
 
-### Ainda NÃO feito (próximas sub-fatias da F3.1)
-Gates de dado desatualizado/baixa confiança/teto financeiro no `execute` (F3.1c) · kill switch por organização e por (domínio, ação) (F3.1c) · tela Empresa→IA (F3.1d).
+## F3.1c — kill switch e travas de segurança
+
+### Kill switch (pausa da autonomia)
+Enquanto estiver ativo, o executor **recusa todo efeito externo** — inclusive de ação já aprovada por pessoa e via `dispatchGoverned` — e a recusa fica **auditada** (`error_code = autonomy_paused`) com o "Não executei porque o dono pausou a autonomia". Propor, preparar, aprovar e explicar **continuam funcionando**: pausar não esconde nada.
+
+| Ação | Rota | Quem |
+| --- | --- | --- |
+| Ver pausas ativas + histórico | `GET /api/actions/autonomy/status` | qualquer usuário da empresa |
+| Pausar (empresa inteira, ou um tipo com `domain`+`actionType`) | `POST /api/actions/autonomy/pause` `{reason, domain?, actionType?}` | **dono** ou admin master |
+| Retomar | `POST /api/actions/autonomy/resume` `{domain?, actionType?}` | **dono** ou admin master |
+
+O **motivo é obrigatório** (vai para a auditoria: `AUTONOMY_PAUSED`/`AUTONOMY_RESUMED`). Pausar de novo a mesma abrangência é idempotente. Retomar só marca `resumed_at` — **nada é apagado** (tabela `autonomy_pauses`). Pausar só um domínio não é suportado: ou a empresa inteira, ou um tipo de ação. O nível 0–3 (`/autonomy-level`) passa a mostrar `paused:true` e a explicar.
+
+Por que tabela própria e não uma linha em `agent_policies`: inserir política para pausar mudaria o que o `dispatchGoverned` faz quando o tipo ainda não tem política e deixaria uma linha restritiva ao retomar.
+
+### Travas de segurança (opt-in — **desligadas por padrão**)
+Configuradas por tipo de ação, **só em tipos que já têm política ativa** (criar uma política só para guardar a trava mudaria o `dispatchGoverned`). Sem trava = comportamento de sempre, nenhuma automação existente muda.
+
+| Trava | Recusa quando | Código |
+| --- | --- | --- |
+| `minConfidence` (0–1) | a confiança da ação é menor — ou desconhecida | `confidence_below_min` |
+| `maxExecuteAmount` (≥ 0) | o valor da ação é maior — **ou desconhecido** (não se prova que cabe no limite) | `amount_above_limit` / `amount_unknown` |
+| `maxDataAgeMinutes` (> 0) | o dado é mais velho — **ou a ação não informa a data** (`dataAsOf` no comando ou na evidência) | `data_stale` / `data_freshness_unknown` |
+
+`PUT /api/actions/autonomy/gates` `{domain, actionType, minConfidence?, maxExecuteAmount?, maxDataAgeMinutes?}` (**só dono**; `null` limpa uma trava, as outras ficam) · `GET /api/actions/autonomy/gates?domain=&actionType=`. Quem produz a ação precisa carregar `dataAsOf` (ISO) no comando ou na evidência para que a trava de idade funcione — sem ele a ação é recusada, de propósito. As travas vigentes entram na foto da política (F3.1b) e a explicação diz "Travas de segurança ativas…".
+
+### Rollback
+Aditivo: 1 tabela nova, sem colunas nem migração de dados. Desligar as travas = `null` em cada uma; reverter o commit restaura o comportamento anterior.
+
+### Ainda NÃO feito
+Tela Empresa→IA (políticas, pausa e travas visíveis/editáveis) — F3.1d.

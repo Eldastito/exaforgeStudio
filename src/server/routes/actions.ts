@@ -8,6 +8,9 @@ import { UxPresentationService } from "../UxPresentationService.js";
 import { ApprovalPolicyService } from "../ApprovalPolicyService.js";
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
 import { ContextProjectionService } from "../ContextProjectionService.js";
+import { AutonomyKillSwitchService } from "../AutonomyKillSwitchService.js";
+import { PermissionService } from "../PermissionService.js";
+import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 
 // Decision & Action Ledger (ADR-136, Epic 2 — C2). Rota core.
 const router = Router();
@@ -20,6 +23,54 @@ router.get("/", (req: AuthRequest, res): any => {
   const status = typeof req.query?.status === "string" ? req.query.status : undefined;
   const domain = typeof req.query?.domain === "string" ? req.query.domain : undefined;
   res.json({ actions: DecisionActionService.list(orgId, { status, domain }) });
+});
+
+// ── ADR-204 F3.1c — kill switch + travas de segurança. Pausar/retomar/configurar: só o DONO (ou o admin master da plataforma).
+const canGovernAutonomy = (req: AuthRequest): boolean =>
+  !!req.organizationId && (PermissionService.isOwner(req.organizationId, req.user) || !!(req.user?.email && req.user.email === MASTER_ADMIN_EMAIL));
+
+// GET /api/actions/autonomy/status — pausas ativas + histórico recente (qualquer usuário da empresa lê; só o dono altera).
+router.get("/autonomy/status", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ...AutonomyKillSwitchService.status(req.organizationId), canGovern: canGovernAutonomy(req) });
+});
+
+// POST /api/actions/autonomy/pause { reason, domain?, actionType? } — sem domain/actionType = a empresa inteira.
+router.post("/autonomy/pause", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!canGovernAutonomy(req)) return res.status(403).json({ error: "Só o dono pode pausar a autonomia." });
+  try { res.status(201).json(AutonomyKillSwitchService.pause(req.organizationId, { domain: req.body?.domain, actionType: req.body?.actionType, reason: req.body?.reason, by: String(req.user?.userId || "") })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/actions/autonomy/resume { domain?, actionType? } — retoma a abrangência indicada.
+router.post("/autonomy/resume", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!canGovernAutonomy(req)) return res.status(403).json({ error: "Só o dono pode retomar a autonomia." });
+  try { res.json(AutonomyKillSwitchService.resume(req.organizationId, { domain: req.body?.domain, actionType: req.body?.actionType, by: String(req.user?.userId || "") })); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/actions/autonomy/gates?domain=&actionType= — travas configuradas (vazio = nenhuma, comportamento de sempre).
+router.get("/autonomy/gates", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const domain = typeof req.query?.domain === "string" ? req.query.domain : "";
+  const actionType = typeof req.query?.actionType === "string" ? req.query.actionType : "";
+  if (!domain || !actionType) return res.status(400).json({ error: "domain e actionType são obrigatórios." });
+  res.json({ domain, actionType, gates: ApprovalPolicyService.gatesFor(req.organizationId, domain, actionType) });
+});
+
+// PUT /api/actions/autonomy/gates { domain, actionType, minConfidence?, maxExecuteAmount?, maxDataAgeMinutes? } — null limpa a trava.
+router.put("/autonomy/gates", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!canGovernAutonomy(req)) return res.status(403).json({ error: "Só o dono pode configurar as travas de segurança." });
+  const { domain, actionType } = req.body || {};
+  if (!domain || !actionType) return res.status(400).json({ error: "domain e actionType são obrigatórios." });
+  try {
+    const b = req.body || {};
+    const gates = ApprovalPolicyService.setGates(req.organizationId, String(domain), String(actionType), { minConfidence: b.minConfidence, maxExecuteAmount: b.maxExecuteAmount, maxDataAgeMinutes: b.maxDataAgeMinutes });
+    res.json({ domain, actionType, gates });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // GET /api/actions/ledger — Impact Ledger unificado (esperado × realizado).

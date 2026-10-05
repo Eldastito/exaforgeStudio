@@ -936,6 +936,7 @@
     "test:sales-recovery-choke-point": "tsx scripts/test-sales-recovery-choke-point.ts",
     "test:prospect-choke-point": "tsx scripts/test-prospect-choke-point.ts",
     "test:autonomy-contract": "tsx scripts/test-autonomy-contract.ts",
+    "test:autonomy-floor": "tsx scripts/test-autonomy-floor.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

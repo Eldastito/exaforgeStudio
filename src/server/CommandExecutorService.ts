@@ -213,6 +213,19 @@ export class CommandExecutorService {
       throw new Error(msg);
     }
 
+    // ── Piso de autonomia (ADR-204 F3.1a / RN-F3-2): tipo "sempre exige pessoa" só executa
+    //    com aprovação HUMANA registrada. Cobre o legado (ação já `approved` por política 'none'
+    //    ou por rótulo de sistema, sem linha em action_approvals) — recusa auditada, não silenciosa.
+    if (ApprovalPolicyService.isHumanOnly(action.action_type)) {
+      const humans = (db.prepare("SELECT approver_user_id FROM action_approvals WHERE action_id = ? AND organization_id = ? AND decision = 'approved' AND approver_user_id IS NOT NULL").all(actionId, orgId) as any[])
+        .filter((r) => !ApprovalPolicyService.isSystemActor(r.approver_user_id)).length;
+      if (humans < 1) {
+        const msg = `Ação restrita (${action.action_type}) sem aprovação de uma pessoa — não executei (RN-F3-2).`;
+        this.logRejected(orgId, actionId, attempt, handler.key, "human_approval_missing", msg, action.command_payload_json, action.correlation_id);
+        throw new Error(msg);
+      }
+    }
+
     // ── Idempotência REAL do efeito externo (ADR-159 F2/D1). No sucesso, o
     //    execute grava `executed_at` mas mantém o status 'approved' (a ação só
     //    vira terminal no complete/outcome C2b) — e `executed_at` também é setado
@@ -322,6 +335,11 @@ export class CommandExecutorService {
     commandType: string; commandPayload: any;
     correlationId?: string | null; createdBy?: string;
   }): Promise<string | undefined> {
+    // ADR-204 F3.1a (RN-F3-2/D2): esta costura semeia política e AUTO-APROVA (feita p/ mensagens
+    // que já saíam sem gate). Tipo do piso (compras/pagamento/comissão/…) NUNCA passa por aqui.
+    if (ApprovalPolicyService.isHumanOnly(input.actionType)) {
+      throw new Error(`dispatchGoverned não executa ação restrita (${input.actionType}): exige aprovação de uma pessoa (RN-F3-2).`);
+    }
     const { DecisionActionService } = await import("./DecisionActionService.js");
     const actor = input.createdBy || "runtime";
     const pol = db.prepare(`SELECT id FROM agent_policies WHERE organization_id = ? AND domain = ? AND action_type = ?`).get(orgId, input.domain, input.actionType) as any;

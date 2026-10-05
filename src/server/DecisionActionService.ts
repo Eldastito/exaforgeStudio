@@ -54,6 +54,10 @@ export class DecisionActionService {
       if (contract.state === "allow") { policy = "none"; requiredRole = null; }
       else { policy = "role"; requiredRole = contract.requiredRole || requiredRole; } // require_approval | escalate
     }
+    // ADR-204 F3.1a (RN-F3-2) — PISO: tipo "sempre exige pessoa" (PRD Fase 3 §4) NUNCA nasce
+    // aprovado, nem com banda `allow`/política 'none'/teto de automação. O contrato acima só
+    // pode ENDURECER; aqui garantimos o mínimo: aprovação de 1 pessoa.
+    if (ApprovalPolicyService.isHumanOnly(input.actionType) && policy === "none") { policy = "single"; requiredRole = requiredRole || null; }
     // Política 'none' já nasce aprovada (pronta para concluir); as demais aguardam aprovação.
     const status = policy === "none" ? "approved" : "awaiting_approval";
     const id = randomUUID();
@@ -120,9 +124,14 @@ export class DecisionActionService {
     // (o antigo COUNT(DISTINCT COALESCE(...,'?')) contava N nulos como 1),
     // deixando 1 ator sozinho "satisfazer" um two_step.
     if (!actorId) throw new Error("Aprovação exige um usuário identificado (RN-159 D2).");
-    const a = db.prepare("SELECT status, approval_policy, approval_role FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
+    const a = db.prepare("SELECT status, approval_policy, approval_role, action_type FROM decision_actions WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!a) throw new Error("Ação não encontrada.");
     if (a.status !== "awaiting_approval") throw new Error(`Ação não está aguardando aprovação (${a.status}).`);
+    // ADR-204 F3.1a (RN-F3-2): tipo do piso só é aprovado por PESSOA — rótulo de sistema
+    // ("runtime", "rule", "ai"…) não satisfaz, mesmo vindo de um caller interno.
+    if (ApprovalPolicyService.isHumanOnly(a.action_type) && ApprovalPolicyService.isSystemActor(actorId)) {
+      throw new Error(`Ação restrita (${a.action_type}) exige aprovação de uma pessoa — a IA só analisa e prepara (RN-F3-2).`);
+    }
     try {
       db.prepare("INSERT INTO action_approvals (id, organization_id, action_id, required_role, approver_user_id, decision, reason) VALUES (?, ?, ?, ?, ?, 'approved', ?)")
         .run(randomUUID(), orgId, id, a.approval_role || null, actorId, opts.reason || null);

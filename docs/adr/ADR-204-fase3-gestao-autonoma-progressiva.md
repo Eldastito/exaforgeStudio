@@ -82,3 +82,5 @@ Terceira sub-fatia da F3.1 (PRD §37, RN-F3-7/RN-F3-10). **Decisões do dono:** 
 ## 12. Status F3.1d — EM PR (tela Empresa → Autonomia da IA) — F3.1 COMPLETA
 `ApprovalPolicyService.overview` + `GET /api/actions/autonomy/overview` (read-only, `canGovern`) e `AutonomyContractPanel` em Configurações → Governança (já alcançável pelo atalho "Autonomia da IA" de Empresa). Dono pausa/retoma/ajusta travas; demais leem. Sem controle de elevar autonomia (RN-F3-3). `test:autonomy-overview` (16). Verificado em Chromium com API simulada (desktop + celular + modo leitura); **não** verificado contra o app completo com auth real. Com isso o piso, a explicação, o kill switch/travas e a tela da F3.1 estão entregues.
 
+## 13. D8 — `refund` entra no piso (decisão do dono)
+Nova categoria `reembolso` em `HUMAN_ONLY_CATEGORIES` (`refund`, `issue_refund`, `customer_refund`, `chargeback_refund`). Banda `allow` não auto-aprova mais reembolso; `deny` segue valendo. Muda o comportamento antes preservado pela ADR-159 (anotado no runbook).

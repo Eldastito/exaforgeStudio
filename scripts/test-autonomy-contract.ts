@@ -90,7 +90,7 @@ async function main() {
   // deny bloqueia a proposta
   P.setBands(orgA, "finance", "refund", [{ upTo: 500, state: "allow" }, { upTo: null, state: "deny" }]);
   const rOk = D.propose(orgA, { domain: "finance", actionType: "refund", title: "Estorno pequeno", expectedImpact: 100 });
-  check("propose refund 100 (allow): aprovada", rOk.status === "approved");
+  check("propose refund 100 (allow): NÃO auto-aprova (D8 — piso); espera pessoa", rOk.status === "awaiting_approval");
   let denied = false;
   try { D.propose(orgA, { domain: "finance", actionType: "refund", title: "Estorno grande", expectedImpact: 5000 }); } catch { denied = true; }
   check("propose refund 5000 (deny): BLOQUEADA (lança)", denied);

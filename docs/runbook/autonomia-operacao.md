@@ -27,8 +27,10 @@ A IA ainda pode **analisar e preparar** (rascunho/`prepare`) essas ações — s
 
 Tipos do piso ficam **travados em ≤ 2**, sejam quais forem a política e o teto.
 
+### D8 — reembolso no piso (decisão do dono, 2026-10)
+`refund`/`issue_refund`/`customer_refund`/`chargeback_refund` agora SEMPRE exigem uma pessoa (categoria "Reembolso e estorno ao cliente"). Uma banda `allow` ou `max_auto_amount` não os auto-aprova mais; `deny` do dono continua bloqueando. Mudança de comportamento: quem tinha banda `allow` p/ refund passa a ver a ação em "aguardando aprovação".
+
 ### Fora do piso de propósito
-- `refund`: a banda configurada pelo dono (ADR-159) segue valendo. **Decisão D8 em aberto** (travar também?).
 - `prepare_purchase`, `send_quote_request`: rascunho/cotação — nível 2.
 - `asaas_pix_charge`, `collection*`: cobrar cliente é **receber**, não compromete dinheiro da empresa. (`domain = finance` também carrega cobrança — por isso o piso é por **tipo**, não por domínio.)
 - `retail_transfer`: transferência de **estoque**, não de dinheiro.

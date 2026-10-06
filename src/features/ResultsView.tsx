@@ -88,6 +88,22 @@ function BriefingBlock() {
   const [period, setPeriod] = useState<'week' | 'month' | null>(null);
   const [b, setB] = useState<{ text: string; restricted: boolean } | null>(null);
   const [err, setErr] = useState(false);
+  // Interruptor da entrega proativa: o servidor só responde a dono/admin (403 pros demais) — quem não pode simplesmente não vê o controle.
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/ux/briefing/enabled').then(r => r.ok ? r.json() : Promise.reject()).then(d => { if (alive) setEnabled(!!d.enabled); }).catch(() => { /* sem permissão: não mostra */ });
+    return () => { alive = false; };
+  }, []);
+  const toggle = () => {
+    if (enabled === null || saving) return;
+    setSaving(true);
+    const next = !enabled;
+    apiFetch('/api/ux/briefing/enabled', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) })
+      .then(r => r.ok ? r.json() : Promise.reject()).then(d => { setEnabled(!!d.enabled); trackAction('briefing_entrega', d.enabled ? 'ligar' : 'desligar'); })
+      .catch(() => { /* mantém o estado anterior */ }).finally(() => setSaving(false));
+  };
   const open = (p: 'week' | 'month') => {
     setPeriod(p); setB(null); setErr(false);
     trackAction('briefing_abrir', p);
@@ -100,6 +116,12 @@ function BriefingBlock() {
         <button onClick={() => open('week')} className={`rounded-lg border px-3 py-1.5 text-xs ${period === 'week' ? 'border-indigo-500 text-slate-100' : 'border-slate-700 text-slate-300'}`}>Semanal</button>
         <button onClick={() => open('month')} className={`rounded-lg border px-3 py-1.5 text-xs ${period === 'month' ? 'border-indigo-500 text-slate-100' : 'border-slate-700 text-slate-300'}`}>Mensal</button>
       </div>
+      {enabled !== null && (
+        <label className="flex items-start gap-2 text-xs text-slate-400" data-testid="briefing-delivery">
+          <input type="checkbox" className="mt-0.5" checked={enabled} disabled={saving} onChange={toggle} />
+          <span>Avisar quando o briefing estiver pronto (semanal toda segunda; mensal nos primeiros dias do mês). O aviso não traz valores em R$ — o detalhe fica aqui.</span>
+        </label>
+      )}
       {err && <p className="text-xs text-slate-500">Não consegui montar o briefing agora.</p>}
       {period && !b && !err && <p className="text-xs text-slate-500">Montando…</p>}
       {b && <pre className="whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-300 font-sans" data-testid="briefing-text">{b.text}</pre>}

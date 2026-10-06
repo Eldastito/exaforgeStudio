@@ -243,5 +243,6 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 
 **Entrega pelos canais existentes:** `publish` grava UM sinal **sem dinheiro** em `business_signals` (`weekly_commercial_briefing` / `monthly_briefing`, idempotente por período, só quando há algo notável: loja abaixo, meta fora do ritmo ou prioridade) — flui pro Smart Inbox/"Hoje"/push/WhatsApp com quiet-hours e limiar do `FalaTuProactiveService`. O texto completo é lido sob demanda em **Resultados → Briefing** (`GET /api/ux/briefing/{week|month}`), role-gated (§73): sem visão completa, os números viram "do gestor". `Scheduler`: segunda (SP) publica o semanal; dias 1–3 o mensal. **Opt-in** `organization_settings.periodic_briefing_enabled` (default 0; `GET/PUT /api/ux/briefing/enabled`, owner/admin).
 **Não coberto (declarado no próprio briefing):** margem confiável, estoque, clientes e campanhas (sem fonte consolidada / dependem da D4). O impacto é acumulado (o ledger não é por período).
+**Ligar/desligar pela tela:** em Resultados → Briefing há um interruptor "Avisar quando o briefing estiver pronto" — só aparece pra dono/admin (a UI consulta `GET /api/ux/briefing/enabled`, que responde 403 aos demais); a gate real continua no servidor.
 **Rollback:** desligar a flag (default já é off); só código + 1 coluna ignorável.
 

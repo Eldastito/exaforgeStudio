@@ -112,6 +112,7 @@ async function main() {
 
   const ui = fs.readFileSync(path.join(process.cwd(), "src/features/ResultsView.tsx"), "utf8");
   check("UI Resultados: botões Semanal/Mensal consomem /api/ux/briefing/:period e só renderizam o texto", /briefing-block/.test(ui) && /\/api\/ux\/briefing\/\$\{p\}/.test(ui) && /Semanal/.test(ui) && /Mensal/.test(ui));
+  check("UI: interruptor da entrega só aparece se a rota /briefing/enabled responde (dono/admin) e liga/desliga via PUT", /briefing-delivery/.test(ui) && /\/api\/ux\/briefing\/enabled/.test(ui) && /method: 'PUT'/.test(ui) && /sem permissão: não mostra/.test(ui) && /enabled !== null/.test(ui));
   for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok ? "" : "  → " + x.d}`);
   console.log(`\n${results.length - failures}/${results.length} checks`);
   fs.rmSync(tmpDir, { recursive: true, force: true });

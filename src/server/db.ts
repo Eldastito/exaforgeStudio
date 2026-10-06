@@ -12358,6 +12358,9 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN intervention_cost REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN confidence TEXT`); } catch(e){}
 
+  // ADR-204 F3.10 — briefings semanal/mensal por exceção (opt-in, default off — convenção nº 10).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN periodic_briefing_enabled INTEGER DEFAULT 0`); } catch(e){}
+
 };
 
 initDb();

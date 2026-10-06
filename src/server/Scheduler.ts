@@ -920,6 +920,12 @@ export class Scheduler {
       import("./ProductOpportunityService.js").then((m) => m.ProductOpportunityService.pass())
         .catch((e) => console.error('[Scheduler] product opportunity falhou', e));
     } catch (e) { console.error('[Scheduler] pass de product opportunity falhou', e); }
+    // Radar contextual do varejo (ADR-204 F3.3): dia fechado da loja fora do normal + qualidade de dado (preço/duplicidade/
+    // integração/comissão) → `business_signals`. Opt-in por empresa (`retail_radar_enabled`); nunca usa hora do PDV.
+    try {
+      import("./RetailRadarService.js").then((m) => m.RetailRadarService.pass())
+        .catch((e) => console.error('[Scheduler] radar do varejo falhou', e));
+    } catch (e) { console.error('[Scheduler] pass do radar do varejo falhou', e); }
     // Social Attribution (ADR-167 F12): resolve confirmações social_publish com o
     // analytics do post → PUBLISHED vira RESULTADO medido (fecha o closed-loop; §42/D6).
     try {

@@ -941,6 +941,7 @@
     "test:autonomy-guard": "tsx scripts/test-autonomy-guard.ts",
     "test:autonomy-overview": "tsx scripts/test-autonomy-overview.ts",
     "test:business-memory": "tsx scripts/test-business-memory.ts",
+    "test:retail-radar": "tsx scripts/test-retail-radar.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

@@ -36,6 +36,9 @@ export interface AnomalyDetectorDef {
   subjectType?: string | null;
   recommendedProcessType?: string | null; // §40 — molde; router continua map-driven
   verticals?: string[];         // §88-90 — vazio/omitido = universal
+  // ADR-204 F3.3 — separa ANOMALIA TÉCNICA (dado/integração/cadastro errado) de OPORTUNIDADE e de desvio de NEGÓCIO. Opcional:
+  // omitido = o detector não declara (0-regressão — o `evidence` do sinal só ganha `signalClass` quando declarado).
+  signalClass?: "technical" | "opportunity" | "business";
 }
 
 export interface DetectorMeasurement {
@@ -75,6 +78,7 @@ export class AnomalyDetectorRegistry {
   static get(name: string): AnomalyDetectorDef | null { return this.defs.get(name) || null; }
   static list(): AnomalyDetectorDef[] { return [...this.defs.values()]; }
   static byDomain(domain: string): AnomalyDetectorDef[] { return this.list().filter((d) => d.domain === domain); }
+  static byClass(signalClass: "technical" | "opportunity" | "business"): AnomalyDetectorDef[] { return this.list().filter((d) => d.signalClass === signalClass); }
   /** §88-90 — detectores default pra uma vertical (universais entram sempre). */
   static byVertical(vertical: string): AnomalyDetectorDef[] {
     return this.list().filter((d) => !d.verticals || d.verticals.length === 0 || d.verticals.includes(vertical));
@@ -102,7 +106,7 @@ export class AnomalyDetectorRegistry {
       domain: def.domain, signalType: def.name, severity: def.severity, basis: def.basis,
       confidence: def.confidence ?? 0.75, sourceService: `detector:${def.name}`,
       impactAmount: m.impactAmount ?? null, impactUnit: m.impactUnit ?? null,
-      evidence: { ...(m.evidence || {}), metric: def.metric, current: m.current, baseline: anomaly.baseline, deviation: anomaly.reason, recommendedProcessType: def.recommendedProcessType ?? null },
+      evidence: { ...(m.evidence || {}), metric: def.metric, current: m.current, baseline: anomaly.baseline, deviation: anomaly.reason, recommendedProcessType: def.recommendedProcessType ?? null, ...(def.signalClass ? { signalClass: def.signalClass } : {}) },
       dedupeKey: `${def.name}:${subjectId || "org"}`,
       subjectType: def.subjectType ?? null, subjectId,
       expiresAt: ttlIso(def.ttlMs, now),
@@ -151,3 +155,19 @@ AnomalyDetectorRegistry.registerPack("consumption", [
     subjectType: "product", recommendedProcessType: null,
   },
 ]);
+
+// ADR-204 F3.3 — RADAR CONTEXTUAL do varejo. Normalidade por LOJA × DIA DA SEMANA (a hora da venda NÃO é confiável no PDV —
+// RN-F3-5: nunca se afirma nada por horário). Os 2 detectores estatísticos decidem pela primitiva `evaluateAnomaly`; os 4 de
+// qualidade de dado são regras (não estatística) e se DECLARAM aqui só pelo contrato (nome, domínio, severidade, TTL, classe).
+registerRetailRadarPack();
+function registerRetailRadarPack(): void {
+  AnomalyDetectorRegistry.registerPack("retail_radar", [
+    { name: "retail_store_day_below_normal", domain: "retail_radar", purpose: "Dia FECHADO da loja bem abaixo do normal do mesmo dia da semana.", metric: "storeDaySales", method: "relative", direction: "drop", threshold: 0.3, minSample: 6, cooldownMs: 0, ttlMs: 3 * 24 * HOUR, severity: "attention", basis: "fact", confidence: 0.7, subjectType: "store", signalClass: "business", verticals: ["retail", "moda"] },
+    { name: "retail_store_day_above_normal", domain: "retail_radar", purpose: "Dia FECHADO da loja bem acima do normal — vale entender o que funcionou.", metric: "storeDaySales", method: "relative", direction: "spike", threshold: 0.4, minSample: 6, cooldownMs: 0, ttlMs: 3 * 24 * HOUR, severity: "info", basis: "fact", confidence: 0.7, subjectType: "store", signalClass: "opportunity", verticals: ["retail", "moda"] },
+    { name: "retail_price_anomaly", domain: "retail_radar", purpose: "Item vendido com preço zerado ou absurdo frente ao histórico do próprio produto.", metric: "unitPrice", method: "relative", direction: "both", threshold: 9, minSample: 5, cooldownMs: 0, ttlMs: 7 * 24 * HOUR, severity: "attention", basis: "fact", confidence: 0.8, subjectType: "filial", signalClass: "technical", verticals: ["retail", "moda"] },
+    { name: "retail_duplicate_sale", domain: "retail_radar", purpose: "Boletas distintas com valor, peças, operador e pagamento idênticos no mesmo dia (possível lançamento duplicado).", metric: "duplicateBoletas", method: "absolute", direction: "spike", threshold: 1, minSample: 1, cooldownMs: 0, ttlMs: 7 * 24 * HOUR, severity: "attention", basis: "hypothesis", confidence: 0.5, subjectType: "filial", signalClass: "technical", verticals: ["retail", "moda"] },
+    { name: "retail_integration_late", domain: "retail_radar", purpose: "A integração de vendas com o ERP parou de atualizar.", metric: "hoursSinceSync", method: "absolute", direction: "spike", threshold: 36, minSample: 1, cooldownMs: 0, ttlMs: 3 * 24 * HOUR, severity: "attention", basis: "fact", confidence: 0.9, subjectType: "integration", signalClass: "technical", verticals: ["retail", "moda"] },
+    { name: "retail_commission_strange", domain: "retail_radar", purpose: "Comissão do ERP fora do padrão da própria rede (acima da venda, sem venda ou muito acima da mediana).", metric: "commissionRatio", method: "relative", direction: "spike", threshold: 1.5, minSample: 10, cooldownMs: 0, ttlMs: 7 * 24 * HOUR, severity: "attention", basis: "fact", confidence: 0.7, subjectType: "org", signalClass: "technical", verticals: ["retail", "moda"] },
+  ]);
+}
+

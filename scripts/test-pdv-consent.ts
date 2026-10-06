@@ -87,8 +87,17 @@ async function main() {
   const sum = await call("GET", "/pdv-consent/summary", "dono");
   check("rota GET /summary: contagens da rede, sem nome de cliente", sum.status === 200 && sum.body.total === 4 && sum.body.granted >= 2 && !JSON.stringify(sum.body).includes("Ana"));
   check("rota GET /contactable: só quem autorizou", (await call("GET", "/pdv-consent/contactable", "dono")).body.items.every((x: any) => ["101", "104"].includes(x.code)));
+  // lista de clientes: cada um com o estado do consentimento; "unknown" quando não há registro; vendedor não pode registrar
+  const lst = await call("GET", "/pdv-customers?limit=50", "dono");
+  const byCode = (code: string) => (lst.body.customers || []).find((c: any) => c.codigo_n === code);
+  check("rota GET /pdv-customers: cada cliente traz o consentimento (104 autorizou, 101 autorizou, 102 sem registro)", lst.status === 200 && byCode("104")?.consent.state === "granted" && byCode("101")?.consent.state === "granted" && byCode("102")?.consent.state === "unknown" && byCode("102")?.consent.since === null);
+  check("rota GET /pdv-customers: dono pode registrar; vendedor não", lst.body.canRecordConsent === true && (await call("GET", "/pdv-customers?limit=5", "vend")).body.canRecordConsent === false);
+  check("statusMany bate com status (última decisão por cliente, 1 query)", (() => { const m = P.statusMany(O, ["100", "101", "104", "102", "999"]); return m.get("100")!.state === P.status(O, "100").state && m.get("101")!.state === "granted" && m.get("102")!.state === "unknown" && m.get("999")!.state === "unknown" && m.size === 5; })());
   server.close();
 
+  const ui = fs.readFileSync(path.join(process.cwd(), "src/features/RetailOpsView.tsx"), "utf8");
+  check("UI Clientes do PDV: cobertura, coluna Consentimento ('Sem registro' ≠ autorizou) e formulário com origem + aviso de registro permanente", /pdv-consent-coverage/.test(ui) && /Sem registro/.test(ui) && /não é autorização/.test(ui) && /pdv-consent-form/.test(ui) && /\/api\/retailops\/pdv-consent\/\$\{encodeURIComponent\(c\.codigo_n\)\}/.test(ui) && /não pode ser apagado/.test(ui));
+  check("UI: botões de registrar só com canRecordConsent; 'Autorizou' desabilitado sem celular", /canRecord && editing !== c\.codigo_n/.test(ui) && /disabled=\{!c\.celular\}/.test(ui) && /setCanRecord\(!!d\.canRecordConsent\)/.test(ui));
   for (const x of results) console.log(`${x.ok ? "PASS" : "FAIL"}  ${x.name}${x.ok ? "" : "  → " + x.d}`);
   console.log(`\n${results.length - failures}/${results.length} checks`);
   fs.rmSync(tmpDir, { recursive: true, force: true });

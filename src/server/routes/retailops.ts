@@ -1057,7 +1057,7 @@ router.get("/pdv-sale-lines", scopeFilial, (req: AuthRequest, res): any => {
 // do mês (?birthdayMonth=MM) + filtro por FILIAL (?store=<código da loja>, CRM-001).
 // Base separada dos contatos do WhatsApp. Resposta enriquecida com loja e
 // timestamp de sync (RetailPdvCustomerService). Isolado por organização.
-router.get("/pdv-customers", (req: AuthRequest, res): any => {
+router.get("/pdv-customers", async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -1066,7 +1066,15 @@ router.get("/pdv-customers", (req: AuthRequest, res): any => {
     if (store && !scope.unrestricted && !scope.storeCodes.includes(store)) {
       return res.status(403).json({ error: "store_out_of_scope" });
     }
-    res.json(RetailPdvCustomerService.list(orgId, req.query as any, scope.unrestricted ? {} : { restrictCodes: scope.storeCodes }));
+    const out: any = RetailPdvCustomerService.list(orgId, req.query as any, scope.unrestricted ? {} : { restrictCodes: scope.storeCodes });
+    // ADR-204 D4 — cada cliente carrega o estado do consentimento (`unknown` = sem registro, NUNCA "autorizou") e se este usuário pode registrar.
+    try {
+      const { PdvConsentService } = await import("../PdvConsentService.js");
+      const st = PdvConsentService.statusMany(orgId, (out.customers || []).map((c: any) => String(c.codigo_n)));
+      out.customers = (out.customers || []).map((c: any) => ({ ...c, consent: st.get(String(c.codigo_n)) || { state: "unknown", since: null, source: null } }));
+      out.canRecordConsent = ["owner", "admin"].includes(String(req.user?.role || ""));
+    } catch { /* sem o livro: a lista segue como antes */ }
+    res.json(out);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

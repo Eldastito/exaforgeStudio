@@ -35,6 +35,22 @@ export class PdvConsentService {
     return { state: r.granted ? "granted" : "revoked", since: r.recorded_at, source: r.source };
   }
 
+  /** Estado de VÁRIOS clientes de uma vez (1 query) — pra listas. Quem não tem linha fica `unknown`. */
+  static statusMany(orgId: string, codes: string[]): Map<string, { state: PdvConsentState; since: string | null; source: string | null }> {
+    const out = new Map<string, { state: PdvConsentState; since: string | null; source: string | null }>();
+    const uniq = [...new Set(codes.map(String))];
+    for (const c of uniq) out.set(c, { state: "unknown", since: null, source: null });
+    if (!uniq.length) return out;
+    for (let i = 0; i < uniq.length; i += 400) {
+      const chunk = uniq.slice(i, i + 400);
+      const rows = db.prepare(`SELECT customer_code, granted, source, recorded_at FROM retail_pdv_consents k
+        WHERE k.organization_id = ? AND k.scope = ? AND k.customer_code IN (${chunk.map(() => "?").join(",")})
+          AND k.rowid = (SELECT k2.rowid FROM retail_pdv_consents k2 WHERE k2.organization_id = k.organization_id AND k2.customer_code = k.customer_code AND k2.scope = k.scope ORDER BY k2.recorded_at DESC, k2.rowid DESC LIMIT 1)`).all(orgId, PDV_CONSENT_SCOPE, ...chunk) as any[];
+      for (const r of rows) out.set(r.customer_code, { state: r.granted ? "granted" : "revoked", since: r.recorded_at, source: r.source });
+    }
+    return out;
+  }
+
   static history(orgId: string, code: string): any[] {
     return db.prepare("SELECT id, granted, source, evidence, actor_id, recorded_at FROM retail_pdv_consents WHERE organization_id = ? AND customer_code = ? AND scope = ? ORDER BY recorded_at DESC, rowid DESC LIMIT 50").all(orgId, String(code), PDV_CONSENT_SCOPE) as any[];
   }

@@ -4046,6 +4046,27 @@ function PdvCustomersTab() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // ADR-204 D4 — consentimento LGPD (comunicações) do cliente do PDV. "Sem registro" NUNCA é "autorizou": só vale o que alguém registrou.
+  const [canRecord, setCanRecord] = useState(false);
+  const [coverage, setCoverage] = useState<any | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState<{ granted: boolean; source: string; evidence: string }>({ granted: true, source: 'balcao', evidence: '' });
+  const [savingConsent, setSavingConsent] = useState(false);
+  const loadCoverage = () => { apiFetch('/api/retailops/pdv-consent/summary').then(r => r.ok ? r.json() : null).then(d => setCoverage(d && !d.error ? d : null)).catch(() => setCoverage(null)); };
+  useEffect(() => { loadCoverage(); }, []);
+  const SOURCES: Record<string, string> = { balcao: 'No balcão (assinou/disse na loja)', whatsapp: 'Por WhatsApp (o cliente respondeu)', formulario: 'Formulário/cadastro', telefone: 'Por telefone' };
+  const openConsent = (c: any, granted: boolean) => { setEditing(c.codigo_n); setForm({ granted, source: 'balcao', evidence: '' }); };
+  const saveConsent = async (c: any) => {
+    setSavingConsent(true);
+    try {
+      const r = await apiFetch(`/api/retailops/pdv-consent/${encodeURIComponent(c.codigo_n)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não consegui registrar.'); return; }
+      toast.success(form.granted ? 'Autorização registrada.' : 'Recusa/revogação registrada.');
+      setCustomers(prev => prev.map(x => x.codigo_n === c.codigo_n ? { ...x, consent: { state: d.state, since: new Date().toISOString(), source: form.source } } : x));
+      setEditing(null); loadCoverage();
+    } catch { toast.error('Falha de conexão.'); } finally { setSavingConsent(false); }
+  };
   const load = (offset: number, append: boolean) => {
     append ? setLoadingMore(true) : setLoading(true);
     apiFetch(`/api/retailops/pdv-customers?q=${encodeURIComponent(q)}&birthdayMonth=${bMonth}&store=${encodeURIComponent(storeFilter)}&limit=${PAGE}&offset=${offset}`)
@@ -4053,6 +4074,7 @@ function PdvCustomersTab() {
       .then(d => {
         if (d && !d.error) {
           setTotal(Number(d.total) || 0);
+          setCanRecord(!!d.canRecordConsent);
           setCustomers(prev => append ? [...prev, ...(d.customers || [])] : (d.customers || []));
           if (Array.isArray(d.stores)) setStores(d.stores);
         }
@@ -4066,6 +4088,18 @@ function PdvCustomersTab() {
   return (
     <div>
       <p className="text-[12px] text-zinc-500 mb-3">Base de clientes do PDV (nome, CPF, celular, e-mail, aniversário) — separada dos contatos do WhatsApp, para campanhas e relacionamento. Requer o opt-in "Importar clientes do PDV" em Integrações → Alterdata. A <strong>Loja</strong> é a filial de cadastro/origem do cliente.</p>
+      {coverage && (
+        <div className="mb-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-[12px] text-zinc-400" data-testid="pdv-consent-coverage">
+          <div className="text-zinc-200 text-sm font-medium">Consentimento para receber mensagens</div>
+          {coverage.total > 0 ? (
+            <div className="mt-1">
+              <b className="text-emerald-300">{coverage.contactable}</b> autorizaram{coverage.withPhone > 0 && coverage.contactablePctOfWithPhone != null ? <> ({coverage.contactablePctOfWithPhone}% dos {coverage.withPhone} com celular)</> : null}
+              {' · '}<b className="text-rose-300">{coverage.revoked}</b> recusaram/revogaram · <b className="text-zinc-300">{coverage.unknown}</b> sem registro.
+            </div>
+          ) : <div className="mt-1">Sem clientes ativos na base.</div>}
+          <div className="mt-1 text-zinc-500">"Sem registro" não é autorização: só recebe mensagem quem autorizou e tem celular.</div>
+        </div>
+      )}
       <div className="mb-3 flex items-center gap-2 flex-wrap">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nome, CPF ou celular…" className="w-full max-w-sm bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100" />
         {stores.length > 0 && (
@@ -4093,17 +4127,47 @@ function PdvCustomersTab() {
               <th className="px-3 py-2 text-left font-medium">E-mail</th>
               <th className="px-3 py-2 text-left font-medium">Aniversário</th>
               <th className="px-3 py-2 text-left font-medium">Última compra</th>
+              <th className="px-3 py-2 text-left font-medium">Consentimento</th>
             </tr></thead>
             <tbody>
               {data.customers.map((c: any) => (
-                <tr key={c.codigo_n} className="border-t border-zinc-800/70">
+                <Fragment key={c.codigo_n}>
+                <tr className="border-t border-zinc-800/70">
                   <td className="px-3 py-2 text-zinc-200">{c.nome || '—'}</td>
                   <td className="px-3 py-2 text-zinc-300">{c.store_name || (c.filial ? <span className="text-zinc-500" title="Filial não mapeada a uma loja cadastrada">Filial {c.filial}</span> : '—')}</td>
                   <td className="px-3 py-2 text-zinc-300">{c.celular || '—'}</td>
                   <td className="px-3 py-2 text-zinc-400">{c.email || '—'}</td>
                   <td className="px-3 py-2 text-zinc-300">{c.nascimento ? c.nascimento.slice(5).split('-').reverse().join('/') : '—'}</td>
                   <td className="px-3 py-2 text-zinc-400">{c.ultima_compra ? c.ultima_compra.split('-').reverse().join('/') : '—'}</td>
+                  <td className="px-3 py-2" data-testid="pdv-consent-cell">
+                    {c.consent?.state === 'granted' ? <span className="text-emerald-300" title={c.consent.since || ''}>Autorizou{c.consent.source ? ` (${({ balcao: 'balcão', whatsapp: 'WhatsApp', formulario: 'formulário', telefone: 'telefone' } as Record<string, string>)[c.consent.source] || c.consent.source})` : ''}</span>
+                      : c.consent?.state === 'revoked' ? <span className="text-rose-300" title={c.consent.since || ''}>Recusou/revogou</span>
+                      : <span className="text-zinc-500">Sem registro</span>}
+                    {canRecord && editing !== c.codigo_n && (
+                      <span className="ml-2 inline-flex gap-1.5">
+                        {c.consent?.state !== 'granted' && <button onClick={() => openConsent(c, true)} disabled={!c.celular} title={c.celular ? 'Registrar que o cliente autorizou' : 'Sem celular cadastrado — não há por onde falar'} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Autorizou</button>}
+                        {c.consent?.state !== 'revoked' && <button onClick={() => openConsent(c, false)} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800">{c.consent?.state === 'granted' ? 'Revogar' : 'Recusou'}</button>}
+                      </span>
+                    )}
+                  </td>
                 </tr>
+                {canRecord && editing === c.codigo_n && (
+                  <tr className="border-t border-zinc-800/40 bg-zinc-900/40" data-testid="pdv-consent-form">
+                    <td colSpan={7} className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2 text-[12px] text-zinc-300">
+                        <span>{form.granted ? `${c.nome || 'Cliente'} autorizou receber mensagens.` : `${c.nome || 'Cliente'} recusou/revogou.`} Como foi?</span>
+                        <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100">
+                          {Object.entries(SOURCES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <input value={form.evidence} onChange={e => setForm(f => ({ ...f, evidence: e.target.value.slice(0, 300) }))} placeholder="Observação (opcional, sem dados sensíveis)" className="min-w-[14rem] flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
+                        <button onClick={() => saveConsent(c)} disabled={savingConsent} className="rounded bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{savingConsent ? 'Salvando…' : 'Confirmar'}</button>
+                        <button onClick={() => setEditing(null)} className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Cancelar</button>
+                      </div>
+                      <div className="mt-1 text-[11px] text-zinc-500">Registre só o que o cliente disse ou assinou de fato. O registro fica no histórico e não pode ser apagado — se mudar de ideia, registre uma revogação.</div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

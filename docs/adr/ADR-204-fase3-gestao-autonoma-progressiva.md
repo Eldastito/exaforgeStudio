@@ -109,3 +109,6 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 ## 21. Status F3.8 — EM PR (Impact Ledger 2.0, sem holdout)
 `action_outcomes.intervention_cost` + `confidence` (aditivos), `ledger().totals.{net,confidence,causality}`, `ExecutionResultsService.results().impactReading` e leitura na tela Resultados. Custo desconhecido ≠ 0; líquido só com fato+custo conhecido; tudo rotulado "associado" (sem controle). **Holdout/incremental (RN-F3-9) segue pendente da D3** e de campanha com grupo de controle; nada grava custo automaticamente ainda.
 
+## 22. Status F3.10 — EM PR (briefings semanal e mensal)
+`PeriodicBriefingService` + sinal sem dinheiro na espinha (entrega pelos canais existentes) + `GET /api/ux/briefing/:period` + bloco em Resultados + `Scheduler` (opt-in `periodic_briefing_enabled`). Compõe fontes existentes; role-gated; seção sem dado explica por quê. **Fora (declarado):** margem confiável, estoque, clientes/campanhas; impacto é acumulado, não por período. Empilhada sobre a F3.8 (usa custo/associado).
+

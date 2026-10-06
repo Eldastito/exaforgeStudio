@@ -997,6 +997,11 @@ export class Scheduler {
       import("./ExecutiveProactiveService.js").then((m) => m.ExecutiveProactiveService.pass())
         .catch((e) => console.error('[Scheduler] briefing executivo falhou', e));
     } catch (e) { console.error('[Scheduler] pass de briefing executivo falhou', e); }
+    // Briefing semanal/mensal (ADR-204 F3.10): sinal SEM dinheiro na espinha, 1x por período, só orgs que ligaram (opt-in). Best-effort.
+    try {
+      import("./PeriodicBriefingService.js").then((m) => m.PeriodicBriefingService.pass())
+        .catch((e) => console.error('[Scheduler] briefing periódico falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de briefing periódico falhou', e); }
     // Prazos processuais (ADR-191 F5): sinaliza na espinha os PRAZOS FATAIS abertos
     // vencendo em ≤3 dias úteis (ou já vencidos) das orgs de advocacia. Nunca inventa —
     // só o que está armazenado. Perder prazo é erro profissional. Best-effort.

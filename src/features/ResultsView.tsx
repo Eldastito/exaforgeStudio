@@ -83,6 +83,30 @@ const StoreRow: React.FC<{ s: Store }> = ({ s }) => {
   );
 };
 
+// ADR-204 F3.10 — briefing semanal/mensal sob demanda (só RENDERIZA `GET /api/ux/briefing/:period`; o servidor decide o que o papel vê).
+function BriefingBlock() {
+  const [period, setPeriod] = useState<'week' | 'month' | null>(null);
+  const [b, setB] = useState<{ text: string; restricted: boolean } | null>(null);
+  const [err, setErr] = useState(false);
+  const open = (p: 'week' | 'month') => {
+    setPeriod(p); setB(null); setErr(false);
+    trackAction('briefing_abrir', p);
+    apiFetch(`/api/ux/briefing/${p}`).then(r => r.ok ? r.json() : Promise.reject()).then(setB).catch(() => setErr(true));
+  };
+  return (
+    <section aria-label="Briefing" className="space-y-2" data-testid="briefing-block">
+      <h3 className="text-sm font-semibold text-slate-200">Briefing</h3>
+      <div className="flex gap-2">
+        <button onClick={() => open('week')} className={`rounded-lg border px-3 py-1.5 text-xs ${period === 'week' ? 'border-indigo-500 text-slate-100' : 'border-slate-700 text-slate-300'}`}>Semanal</button>
+        <button onClick={() => open('month')} className={`rounded-lg border px-3 py-1.5 text-xs ${period === 'month' ? 'border-indigo-500 text-slate-100' : 'border-slate-700 text-slate-300'}`}>Mensal</button>
+      </div>
+      {err && <p className="text-xs text-slate-500">Não consegui montar o briefing agora.</p>}
+      {period && !b && !err && <p className="text-xs text-slate-500">Montando…</p>}
+      {b && <pre className="whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-300 font-sans" data-testid="briefing-text">{b.text}</pre>}
+    </section>
+  );
+}
+
 export function ResultsView() {
   const [data, setData] = useState<Story | null>(null);
   const [error, setError] = useState(false);
@@ -133,6 +157,7 @@ export function ResultsView() {
           )}
         </section>
       )}
+      <BriefingBlock />
     </div>
   );
 }

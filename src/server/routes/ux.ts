@@ -271,4 +271,25 @@ router.put("/preferences", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ADR-204 F3.10 — briefing semanal/mensal. GET lê sob demanda (role-gated: sem visão completa os números viram "do gestor");
+// o opt-in da entrega proativa (sinal sem dinheiro na espinha) é do dono/admin. Nada novo é calculado aqui — só compõe.
+router.get("/briefing/enabled", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const { PeriodicBriefingService } = await import("../PeriodicBriefingService.js");
+  res.json({ enabled: PeriodicBriefingService.enabled(req.organizationId!) });
+});
+router.put("/briefing/enabled", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const { PeriodicBriefingService } = await import("../PeriodicBriefingService.js");
+  res.json(PeriodicBriefingService.setEnabled(req.organizationId!, !!req.body?.enabled));
+});
+router.get("/briefing/:period", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const period = String(req.params.period);
+  if (period !== "week" && period !== "month") return res.status(400).json({ error: "period deve ser week ou month." });
+  try {
+    const { PeriodicBriefingService } = await import("../PeriodicBriefingService.js");
+    res.json(PeriodicBriefingService.compose(orgId, req.user, { period }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

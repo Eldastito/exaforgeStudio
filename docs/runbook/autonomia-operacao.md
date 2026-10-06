@@ -238,3 +238,10 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 **Legado:** outcomes antigos (sem custo/confiança) seguem idênticos; `realized`/`expected`/categorias não mudaram. **Rollback:** colunas ignoráveis; reverter o commit restaura tudo.
 **Não feito:** holdout/controle, "incremental estimado", poder estatístico (RN-F3-9) — dependem da D3 e de campanha com grupo de controle; nenhum caminho existente grava custo automaticamente (hoje só manual/rota).
 
+## F3.10 — Briefings semanal (comercial) e mensal
+`PeriodicBriefingService.compose(orgId, user, {period})` (read-only, sem tabela/motor/canal novo) compõe o que já existe: resultado × meta da rede (`ResultsStoryService`), lojas abaixo, previsão do mês (`RetailForecastService`, só no semanal), equipe que mais caiu (fato), metas fora do ritmo, impacto (F3.8 "associado" + F3.7 "o que funciona") e prioridades. **Semanal** olha ontem/a semana; **mensal** olha o mês **fechado** anterior. Seção sem dado diz o motivo (`available:false` + `reason`); nunca preenche.
+
+**Entrega pelos canais existentes:** `publish` grava UM sinal **sem dinheiro** em `business_signals` (`weekly_commercial_briefing` / `monthly_briefing`, idempotente por período, só quando há algo notável: loja abaixo, meta fora do ritmo ou prioridade) — flui pro Smart Inbox/"Hoje"/push/WhatsApp com quiet-hours e limiar do `FalaTuProactiveService`. O texto completo é lido sob demanda em **Resultados → Briefing** (`GET /api/ux/briefing/{week|month}`), role-gated (§73): sem visão completa, os números viram "do gestor". `Scheduler`: segunda (SP) publica o semanal; dias 1–3 o mensal. **Opt-in** `organization_settings.periodic_briefing_enabled` (default 0; `GET/PUT /api/ux/briefing/enabled`, owner/admin).
+**Não coberto (declarado no próprio briefing):** margem confiável, estoque, clientes e campanhas (sem fonte consolidada / dependem da D4). O impacto é acumulado (o ledger não é por período).
+**Rollback:** desligar a flag (default já é off); só código + 1 coluna ignorável.
+

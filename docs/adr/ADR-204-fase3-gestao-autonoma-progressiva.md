@@ -118,3 +118,6 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 ## 24. Status D4 — EM PR (consentimento dos clientes do PDV)
 `PdvConsentService` + `retail_pdv_consents` (append-only; última decisão vale; revogar vence) + rotas `/api/retailops/pdv-consent*` + o `OutboundConsentGuardService` passa a tratar cliente do PDV (casado pelo celular) como sujeito a consentimento quando `outbound_consent_required=1`. Sem registro = sem consentimento. **Destrava** o desenho da campanha preditiva (F3.9), que deve usar `assertContactable`; **não a implementa**. **Pendente:** tela/link de opt-in pro cliente e captura em massa; decisão de quando ligar a flag.
 
+## 25. Status D4b — EM PR (tela de captura do consentimento)
+Cartão de cobertura + coluna "Consentimento" + registro por cliente na aba **Clientes do PDV** (Retail). `GET /pdv-customers` devolve `consent` por cliente (`statusMany`) e `canRecordConsent`. Sem registro = "Sem registro" (nunca autorizou). **Pendente:** link/QR de opt-in pro cliente e importação em massa; ligar `outbound_consent_required` só depois da captura.
+

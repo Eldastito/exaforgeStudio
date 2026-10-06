@@ -943,6 +943,7 @@
     "test:business-memory": "tsx scripts/test-business-memory.ts",
     "test:retail-radar": "tsx scripts/test-retail-radar.ts",
     "test:retail-forecast": "tsx scripts/test-retail-forecast.ts",
+    "test:seller-plan": "tsx scripts/test-seller-plan.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

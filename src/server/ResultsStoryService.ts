@@ -37,7 +37,7 @@ export interface ResultsStory {
   basis: string;                          // "só fechamentos já enviados"
   network: { day: PeriodText; week: PeriodText; month: PeriodText; storesHit: number | null; storesBelow: number | null; storesNoData: number } | null;
   stores: ResultsStore[];
-  solved: { categories: Record<string, any>; disclaimer: string } | null;   // o que o ZappFlow resolveu (ledger)
+  solved: { categories: Record<string, any>; disclaimer: string; reading?: any } | null;   // o que o ZappFlow resolveu (ledger)
   generatedAt: string;
 }
 export interface TeamFinding { sellerId: string; name: string; salesDeltaPct: number | null; findings: Array<{ kind: "fact" | "hypothesis"; text: string }> }
@@ -123,8 +123,8 @@ export class ResultsStoryService {
   }
 
   /** O que o ZappFlow resolveu — ledger por categoria; categorias em R$ vêm `restricted` sem visão completa. */
-  private static solved(orgId: string, user: any): { categories: Record<string, any>; disclaimer: string } | null {
-    try { const r = ExecutionResultsService.results(orgId, user); return { categories: r.impact.categories, disclaimer: r.impact.disclaimer }; } catch { return null; }
+  private static solved(orgId: string, user: any): { categories: Record<string, any>; disclaimer: string; reading: any } | null {
+    try { const r = ExecutionResultsService.results(orgId, user); return { categories: r.impact.categories, disclaimer: r.impact.disclaimer, reading: r.impactReading }; } catch { return null; }
   }
 }
 

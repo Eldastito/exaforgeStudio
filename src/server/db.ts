@@ -12354,6 +12354,10 @@ const initDb = () => {
   // ADR-204 F3.3 — Radar contextual do varejo (opt-in, default off — convenção nº 10): sem a flag, o Scheduler não publica sinais.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_radar_enabled INTEGER DEFAULT 0`); } catch(e){}
 
+  // ADR-204 F3.8 — Impact Ledger 2.0: custo da intervenção (NULL = desconhecido, nunca 0) e confiança da medição (high|medium|low; NULL = não informada).
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN intervention_cost REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE action_outcomes ADD COLUMN confidence TEXT`); } catch(e){}
+
 };
 
 initDb();

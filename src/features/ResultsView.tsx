@@ -15,7 +15,7 @@ interface Story {
   date: string; restricted: boolean; hasRetail: boolean; headline: string | null; headlineReason: string | null; basis: string;
   network: null | { day: PT; week: PT; month: PT; storesHit: number | null; storesBelow: number | null; storesNoData: number };
   stores: Store[];
-  solved: null | { categories: Record<string, Cat>; disclaimer: string };
+  solved: null | { categories: Record<string, Cat>; disclaimer: string; reading?: { causality: { basis: string }; confidence: Record<string, number>; net: { cost: number | null; net: number | null; costKnownCount: number; costUnknownCount: number; restricted: boolean } } };
 }
 type Cat = { unit: string; total: number | null; restricted: boolean; lineCount?: number; lines?: any[] };
 interface Understand {
@@ -123,6 +123,14 @@ export function ResultsView() {
           <h3 className="text-sm font-semibold text-slate-200">O que o ZappFlow resolveu</h3>
           {money.map(([name, c]) => <p key={name} className="text-sm text-slate-300">{name}: {c.unit === 'BRL' ? (c.total as number).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : `${c.total} ${c.unit}`}</p>)}
           <p className="text-xs text-slate-500">{data.solved.disclaimer}</p>
+          {data.solved.reading && (
+            <div className="space-y-0.5 text-xs text-slate-500" data-testid="impact-reading">
+              <p>Valores <strong>associados</strong> às ações — sem grupo de controle, não é efeito causal comprovado.</p>
+              {data.solved.reading.net.net != null && <p>Resultado líquido (só onde o custo é conhecido): {data.solved.reading.net.net.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })} — custo {(data.solved.reading.net.cost as number).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}.</p>}
+              {data.solved.reading.net.costUnknownCount > 0 && <p>{data.solved.reading.net.costUnknownCount} medição(ões) sem custo informado ficam fora do líquido.</p>}
+              {data.solved.reading.confidence.low > 0 && <p>{data.solved.reading.confidence.low} medição(ões) de confiança baixa.</p>}
+            </div>
+          )}
         </section>
       )}
     </div>

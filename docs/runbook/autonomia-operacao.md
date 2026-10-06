@@ -229,3 +229,12 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 **Não coberto:** "% do objetivo" (falta elo ação → meta); estratégia de mensagem por amostra (precisa de dado de campanha, depende de D4/LGPD).
 **Rollback:** só código (1 serviço, 1 rota, 1 seção de UI). Sem schema.
 
+## F3.8 — Impact Ledger 2.0: custo, confiança e "associado × causado"
+**Decisão (D3 ainda aberta, seguindo a recomendação):** esta fatia NÃO tem holdout/grupo de controle — por isso tudo é rotulado **associado**, nunca "causado/incremental" (`totals.causality = { basis:"associated", incremental:null }`). Holdout fica pra quando o dono definir a regra (D3) e existir campanha com controle.
+
+**O que entrou (aditivo, 2 colunas em `action_outcomes`):** `intervention_cost` (R$; **NULL = desconhecido, nunca 0**; negativo/NaN/vazio → NULL; `0` declarado é aceito) e `confidence` (`high|medium|low`; fora do enum → NULL). `POST /api/actions/:id/outcomes` aceita `interventionCost`/`confidence`; `OutcomeMeasurementService.record` valida.
+**Líquido** (`ledger().totals.net`): Σ realizado − Σ custo **só de FATO com custo conhecido**; custo desconhecido vira `costUnknownCount` (fora da conta, não zero); estimativa/atribuído nunca entram; sem nenhum custo conhecido → `net:null`. `totals.confidence` conta high/medium/low/`unreported`.
+**Resultados:** `ExecutionResultsService.results().impactReading` e a tela Resultados mostram "valores associados (sem grupo de controle)", líquido só quando há custo, e quantas medições ficaram sem custo/com confiança baixa. R$ do líquido só pro gestor (§73); rótulos e contagens sempre.
+**Legado:** outcomes antigos (sem custo/confiança) seguem idênticos; `realized`/`expected`/categorias não mudaram. **Rollback:** colunas ignoráveis; reverter o commit restaura tudo.
+**Não feito:** holdout/controle, "incremental estimado", poder estatístico (RN-F3-9) — dependem da D3 e de campanha com grupo de controle; nenhum caminho existente grava custo automaticamente (hoje só manual/rota).
+

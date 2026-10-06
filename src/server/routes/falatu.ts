@@ -127,6 +127,24 @@ router.post("/ask", async (req: AuthRequest, res): Promise<any> => {
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+// ADR-204 F3.6a — UMA frase com várias ações: o /ask devolve a LISTA (pré-visualização, sem escrever) e estas rotas confirmam UMA vez
+// (`keep` = ids mantidos; default = todos os não bloqueados) ou cancelam. Cada item é preparado pelo MESMO caminho de sempre
+// (proposta governada → aprovação / Inbox); a confirmação única NÃO aprova nada no lugar de ninguém.
+router.post("/multi/:planId/confirm", async (req: AuthRequest, res): Promise<any> => {
+  const keep = req.body?.keep;
+  if (keep !== undefined && keep !== null && (!Array.isArray(keep) || keep.some((k: any) => typeof k !== "string"))) return res.status(400).json({ error: "keep deve ser uma lista de ids." });
+  try {
+    const { FalaTuMultiActionService } = await import("../FalaTuMultiActionService.js");
+    const out = await FalaTuMultiActionService.confirm(req.organizationId!, req.user, String(req.params.planId), keep ?? null);
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+});
+router.post("/multi/:planId/cancel", async (req: AuthRequest, res): Promise<any> => {
+  const { FalaTuMultiActionService } = await import("../FalaTuMultiActionService.js");
+  res.json({ ok: FalaTuMultiActionService.cancel(req.organizationId!, req.user, String(req.params.planId)) });
+});
+
 router.get("/inbox", (req: AuthRequest, res): any => {
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
   try { res.json(FalaTuService.listInbox(req.organizationId!, actorId(req), status)); }

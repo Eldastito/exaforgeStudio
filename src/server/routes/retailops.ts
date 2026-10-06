@@ -188,6 +188,7 @@ import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
+import { RetailRadarService } from "../RetailRadarService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
@@ -307,6 +308,20 @@ router.post("/signals/refresh", requireNetworkScope, (req: AuthRequest, res): an
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: true, ...RetailOpsSignalPublisher.run(orgId, { asOf: req.body?.asOf }) });
+});
+
+// ADR-204 F3.3 — RADAR CONTEXTUAL: o que merece atenção no dia FECHADO (técnico × negócio × oportunidade). Dado da REDE
+// inteira → só dono/admin sem trava de loja. `GET /radar` é só leitura (não publica); `POST /radar/scan` publica em
+// `business_signals` (só com o radar ligado); `PUT /radar/enabled` liga/desliga (opt-in, default off).
+router.get("/radar", requireNetworkScope, (req: AuthRequest, res): any => {
+  const asOf = typeof req.query?.asOf === "string" ? req.query.asOf : undefined;
+  res.json({ enabled: RetailRadarService.isEnabled(req.organizationId!), ...RetailRadarService.scan(req.organizationId!, { asOf, publish: false }) });
+});
+router.post("/radar/scan", requireNetworkScope, (req: AuthRequest, res): any => {
+  res.json({ ok: true, ...RetailRadarService.scan(req.organizationId!, { asOf: req.body?.asOf, publish: true }) });
+});
+router.put("/radar/enabled", requireNetworkScope, (req: AuthRequest, res): any => {
+  res.json({ ok: true, enabled: RetailRadarService.setEnabled(req.organizationId!, !!req.body?.enabled) });
 });
 
 // Insights consolidados da loja: prioridades (o que atacar), padrões aprendidos

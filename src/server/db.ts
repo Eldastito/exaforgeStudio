@@ -12351,6 +12351,9 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_bp_decisions_pattern ON business_pattern_decisions (organization_id, pattern_id, created_at);
   `);
 
+  // ADR-204 F3.3 — Radar contextual do varejo (opt-in, default off — convenção nº 10): sem a flag, o Scheduler não publica sinais.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN retail_radar_enabled INTEGER DEFAULT 0`); } catch(e){}
+
 };
 
 initDb();

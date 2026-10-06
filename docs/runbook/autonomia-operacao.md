@@ -120,3 +120,28 @@ Aditivo: 4 colunas nullable em `business_patterns` + 1 tabela de histórico. Rev
 - Responder "sim" pelo FalaTu (hoje a pergunta aparece no radar/atenção e a confirmação é na tela de Insights).
 - Confirmar uma regra ainda não muda o comportamento de nenhum motor: ela é MEMÓRIA consultável. Usar regras confirmadas nas recomendações é a F3.5.
 
+## F3.3 — Radar contextual do varejo (anomalia técnica × desvio de negócio × oportunidade)
+`RetailRadarService` olha o dia **FECHADO** (ontem, em SP) e publica só o que merece atenção em `business_signals` (domínio `retail_radar`). A classe vai em `evidence.signalClass`, declarada no `AnomalyDetectorRegistry` (pack `retail_radar`).
+
+| Detector | Classe | O que dispara |
+| --- | --- | --- |
+| `retail_store_day_below_normal` | negócio | dia da loja ≥30% abaixo da mediana dos MESMOS dias da semana (12 semanas) **e** abaixo de tudo que já houve nesse dia (−10%) |
+| `retail_store_day_above_normal` | oportunidade | ≥40% acima **e** acima do máximo histórico (+10%) — info, "vale entender o que funcionou" |
+| `retail_price_anomaly` | técnica | preço zerado (provável brinde → info) ou ≥10× / ≤1/10 da mediana do próprio produto (≥5 vendas em 90 dias → atenção) |
+| `retail_duplicate_sale` | técnica | boletas com valor, peças, operador e pagamento idênticos no dia — **hipótese** |
+| `retail_integration_late` | técnica | cursor de vendas sem sincronizar há >36h (>72h = risco); sem cursor: nenhuma venda nova há >3 dias (hipótese) |
+| `retail_commission_strange` | técnica | comissão do ERP > venda, sem venda, ou >2,5× a mediana da rede (precisa de ≥10 lançamentos de base); sinal **sem R$** |
+
+**Regras duras:** (1) a **hora da venda NÃO é confiável** (informado pelo dono) → o radar nem lê `sale_time`; só loja × dia da semana, só dia fechado. (2) Menos de 6 mesmos-dias-da-semana → "histórico insuficiente" (não inventa faixa). (3) Dia sem nenhuma venda nunca é lido como queda. (4) **Dado velho nunca vira "queda de venda"**: com a integração atrasada o radar publica só o sinal técnico e se cala sobre as lojas (e retira os desvios já publicados). (5) Nunca inventa dinheiro (`impactAmount` sempre null; texto em %).
+
+**Ligar:** opt-in por empresa — `PUT /api/retail/radar/enabled {enabled}` (dono/admin sem trava de loja). Desligado: o Scheduler não publica nada. `GET /api/retail/radar[?asOf=]` = só leitura (mostra o que seria dito, sem publicar); `POST /api/retail/radar/scan` publica. O Scheduler roda `RetailRadarService.pass()` a cada ciclo, só p/ empresas ligadas com vendas no PDV; é idempotente (dedupe) e os sinais de estado se auto-curam.
+
+### Rollback
+Aditivo: 1 coluna (`organization_settings.retail_radar_enabled`, default 0) e nenhuma tabela. Desligar a flag silencia tudo; reverter o commit remove o serviço.
+
+### Ainda NÃO feito (F3.3)
+- **Normalidade por hora**: não existe, de propósito (hora do PDV não confiável). Só volta se o dono corrigir a origem da hora e informar a janela confiável (F3.4 intradiária).
+- Não há tela do radar: os sinais aparecem pelo caminho já existente (atenção/Smart Inbox/Fala Tu). A separação técnica × negócio × oportunidade está no dado (`signalClass`); a UI ainda não filtra por ela.
+- Não calibrei os limiares (30%/40%/36h/2,5×) com dado real da TOULON — são valores iniciais prudentes. Rode primeiro em preview (`GET /radar`) e ajuste.
+- Detectores de preço/duplicidade olham o PDV da última venda ingerida; não cruzam com a tabela de preços do ERP.
+

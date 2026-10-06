@@ -222,3 +222,10 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 - Só pedidos de **registro** entram (cliente, despesa, venda, recebível, compromisso, anotação). Tarefas para outras pessoas, campanhas, transferências e demais ações governadas não são decompostas ainda.
 - Em "Hoje/Executando/Resultados" o que aparece são as propostas/aprovações já existentes; não há visão própria do plano.
 
+## F3.7 — Learning Loop: eficácia por intervenção ("O que funciona")
+`InterventionEffectivenessService.summary` (read-only, sem tabela) agrupa o Impact Ledger por **(domínio, tipo de ação)** e responde "isso costuma atingir o esperado?". Rota `GET /api/executive/intervention-effectiveness[?domain=]`; seção nova na aba **O que funciona** do Diretor IA (a lista de padrões de antes fica intacta).
+
+**Regras:** só ação `assured` (efeito confirmado + impacto medido, PRD 8) entra na taxa — medida sem confirmação vira só contagem (`measuredNotAssured`); só base `fact` (estimativa nunca soma, `estimateOnly`); "atingiu" = realizado ≥ esperado e só com esperado > 0 (sem meta → fora da amostra, null≠0). **Amostra mínima = 5** casos com meta: abaixo, sem taxa nem veredito. Com amostra: taxa + banda de Wilson 95% + veredito pela banda (`works` piso ≥ 50% · `weak` teto < 50% · `inconclusive`). Veredito é evidência pro gestor, nunca regra automática. R$ (esperado/realizado) só com permissão de dinheiro (§73); taxa e contagens sempre.
+**Não coberto:** "% do objetivo" (falta elo ação → meta); estratégia de mensagem por amostra (precisa de dado de campanha, depende de D4/LGPD).
+**Rollback:** só código (1 serviço, 1 rota, 1 seção de UI). Sem schema.
+

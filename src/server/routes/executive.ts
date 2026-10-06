@@ -29,6 +29,18 @@ router.get("/effectiveness", (req: AuthRequest, res): any => {
   res.json({ items: ExecutiveAdvisorService.learnedEffectiveness(orgId) });
 });
 
+// GET /api/executive/intervention-effectiveness — ADR-204 F3.7: esperado × realizado por intervenção (só ação assured,
+// só fato, amostra mínima + banda de Wilson). Rate/contagens sempre; R$ só pra quem vê dinheiro (§73).
+router.get("/intervention-effectiveness", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { InterventionEffectivenessService } = await import("../InterventionEffectivenessService.js");
+    const domain = typeof req.query.domain === "string" && req.query.domain ? req.query.domain : undefined;
+    res.json(InterventionEffectivenessService.summary(orgId, { canSeeMoney: FalaTuAskService.canSeeMoney(orgId, req.user), domain }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/executive/ask — pergunta livre do gestor ao Diretor IA.
 // CA-04/INV-11: esta rota não tem `requireRole` (permite gerente, que vê
 // dinheiro por role_profile, não só owner/admin). O gate de dinheiro vai no

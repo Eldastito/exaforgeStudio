@@ -189,6 +189,7 @@ import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { RetailRadarService } from "../RetailRadarService.js";
+import { RetailForecastService } from "../RetailForecastService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
@@ -322,6 +323,13 @@ router.post("/radar/scan", requireNetworkScope, (req: AuthRequest, res): any => 
 });
 router.put("/radar/enabled", requireNetworkScope, (req: AuthRequest, res): any => {
   res.json({ ok: true, enabled: RetailRadarService.setEnabled(req.organizationId!, !!req.body?.enabled) });
+});
+
+// ADR-204 F3.4 — PREVISÃO DO MÊS por loja (faixa, chance de bater a meta, quanto falta). Só leitura; a meta oficial nunca é
+// alterada. Tem dinheiro e dado da REDE → dono/admin sem trava de loja. Base: fechamentos por dia (a hora do PDV não entra).
+router.get("/forecast", requireNetworkScope, (req: AuthRequest, res): any => {
+  const q = req.query || {};
+  res.json(RetailForecastService.forecast(req.organizationId!, { asOf: typeof q.asOf === "string" ? q.asOf : undefined, month: typeof q.month === "string" ? q.month : undefined }));
 });
 
 // Insights consolidados da loja: prioridades (o que atacar), padrões aprendidos

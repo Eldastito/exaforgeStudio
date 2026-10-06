@@ -232,6 +232,14 @@ function PatternsPanel() {
     else toast.error(d.error || 'Falha ao registrar o desfecho.');
   };
 
+  // ADR-204 F3.2 (RN-F3-4): padrão só vira REGRA da empresa quando uma pessoa confirma; "validado" é só hipótese.
+  const decide = async (p: any, decision: 'confirmed' | 'rejected' | 'revoked') => {
+    const res = await apiFetch(`/api/insights/patterns/${p.id}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d.ok) { toast.success(decision === 'confirmed' ? 'Regra da empresa confirmada.' : decision === 'rejected' ? 'Ok — não é regra; não vou mais alertar sobre isso.' : 'Decisão desfeita.'); load(); }
+    else toast.error(d.error || 'Falha ao registrar a decisão.');
+  };
+
   if (loading) return <div className="flex items-center gap-2 p-8 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" /> Carregando…</div>;
 
   const enabled: boolean = !!data?.enabled;
@@ -271,11 +279,24 @@ function PatternsPanel() {
               <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{domLabel(p.domain)}</span>
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
+                  {p.manager_decision === 'confirmed'
+                    ? <span className="inline-flex rounded-full border px-2 py-0.5 text-[11px] text-indigo-300 bg-indigo-500/10 border-indigo-500/30">regra da empresa</span>
+                    : p.manager_decision === 'rejected'
+                      ? <span className="inline-flex rounded-full border px-2 py-0.5 text-[11px] text-zinc-400 bg-zinc-500/10 border-zinc-500/30">não é regra</span>
+                      : <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${st.cls}`}>{p.status === 'validated' ? 'hipótese' : st.label}</span>}
                   <span className="text-[11px] text-zinc-500">confiança {Math.round(Number(p.confidence) * 100)}% · visto {p.occurrences}x</span>
                   {stats && Number(stats.acted) > 0 && <span className="text-[11px] text-sky-300">· eficácia {Math.round(Number(stats.effectiveness) * 100)}% ({stats.acted} ação{Number(stats.acted) > 1 ? 'ões' : ''})</span>}
                 </div>
                 <p className="mt-1 text-sm text-zinc-200">{p.description || `${p.pattern_type} (${ev.scopeName || ''})`}</p>
+                {p.manager_decision ? (
+                  <div className="mt-1.5 text-[12px]"><button onClick={() => decide(p, 'revoked')} className="rounded border border-zinc-600 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800">Desfazer decisão</button></div>
+                ) : p.status === 'validated' || p.status === 'candidate' ? (
+                  <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
+                    <span className="text-zinc-500">Considera uma regra da empresa?</span>
+                    <button onClick={() => decide(p, 'confirmed')} className="rounded border border-indigo-500/30 px-2 py-0.5 text-indigo-300 hover:bg-indigo-500/10">Sim, é regra</button>
+                    <button onClick={() => decide(p, 'rejected')} className="rounded border border-zinc-600 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800">Não é regra</button>
+                  </div>
+                ) : null}
                 {p.status === 'validated' && (
                   <div className="mt-1.5 flex items-center gap-2 text-[12px] flex-wrap">
                     <span className="text-zinc-500">Agiu? Registre o desfecho:</span>

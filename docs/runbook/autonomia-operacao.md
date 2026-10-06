@@ -99,3 +99,24 @@ Só front + 1 rota de leitura; remover o `<AutonomyContractPanel />` do `Setting
 
 ### Ainda NÃO feito
 Elevação de autonomia guiada por evidência (F3.7 — `ProgressiveAutonomyService` só propõe; humano aceita). Verificação da tela contra o app completo com autenticação real (feita só em Chromium com API simulada).
+
+## F3.2 — Memória empresarial: padrão só vira REGRA com uma pessoa (RN-F3-4)
+Estágios (derivados, nunca gravados): **observado** (candidato) → **hipótese** (a recorrência validou, `status='validated'`, ninguém decidiu) → **regra da empresa** (`manager_decision='confirmed'`). O gestor também pode **rejeitar** ("não é regra": o padrão para de alertar, mesmo que a recorrência suba) e **revogar** (volta a hipótese).
+- **Quem decide:** `POST /api/insights/patterns/:id/decision` `{decision: confirmed|rejected|revoked, note?}` (owner/admin). Rótulo de sistema (`runtime`/`ai`/`rule`…) é recusado — a IA não confirma o próprio aprendizado. Dormente não se confirma.
+- **O `learn` não toca a decisão:** reavalia a recorrência (e pode adormecer o padrão), mas `manager_decision` é coluna à parte; uma regra confirmada continua regra mesmo dormente. Histórico append-only em `business_pattern_decisions` + auditoria (`PATTERN_CONFIRMED/REJECTED/REVOKED`).
+- **A pergunta** "Identifiquei isso N vezes desde DD/MM — considera uma regra da empresa?" vai pro ledger (`business_signals`, domínio `memory`, `basis=hypothesis`, severidade info, sem R$), no máximo 3 abertas por empresa, só hipótese sem decisão; some ao decidir e volta ao revogar. N é a contagem real de ocorrências do motor — não inventa "X de Y semanas".
+- **Leitura:** `GET /api/insights/memory` (`BusinessMemoryService`, read-model sem tabela de RAG nova): regras · hipóteses · observados · rejeitados · preferências · políticas de autonomia · aprendizados assegurados. O limiar de alerta (R$) só aparece p/ quem vê dinheiro. `GET /api/insights/patterns/:id/decisions` = histórico.
+- **Tela:** Insights → "Padrões aprendidos": "validado" agora aparece como **hipótese**; botões "Sim, é regra" / "Não é regra" / "Desfazer decisão".
+
+### Mudanças de comportamento
+- O rótulo na tela deixa de dizer "validado" (passa a "hipótese"); o alerta do padrão validado continua igual.
+- Padrão **rejeitado** não publica mais alerta (antes não existia a rejeição).
+
+### Rollback
+Aditivo: 4 colunas nullable em `business_patterns` + 1 tabela de histórico. Reverter o commit restaura tudo; as colunas ficam inertes.
+
+### Ainda NÃO feito (F3.2)
+- A regra TOULON "SKU esgotado não recompra" NÃO foi semeada como regra confirmada: confirmar é decisão do gestor (RN-F3-4), não nossa. Hoje ela existe como estratégia `collection_sellout`, não como padrão.
+- Responder "sim" pelo FalaTu (hoje a pergunta aparece no radar/atenção e a confirmação é na tela de Insights).
+- Confirmar uma regra ainda não muda o comportamento de nenhum motor: ela é MEMÓRIA consultável. Usar regras confirmadas nas recomendações é a F3.5.
+

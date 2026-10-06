@@ -84,3 +84,7 @@ Terceira sub-fatia da F3.1 (PRD §37, RN-F3-7/RN-F3-10). **Decisões do dono:** 
 
 ## 13. D8 — `refund` entra no piso (decisão do dono)
 Nova categoria `reembolso` em `HUMAN_ONLY_CATEGORIES` (`refund`, `issue_refund`, `customer_refund`, `chargeback_refund`). Banda `allow` não auto-aprova mais reembolso; `deny` segue valendo. Muda o comportamento antes preservado pela ADR-159 (anotado no runbook).
+
+## 14. Status F3.2 — EM PR (memória empresarial)
+`PatternMemoryService.decide/decisions/requestConfirmations/stageOf` + `BusinessMemoryService.overview` + `GET /api/insights/memory` + `POST /patterns/:id/decision` + botões na aba "Padrões aprendidos". Padrão só vira regra com confirmação de uma pessoa (RN-F3-4); rejeitado não alerta; `learn` não toca a decisão; pergunta "considera uma regra?" vai pro `business_signals` (máx. 3, sem R$). `test:business-memory` (60); 60 suítes de padrões/aprendizado/sinais sem regressão. **Não feito:** semear "SKU esgotado não recompra" (decisão do gestor), responder pelo FalaTu, e usar regras nas recomendações (F3.5). Decisões D3/D4/D6/D7 seguem abertas e não bloqueiam esta fatia.
+

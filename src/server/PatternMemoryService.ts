@@ -78,6 +78,91 @@ export class PatternMemoryService {
     return db.prepare(sql).all(...params) as any[];
   }
 
+  // ── MEMÓRIA EMPRESARIAL (ADR-204 F3.2 · RN-F3-4): observado → hipótese → REGRA (só com pessoa) ──────────────────────
+  /**
+   * Estágio em linguagem de memória, DERIVADO (nunca gravado): `rule` = o gestor confirmou; `rejected` = o gestor disse que
+   * não é regra; `hypothesis` = a recorrência validou (`validated`) mas ninguém decidiu — continua sendo só hipótese;
+   * `observed` = candidato; `dormant` = parou de aparecer. A confirmação humana vence o estado automático.
+   */
+  static stageOf(p: { status?: string; manager_decision?: string | null }): "rule" | "rejected" | "hypothesis" | "observed" | "dormant" {
+    if (p.manager_decision === "confirmed") return "rule";
+    if (p.manager_decision === "rejected") return "rejected";
+    if (p.status === "validated") return "hypothesis";
+    if (p.status === "dormant" || p.status === "refuted") return "dormant";
+    return "observed";
+  }
+
+  /**
+   * O GESTOR decide sobre um padrão: `confirmed` (vira regra da empresa), `rejected` (não é regra — para de alertar) ou
+   * `revoked` (volta a ser só hipótese). Exige uma PESSOA identificada (rótulo de sistema — runtime/ai/rule… — é recusado:
+   * a IA nunca confirma o próprio aprendizado, RN-F3-3/4). Só se confirma o que ainda está vivo (observado/hipótese), não o
+   * dormente. Cada decisão fica no histórico append-only e na auditoria; a decisão NÃO é tocada por `learn` (que só reavalia
+   * a recorrência). Isolado por organização.
+   */
+  static decide(orgId: string, patternId: string, decision: "confirmed" | "rejected" | "revoked", decidedBy: string | null | undefined, note?: string | null): { ok: boolean; error?: string; stage?: string; pattern?: any } {
+    const by = String(decidedBy || "").trim();
+    if (!by) return { ok: false, error: "A decisão exige uma pessoa identificada." };
+    if (/^(rule|ai|runtime|system|scheduler|agent|autopilot|mission|playbook|process|cron|bot)([:_\-\s]|$)/i.test(by)) return { ok: false, error: "Só uma pessoa confirma uma regra da empresa — a IA não confirma o próprio aprendizado." };
+    if (!["confirmed", "rejected", "revoked"].includes(decision)) return { ok: false, error: "Decisão inválida." };
+    const p = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
+    if (!p) return { ok: false, error: "Padrão não encontrado." };
+    if (decision === "confirmed" && (p.status === "dormant" || p.status === "refuted")) return { ok: false, error: "Esse padrão parou de aparecer — não dá para confirmar como regra." };
+    if (decision === "revoked" && !p.manager_decision) return { ok: false, error: "Esse padrão não tem decisão a revogar." };
+    const cleanNote = note ? String(note).trim().slice(0, 500) || null : null;
+    const tx = db.transaction(() => {
+      if (decision === "revoked") {
+        db.prepare("UPDATE business_patterns SET manager_decision = NULL, manager_decided_by = NULL, manager_decided_at = NULL, manager_note = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(patternId, orgId);
+      } else {
+        db.prepare("UPDATE business_patterns SET manager_decision = ?, manager_decided_by = ?, manager_decided_at = CURRENT_TIMESTAMP, manager_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(decision, by, cleanNote, patternId, orgId);
+      }
+      db.prepare("INSERT INTO business_pattern_decisions (id, organization_id, pattern_id, decision, decided_by, note, confidence_at, occurrences_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(randomUUID(), orgId, patternId, decision, by, cleanNote, p.confidence, p.occurrences);
+    });
+    tx();
+    // A pergunta "considera uma regra?" deixa de valer assim que há decisão (ou some a decisão e ela volta a valer).
+    try { BusinessSignalService.resolveByDedupe(orgId, `memory:confirm:${patternId}`); } catch { /* best-effort */ }
+    try { logAuthEvent(orgId, by, null, `PATTERN_${decision.toUpperCase()}`, { patternId, domain: p.domain, patternType: p.pattern_type }); } catch { /* best-effort */ }
+    const fresh = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
+    return { ok: true, stage: this.stageOf(fresh), pattern: fresh };
+  }
+
+  /** Histórico de decisões do gestor sobre um padrão (mais novo primeiro). */
+  static decisions(orgId: string, patternId: string): any[] {
+    return db.prepare("SELECT decision, decided_by, note, confidence_at, occurrences_at, created_at FROM business_pattern_decisions WHERE organization_id = ? AND pattern_id = ? ORDER BY created_at DESC, rowid DESC").all(orgId, patternId) as any[];
+  }
+
+  /**
+   * "Identifiquei isso N vezes — considera uma regra?": publica, no ledger (`business_signals`, nunca tabela de alerta
+   * própria), até `limit` HIPÓTESES ainda sem decisão do gestor, as mais fortes primeiro. Idempotente por padrão; a pergunta
+   * se resolve sozinha quando o gestor decide ou o padrão deixa de ser hipótese. Só o que o motor contou (N = ocorrências
+   * reais, desde a 1ª vez) — não inventa "X de Y semanas". Nunca muda o padrão: perguntar não é decidir.
+   */
+  static requestConfirmations(orgId: string, limit = 3): { asked: number; resolved: number } {
+    const rows = db.prepare(`SELECT * FROM business_patterns WHERE organization_id = ? AND status = 'validated' AND manager_decision IS NULL ORDER BY confidence DESC, occurrences DESC LIMIT ?`).all(orgId, Math.max(0, limit)) as any[];
+    const keep = new Set<string>();
+    let asked = 0;
+    for (const p of rows) {
+      const dedupeKey = `memory:confirm:${p.id}`;
+      keep.add(dedupeKey);
+      try {
+        BusinessSignalService.publish(orgId, {
+          domain: "memory", signalType: "pattern_confirmation", severity: "info", basis: "hypothesis",
+          confidence: Number(p.confidence) || 0.5, impactAmount: null, impactUnit: null,
+          sourceService: "PatternMemoryService", sourceEntityType: "business_pattern", sourceEntityId: p.id,
+          evidence: { question: "Considera isso uma regra da empresa?", description: p.description, occurrences: p.occurrences, firstSeen: p.first_seen_date, lastSeen: p.last_seen_date, patternDomain: p.domain },
+          dedupeKey,
+        } as any);
+        BusinessSignalService.reopenByDedupe(orgId, dedupeKey, { onlyAutoResolved: true }); // revogou a decisão → a pergunta volta; o que uma pessoa dispensou segue dispensado
+        asked++;
+      } catch { /* best-effort */ }
+    }
+    // Perguntas antigas que deixaram de caber (decididas, dormentes ou fora do top) saem do radar.
+    let resolved = 0;
+    const open = db.prepare(`SELECT dedupe_key FROM business_signals WHERE organization_id = ? AND domain = 'memory' AND signal_type = 'pattern_confirmation' AND status NOT IN ('resolved','dismissed')`).all(orgId) as any[];
+    for (const o of open) if (!keep.has(o.dedupe_key)) { try { if (BusinessSignalService.resolveByDedupe(orgId, o.dedupe_key).ok) resolved++; } catch { /* noop */ } }
+    return { asked, resolved };
+  }
+
   // ── HIPOTETIZAR (LLM, frugal) — só a descrição; confiança é da regra ──────────
   private static async hypothesize(candidates: PatternCandidate[], domain: string, injected?: Hypothesizer | null): Promise<Record<string, string>> {
     if (!candidates.length) return {};
@@ -156,7 +241,8 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     let published = 0, resolved = 0;
     for (const p of rows) {
       const dedupeKey = `pattern:${domain}:${p.pattern_type}:${p.scope_id || ""}`;
-      if (p.status !== "validated") { if (BusinessSignalService.resolveByDedupe(orgId, dedupeKey).ok) resolved++; continue; }
+      // F3.2: o gestor rejeitou ("não é regra") → o padrão não volta a alertar, mesmo que a recorrência continue.
+      if (p.status !== "validated" || p.manager_decision === "rejected") { if (BusinessSignalService.resolveByDedupe(orgId, dedupeKey).ok) resolved++; continue; }
       const ev = (() => { try { return JSON.parse(p.evidence_json || "{}"); } catch { return {}; } })();
       const stats = this.typeStats(orgId, domain, p.pattern_type);
       let severity = Number(p.confidence) >= 0.6 ? "risk" : "attention";
@@ -361,6 +447,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     }
     const decayed = this.decayStale(orgId, domain, opts.handledTypes, seen);
     const sig = this.publishSignals(orgId, domain, { sourceService: opts.sourceService, handledTypes: opts.handledTypes });
+    try { this.requestConfirmations(orgId); } catch { /* best-effort: perguntar nunca derruba o aprendizado */ }
     return { detected: candidates.length, validated, decayed, published: sig.published, resolved: sig.resolved };
   }
 }

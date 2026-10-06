@@ -20,6 +20,8 @@ import { FinanceSignalPublisher } from "../FinanceSignalPublisher.js";
 import { ProductionSignalPublisher } from "../ProductionSignalPublisher.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { PatternMemoryService } from "../PatternMemoryService.js";
+import { BusinessMemoryService } from "../BusinessMemoryService.js";
+import { ContextProjectionService } from "../ContextProjectionService.js";
 import { ProductionPatternMemory } from "../ProductionPatternMemory.js";
 import { ProcurementPatternMemory } from "../ProcurementPatternMemory.js";
 import { FinancePatternMemory } from "../FinancePatternMemory.js";
@@ -92,6 +94,32 @@ router.get("/patterns", (req: AuthRequest, res): any => {
   // typeStats já traz o recorte ASSEGURADO anexado (PRD 9 / ADR-166 F2): campos
   // mistos (effectiveness/acted) + assuredEffectiveness (null sem prova) + assuredActed.
   res.json({ enabled: PatternMemoryService.isEnabled(orgId), patterns: PatternMemoryService.list(orgId, { domain, status }), typeStats: PatternMemoryService.allEffectiveness(orgId) });
+});
+
+// GET /api/insights/memory — ADR-204 F3.2: a memória empresarial (regras confirmadas · hipóteses · observados · rejeitados ·
+// preferências · políticas · aprendizados assegurados). Read-only; o limiar de alerta (R$) só p/ quem vê dinheiro.
+router.get("/memory", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const canSeeMoney = ContextProjectionService.hasFullBusinessVisibility(orgId, req.user);
+  res.json(BusinessMemoryService.overview(orgId, { canSeeMoney }));
+});
+
+// POST /api/insights/patterns/:id/decision — o GESTOR confirma como regra / rejeita / revoga (F3.2, RN-F3-4). owner/admin.
+// `{ decision: "confirmed"|"rejected"|"revoked", note? }`. Rótulo de sistema nunca decide.
+router.post("/patterns/:id/decision", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = PatternMemoryService.decide(orgId, String(req.params.id || ""), req.body?.decision, req.user?.userId, req.body?.note);
+  if (!out.ok) return res.status(400).json({ ok: false, error: out.error });
+  res.json({ ok: true, stage: out.stage });
+});
+
+// GET /api/insights/patterns/:id/decisions — histórico das decisões do gestor sobre o padrão.
+router.get("/patterns/:id/decisions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ decisions: PatternMemoryService.decisions(orgId, String(req.params.id || "")) });
 });
 
 // POST /api/insights/patterns/:id/outcome — fecha o loop: o gestor mede o desfecho

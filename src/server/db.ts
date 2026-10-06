@@ -12329,6 +12329,28 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_autonomy_pauses_org ON autonomy_pauses (organization_id, resumed_at);
   `);
 
+  // ADR-204 F3.2 — MEMÓRIA EMPRESARIAL: padrão só vira REGRA com confirmação de uma PESSOA (RN-F3-4). A promoção automática
+  // `status='validated'` continua existindo como HIPÓTESE; a decisão do gestor é uma coluna à parte (nunca sobrescrita pelo
+  // `learn`). Histórico append-only: confirmar/rejeitar/revogar nunca apaga o que veio antes.
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_decision TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_decided_by TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_decided_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_note TEXT`); } catch(e){}
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS business_pattern_decisions (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      pattern_id TEXT NOT NULL,
+      decision TEXT NOT NULL,            -- confirmed | rejected | revoked
+      decided_by TEXT NOT NULL,
+      note TEXT,
+      confidence_at REAL,
+      occurrences_at INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_bp_decisions_pattern ON business_pattern_decisions (organization_id, pattern_id, created_at);
+  `);
+
 };
 
 initDb();

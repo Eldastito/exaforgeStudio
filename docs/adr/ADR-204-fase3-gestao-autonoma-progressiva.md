@@ -102,3 +102,7 @@ Nova categoria `reembolso` em `HUMAN_ONLY_CATEGORIES` (`refund`, `issue_refund`,
 
 ## 19. Status F3.6c — EM PR (dependência entre itens da multi-ação)
 Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastro ser aprovado; `POST /multi/:planId/continue` ("Tentar agora", 2 h) retoma. Pronome só resolve com um único cadastro antes. Inclui correção de `parseAppointment` com acentos. Sem tabela/coluna nova. WhatsApp e decomposição de objetivo (F3.6b) seguem fora.
+
+## 20. Status F3.7 — EM PR (Learning Loop: eficácia por intervenção)
+`InterventionEffectivenessService` + `GET /api/executive/intervention-effectiveness` + seção na aba "O que funciona". Esperado × realizado por (domínio, tipo de ação), só `assured` + só `fact`, amostra mínima 5, banda de Wilson, R$ role-gated. **Fora desta fatia (declarado):** "% do objetivo" (sem elo ação→meta) e estratégia de mensagem (depende de D4). Sem tabela/coluna nova.
+

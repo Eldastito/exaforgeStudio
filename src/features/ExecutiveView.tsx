@@ -577,11 +577,14 @@ const policyLabel = (a: any) => {
 // ===== Aba: O que funciona (eficácia aprendida por tipo de ação) =====
 function FuncionaTab() {
   const [items, setItems] = useState<any[]>([]);
+  const [interv, setInterv] = useState<{ items: any[]; minSample: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     apiFetch('/api/executive/effectiveness').then(r => r.json()).then(d => setItems(Array.isArray(d.items) ? d.items : [])).catch(() => {}).finally(() => setLoading(false));
+    apiFetch('/api/executive/intervention-effectiveness').then(r => r.json()).then(d => setInterv(Array.isArray(d?.items) ? d : null)).catch(() => {});
   }, []);
+  const verdictLabel: Record<string, string> = { works: 'costuma atingir o esperado', weak: 'costuma ficar abaixo do esperado', inconclusive: 'ainda inconclusivo', insufficient_sample: 'poucos casos para concluir' };
 
   const effCls = (e: number) => e >= 0.66 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : e >= 0.34 ? 'text-amber-300 bg-amber-500/10 border-amber-500/30' : 'text-rose-300 bg-rose-500/10 border-rose-500/30';
 
@@ -594,6 +597,28 @@ function FuncionaTab() {
           <TrendingUp className="h-4 w-4 text-indigo-400" />
           O que <strong>costuma funcionar</strong> no seu negócio — aprendido dos desfechos que você registrou.
         </div>
+        {interv && interv.items.length > 0 && (
+          <div className="mb-5" data-testid="intervention-effectiveness">
+            <p className="mb-2 text-xs text-zinc-500">Esperado × realizado por tipo de ação (só ações com efeito confirmado e resultado medido; abaixo de {interv.minSample} casos com meta não há conclusão).</p>
+            <div className="space-y-2">
+              {interv.items.map((it: any) => (
+                <div key={`${it.domain}-${it.actionType}`} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-800/40 px-2 py-0.5 text-[11px] text-zinc-400">{domLabel(it.domain)}</span>
+                    <span className="text-sm text-zinc-200">{it.actionType}</span>
+                    <span className="text-[11px] text-zinc-400">{verdictLabel[it.verdict]}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    {it.hitRate != null ? `atingiu o esperado em ${Math.round(it.hitRate * 100)}% (${it.hits}/${it.sample}; faixa ${Math.round(it.interval.lower * 100)}–${Math.round(it.interval.upper * 100)}%)` : `${it.sample} caso(s) com meta`}
+                    {it.realizationPct != null ? ` • realizou ${it.realizationPct}% do esperado` : ''}
+                    {it.realizedTotal != null ? ` (${brl(it.realizedTotal)} de ${brl(it.expectedTotal)})` : ''}
+                    {it.measuredNotAssured > 0 ? ` • ${it.measuredNotAssured} medida(s) sem confirmação, fora da conta` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">
             Ainda não há histórico de eficácia. Conforme você <strong>age sobre os padrões</strong> (na tela de Insights) e marca o desfecho

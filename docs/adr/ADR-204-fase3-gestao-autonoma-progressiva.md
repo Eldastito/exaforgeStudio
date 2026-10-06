@@ -112,3 +112,6 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 ## 22. Status F3.10 — EM PR (briefings semanal e mensal)
 `PeriodicBriefingService` + sinal sem dinheiro na espinha (entrega pelos canais existentes) + `GET /api/ux/briefing/:period` + bloco em Resultados + `Scheduler` (opt-in `periodic_briefing_enabled`). Compõe fontes existentes; role-gated; seção sem dado explica por quê. **Fora (declarado):** margem confiável, estoque, clientes/campanhas; impacto é acumulado, não por período. Empilhada sobre a F3.8 (usa custo/associado).
 
+## 23. Status F3.9 (compras) — EM PR (cenários de compra, só análise)
+`PurchaseScenarioService` + `POST /api/health-center/simulate/purchase-scenarios` + modo no Simulador de decisões. 3 cenários ligando caixa (13 semanas) + cobertura/encalhe + reserva saudável; orçamento máximo recomendado; rascunho de contraproposta NÃO enviado; nunca executa (RN-F3-14). **Fora (declarado):** plano sazonal completo e campanha preditiva (D4). Sem schema novo.
+

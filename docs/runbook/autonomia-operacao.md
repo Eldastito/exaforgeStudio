@@ -194,3 +194,27 @@ Só leitura + 2 rotas + 2 serviços novos e 2 campos aditivos em `SellerDiagnosi
 - Atendimentos só fazem sentido onde o módulo Retail Floor é usado; sem ele a recomendação segue só com vendas/escala/meta.
 - Os limiares do fator (±15% de queda, ±10% de estabilidade) são os que o `SellerDiagnosisService` já usava; **não foram calibrados com dado real da TOULON**.
 
+## F3.6a — FalaTu multi-ação: uma frase → N ações → UMA confirmação
+"cadastra o cliente João e marca reunião com ele amanhã às 10h; anota ligar pro contador" é 3 pedidos. Antes o FalaTu entendia só o primeiro verbo. Agora a frase é dividida e o dono vê a **lista do que vai ser preparado** (cada item com checkbox, removível) e confirma **uma vez**.
+
+**Como funciona (sem orquestrador novo, sem caminho de escrita novo):**
+1. `POST /api/falatu/ask` → `FalaTuAskService.converse`. Se a frase tem ≥2 pedidos de **registro**, devolve `kind: "multi_action"` + `data.multiPlan {planId, items[], expiresAt}` — **pré-visualização, não escreve nada**.
+2. `POST /api/falatu/multi/:planId/confirm {keep?: [ids]}` (default = todos os não bloqueados) prepara cada item mantido pelo **mesmo** `converse` de sempre (`noMulti`): cliente/despesa/venda/recebível/compromisso viram **proposta governada** (`DecisionAction → ApprovalPolicy`, onde a política e o piso da F3.1 decidem quem aprova); "anota…" vai pro **Inbox**. `POST /multi/:planId/cancel` descarta.
+3. **A confirmação única é do PREPARO — não aprova nada no lugar de ninguém.** Despesa/venda continuam "aguardando aprovação" em *Aprovações*.
+
+**Divisão (`FalaTuMultiActionService.split`)** reusa `FalaTuAskService.classify` — sem vocabulário novo: um pedaço só é ação se o classificador de sempre o reconhece como registro. Fronteiras: `;`, "e (depois|também)", "depois", "também", vírgula — **nunca vírgula entre dígitos** (R$ 1,50). Pedaço que não é ação ("leite" em "anota comprar pão e leite") é **colado** no anterior (texto original, nunca recomposto). Pergunta misturada com ação, uma ação só, ou >6 pedidos → **não é multi** (segue o caminho de antes; >6 pede pra mandar menos).
+
+**Regras:** dinheiro role-gated (§73) — item de despesa/venda/recebível aparece 🔒 e é barrado no confirm de quem não vê dinheiro (o `converse` barra de novo); item que o motor não consegue preparar (cliente não encontrado, faltou valor) volta com o **motivo** — nunca finge; plano em **memória** (15 min, por empresa+usuário; sem texto em banco — LGPD; reiniciar o servidor ou passar o prazo "esquece" e pede pra repetir); confirmar 2× devolve o mesmo resultado (idempotente); outro usuário/empresa não confirma; auditoria `FALATU_MULTI_CONFIRMED` só com quantidade/tipos — **sem o texto do dono**.
+
+**UI** (`FalaTuView`, aba Perguntar): cartão com checkbox por ação + um botão "Preparar N ação(ões)" + Cancelar; depois de confirmar mostra o resumo e o destino de cada item.
+
+### Rollback
+Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `noMulti`), 2 rotas, UI. Nenhuma tabela/coluna. Reverter o commit restaura o comportamento anterior.
+
+### Ainda NÃO feito (F3.6)
+- **Decomposição de objetivo** ("+10% na Carioca" → ações por loja) sobre `BusinessGoalService`/Mission OS: fatia própria (**F3.6b**).
+- **WhatsApp** (`FalaTuWhatsAppService`) segue o caminho antigo (não divide frases); só a tela do FalaTu.
+- **Dependência entre itens**: "cadastra o cliente João e marca reunião com ele" — o cliente só é *proposto* (aguardando aprovação), então o compromisso não o encontra e volta "não preparei". Honesto, mas o dono precisa aprovar o cadastro e repetir o agendamento. Pronomes ("com ele") não são resolvidos.
+- Só pedidos de **registro** entram (cliente, despesa, venda, recebível, compromisso, anotação). Tarefas para outras pessoas, campanhas, transferências e demais ações governadas não são decompostas ainda.
+- Em "Hoje/Executando/Resultados" o que aparece são as propostas/aprovações já existentes; não há visão própria do plano.
+

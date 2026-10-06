@@ -38,7 +38,7 @@ import { RecoveryAssessmentService } from "./RecoveryAssessmentService.js";
 import { RecoveryPlanService } from "./RecoveryPlanService.js";
 import { isDecisionInquiry } from "./ConversationalIntentRules.js";
 
-export type FalaTuAskKind = "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable" | "financial_recovery";
+export type FalaTuAskKind = "multi_action" | "cash_on_day" | "sales_on_day" | "who_is_off" | "open_question" | "record" | "record_expense" | "record_sale" | "record_contact" | "record_appointment" | "record_receivable" | "financial_recovery";
 
 export interface FalaTuAskClassification {
   kind: FalaTuAskKind;
@@ -435,9 +435,16 @@ export class FalaTuAskService {
    * `opts.source` marca o canal (whatsapp/falatu_web) pro item ser confirmável
    * no fluxo do canal certo.
    */
-  static async converse(orgId: string, user: any, text: string, opts: { now?: Date; source?: string; contextStoreId?: string | null } = {}): Promise<FalaTuAskResult> {
+  static async converse(orgId: string, user: any, text: string, opts: { now?: Date; source?: string; contextStoreId?: string | null; noMulti?: boolean } = {}): Promise<FalaTuAskResult> {
     const t = String(text || "").trim();
     const today = BusinessTimeService.businessDate(orgId, opts.now || new Date());
+    // ADR-204 F3.6a — UMA frase com ≥2 pedidos de registro vira uma LISTA pra confirmar UMA vez (pré-visualização, sem escrever).
+    // Qualquer outra frase (1 ação, pergunta, mistura) devolve null e segue EXATAMENTE o caminho de antes (0-regressão).
+    if (!opts.noMulti) {
+      const { FalaTuMultiActionService } = await import("./FalaTuMultiActionService.js");
+      const m = FalaTuMultiActionService.detect(orgId, user, t, { today, contextStoreId: opts.contextStoreId, source: opts.source, now: opts.now?.getTime() });
+      if (m) return { kind: "multi_action", date: null, grounded: true, moneyRestricted: false, answer: m.answer, data: m.data };
+    }
     const cls = this.classify(t, today);
 
     // Registro de DESPESA → pipeline GOVERNADO (proposta→aprovação→execução).

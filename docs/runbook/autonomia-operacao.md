@@ -145,3 +145,27 @@ Aditivo: 1 coluna (`organization_settings.retail_radar_enabled`, default 0) e ne
 - Não calibrei os limiares (30%/40%/36h/2,5×) com dado real da TOULON — são valores iniciais prudentes. Rode primeiro em preview (`GET /radar`) e ajuste.
 - Detectores de preço/duplicidade olham o PDV da última venda ingerida; não cruzam com a tabela de preços do ERP.
 
+## F3.4 — Previsão do mês por loja (faixa · chance de bater a meta · quanto falta)
+`GET /api/retail/forecast[?asOf=YYYY-MM-DD&month=YYYY-MM]` (dono/admin sem trava de loja; só leitura). Para cada loja ativa: o que já fechou no mês (**fato**), a faixa de fechamento (**estimativa**, ≈80%: 10%–90%), a chance de bater a meta, o que falta e quanto por dia de funcionamento (aritmética sobre a meta, comparada ao dia típico da loja) e a confiança com os motivos.
+
+**Base:** os **fechamentos oficiais por dia** (`retail_daily_closings`, a mesma base do "Mês X / R$ meta" do fechamento da noite). **Não é intradiário**: a hora da venda não é confiável (dono, 2026-10), então não existe "projeção do dia" nem faixa por hora — é loja × dia da semana × mês.
+
+**Modelo (determinístico, sem LLM):** fechado até ontem + soma, nos dias de funcionamento que faltam, da média do próprio dia da semana nas últimas 12 semanas (feriados e datas comerciais ficam FORA do padrão). Faixa = ±1,28σ com dias independentes; chance de bater a meta = aproximação normal, arredondada de 5 em 5 e **nunca 0% nem 100%**. Dias em que a loja fecha (folga na escala ou dia fixo de folga) não entram.
+
+**Datas especiais** (`retailCalendar.ts`: feriados nacionais + Dia das Mães/Namorados/Pais/Crianças, Black Friday, véspera de Natal): se ainda vêm no mês, o dia usa a média do dia da semana (**não há fator inventado**), a faixa é alargada (σ ≥ 50% da média) e a confiança cai para baixa, listando-as. **Feriado municipal/estadual (ex.: São Jorge no RJ) NÃO está no calendário.**
+
+**Gate de dados (RN-F3-5)** — estados: `ok` · `insufficient_history` (menos de 12 semanas de fechamentos — caso Bangu —, ou menos de 6 dias de funcionamento sem feriado de algum dia da semana que ainda vem) · `no_closings` · `stale_data` (mais de 2 dias de funcionamento do mês sem fechamento) · `month_complete`. 1–2 dias ainda sem fechamento entram como **incertos** (listados), nunca como fato.
+
+**Meta (RN-F3-6):** é lida, nunca alterada. Ordem: meta mensal cadastrada → senão soma das cotas diárias do mês (declarado em `goal.source`) → senão nada (sem probabilidade/falta, nunca meta inventada).
+
+**Rede:** só as lojas projetáveis (as outras aparecem em `storesExcluded` com o motivo); σ somado em quadratura (lojas independentes), então a faixa da rede é mais estreita que a soma das faixas.
+
+### Rollback
+Só leitura: 2 arquivos novos + 1 rota. Nenhuma tabela/coluna. Reverter o commit remove tudo.
+
+### Ainda NÃO feito (F3.4)
+- **Projeção do dia / faixa intradiária**: bloqueada até a hora do PDV ser confiável.
+- **Sell-through da coleção**: NÃO existe dimensão de coleção/temporada no catálogo (`products_services`) — fazer isso seria inventar o agrupamento. Fica para quando o catálogo trouxer coleção (ou o dono definir como agrupar).
+- A faixa mede só a variação normal de dia para dia; **não** cobre mudança de tendência, promoção, ruptura de estoque, nem o efeito real de feriado/Black Friday (sem dado próprio não se inventa fator).
+- Sem tela e sem aviso proativo ("risco de não bater a meta"): é a base para o briefing semanal/mensal (F3.10) e para o plano de recuperação (F3.5). Os limiares de confiança (12 semanas, 6 amostras, 24 semanas p/ "alta") são iniciais e **não foram calibrados com dado real da TOULON**.
+

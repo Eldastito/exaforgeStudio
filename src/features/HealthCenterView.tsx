@@ -406,15 +406,16 @@ export function HealthCenterView() {
 
 // Simulador de Decisões (ADR-133) — "posso contratar?" / "posso comprar estoque?".
 function HireSimulatorCard() {
-  const [mode, setMode] = useState<'hire' | 'stock' | 'withdraw' | 'payback'>('hire');
+  const [mode, setMode] = useState<'hire' | 'stock' | 'withdraw' | 'payback' | 'scenarios'>('hire');
   const [value, setValue] = useState('');
   const [res, setRes] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
-  const setModeReset = (m: 'hire' | 'stock' | 'withdraw' | 'payback') => { setMode(m); setRes(null); setValue(''); };
+  const setModeReset = (m: 'hire' | 'stock' | 'withdraw' | 'payback' | 'scenarios') => { setMode(m); setRes(null); setValue(''); };
   const CFG = {
     hire: { url: '/api/health-center/simulate/hire', key: 'monthlyCost', label: 'Posso contratar?', hint: 'Custo mensal da contratação → quanto de venda a mais isso exige, com a sua margem atual.', ph: 'custo mensal (ex.: 3.500)' },
     stock: { url: '/api/health-center/simulate/buy-stock', key: 'amount', label: 'Posso comprar estoque?', hint: 'Valor da compra → quantos dias de cobertura e quanto tende a ficar parado.', ph: 'valor da compra (ex.: 30.000)' },
     withdraw: { url: '/api/health-center/simulate/withdraw', key: 'amount', label: 'Posso retirar mais?', hint: 'Valor da retirada → efeito no caixa e se cabe no pró-labore sustentável.', ph: 'valor da retirada (ex.: 2.000)' },
+    scenarios: { url: '/api/health-center/simulate/purchase-scenarios', key: 'amount', label: 'Cenários de compra', hint: 'Valor da compra → caixa, cobertura e encalhe em 3 cenários (conservador/base/otimista). Só análise: nada é pedido nem pago.', ph: 'valor da compra (ex.: 30.000)' },
     payback: { url: '/api/health-center/simulate/payback', key: 'amount', label: 'Pagar um investimento?', hint: 'Valor do investimento → quanto vender pra pagar (em 12 meses) e o payback no seu ritmo atual.', ph: 'valor da máquina (ex.: 12.000)' },
   } as const;
   const simulate = async () => {
@@ -431,7 +432,7 @@ function HireSimulatorCard() {
     <div className="mt-4 rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
       <h3 className="text-sm font-medium text-indigo-100 flex items-center gap-2"><Target className="w-4 h-4" /> Simulador de decisões</h3>
       <div className="mt-2 flex flex-wrap items-center rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 text-[11px] w-fit gap-0.5">
-        {(['hire', 'stock', 'withdraw', 'payback'] as const).map((m) => (
+        {(['hire', 'stock', 'withdraw', 'payback', 'scenarios'] as const).map((m) => (
           <button key={m} onClick={() => setModeReset(m)} className={`rounded px-2.5 py-1 ${mode === m ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>{CFG[m].label}</button>
         ))}
       </div>
@@ -443,7 +444,29 @@ function HireSimulatorCard() {
         </div>
         <button onClick={simulate} disabled={busy} className="text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 font-medium">Simular</button>
       </div>
-      {res && (res.ok ? (
+      {res && res.ok && mode === 'scenarios' && (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 space-y-2" data-testid="purchase-scenarios">
+          <div className={`text-[13px] ${res.verdict === 'ok' ? 'text-emerald-300' : res.verdict === 'attention' ? 'text-amber-300' : res.verdict === 'not_recommended' ? 'text-red-300' : 'text-zinc-300'}`}>
+            {res.verdict === 'ok' ? 'Cabe nos três cenários' : res.verdict === 'attention' ? 'Cabe, mas com atenção' : res.verdict === 'not_recommended' ? 'Não recomendo essa compra' : 'Dados insuficientes pra concluir'}
+          </div>
+          <ul className="list-disc pl-4 text-[11px] text-zinc-400">{(res.reasons || []).map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {(res.scenarios || []).map((sc: any) => (
+              <div key={sc.key} className="rounded-lg border border-zinc-800 p-2 text-[11px] text-zinc-400">
+                <div className="text-zinc-200 font-medium">{sc.label}</div>
+                <div>Caixa mínimo: <b className={sc.breachesMinCash ? 'text-red-300' : 'text-zinc-200'}>{brl(sc.minEndingWith)}</b></div>
+                <div>Cobertura: <b className="text-zinc-200">{sc.coverageDaysAfter != null ? `${sc.coverageDaysAfter} dias` : '—'}</b></div>
+                <div>Vender tudo em: <b className="text-zinc-200">{sc.sellThroughDays != null ? `${sc.sellThroughDays} dias` : '—'}</b></div>
+              </div>
+            ))}
+          </div>
+          {res.recommendedMaxBudget?.amount != null && <div className="text-[11px] text-zinc-400">Orçamento máximo que cabe: <b className="text-amber-200">{brl(res.recommendedMaxBudget.amount)}</b> <span className="text-zinc-500">({res.recommendedMaxBudget.basis})</span></div>}
+          {res.counterproposalDraft && <div className="rounded-lg border border-zinc-800 p-2 text-[11px] text-zinc-300">{res.counterproposalDraft}</div>}
+          <ul className="list-disc pl-4 text-[10px] text-zinc-500">{(res.caveats || []).map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
+          <div className="text-[10px] text-zinc-600">Só análise — nada foi pedido, pago nem enviado ao fornecedor.</div>
+        </div>
+      )}
+      {res && !(res.ok && mode === 'scenarios') && (res.ok ? (
         <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
           <div className="text-[13px] text-zinc-100">{res.veredito}</div>
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-400">
@@ -480,7 +503,7 @@ function HireSimulatorCard() {
           </div>
         </div>
       ) : (
-        <div className="mt-3 text-[12px] text-amber-300">{res.message}</div>
+        <div className="mt-3 text-[12px] text-amber-300">{res.message || res.error}</div>
       ))}
     </div>
   );

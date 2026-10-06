@@ -246,3 +246,11 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 **Ligar/desligar pela tela:** em Resultados → Briefing há um interruptor "Avisar quando o briefing estiver pronto" — só aparece pra dono/admin (a UI consulta `GET /api/ux/briefing/enabled`, que responde 403 aos demais); a gate real continua no servidor.
 **Rollback:** desligar a flag (default já é off); só código + 1 coluna ignorável.
 
+## F3.9 (compras) — cenários de compra, SÓ ANÁLISE
+`PurchaseScenarioService.analyze(orgId, {amount, minCash?, payInWeeks?})` — `POST /api/health-center/simulate/purchase-scenarios` (só gestor com visão completa; §73) e modo **"Cenários de compra"** no Simulador de decisões (Central de Saúde). Liga o que existe: caixa de 13 semanas (`CashForecastService`, compra como saída na semana escolhida), cobertura/encalhe (`DecisionSimulatorService.buyStock` + `stockCapital`) e reserva saudável (ADR-201, só contexto). Três cenários: conservador/base/otimista = ±30% na velocidade de venda e nos recebíveis (**premissa declarada**, não dado medido).
+
+**Nunca executa (RN-F3-14):** `executes:false`; não cria pedido/requisição/ação, não paga, não fala com fornecedor. A única escrita é a sincronização idempotente de vendas pagas no caixa que o motor de caixa já faz ao projetar. A **contraproposta é um RASCUNHO** de texto ("não enviado — você decide"), só quando a compra passa do orçamento máximo; não inventa fornecedor nem condição.
+**Veredito (conselho):** `not_recommended` se o caixa conservador fura o mínimo ou a cobertura base passa de 120 dias; `attention` se encosta no mínimo, cobertura > 60, reserva do mês fora do ideal ou ≥30% do estoque sem giro; `insufficient_data` sem caixa e sem velocidade; `ok` caso contrário. **Orçamento máximo** = o menor entre o que o caixa conservador aguenta e a cobertura de 120 dias com venda conservadora (a base usada é dita).
+**Honestidade:** margem/giro/caixa ausentes → `null` + `caveats` (nunca 0); giro não medido → sem estimativa de encalhe; caixa mínimo não informado → R$ 0 declarado.
+**Fora (declarado):** planejamento sazonal ("Black Friday") com clientes/campanhas/equipe e **campanha preditiva** — bloqueados pela D4 (consentimento na base do PDV). Sem tabela/coluna nova. **Rollback:** só código.
+

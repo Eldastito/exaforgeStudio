@@ -948,6 +948,7 @@
     "test:intervention-effectiveness": "tsx scripts/test-intervention-effectiveness.ts",
     "test:impact-ledger-v2": "tsx scripts/test-impact-ledger-v2.ts",
     "test:periodic-briefing": "tsx scripts/test-periodic-briefing.ts",
+    "test:purchase-scenarios": "tsx scripts/test-purchase-scenarios.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

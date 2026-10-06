@@ -61,6 +61,20 @@ router.post("/simulate/buy-stock", (req: AuthRequest, res): any => {
   res.json(DecisionSimulatorService.buyStock(orgId, { amount: Number(req.body?.amount) || 0 }));
 });
 
+// POST /api/health-center/simulate/purchase-scenarios — ADR-204 F3.9: compra em 3 cenários (caixa + cobertura + reserva). SÓ ANÁLISE:
+// não cria pedido, não paga, não fala com fornecedor. É dinheiro da empresa → só quem tem visão completa do negócio (§73).
+router.post("/simulate/purchase-scenarios", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { ContextProjectionService } = await import("../ContextProjectionService.js");
+    if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "A análise de compra mostra caixa e margem — é do gestor." });
+    const { PurchaseScenarioService } = await import("../PurchaseScenarioService.js");
+    const out = PurchaseScenarioService.analyze(orgId, { amount: req.body?.amount, minCash: req.body?.minCash, payInWeeks: req.body?.payInWeeks });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

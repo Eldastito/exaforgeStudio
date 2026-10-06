@@ -275,6 +275,7 @@ router.post("/:id/outcomes", (req: AuthRequest, res): any => {
     res.status(201).json(OutcomeMeasurementService.record(orgId, req.params.id, {
       expectedValue: b.expectedValue, realizedValue: b.realizedValue, basis: b.basis,
       measurementMethod: b.measurementMethod, attributionWindowDays: b.attributionWindowDays, evidence: b.evidence,
+      interventionCost: b.interventionCost, confidence: b.confidence,
     }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

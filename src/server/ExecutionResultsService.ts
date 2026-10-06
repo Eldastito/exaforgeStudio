@@ -26,6 +26,7 @@ import { ContextProjectionService } from "./ContextProjectionService.js";
 import { UnifiedImpactLedgerService } from "./UnifiedImpactLedgerService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { UxPresentationService } from "./UxPresentationService.js";
+import { OutcomeMeasurementService } from "./OutcomeMeasurementService.js";
 import { OutcomeAssuranceService } from "./OutcomeAssuranceService.js";
 
 const PROC_ACTIVE = new Set(["planned", "authorized", "queued", "executing", "waiting_external_response"]);
@@ -104,6 +105,9 @@ export class ExecutionResultsService {
   static results(orgId: string, user: any): {
     fullVisibility: boolean;
     impact: { categories: Record<string, any>; sources: string[]; disclaimer: string };
+    // ADR-204 F3.8 — como ler o impacto: ASSOCIADO (sem grupo de controle nunca é "causado"), confiança da medição e
+    // resultado líquido (fato com custo conhecido). R$ só pro gestor (§73); contagens e rótulos sempre.
+    impactReading: { causality: { basis: string; incremental: null; reason: string }; confidence: Record<string, number>; net: { costKnownCount: number; costUnknownCount: number; cost: number | null; realizedWhereCostKnown: number | null; net: number | null; restricted: boolean } };
     goals: { total: number; offTrack: number; items: any[] } | null;
     generatedAt: string;
   } {
@@ -134,9 +138,15 @@ export class ExecutionResultsService {
       };
     }
 
+    const t: any = OutcomeMeasurementService.ledger(orgId, { limit: 500 }).totals;
+    const impactReading = {
+      causality: t.causality, confidence: t.confidence,
+      net: full ? { ...t.net, restricted: false } : { costKnownCount: t.net.costKnownCount, costUnknownCount: t.net.costUnknownCount, cost: null, realizedWhereCostKnown: null, net: null, restricted: true },
+    };
     return {
       fullVisibility: full,
       impact: { categories, sources: ledger.sources, disclaimer: ledger.disclaimer },
+      impactReading,
       goals,
       generatedAt: new Date().toISOString(),
     };

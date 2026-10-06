@@ -39,7 +39,11 @@ export interface RecordOutcomeInput {
   // medir 2× o MESMO evento não grava dois outcomes (anti-dupla-contagem): a 2ª chamada
   // devolve o outcome já existente. Opcional — sem chave, o comportamento legado é preservado.
   eventKey?: string | null;
+  // ADR-204 F3.8 — custo que a intervenção custou (R$; null/ausente = DESCONHECIDO, nunca 0) e confiança de quem mediu.
+  interventionCost?: number | null;
+  confidence?: string | null;           // high | medium | low
 }
+const CONFIDENCES = ["high", "medium", "low"] as const;
 
 export class OutcomeMeasurementService {
   /**
@@ -53,6 +57,8 @@ export class OutcomeMeasurementService {
     if (!action) throw new Error("Ação não encontrada para medir outcome.");
     const basis = (BASES as readonly string[]).includes(String(input.basis)) ? String(input.basis) : "estimate";
     const method: Method = (METHODS as readonly string[]).includes(input.measurementMethod as any) ? (input.measurementMethod as Method) : "manual";
+    const cost = input.interventionCost != null && input.interventionCost !== ("" as any) && Number.isFinite(Number(input.interventionCost)) && Number(input.interventionCost) >= 0 ? round2(Number(input.interventionCost)) : null;
+    const confidence = (CONFIDENCES as readonly string[]).includes(String(input.confidence)) ? String(input.confidence) : null;
     const eventKey = input.eventKey != null && String(input.eventKey).trim() ? String(input.eventKey).trim() : null;
 
     // Idempotência por evento (F5): se a chave já mediu, devolve o outcome existente —
@@ -66,8 +72,8 @@ export class OutcomeMeasurementService {
     try {
       db.prepare(`INSERT INTO action_outcomes
         (id, organization_id, action_id, expected_value, realized_value, basis, measurement_method, attribution_window_days, evidence_json,
-         time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented, correlation_id, event_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         time_saved_minutes, cost_avoided, revenue_recovered, loss_prevented, correlation_id, event_key, intervention_cost, confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, orgId, actionId,
           input.expectedValue != null ? round2(input.expectedValue) : null,
           input.realizedValue != null ? round2(input.realizedValue) : null,
@@ -78,7 +84,7 @@ export class OutcomeMeasurementService {
           input.costAvoided != null ? round2(input.costAvoided) : null,
           input.revenueRecovered != null ? round2(input.revenueRecovered) : null,
           input.lossPrevented != null ? round2(input.lossPrevented) : null,
-          action.correlation_id || null, eventKey);
+          action.correlation_id || null, eventKey, cost, confidence);
     } catch (e: any) {
       // Corrida: outra transação gravou a mesma event_key entre o SELECT e o INSERT.
       if (eventKey && String(e?.code || "").includes("SQLITE_CONSTRAINT")) {
@@ -132,9 +138,26 @@ export class OutcomeMeasurementService {
     // uma tem unidade/interpretação diferente); só agregadas dentro da MESMA
     // categoria. Nulls ignorados. Alimentam o painel "Concluído hoje" (F3.2).
     const sumField = (field: string) => round2(items.reduce((s, i) => s + (Number((i as any)[field]) || 0), 0));
+    // ADR-204 F3.8 — custo × resultado. Só FATO com custo CONHECIDO entra no líquido (custo desconhecido NÃO é 0:
+    // vira `costUnknown`, fora da conta). Estimativa/atribuído nunca entram. Sem nenhum custo conhecido → net null.
+    const facts = items.filter((i) => i.basis === "fact");
+    const withCost = facts.filter((i) => i.intervention_cost != null);
+    const costKnown = round2(withCost.reduce((s, i) => s + (Number(i.intervention_cost) || 0), 0));
+    const realizedWithCost = round2(withCost.reduce((s, i) => s + (Number(i.realized_value) || 0), 0));
+    const net = {
+      costKnownCount: withCost.length, costUnknownCount: facts.length - withCost.length,
+      cost: withCost.length ? costKnown : null,
+      realizedWhereCostKnown: withCost.length ? realizedWithCost : null,
+      net: withCost.length ? round2(realizedWithCost - costKnown) : null,
+    };
+    const confidence = { high: 0, medium: 0, low: 0, unreported: 0 } as Record<string, number>;
+    for (const i of items) confidence[(CONFIDENCES as readonly string[]).includes(i.confidence) ? i.confidence : "unreported"]++;
     return {
       items,
       totals: {
+        net, confidence,
+        // Sem grupo de controle, TUDO é "associado" à ação — nunca "causado/incremental" (RN-F3-9; holdout fica pra quando houver D3 + campanha).
+        causality: { basis: "associated", incremental: null, reason: "sem grupo de controle" },
         expected,
         realized,
         gap: round2(realized - expected),

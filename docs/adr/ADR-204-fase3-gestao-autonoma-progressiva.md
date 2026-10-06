@@ -106,3 +106,6 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 ## 20. Status F3.7 — EM PR (Learning Loop: eficácia por intervenção)
 `InterventionEffectivenessService` + `GET /api/executive/intervention-effectiveness` + seção na aba "O que funciona". Esperado × realizado por (domínio, tipo de ação), só `assured` + só `fact`, amostra mínima 5, banda de Wilson, R$ role-gated. **Fora desta fatia (declarado):** "% do objetivo" (sem elo ação→meta) e estratégia de mensagem (depende de D4). Sem tabela/coluna nova.
 
+## 21. Status F3.8 — EM PR (Impact Ledger 2.0, sem holdout)
+`action_outcomes.intervention_cost` + `confidence` (aditivos), `ledger().totals.{net,confidence,causality}`, `ExecutionResultsService.results().impactReading` e leitura na tela Resultados. Custo desconhecido ≠ 0; líquido só com fato+custo conhecido; tudo rotulado "associado" (sem controle). **Holdout/incremental (RN-F3-9) segue pendente da D3** e de campanha com grupo de controle; nada grava custo automaticamente ainda.
+

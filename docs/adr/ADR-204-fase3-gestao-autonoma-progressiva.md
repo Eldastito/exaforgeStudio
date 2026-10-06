@@ -43,7 +43,7 @@ RN-F3-1 níveis derivados, sem enum novo · RN-F3-2 a lista de ações sempre-hu
 - **D1** — Aceitar níveis 0–4 como **mapa derivado** (sem enum novo) e **não implementar o Nível 4** nesta fase. *(recomendo sim)*
 - **D2** — `dispatchGoverned` mantém o comportamento atual para mensagens (cobrança/recuperação/prospecção), mas passa a **recusar** qualquer tipo da lista sempre-humana. *(recomendo sim)*
 - **D3** — Holdout/controle em campanha: aceitar que, sem amostra mínima, o sistema só mostra "receita associada". *(recomendo sim)*
-- **D4** — **Consentimento na base do PDV**: `retail_pdv_customers` não tem coluna de consentimento. Definir a regra (LGPD) antes de qualquer campanha preditiva.
+- **D4** — **Consentimento na base do PDV**: `retail_pdv_customers` não tem coluna de consentimento. Definir a regra (LGPD) antes de qualquer campanha preditiva. **DECIDIDA pelo dono: o cliente precisa aprovar** → ver §24 (registro + gate do sink; captura pro cliente ainda pendente).
 - **D5** — Ordem: F3.1 primeiro (piso); compras (F3.9-compras) por último e só análise. *(recomendo sim)*
 - **D6** — Piloto da Fase 2 (celular, vendedor, medição de uso) **antes** da F3.4 em diante, ou em paralelo? Previsão em cima de superfícies não validadas é risco.
 - **D7** — Quantos meses de vendas **com horário** a TOULON tem? Decide a viabilidade da F3.4.
@@ -114,4 +114,7 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 
 ## 23. Status F3.9 (compras) — EM PR (cenários de compra, só análise)
 `PurchaseScenarioService` + `POST /api/health-center/simulate/purchase-scenarios` + modo no Simulador de decisões. 3 cenários ligando caixa (13 semanas) + cobertura/encalhe + reserva saudável; orçamento máximo recomendado; rascunho de contraproposta NÃO enviado; nunca executa (RN-F3-14). **Fora (declarado):** plano sazonal completo e campanha preditiva (D4). Sem schema novo.
+
+## 24. Status D4 — EM PR (consentimento dos clientes do PDV)
+`PdvConsentService` + `retail_pdv_consents` (append-only; última decisão vale; revogar vence) + rotas `/api/retailops/pdv-consent*` + o `OutboundConsentGuardService` passa a tratar cliente do PDV (casado pelo celular) como sujeito a consentimento quando `outbound_consent_required=1`. Sem registro = sem consentimento. **Destrava** o desenho da campanha preditiva (F3.9), que deve usar `assertContactable`; **não a implementa**. **Pendente:** tela/link de opt-in pro cliente e captura em massa; decisão de quando ligar a flag.
 

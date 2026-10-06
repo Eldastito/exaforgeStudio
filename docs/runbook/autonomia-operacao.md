@@ -208,6 +208,10 @@ Só leitura + 2 rotas + 2 serviços novos e 2 campos aditivos em `SellerDiagnosi
 
 **UI** (`FalaTuView`, aba Perguntar): cartão com checkbox por ação + um botão "Preparar N ação(ões)" + Cancelar; depois de confirmar mostra o resumo e o destino de cada item.
 
+### F3.6c — dependência entre itens (cadastro → compromisso)
+"cadastra o cliente João e marca reunião com ele amanhã": o compromisso só pode ser preparado quando o cliente EXISTE, e o cadastro só existe depois de aprovado. Por isso `linkDependencies` liga o compromisso ao cadastro **anterior** da mesma frase (nome citado, com acento/caixa normalizados, ou "com ele/ela" quando há **exatamente um** cadastro antes — ambíguo não adivinha). No confirm, o compromisso fica `waiting` (não finge que fez, não cria nada). Depois de aprovar o cadastro, "Tentar agora" (`POST /api/falatu/multi/:planId/continue`) roda de novo só os que esperam: se o cliente já existe, prepara; se não, segue esperando com o motivo. Vale por 2 h; nada esperando → recusa (idempotente). Auditoria `FALATU_MULTI_CONTINUED`.
+Correção embutida: `parseAppointment` não cortava "amanhã"/"às" (o `\b` não enxerga acento) e o nome saía errado → "Não achei o cliente". Agora usa limites com letras acentuadas.
+
 ### Rollback
 Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `noMulti`), 2 rotas, UI. Nenhuma tabela/coluna. Reverter o commit restaura o comportamento anterior.
 

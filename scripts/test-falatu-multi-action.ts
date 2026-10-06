@@ -120,6 +120,35 @@ async function main() {
   const plan7 = await mk("cadastra o cliente Gil Neves e anota ligar pro contador");
   check("cancelar descarta (nada foi escrito) e depois não dá mais pra confirmar", M.cancel(O, dono, plan7.planId) === true && (await M.confirm(O, dono, plan7.planId, null, { now: now() })).ok === false && M.cancel(O, vend, plan5.planId) === false);
 
+  // ── F) F3.6c — dependência entre itens (cadastro → compromisso com o mesmo cliente) ──
+  const dep: any = await A.converse(O, dono, "cadastra o cliente Paulo Mota e marca reunião com ele amanhã às 10h", { now: now() });
+  const di = dep.data?.multiPlan?.items || [];
+  check("pronome 'com ele' liga o compromisso ao cadastro anterior (único)", dep.kind === "multi_action" && di[1]?.dependsOn === di[0]?.id && di[1]?.dependsName === "Paulo Mota" && /espera o cadastro de Paulo Mota/.test(di[1].label), JSON.stringify(di));
+  const dep2: any = await A.converse(O, dono, "cadastra o cliente Rita Lopes e marca reunião com Rita Lopes amanhã às 10h", { now: now() });
+  check("nome citado (com acento/caixa) também liga", dep2.data?.multiPlan?.items?.[1]?.dependsName === "Rita Lopes");
+  const dep3: any = await A.converse(O, dono, "cadastra o cliente Ana Dias, cadastra o cliente Beto Cruz e marca reunião com ele amanhã às 10h", { now: now() });
+  check("pronome AMBÍGUO (2 cadastros antes) NÃO liga — não adivinha", (dep3.data?.multiPlan?.items || []).every((i: any) => !i.dependsOn));
+  const dep4: any = await A.converse(O, dono, "marca reunião com ele amanhã às 10h e cadastra o cliente Zeca Lima", { now: now() });
+  check("cadastro DEPOIS do compromisso não vira dependência", (dep4.data?.multiPlan?.items || []).every((i: any) => !i.dependsOn));
+  const bA = snapshot();
+  const cf: any = await M.confirm(O, dono, dep.data.multiPlan.planId, null, { now: now() });
+  const w = cf.results?.find((r: any) => r.outcome === "waiting");
+  check("confirmar: o compromisso ESPERA (não cria nada sem o cliente) e o resumo diz", cf.ok && !!w && /esperando o cadastro/.test(cf.summary) && count("appointments") === (JSON.parse(bA)[3]));
+  const d_c1: any = await M.continueWaiting(O, dono, dep.data.multiPlan.planId, { now: now() });
+  check("'Tentar agora' sem o cadastro aprovado: segue esperando, sem criar compromisso", d_c1.ok && d_c1.stillWaiting === 1 && count("appointments") === JSON.parse(bA)[3]);
+  check("continuar: outro usuário/empresa recusado; plano inexistente recusado", !(await M.continueWaiting(O, vend, dep.data.multiPlan.planId)).ok && !(await M.continueWaiting(P, outra, dep.data.multiPlan.planId)).ok && !(await M.continueWaiting(O, dono, "nao-existe")).ok);
+  const d_late: any = await M.continueWaiting(O, dono, dep.data.multiPlan.planId, { now: new Date(now().getTime() + 3 * 3600_000) });
+  check("passado o prazo (2 h) não retoma", !d_late.ok && /prazo/.test(d_late.error));
+  // cliente passa a existir (cadastro aprovado/executado) → o compromisso é preparado, e só uma vez
+  const chId = randomUUID();
+  db.prepare(`INSERT INTO channels (id, organization_id, provider, name, identifier, status) VALUES (?, ?, 'falatu', 'Fala Tu', 'falatu', 'connected')`).run(chId, O);
+  db.prepare(`INSERT INTO contacts (id, organization_id, channel_id, name, identifier) VALUES (?, ?, ?, 'Paulo Mota', 'paulo-mota')`).run(randomUUID(), O, chId);
+  const d_c2: any = await M.continueWaiting(O, dono, dep.data.multiPlan.planId, { now: now() });
+  check("com o cliente existindo, 'Tentar agora' prepara o compromisso e zera a espera", d_c2.ok && d_c2.stillWaiting === 0 && d_c2.results.find((r: any) => r.id === w.id).outcome !== "waiting", JSON.stringify(d_c2.results));
+  const d_c3: any = await M.continueWaiting(O, dono, dep.data.multiPlan.planId, { now: now() });
+  const snapC = snapshot(); const d_c4: any = await M.continueWaiting(O, dono, dep.data.multiPlan.planId, { now: now() });
+  check("idempotente: continuar de novo (nada esperando) é recusado e não reprepara", !d_c3.ok && !d_c4.ok && /Nada está esperando/.test(d_c4.error) && snapshot() === snapC);
+
   // ── E) auditoria, rotas, UI ──
   const aud = db.prepare(`SELECT metadata_json FROM auth_audit_logs WHERE organization_id = ? AND event_type = 'FALATU_MULTI_CONFIRMED' ORDER BY created_at DESC`).all(O) as any[];
   check("auditoria registra quantidade e tipos — SEM o texto do dono", aud.length >= 3 && aud.every((a) => !/Beatriz|Acme|contador|350/.test(String(a.metadata_json))) && aud.some((a) => /cliente/.test(String(a.metadata_json))));
@@ -146,12 +175,18 @@ async function main() {
   check("rota: confirma (200) com resumo e resultados", ok.status === 200 && ok.body.ok && ok.body.results.length === 2 && /Pronto/.test(ok.body.summary));
   const ask2 = await call("POST", "/ask", "dono", O, { question: "cadastra o cliente Ivo Reis e anota ligar pro contador" });
   check("rota: cancelar", (await call("POST", `/multi/${ask2.body.data.multiPlan.planId}/cancel`, "dono", O, {})).body.ok === true);
+  const dd = await call("POST", "/ask", "dono", O, { question: "cadastra o cliente Lia Neri e marca reunião com ela amanhã às 10h" });
+  await call("POST", `/multi/${dd.body.data.multiPlan.planId}/confirm`, "dono", O, {});
+  const cont = await call("POST", `/multi/${dd.body.data.multiPlan.planId}/continue`, "dono", O, {});
+  check("rota /continue: 200 e ainda esperando o cadastro", cont.status === 200 && cont.body.stillWaiting === 1);
+  check("rota /continue: plano inexistente → 400", (await call("POST", "/multi/xx/continue", "dono", O, {})).status === 400);
   server.close();
 
   const ui = fs.readFileSync(path.join(process.cwd(), "src/features/FalaTuView.tsx"), "utf8");
   check("UI: lista com checkbox por ação + UM botão de preparar + cancelar", /falatu-multi-plan/.test(ui) && /type="checkbox"/.test(ui) && /Preparar \$\{t\.multi\.keep\.length\} ação\(ões\)/.test(ui) && /\/multi\/\$\{t\.multi\.planId\}\/confirm/.test(ui) && /\/cancel/.test(ui));
   check("UI: item bloqueado fica desabilitado e a telemetria só conta QUANTAS (nunca o texto)", /disabled=\{!!it\.blocked/.test(ui) && /trackAction\('falatu_multi_confirmar', String\(t\.multi\.keep\.length\)\)/.test(ui));
 
+  check("UI: botão 'Tentar agora' só aparece com item esperando e chama /continue", /falatu-multi-continue/.test(ui) && /\/multi\/\$\{t\.multi\.planId\}\/continue/.test(ui) && /t\.multi\.waiting/.test(ui));
   for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.ok ? "" : "  → " + r.detail}`);
   console.log(`\n${results.length - failures}/${results.length} checks`);
   fs.rmSync(tmpDir, { recursive: true, force: true });

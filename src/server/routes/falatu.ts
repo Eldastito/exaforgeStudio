@@ -140,6 +140,14 @@ router.post("/multi/:planId/confirm", async (req: AuthRequest, res): Promise<any
     res.json(out);
   } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
 });
+router.post("/multi/:planId/continue", async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { FalaTuMultiActionService } = await import("../FalaTuMultiActionService.js");
+    const out = await FalaTuMultiActionService.continueWaiting(req.organizationId!, req.user, String(req.params.planId));
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+});
 router.post("/multi/:planId/cancel", async (req: AuthRequest, res): Promise<any> => {
   const { FalaTuMultiActionService } = await import("../FalaTuMultiActionService.js");
   res.json({ ok: FalaTuMultiActionService.cancel(req.organizationId!, req.user, String(req.params.planId)) });

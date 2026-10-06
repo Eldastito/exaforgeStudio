@@ -56,6 +56,11 @@ async function main() {
   check("2.2 data", p.date === "2025-09-05");
   check("2.3 hora 14:30", p.time === "14:30");
   check("2.4 título Reunião", p.title === "Reunião");
+  // F3.6c — regressão: palavra com acento ("amanhã", "às") colada ao nome impedia achar o cliente (\b não vê acento)
+  const pa = FalatuRecordService.parseAppointment("marca reunião com João Silva amanhã às 10h", "2026-09-08");
+  check("2.5 acento: 'amanhã às 10h' não entra no nome", pa.contactName === "João Silva" && pa.time === "10:00");
+  check("2.6 acento: 'no sábado às 14h' → só o nome", FalatuRecordService.parseAppointment("marca com Maria no sábado às 14h", "2026-09-08").contactName === "Maria");
+  check("2.7 acento: 'depois de amanhã' corta o nome", FalatuRecordService.parseAppointment("marca reunião com Carlos depois de amanhã às 9h", "2026-09-08").contactName === "Carlos");
 
   // ── 3. cliente não cadastrado → não propõe (honesto) ──
   const r0 = await FalaTuAskService.converse(A, owner, "marca reunião com Fulano dia 05/09/2025 às 14h");

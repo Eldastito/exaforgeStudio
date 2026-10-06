@@ -308,7 +308,7 @@ export function FalaTuView() {
   const [askQuestion, setAskQuestion] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   // ADR-204 F3.6a — `multi`: uma frase com várias ações vira uma LISTA pra confirmar UMA vez (cada item removível). `done` = resumo depois de confirmar.
-  type MultiPlanCard = { planId: string; items: { id: string; text: string; label: string; blocked: string | null }[]; keep: string[]; busy?: boolean; done?: boolean };
+  type MultiPlanCard = { planId: string; items: { id: string; text: string; label: string; blocked: string | null }[]; keep: string[]; busy?: boolean; done?: boolean; waiting?: boolean };
   const [askThread, setAskThread] = useState<{ id: string; q: string; answer: string; grounded: boolean; restricted: boolean; continuable?: boolean; multi?: MultiPlanCard }[]>([]);
   // ADR-203 F2.8 — contexto corrente da conversa: sobre qual loja? ('' = todas). Só aparece com 2+ lojas visíveis ao usuário.
   const [ctxStores, setCtxStores] = useState<{ id: string; name: string }[]>([]);
@@ -790,14 +790,27 @@ export function FalaTuView() {
 
   // F3.6a — marcar/desmarcar item do plano, confirmar UMA vez e cancelar. O servidor prepara cada item pelo caminho de sempre.
   const toggleMulti = (threadId: string, itemId: string) => setAskThread((prev) => prev.map((t) => t.id !== threadId || !t.multi || t.multi.done ? t : { ...t, multi: { ...t.multi, keep: t.multi.keep.includes(itemId) ? t.multi.keep.filter((k) => k !== itemId) : [...t.multi.keep, itemId] } }));
+const fmtMulti = (r: any) => { const lines = (r?.results || []).map((x: any) => `• ${x.text} — ${({ awaiting_approval: 'aguardando sua aprovação em Aprovações', prepared: 'preparada', inbox: 'anotada no Inbox pra você confirmar', removed: 'removida por você', blocked: 'restrita ao seu perfil', waiting: 'esperando o cadastro ser aprovado', not_prepared: 'não preparei: ' + (x.message || 'faltou informação'), error: 'falhou: ' + (x.message || '') } as Record<string, string>)[x.outcome] || x.outcome}`); return `${r?.summary || 'Pronto.'}\n${lines.join('\n')}`; };
+  const continueMulti = async (t: { id: string; multi?: MultiPlanCard }) => {
+    if (!t.multi || t.multi.busy) return;
+    setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, multi: { ...x.multi, busy: true } } : x));
+    try {
+      const r = await api(`/multi/${t.multi.planId}/continue`, { method: 'POST', body: '{}' });
+      setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, answer: fmtMulti(r), multi: { ...x.multi, busy: false, waiting: (r?.stillWaiting || 0) > 0 } } : x));
+      loadPending();
+    } catch (e: any) {
+      toast.error(e?.message || 'Não consegui retomar. Mande a frase de novo.');
+      setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, multi: { ...x.multi, busy: false } } : x));
+    }
+  };
   const confirmMulti = async (t: { id: string; multi?: MultiPlanCard }) => {
     if (!t.multi || t.multi.busy || t.multi.done || !t.multi.keep.length) return;
     setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, multi: { ...x.multi, busy: true } } : x));
     trackAction('falatu_multi_confirmar', String(t.multi.keep.length));   // só QUANTAS, nunca o texto
     try {
       const r = await api(`/multi/${t.multi.planId}/confirm`, { method: 'POST', body: JSON.stringify({ keep: t.multi.keep }) });
-      const lines = (r?.results || []).map((x: any) => `• ${x.text} — ${({ awaiting_approval: 'aguardando sua aprovação em Aprovações', prepared: 'preparada', inbox: 'anotada no Inbox pra você confirmar', removed: 'removida por você', blocked: 'restrita ao seu perfil', not_prepared: 'não preparei: ' + (x.message || 'faltou informação'), error: 'falhou: ' + (x.message || '') } as Record<string, string>)[x.outcome] || x.outcome}`);
-      setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, answer: `${r?.summary || 'Pronto.'}\n${lines.join('\n')}`, multi: { ...x.multi, busy: false, done: true } } : x));
+      const waiting = (r?.results || []).some((x: any) => x.outcome === 'waiting');
+      setAskThread((prev) => prev.map((x) => x.id === t.id && x.multi ? { ...x, answer: fmtMulti(r), multi: { ...x.multi, busy: false, done: true, waiting } } : x));
       loadPending();
     } catch (e: any) {
       toast.error(e?.message || 'Não consegui confirmar o plano. Mande a frase de novo.');
@@ -1107,6 +1120,12 @@ export function FalaTuView() {
                       <button onClick={() => cancelMulti(t)} disabled={t.multi.busy} className="rounded-lg border border-ft-border px-3 py-1.5 text-xs text-ft-text-muted hover:bg-ft-surface-2 disabled:opacity-50">Cancelar</button>
                     </div>
                   </div>
+                )}
+                {t.multi?.done && t.multi.waiting && (
+                  <button onClick={() => continueMulti(t)} disabled={t.multi.busy} data-testid="falatu-multi-continue"
+                    className="rounded-lg border border-ft-border px-3 py-1.5 text-xs text-ft-text hover:bg-ft-surface-2 disabled:opacity-50">
+                    {t.multi.busy ? 'Tentando…' : 'Tentar agora os que dependiam do cadastro'}
+                  </button>
                 )}
                 {!t.grounded && !t.restricted && (
                   <p className="text-[11px] text-ft-text-faint">Resposta da IA a partir do panorama do negócio.</p>

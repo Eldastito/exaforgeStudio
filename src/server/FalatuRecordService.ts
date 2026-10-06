@@ -262,13 +262,18 @@ export class FalatuRecordService {
     let contactName: string | null = null;
     const cm = t.match(/\bcom\s+(?:o\s+|a\s+)?(.+)$/i);
     if (cm) {
+      // `\b` do JS NÃO enxerga letra acentuada como "palavra": `amanh[aã]\b` nunca casava com "amanhã" (nem "às"), e o nome do cliente
+      // saía "João Silva amanhã às" → "cliente não encontrado". Fronteira por lookaround de letra (acento incluso).
+      const L = "A-Za-zÀ-ú";
       contactName = cm[1]
-        .replace(/\b(depois de amanh[aã]|amanh[aã]|hoje|ontem|anteontem|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\b.*$/i, "")
+        .replace(new RegExp(`(?<![${L}])(?:depois de amanh[aã]|amanh[aã]|hoje|ontem|anteontem|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?![${L}]).*$`, "i"), "")
         .replace(/\bdia\s+\d.*$/i, "")
-        .replace(/\b[àa]s?\s+\d.*$/i, "")
+        .replace(new RegExp(`(?<![${L}])[àa]s?\\s+\\d.*$`, "i"), "")
         .replace(/\b\d{1,2}[:h/].*$/i, "")
         .replace(/\b\d{1,2}\s*h.*$/i, "")
         .replace(/[,;].*$/, "")
+        .replace(/[\s.]+$/, "")
+        .replace(new RegExp(`(?:\\s+(?:no|na|nesta|neste|em|para|pra|de|do|da|às|as|a))+$`, "i"), "")   // sobra de "no sábado", "de amanhã"…
         .replace(/[\s.]+$/, "")
         .trim().slice(0, 60);
       if (!contactName) contactName = null;

@@ -254,3 +254,14 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 **Honestidade:** margem/giro/caixa ausentes → `null` + `caveats` (nunca 0); giro não medido → sem estimativa de encalhe; caixa mínimo não informado → R$ 0 declarado.
 **Fora (declarado):** planejamento sazonal ("Black Friday") com clientes/campanhas/equipe e **campanha preditiva** — bloqueados pela D4 (consentimento na base do PDV). Sem tabela/coluna nova. **Rollback:** só código.
 
+## D4 — Consentimento dos clientes do PDV (LGPD, escopo `comunicacoes`)
+**Decisão do dono:** "eles precisam aprovar". `retail_pdv_customers` (base do ERP) não tinha consentimento — e o gate do sink de mensagens (`OutboundConsentGuardService`) só olhava `contacts`: um cliente do PDV era tratado como "contato desconhecido = mensagem de sistema" e **passava sem prova**. Esta fatia registra a aprovação e fecha esse buraco. **Não é campanha** e não envia nada.
+
+- **Livro** `retail_pdv_consents` (APPEND-ONLY, chave = `codigo_n` do ERP): a **última** linha vale; **revogar é nova linha `granted=0` e sempre vence**. Cada registro leva origem (`balcao|whatsapp|formulario|telefone`), quem registrou, evidência curta (≤300, sem dado sensível) e é auditado (`PDV_CONSENT_GRANTED/REVOKED`, sem PII).
+- **Sem registro = sem consentimento** (`unknown`): nunca inferido de compra, do ERP ou de ter celular. Só autoriza quem tem celular; só cliente que existe no PDV da org.
+- `PdvConsentService.assertContactable` é a pergunta que **toda campanha futura deve fazer** (recusa `consent_unknown|consent_revoked|no_phone|inactive|customer_not_found`). `summary` dá a cobertura só em contagens (percentual `null` sem base — não 0%); `contactable` lista só quem autorizou.
+- **Sink:** com `outbound_consent_required=1` (a flag que já existia; default off = 0-regressão), o destinatário que **é cliente do PDV** (casa pelo celular, tolerante a DDI/9º dígito) só recebe com consentimento; sem prova → `outbound_blocked:consent_missing` (mesmo código de antes, `source:"pdv"`). Número que não é cliente do PDV segue como mensagem de sistema.
+- **Rotas** `/api/retailops/pdv-consent`: `GET /summary` (rede, só contagens) · `GET /contactable` · `GET/POST /:code` (owner/admin, com a trava de loja ADR-173).
+- **Limites (declarados):** ainda **não há tela nem link de opt-in** pro cliente — o registro é via API/operador (ex.: balcão). Ligar a flag `outbound_consent_required` é decisão do dono e passa a barrar TODO envio a cliente do PDV sem consentimento (inclusive fluxos que hoje funcionam) — ligar só depois de capturar consentimento. A busca por celular no sink varre os clientes da org (sem índice): ok para milhares, a otimizar se a base for muito grande. Consentimento não é herdado de `contact_consents` (escopos separados).
+**Rollback:** só código + 1 tabela aditiva; flag off restaura o comportamento anterior.
+

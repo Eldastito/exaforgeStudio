@@ -44,6 +44,7 @@
  */
 import db from "./db.js";
 import { LgpdService } from "./LgpdService.js";
+import { PdvConsentService } from "./PdvConsentService.js";
 
 // Escopo canônico de consent pra outbound. NUNCA aceitar outro no gate
 // (RN-BS-04 escopos separados). O tipo aparece em `LgpdService.categories`
@@ -51,8 +52,8 @@ import { LgpdService } from "./LgpdService.js";
 export const OUTBOUND_CONSENT_SCOPE = "comunicacoes" as const;
 
 export type OutboundGuardDecision =
-  | { allow: true; reason: "flag_off" | "unknown_contact" | "consent_active" }
-  | { allow: false; reason: "consent_missing"; contactId: string; contactName: string | null };
+  | { allow: true; reason: "flag_off" | "unknown_contact" | "consent_active" | "pdv_consent_active" }
+  | { allow: false; reason: "consent_missing"; contactId: string; contactName: string | null; source?: "pdv" };
 
 export class OutboundConsentGuardService {
   /**
@@ -72,6 +73,15 @@ export class OutboundConsentGuardService {
 
     const contact = this.findContactByIdentifier(orgId, identifier);
     if (!contact) {
+      // ADR-204 D4 — o destinatário não é um `contact`, mas pode ser CLIENTE DO PDV (base do ERP). Esse caso NÃO é "mensagem de sistema":
+      // com a flag ligada, o cliente do PDV só recebe com consentimento registrado (`comunicacoes`); sem prova = bloqueia (nunca presume).
+      try {
+        const pdv = PdvConsentService.findByPhone(orgId, identifier);
+        if (pdv) {
+          if (PdvConsentService.status(orgId, pdv.code).state === "granted") return { allow: true, reason: "pdv_consent_active" };
+          return { allow: false, reason: "consent_missing", contactId: pdv.code, contactName: pdv.nome || null, source: "pdv" };
+        }
+      } catch { /* PDV indisponível: cai no comportamento anterior (0-regressão) */ }
       // Mensagem pra identifier sem contato cadastrado NA ORG.
       // Interpretamos como comunicação de sistema (broadcast/teste/admin);
       // consent LGPD não se aplica. Alternativa restritiva (bloquear tudo

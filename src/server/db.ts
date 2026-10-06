@@ -12361,6 +12361,23 @@ const initDb = () => {
   // ADR-204 F3.10 — briefings semanal/mensal por exceção (opt-in, default off — convenção nº 10).
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN periodic_briefing_enabled INTEGER DEFAULT 0`); } catch(e){}
 
+  // ADR-204 D4 — consentimento LGPD (escopo `comunicacoes`) dos clientes da base do PDV. Livro APPEND-ONLY: a última linha vale; revogar = nova linha granted=0.
+  // Chave = codigo_n do ERP (o PDV não tem id próprio estável fora dele). Sem linha = SEM consentimento (nunca inferido).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retail_pdv_consents (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      customer_code TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'comunicacoes',
+      granted INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      evidence TEXT,
+      actor_id TEXT,
+      recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_retail_pdv_consents ON retail_pdv_consents (organization_id, customer_code, scope, recorded_at);
+  `);
+
 };
 
 initDb();

@@ -1070,6 +1070,43 @@ router.get("/pdv-customers", (req: AuthRequest, res): any => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// CONSENTIMENTO DO CLIENTE DO PDV (ADR-204 D4): livro append-only (a última decisão vale; revogar vence). Sem registro = SEM consentimento.
+// Só registra/consulta — não envia nada. Escrita/leitura nominal respeita a trava de loja (ADR-173); o resumo (só contagens) é da rede.
+const pdvConsentScopeOk = (req: AuthRequest, code: string): { ok: boolean; status?: number; error?: string } => {
+  const orgId = req.organizationId!;
+  const c = db.prepare("SELECT filial FROM retail_pdv_customers WHERE organization_id = ? AND codigo_n = ?").get(orgId, code) as any;
+  if (!c) return { ok: false, status: 404, error: "Cliente não encontrado na base do PDV." };
+  const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId || "", req.user?.role || "");
+  if (!scope.unrestricted && !(c.filial && scope.storeCodes.includes(c.filial))) return { ok: false, status: 403, error: "store_out_of_scope" };
+  return { ok: true };
+};
+router.get("/pdv-consent/summary", requireNetworkScope, async (req: AuthRequest, res): Promise<any> => {
+  const { PdvConsentService } = await import("../PdvConsentService.js");
+  res.json(PdvConsentService.summary(req.organizationId!));
+});
+router.get("/pdv-consent/contactable", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const { PdvConsentService } = await import("../PdvConsentService.js");
+  const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId || "", req.user?.role || "");
+  res.json({ items: PdvConsentService.contactable(orgId, { limit: Number(req.query.limit) || 100, restrictCodes: scope.unrestricted ? undefined : scope.storeCodes }) });
+});
+router.get("/pdv-consent/:code", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const chk = pdvConsentScopeOk(req, String(req.params.code));
+  if (!chk.ok) return res.status(chk.status!).json({ error: chk.error });
+  const { PdvConsentService } = await import("../PdvConsentService.js");
+  res.json({ ...PdvConsentService.status(req.organizationId, String(req.params.code)), history: PdvConsentService.history(req.organizationId, String(req.params.code)) });
+});
+router.post("/pdv-consent/:code", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const chk = pdvConsentScopeOk(req, String(req.params.code));
+  if (!chk.ok) return res.status(chk.status!).json({ error: chk.error });
+  try {
+    const { PdvConsentService } = await import("../PdvConsentService.js");
+    res.status(201).json(PdvConsentService.record(req.organizationId, String(req.params.code), { granted: req.body?.granted, source: req.body?.source, evidence: req.body?.evidence }, req.user?.userId));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 /**
  * Códigos padrão da tabela de cartão do Alterdata (`ADQ_CODIGO`) mapeados
  * pras bandeiras que a recepção reconhece. Varia por instalação — quando o

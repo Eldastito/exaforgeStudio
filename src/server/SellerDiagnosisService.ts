@@ -33,6 +33,11 @@ export type SellerDiagnosis = {
   enough: boolean; reason?: string;
   current?: WindowFacts; previous?: WindowFacts;
   findings: DiagnosisFinding[];
+  // ADR-204 F3.5 — o FATOR que a leitura das hipóteses aponta, em forma legível por máquina (aditivo; o texto das findings não muda).
+  // `days|orders|ticket|pa` = o número que acompanhou a queda; `unclear` = nenhum fator único; `none` = vendas não caíram;
+  // `insufficient` = sem base para comparar. É HIPÓTESE (nunca causa comprovada) — quem usa continua rotulando assim.
+  driver?: "days" | "orders" | "ticket" | "pa" | "unclear" | "none" | "insufficient";
+  deltasPct?: { sales: number | null; orders: number | null; ticket: number | null; pa: number | null; days: number | null };
 };
 
 export class SellerDiagnosisService {
@@ -73,7 +78,7 @@ export class SellerDiagnosisService {
     const out: SellerDiagnosis = { found: true, seller: { id: base.id, name: base.name || `Matrícula ${base.matricula}`, matricula: String(base.matricula) }, store, enough: true, current, previous, findings: [] };
 
     if (current.sales == null && previous.sales == null) {
-      return { ...out, enough: false, reason: "Não há vendas registradas para esta pessoa nos últimos dois períodos — não dá para diagnosticar sem dados.", findings: [] };
+      return { ...out, driver: "insufficient", enough: false, reason: "Não há vendas registradas para esta pessoa nos últimos dois períodos — não dá para diagnosticar sem dados.", findings: [] };
     }
     const f = out.findings;
     const pct = (a: number, b: number) => Math.round(((a - b) / b) * 100);
@@ -94,14 +99,17 @@ export class SellerDiagnosisService {
     if (current.scheduledDays == null) f.push({ kind: "fact", text: "Não há escala cadastrada: não sei quantos dias a pessoa trabalhou." });
     if (store) f.push({ kind: "fact", text: `Alocada hoje na loja ${store}.` });
 
+    out.deltasPct = { sales: dSales, orders: dOrders, ticket: dTicket, pa: dPa, days: dDays };
+    out.driver = dSales == null ? "insufficient" : dSales >= 0 ? "none" : "unclear";
     // hipóteses — só quando o número sustenta; sempre rotuladas, nunca causa comprovada
     if (dSales != null && dSales < 0) {
-      if (dDays != null && dDays <= -15 && (dTicket == null || dTicket > -10)) f.push({ kind: "hypothesis", text: "A queda parece acompanhar menos dias escalados (ticket estável). Vale conferir escala/ausências." });
-      else if (dOrders != null && dOrders <= -15 && (dTicket == null || dTicket > -10)) f.push({ kind: "hypothesis", text: "A queda parece vir de menos vendas fechadas, não de vendas menores. Pode ser menos fluxo ou menos conversão." });
-      else if (dTicket != null && dTicket <= -15 && (dOrders == null || dOrders > -10)) f.push({ kind: "hypothesis", text: "O número de vendas se manteve, mas o ticket caiu. Pode ser mix de produtos ou menos venda adicional." });
-      else if (dPa != null && dPa <= -15) f.push({ kind: "hypothesis", text: "As peças por venda caíram. Pode haver espaço para trabalhar venda adicional." });
-      else f.push({ kind: "hypothesis", text: "Não há um fator único que explique a queda nos números disponíveis — não vou apontar causa." });
+      if (dDays != null && dDays <= -15 && (dTicket == null || dTicket > -10)) { out.driver = "days"; f.push({ kind: "hypothesis", text: "A queda parece acompanhar menos dias escalados (ticket estável). Vale conferir escala/ausências." }); }
+      else if (dOrders != null && dOrders <= -15 && (dTicket == null || dTicket > -10)) { out.driver = "orders"; f.push({ kind: "hypothesis", text: "A queda parece vir de menos vendas fechadas, não de vendas menores. Pode ser menos fluxo ou menos conversão." }); }
+      else if (dTicket != null && dTicket <= -15 && (dOrders == null || dOrders > -10)) { out.driver = "ticket"; f.push({ kind: "hypothesis", text: "O número de vendas se manteve, mas o ticket caiu. Pode ser mix de produtos ou menos venda adicional." }); }
+      else if (dPa != null && dPa <= -15) { out.driver = "pa"; f.push({ kind: "hypothesis", text: "As peças por venda caíram. Pode haver espaço para trabalhar venda adicional." }); }
+      else { out.driver = "unclear"; f.push({ kind: "hypothesis", text: "Não há um fator único que explique a queda nos números disponíveis — não vou apontar causa." }); }
     }
+
     return out;
   }
 }

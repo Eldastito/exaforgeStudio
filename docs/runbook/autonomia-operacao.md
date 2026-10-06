@@ -169,3 +169,28 @@ Só leitura: 2 arquivos novos + 1 rota. Nenhuma tabela/coluna. Reverter o commit
 - A faixa mede só a variação normal de dia para dia; **não** cobre mudança de tendência, promoção, ruptura de estoque, nem o efeito real de feriado/Black Friday (sem dado próprio não se inventa fator).
 - Sem tela e sem aviso proativo ("risco de não bater a meta"): é a base para o briefing semanal/mensal (F3.10) e para o plano de recuperação (F3.5). Os limiares de confiança (12 semanas, 6 amostras, 24 semanas p/ "alta") são iniciais e **não foram calibrados com dado real da TOULON**.
 
+## F3.5 — "Por que provavelmente" + plano de 14 dias do vendedor (recomendação; tarefas só por pessoa)
+`GET /api/retail/seller-plan/:sellerId[?date=]` (dono/admin; o gerente de loja só vê gente da PRÓPRIA loja — `seller_out_of_scope` 403). **Read-only**: não cria tarefa, ação nem alerta.
+
+**O que liga (sem motor novo):** `SellerDiagnosisService` (vendas × nº de vendas × ticket × P.A. × dias escalados, 30 dias × 30 dias anteriores; ganhou os campos aditivos `driver` e `deltasPct`) + `SellerGoalStreakService` (meses seguidos abaixo da meta) + `RetailFloorAnalyticsService` (atendimentos da loja).
+
+**Fator (`driver`) — vem dos números, é HIPÓTESE:** `days` (menos dias escalados, ticket estável) · `orders` (menos vendas fechadas, ticket estável) · `ticket` · `pa` · `unclear` (nenhum fator único) · `none` (vendas não caíram → **sem plano**) · `insufficient` (sem base → **sem plano**).
+
+**Plano de 14 dias** (`plan14`, começa no dia seguinte; itens por fator; `unclear` = só a CONVERSA, não inventa intervenção; todo plano termina no **checkpoint do dia 14**: rodar o diagnóstico de novo e comparar). A referência de cada item é o **próprio período anterior da pessoa** — nunca meta inventada, nunca altera a meta oficial. `days` começa por **conferir a escala** ("não é desempenho da pessoa"). 3+ meses seguidos abaixo da meta acrescenta "levar o caso à gestão" (apoio, não punição).
+
+**Atendimentos (Retail Floor)** só entram **fora da calibração** (RN-150-011) e com ≥10 atendimentos; comparam a pessoa com a média da PRÓPRIA loja (nunca ranking). Em calibração ou amostra pequena, `evidenceSources.floor` diz `calibration`/`low_sample` e eles não são usados.
+
+**Tarefas só por decisão de uma pessoa:** `POST /api/retail/seller-plan/:sellerId/tasks {date, items:[chaves], assignedTo?}`. O servidor **recalcula** o plano (o cliente só escolhe chaves; chave fora do plano é recusada); quem aprova precisa ser pessoa (rótulo `runtime`/`ai`/`rule`… é recusado); responsável = gerente da loja (senão quem aprovou; fora da empresa → recusado); **idempotente** por `seller_plan14:<vendedor>:<data>:<item>` (repetir devolve `skipped`); a tarefa nasce no `TaskService` com prazo do item, `source: ia`, descrição com o porquê, o que acompanhar e o aviso, e fica na auditoria (`SELLER_PLAN14_TASKS_CREATED`). **Nada** toca comissão, salário, meta oficial ou cobrança.
+
+**Texto:** descreve o NÚMERO, nunca o motivo humano — sem culpa/punição/desligamento. Aviso fixo: orienta uma conversa do gerente, não é avaliação formal.
+
+### Rollback
+Só leitura + 2 rotas + 2 serviços novos e 2 campos aditivos em `SellerDiagnosis`. Nenhuma tabela/coluna. As tarefas já criadas são tarefas normais (apagáveis pelo gerente).
+
+### Ainda NÃO feito (F3.5)
+- **Redistribuição por demanda/baixo giro** (estender `RetailTransferService`, hoje só loja zerada): mexe em estoque — fatia própria (F3.5c), propondo transferência governada.
+- **Sem tela**: a recomendação e a aprovação das tarefas são por API; a tela do gerente fica para depois.
+- **Eficácia do plano esperado × realizado** (F3.7): o checkpoint do dia 14 existe, mas nada mede ainda se o plano funcionou nem alimenta "O que funciona".
+- Atendimentos só fazem sentido onde o módulo Retail Floor é usado; sem ele a recomendação segue só com vendas/escala/meta.
+- Os limiares do fator (±15% de queda, ±10% de estabilidade) são os que o `SellerDiagnosisService` já usava; **não foram calibrados com dado real da TOULON**.
+

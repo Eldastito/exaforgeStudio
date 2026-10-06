@@ -190,6 +190,8 @@ import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { RetailRadarService } from "../RetailRadarService.js";
 import { RetailForecastService } from "../RetailForecastService.js";
+import { SellerRecommendationService } from "../SellerRecommendationService.js";
+import { SellerPlanTaskService } from "../SellerPlanTaskService.js";
 import { ImpactPrioritizationService } from "../ImpactPrioritizationService.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { DecisionActionService } from "../DecisionActionService.js";
@@ -330,6 +332,35 @@ router.put("/radar/enabled", requireNetworkScope, (req: AuthRequest, res): any =
 router.get("/forecast", requireNetworkScope, (req: AuthRequest, res): any => {
   const q = req.query || {};
   res.json(RetailForecastService.forecast(req.organizationId!, { asOf: typeof q.asOf === "string" ? q.asOf : undefined, month: typeof q.month === "string" ? q.month : undefined }));
+});
+
+// ADR-204 F3.5 — "POR QUE provavelmente" + PLANO DE 14 DIAS do vendedor (recomendação; read-only). Tem R$ e nomeia a pessoa:
+// dono/admin; o gerente de loja só vê gente da PRÓPRIA loja. Criar tarefas do plano é decisão de uma pessoa (POST abaixo).
+const sellerPlanScope = (req: AuthRequest, res: any, sellerId: string, date: string): boolean => {
+  const ids = restrictIds(req);
+  if (!ids) return true;
+  const place = RetailSellerIdentityService.storeOn(req.organizationId!, sellerId, date);
+  if (place && ids.includes(place.storeId)) return true;
+  res.status(403).json({ error: "seller_out_of_scope" });
+  return false;
+};
+router.get("/seller-plan/:sellerId", requireOwnerAdmin, (req: AuthRequest, res): any => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
+  if (!sellerPlanScope(req, res, String(req.params.sellerId), date)) return;
+  try {
+    const r = SellerRecommendationService.recommend(req.organizationId!, String(req.params.sellerId), date);
+    if (!r.found) return res.status(404).json({ error: r.error });
+    res.json(r);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/seller-plan/:sellerId/tasks", requireOwnerAdmin, (req: AuthRequest, res): any => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.date || "")) ? String(req.body.date) : todaySP();
+  if (!sellerPlanScope(req, res, String(req.params.sellerId), date)) return;
+  try {
+    const out = SellerPlanTaskService.create(req.organizationId!, { sellerId: String(req.params.sellerId), refDate: date, itemKeys: req.body?.items, assignedTo: req.body?.assignedTo }, req.user?.userId);
+    if (!out.ok) return res.status(400).json(out);
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // Insights consolidados da loja: prioridades (o que atacar), padrões aprendidos

@@ -950,6 +950,7 @@
     "test:periodic-briefing": "tsx scripts/test-periodic-briefing.ts",
     "test:purchase-scenarios": "tsx scripts/test-purchase-scenarios.ts",
     "test:pdv-consent": "tsx scripts/test-pdv-consent.ts",
+    "test:pdv-consent-link": "tsx scripts/test-pdv-consent-link.ts",
     "test:network-objective": "tsx scripts/test-network-objective.ts",
     "test:forecast-alerts-screens": "tsx scripts/test-forecast-alerts-screens.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",

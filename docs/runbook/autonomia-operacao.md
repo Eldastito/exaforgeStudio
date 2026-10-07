@@ -283,3 +283,9 @@ Em **Operação da Rede → Vendas e metas → "Previsão e alertas"** (dono/adm
 - **Plano de 14 dias do vendedor** (`GET /seller-plan/:id`, F3.5): escolha o vendedor; mostra o que mudou nos números (**fato × hipótese** rotulados) e o plano; **"Criar tarefas para o gerente"** só por clique (`POST /seller-plan/:id/tasks`). Não é avaliação de desempenho. `GET /sellers` agora devolve também o `id` do vendedor (campo aditivo).
 **Limites:** a aba nova exigiu atualizar o teste dos grupos (19 → 20 abas); não foi testada em navegador/celular — só por código e rotas.
 
+
+## D4c — Link de consentimento do cliente (PDV)
+1. Em **Clientes (PDV)**, na coluna Consentimento, clique **Link** (só aparece p/ cliente com celular e ainda sem autorização; owner/admin).
+2. Mostre o **QR** no balcão ou copie o link e entregue você mesmo. O ZapFlow não envia.
+3. O cliente escolhe Autorizo / Não autorizo; aparece como "(link do cliente)". Vale até a data mostrada; gerar outro link invalida o anterior.
+4. Requer `APP_URL` no servidor (senão o link é relativo e o QR não serve). Rota pública: `/api/public/consent/:token`.

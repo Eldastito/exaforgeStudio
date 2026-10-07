@@ -10,6 +10,7 @@ import { RadarPublicWizard } from './radar-public/RadarPublicWizard.tsx';
 import { RadarRespondentWizard } from './radar-public/RadarRespondentWizard.tsx';
 import { ClinicPortalPage } from './clinic-public/ClinicPortalPage.tsx';
 import { ProfessionalPortalPage } from './clinic-public/ProfessionalPortalPage.tsx';
+import { ConsentPage } from './clinic-public/ConsentPage.tsx';
 import { PatientPortalPage } from './clinic-public/PatientPortalPage.tsx';
 import { ComigoMesaPage } from './comigo-public/ComigoMesaPage.tsx';
 import { FalatuApp } from './falatu-app/FalatuApp.tsx';
@@ -44,6 +45,8 @@ const isClinicPortal = window.location.pathname.startsWith('/clinic/professional
 // Webapp de autoatendimento do profissional (ADR-180 F7b) — /profissional/:token,
 // público, magic-link → sessão escopada. COM escrita (agenda + disponibilidade).
 const isProfessionalPortal = window.location.pathname.startsWith('/profissional/');
+// Link de consentimento do cliente do PDV (ADR-204 D4c) — /consentimento/:token, público, só pelo token.
+const isConsentPage = window.location.pathname.startsWith('/consentimento/');
 const isPatientPortal = window.location.pathname.startsWith('/paciente/');
 // Comigo Mesa/QR (ADR-119) — autoatendimento público sem login (/mesa/:token).
 const isComigoMesa = window.location.pathname.startsWith('/mesa/');
@@ -105,6 +108,8 @@ createRoot(rootEl).render(
       <ClinicPortalPage />
     ) : isProfessionalPortal ? (
       <ProfessionalPortalPage />
+    ) : isConsentPage ? (
+      <ConsentPage />
     ) : isPatientPortal ? (
       <PatientPortalPage />
     ) : isComigoMesa ? (

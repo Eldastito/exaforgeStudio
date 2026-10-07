@@ -123,4 +123,6 @@ Cartão de cobertura + coluna "Consentimento" + registro por cliente na aba **Cl
 
 ## 26. Status F3.6b — EM PR (objetivo da rede → lojas)
 `NetworkObjectiveService` + rotas `/api/retailops/network-objective*` + card em Operação da Rede. Decisão do dono: rede → lojas. Parte da projeção F3.4; +X% proporcional por loja; R$/dia útil e esforço (premissa não calibrada); loja sem projeção fica de fora; tarefas só por pessoa; meta oficial intocada. **F3.5c (redistribuição por baixo giro): ADIADA por decisão do Bruno (2026-10-07) — não será feita agora.**
+## 27. Status (telas) — EM PR (Previsão e alertas)
+Aba **"Previsão e alertas"** em Operação da Rede (grupo Vendas e metas) com Previsão do mês (F3.4), Radar (F3.3) e Plano do vendedor (F3.5), só renderizando as rotas existentes; `GET /sellers` devolve `id`. Fecha o item "telas só na API" da ADR. **Não coberto:** uso real em navegador/celular; calibração dos limiares com dado da TOULON.
 

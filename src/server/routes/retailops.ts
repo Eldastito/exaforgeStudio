@@ -1348,10 +1348,10 @@ router.get("/sellers", (req: AuthRequest, res): any => {
   const mineIds = restrictIds(req);
   const mineCodes = mineIds ? scopeOf(req).storeCodes : null;
   const sellers = (mineIds
-    ? (mineIds.length ? db.prepare(`SELECT DISTINCT s.matricula, s.name, s.user_id, s.active FROM retail_sellers s
+    ? (mineIds.length ? db.prepare(`SELECT DISTINCT s.id, s.matricula, s.name, s.user_id, s.active FROM retail_sellers s
         JOIN retail_seller_store_assignments a ON a.organization_id = s.organization_id AND a.seller_id = s.id AND a.active = 1
        WHERE s.organization_id = ? AND a.store_id IN (${mineIds.map(() => "?").join(",")}) ORDER BY s.name`).all(orgId, ...mineIds) : [])
-    : db.prepare(`SELECT matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? ORDER BY name`).all(orgId)) as any[];
+    : db.prepare(`SELECT id, matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? ORDER BY name`).all(orgId)) as any[];
   // Chave = CÓDIGO DO VENDEDOR (CAI_USUARIO / `vendedor_codigo`) quando presente,
   // caindo no operador só quando ausente — casa com a agregação de /pdv-sellers.
   const filialFilter = mineCodes ? (mineCodes.length ? ` AND filial IN (${mineCodes.map(() => "?").join(",")})` : " AND 1 = 0") : "";

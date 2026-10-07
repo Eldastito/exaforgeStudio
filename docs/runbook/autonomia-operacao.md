@@ -276,4 +276,10 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 - **Escopo (ADR-173):** gerente restrito vê só a(s) loja(s) dele e **não recebe o total da rede**; só cria tarefa pra loja do alcance.
 - **Limites:** estimativa, não promessa; divisão proporcional (não otimiza entre lojas); não usa o planejador reverso do Mission OS (ele é de receita da empresa, não por loja); não há "Hoje/Executando" ainda mostrando o objetivo.
 **Rollback:** só código; sem schema.
+## Telas: Previsão, Radar e Plano do vendedor (aba "Previsão e alertas")
+Em **Operação da Rede → Vendas e metas → "Previsão e alertas"** (dono/admin sem trava de loja; o servidor recusa os demais). São telas SÓ de renderização sobre rotas já existentes — nada novo é calculado na tela e **nada altera meta, comissão ou cota**.
+- **Previsão do mês por loja** (`GET /forecast`, F3.4): quanto já vendeu, **faixa** que deve fechar (não um número exato), chance de bater a meta, quanto falta por dia útil e a confiança com os motivos. Loja sem previsão mostra o **motivo** (histórico < 12 semanas, fechamento atrasado…); sem meta cadastrada, **não calcula a chance**. Rede soma só as lojas projetáveis.
+- **Radar** (`GET /radar`, F3.3): o que fugiu do normal no último dia **fechado**, separado em Dado/integração × Negócio × Oportunidade. Interruptor "Avisar no sistema quando houver" (`PUT /radar/enabled`, opt-in) e botão **"Verificar e avisar agora"** (`POST /radar/scan`, só com o radar ligado). Dado atrasado → diz que não compara lojas. Desligado, só mostra a lista.
+- **Plano de 14 dias do vendedor** (`GET /seller-plan/:id`, F3.5): escolha o vendedor; mostra o que mudou nos números (**fato × hipótese** rotulados) e o plano; **"Criar tarefas para o gerente"** só por clique (`POST /seller-plan/:id/tasks`). Não é avaliação de desempenho. `GET /sellers` agora devolve também o `id` do vendedor (campo aditivo).
+**Limites:** a aba nova exigiu atualizar o teste dos grupos (19 → 20 abas); não foi testada em navegador/celular — só por código e rotas.
 

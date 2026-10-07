@@ -951,6 +951,7 @@
     "test:purchase-scenarios": "tsx scripts/test-purchase-scenarios.ts",
     "test:pdv-consent": "tsx scripts/test-pdv-consent.ts",
     "test:network-objective": "tsx scripts/test-network-objective.ts",
+    "test:forecast-alerts-screens": "tsx scripts/test-forecast-alerts-screens.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",
     "test:progressive-autonomy": "tsx scripts/test-progressive-autonomy.ts",
     "test:step-up-mfa": "tsx scripts/test-step-up-mfa.ts",

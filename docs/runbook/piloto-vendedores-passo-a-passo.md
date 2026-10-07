@@ -62,4 +62,7 @@ Faça com cada vendedor, **com o celular na mão dele**, não explicando de long
 - **Fim da semana 2:** dono lê o painel (Empresa → "Como a equipe está usando o menu") e decide conforme a tabela do `fase2-piloto-toulon.md` (seção 4). **Painel mede aberturas, não se ajudou** — decida junto com o que os vendedores falaram.
 
 ## O que este piloto NÃO valida
-Previsão, radar de exceções e plano de 14 dias **não têm tela** (só API); campanha preditiva não existe; mensagens automáticas a clientes do PDV dependem do consentimento (ainda sem dados). Não prometa essas coisas aos vendedores.
+Campanha preditiva e plano sazonal **não existem**. As telas **Previsão e alertas** (aba em Varejo → Vendas: previsão por loja, radar de exceções, plano do vendedor) **existem, mas nunca foram vistas em uso real** — são para o gestor, **não** para o vendedor, e os limiares dos alertas **não estão calibrados**: anote na ficha cada alerta que parecer ruído ou que estiver errado. Mensagens automáticas a clientes do PDV só são barradas sem consentimento se a empresa ligar `outbound_consent_required` (**desligada**); o consentimento pode ser registrado pelo gestor em Clientes (PDV) — inclusive pelo **link/QR pessoal** que o cliente abre no próprio celular (o sistema não envia o link). Não prometa essas coisas aos vendedores.
+
+## Ficha pronta para imprimir/copiar
+Use `docs/runbook/piloto-ficha-ocorrencia.md` (diário de 2 semanas + ficha de ocorrência + resumo semanal + teste do link de consentimento).

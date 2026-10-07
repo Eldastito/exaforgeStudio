@@ -179,6 +179,13 @@ D1 (níveis 0–4 como mapa derivado, sem Nível 4), D2 (`dispatchGoverned` recu
 3. **Decisão explícita** sobre D3 (holdout) e sobre quando ligar `outbound_consent_required`, com consentimentos reais já capturados.
 Sem isso, qualquer nova camada de previsão/campanha seria construída sobre números que ninguém conferiu no mundo real.
 
+### 28.6 Errata (2026-10-07, após revisão do dono) — o que a §28.2 disse e precisa ser lido com estas correções
+- **#1 (piloto):** o texto "nenhum vendedor/gerente usou nada" estava **amplo demais**. O dono confirma que o ZapFlow (Operação da Rede: cotas, boletas, informe diário, menu simplificado) **está em uso nas lojas e atualiza todo dia**. O que **continua sem evidência** é o uso, pelos vendedores no **celular**, das telas **da Fase 3** (Previsão e alertas, plano do vendedor, briefings) e a medição de uso do menu (painel "Como a equipe está usando o menu"). Quem consulta o painel e confirma é o dono; esta sessão não acessa a base de produção.
+- **#5 (consentimento):** o link/QR de opt-in agora existe (§29, PR #1855). Continuam faltando consentimentos reais registrados; `outbound_consent_required` segue **sem rota/tela para ligar** (só `OutboundConsentGuardService.setEnabled` em código).
+- **#8 (briefing):** margem, estoque, clientes e campanhas **existem no ZapFlow**; é o **serviço de briefing que ainda não os lê**. O texto "sem fonte consolidada" referia-se a isso, não à inexistência do dado.
+- **#9 (coleção):** a dimensão é capturada do ERP em `products_services.metadata_json.alterdata.colecao` quando o Alterdata envia; falta confirmar se a TOULON preenche e **usar** o campo (nenhum cálculo de sell-through por coleção existe).
+- **#10 (D6):** a Fase 3 avançou sem o piloto porque o dono respondeu "seguir com a recomendação" e a recomendação foi seguir; o risco foi registrado, não resolvido. A lacuna de D6 é a **evidência de uso** das superfícies da Fase 2, não código.
+- **#11:** o débito `parseReceivable` (`at[ée]\b`) foi corrigido no PR #1856.
 
 ## 29. D4c — Link de consentimento pro cliente decidir sozinho (2026-10-07)
 

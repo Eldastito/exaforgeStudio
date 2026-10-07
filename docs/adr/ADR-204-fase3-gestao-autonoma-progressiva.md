@@ -1,6 +1,6 @@
 # ADR-204 — ZapFlow Fase 3: Gestão Autônoma Progressiva, Inteligência Preditiva e Aprendizado do Negócio
 
-**Estado:** **F3.0 FECHADA (doc-only)** · **F3.1a FECHADA** (piso de autonomia + níveis 0–4, PR #1834) · **F3.1b FECHADA** (snapshot da política + "por que o ZapFlow fez isso", PR #1835) · **F3.1c EM PR** (kill switch + travas de segurança) · demais fatias **NÃO iniciadas**.
+**Estado:** **FASE 3 ENCERRADA em 2026-10-07 por decisão do dono, COM PENDÊNCIAS DECLARADAS** (modelo do ADR-203 §7) — ver **§28**. Todo o código que dependia do time de engenharia está em produção (F3.1–F3.10 + D4 + telas); **o piloto TOULON (F3.11) NÃO foi realizado** e nada da Fase 3 foi validado por uso real. Histórico por fatia: §9–§27.
 **Cliente-piloto:** TOULON. **Base:** Fases 1 e 2 (Fase 2 encerrada por decisão do dono em 2026-10-05 **com o piloto não evidenciado** — ADR-203 §7).
 **Análise:** `docs/prd/ANALISE-PRD-FASE3-vs-CODEBASE.md` (matriz PRD→código, com evidência de arquivo e achados verificados).
 
@@ -125,4 +125,57 @@ Cartão de cobertura + coluna "Consentimento" + registro por cliente na aba **Cl
 `NetworkObjectiveService` + rotas `/api/retailops/network-objective*` + card em Operação da Rede. Decisão do dono: rede → lojas. Parte da projeção F3.4; +X% proporcional por loja; R$/dia útil e esforço (premissa não calibrada); loja sem projeção fica de fora; tarefas só por pessoa; meta oficial intocada. **F3.5c (redistribuição por baixo giro): ADIADA por decisão do Bruno (2026-10-07) — não será feita agora.**
 ## 27. Status (telas) — EM PR (Previsão e alertas)
 Aba **"Previsão e alertas"** em Operação da Rede (grupo Vendas e metas) com Previsão do mês (F3.4), Radar (F3.3) e Plano do vendedor (F3.5), só renderizando as rotas existentes; `GET /sellers` devolve `id`. Fecha o item "telas só na API" da ADR. **Não coberto:** uso real em navegador/celular; calibração dos limiares com dado da TOULON.
+
+## 28. ENCERRAMENTO DA FASE 3 (2026-10-07) — entregue × pendente, sem maquiagem
+
+**Decisão do dono (2026-10-07):** encerrar a Fase 3 **com pendências declaradas**, no mesmo modelo da Fase 2 (ADR-203 §7). "Encerrada" aqui significa **código entregue e testado**, NÃO "validada na loja". A diferença é a principal ressalva desta seção.
+
+### 28.1 Entregue (em produção, mergeado)
+| Fatia | O que é | Teste (`npm run`) |
+| --- | --- | --- |
+| F3.1a–d | Piso de autonomia imposto em código (ações só-humanas, inclusive `refund` — D8) · níveis 0–3 derivados · snapshot da política + "por que o ZapFlow fez isso" · kill switch e travas (opt-in) · tela Empresa → Autonomia da IA | `test:autonomy-floor` · `test:autonomy-guard` · `test:autonomy-overview` |
+| F3.2 | Memória empresarial: padrão só vira regra com confirmação de uma pessoa | `test:business-memory` |
+| F3.3 | Radar contextual do varejo (técnico × negócio × oportunidade), opt-in | `test:retail-radar` |
+| F3.4 | Previsão do mês por loja (faixa, chance de bater a meta) | `test:retail-forecast` |
+| F3.5 | "Por que provavelmente" + plano de 14 dias do vendedor (tarefas só por pessoa) | `test:seller-plan` |
+| F3.6a / F3.6c | FalaTu multi-ação + dependência cadastro → compromisso | `test:falatu-multi-action` |
+| F3.6b | Objetivo da REDE ("+X%") dividido por loja (rede → lojas, decisão do dono) | `test:network-objective` |
+| F3.7 | Eficácia por intervenção (esperado × realizado; só `assured`; Wilson) | `test:intervention-effectiveness` |
+| F3.8 | Impact Ledger 2.0: custo e confiança; tudo rotulado "associado" (sem controle) | `test:impact-ledger-v2` |
+| F3.9 (só compras) | Cenários de compra conservador/base/otimista; só análise | `test:purchase-scenarios` |
+| F3.10 | Briefings semanal e mensal por exceção + interruptor | `test:periodic-briefing` |
+| D4 / D4b | Consentimento dos clientes do PDV (livro append-only + gate no sink + tela de captura) | `test:pdv-consent` |
+| Telas | Aba "Previsão e alertas" (previsão, radar, plano do vendedor) | `test:forecast-alerts-screens` |
+| Docs | Roteiro de treinamento/suporte dos vendedores | `docs/runbook/piloto-vendedores-passo-a-passo.md` |
+
+### 28.2 NÃO feito ou NÃO validado — e quem resolve
+| # | Pendência | Por quê | Dono |
+| --- | --- | --- | --- |
+| 1 | **Piloto TOULON (F3.11)** — nunca rodou: nenhum vendedor/gerente usou nada no celular | Depende de uso real; é também a validação pendente da Fase 2 | **Dono/supervisor** |
+| 2 | **Nada foi testado em navegador/celular** — só por código, rotas e testes de fonte | Limite do ambiente de desenvolvimento | Piloto (#1) |
+| 3 | **Calibração com dado real**: limiares do radar, rótulos de esforço (≤10% leve · ≤25% moderado) e faixas de previsão são escolhas minhas, sem base da TOULON; Bangu tem < 3 meses de histórico | Sem dado real | Piloto, depois de semanas de uso |
+| 4 | **Holdout/incremental (D3)**: nada é "causado", tudo é "associado"; **"% do objetivo"** não existe (falta elo ação → meta); custo da intervenção só é registrado à mão | D3 sem decisão; sem campanha com grupo de controle | Dono (D3) + nova fatia |
+| 5 | **Campanha preditiva e plano sazonal NÃO existem.** D4 deu o registro/gate de consentimento, mas **não há link/QR de opt-in** para o cliente, **nenhum consentimento real registrado**, e a flag `outbound_consent_required` está **desligada** (ligar bloqueia envios a cliente do PDV sem consentimento) | Falta captura real | Dono (capturar) + nova fatia |
+| 6 | **F3.5c** (redistribuição por baixo giro) — **adiada por decisão do Bruno** | Decisão de negócio | Bruno |
+| 7 | **FalaTu multi-ação no WhatsApp** — só funciona na tela do FalaTu | Não sabido se será usado | Decidir depois do piloto |
+| 8 | Briefing: **margem confiável, estoque, clientes e campanhas** fora; impacto é acumulado (não por período) | Sem fonte consolidada / D4 | Nova fatia |
+| 9 | **Sell-through de coleção**: o catálogo não tem a dimensão "coleção" | Falta dado | Dono (cadastro) |
+| 10 | **D6** (piloto da Fase 2 antes das fatias seguintes) **ficou sem decisão** — a Fase 3 avançou sem ele, sobre superfícies não validadas | Risco assumido | — |
+| 11 | Débito técnico conhecido: `parseReceivable` ainda usa `at[ée]\b` (acento) — o bug análogo de `parseAppointment` foi corrigido na F3.6c, este não; busca de cliente por celular no sink de mensagens varre a base da empresa (sem índice) | Fora de escopo | Engenharia |
+| 12 | F3.6b não usa o planejador reverso do Mission OS (ele é de receita da empresa, não por loja); o objetivo ainda não aparece em Hoje/Executando | Decisão de desenho | Eventual fatia |
+
+### 28.3 Decisões do dono — estado final
+D1 (níveis 0–4 como mapa derivado, sem Nível 4), D2 (`dispatchGoverned` recusa o piso) e D5 (compras por último e só análise) foram **adotadas ao seguir as recomendações** (o dono mandou seguir "com as recomendações"; não houve resposta separada por item) · **D3** sem decisão (holdout não implementado) · **D4** decidida (o cliente precisa aprovar) · **D6** sem decisão (piloto não rodou) · **D7** respondida (a **data** da venda é confiável, a **hora** não → nada lê `sale_time`) · **D8** decidida (`refund` entra no piso).
+
+### 28.4 Garantias que valem mesmo sem o piloto
+- **Dinheiro e pessoas nunca sem pessoa:** o piso é imposto em `propose`/`approve`/`execute`/`dispatchGoverned`, independente de política semeada; a IA só recomenda e uma pessoa cria tarefa/aprova.
+- **Estimativa ≠ fato ≠ promessa:** previsão com faixa e confiança; impacto "associado"; hipótese rotulada; ausência de dado = "sem dado", nunca 0.
+- **Meta oficial nunca é alterada** pela IA (testado em F3.4/F3.6b); alertas só em `business_signals`; dinheiro role-gated; escopo de loja (ADR-173) respeitado.
+- **Tudo aditivo e reversível:** radar, briefings, kill switch/travas e o gate de consentimento são **opt-in (default desligado)**; as mudanças de schema são só **aditivas** (ex.: `retail_pdv_consents`, `action_outcomes.intervention_cost`/`confidence`, `periodic_briefing_enabled`, `retail_radar_enabled`); nada foi removido.
+
+### 28.5 Condição para abrir uma Fase 4 (ou qualquer fatia nova de "inteligência")
+1. **Piloto evidenciado**: roteiro `piloto-vendedores-passo-a-passo.md` + `fase2-piloto-toulon.md` executados, com fichas de ocorrência e prints, por pelo menos 2 semanas.
+2. **Calibração** dos limiares com o que o piloto mostrou (alertas úteis × ruído).
+3. **Decisão explícita** sobre D3 (holdout) e sobre quando ligar `outbound_consent_required`, com consentimentos reais já capturados.
+Sem isso, qualquer nova camada de previsão/campanha seria construída sobre números que ninguém conferiu no mundo real.
 

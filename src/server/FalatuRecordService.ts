@@ -338,7 +338,7 @@ export class FalatuRecordService {
       || t.match(/\bdo\s+([A-ZÀ-Ú][A-Za-zÀ-ú.'\-]{1,38}(?:\s+[A-ZÀ-Ú][A-Za-zÀ-ú.'\-]{1,38})?)/);
     if (cm) {
       clientName = cm[1]
-        .replace(/\b(vencimento|vence|venc\.|no dia|at[ée]|em)\b.*$/i, "")
+        .replace(/(?<![A-Za-zÀ-ú])(vencimento|vence|venc\.|no dia|at[ée]|em)(?![A-Za-zÀ-ú]).*$/i, "") // \b não enxerga "é" como letra: "até" não fechava a palavra
         .replace(/\bdia\s+\d.*$/i, "")
         .replace(/\+?\d[\d.,/]*.*$/, "")
         .replace(/\br\$.*$/i, "")

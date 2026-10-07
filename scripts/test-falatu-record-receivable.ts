@@ -56,6 +56,10 @@ async function main() {
   check("2.1 valor 500", p.amount === 500);
   check("2.2 cliente João", p.clientName === "João");
   check("2.3 vencimento 2025-09-10", p.dueDate === "2025-09-10");
+  // "até" tem acento: \b não o fechava e o nome vinha "João Silva até".
+  const pa = (t: string) => FalatuRecordService.parseReceivable(t, "2026-09-08").clientName;
+  check("2.3b cliente sem 'até' grudado (até dia / até amanhã / até data)", pa("receber 300 reais do cliente João Silva até dia 15") === "João Silva" && pa("fiado de 200 do cliente Maria até amanhã") === "Maria" && pa("receber 50 do cliente Ana até 20/10") === "Ana");
+  check("2.3c nome que começa com 'Em' não é cortado", pa("receber 80 do cliente Emerson vence dia 20") === "Emerson");
 
   // ── 3. converse(owner) → proposta governada ──
   const r1 = await FalaTuAskService.converse(A, owner, "lança um recebível de R$500 do cliente João vence 10/09/2025");

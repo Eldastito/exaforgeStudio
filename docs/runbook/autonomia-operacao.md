@@ -325,3 +325,10 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Leitura honesta:** faturamento vem dos **fechamentos diários das lojas**; orçamento só enxerga **contas a pagar lançadas** com a categoria do plano. Sem esses lançamentos o campo vem vazio — não é zero.
 5. **Encerrar:** `POST /plans/:id/close`. Só dono/admin escreve; quem tem visão completa do negócio lê.
 
+## F4.5 — Comparar alternativas de investimento
+1. **Monte as alternativas (2 a 8)** e envie `POST /api/health-center/capital/compare` com `{capitalAvailable?, options:[...]}`. Cada alternativa **precisa** de: `label`, `amount`, `expectedMonthlyReturn:{low, high}` (pior e melhor mês), `source` (de onde vem o número), `basis` (`fact` medido · `estimate` estimado · `hypothesis` palpite), `risk` (`low|medium|high`) e `reversible` (true/false). Opcionais: `startInMonths` (quando o retorno começa) e `horizonMonths` (padrão 12).
+2. **O sistema não estima o retorno por você.** Se faltar qualquer campo obrigatório, recusa e diz qual. Use números honestos: um retorno otimista produz uma comparação otimista.
+3. **Leia por critério, não por vencedor:** o resultado mostra quem lidera em menor desembolso, maior potencial, melhor pior caso, payback mais rápido e menor risco — e nem sempre é a mesma alternativa. Não há "recomendada".
+4. **Com `capitalAvailable`**, veja as combinações que cabem (em ordem de cadastro, sem preferência). As faixas são somadas e **não** consideram uma alternativa atrapalhando a outra.
+5. **Decidiu?** Registre em `POST /strategic/decisions` (F4.2): lá a hipótese fica guardada e, depois, você informa o resultado real.
+

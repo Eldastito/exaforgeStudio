@@ -137,6 +137,7 @@ import radarRoutes from "./src/server/routes/radar.js";
 import radarPublicRoutes from "./src/server/routes/radarPublic.js";
 import clinicPublicRoutes from "./src/server/routes/clinicPublic.js";
 import professionalPublicRoutes from "./src/server/routes/professionalPublic.js";
+import consentPublicRoutes from "./src/server/routes/consentPublic.js";
 import beautyRoutes from "./src/server/routes/beauty.js";
 import beautyPublicRoutes from "./src/server/routes/beautyPublic.js";
 import { artifactsRoutes, artifactsPublicRoutes } from "./src/server/routes/artifacts.js";
@@ -569,6 +570,8 @@ async function startServer() {
   // propósito: a segurança é o magic-link → sessão escopada (professional_portal), nunca o
   // JWT de staff. Antes do protectedApi pra /api/public/* jamais exigir sessão de painel.
   app.use("/api/public/professional", professionalPublicRoutes);
+  // ADR-204 D4c — link de consentimento do cliente do PDV (público, só pelo token; antes do mount genérico /api/public).
+  app.use("/api/public/consent", consentPublicRoutes);
   // ADR-169 F7 (BEAUTY-007) — Beauty AI mídia privada por URL assinada
   // (fileSigning canônico, escopo `beauty_private_media_v1`, TTL 15min).
   // Antes do protectedApi porque a assinatura é a segurança — sessão não é

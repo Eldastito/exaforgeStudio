@@ -18,7 +18,8 @@ import { logAuthEvent } from "./auditLog.js";
  *  - Este serviço só LÊ/REGISTRA: não envia nada. A campanha preditiva futura DEVE perguntar `assertContactable` antes de qualquer envio.
  */
 export const PDV_CONSENT_SCOPE = "comunicacoes" as const;
-export const PDV_CONSENT_SOURCES = ["balcao", "whatsapp", "formulario", "telefone"] as const;
+// `link` = o PRÓPRIO cliente decidiu pela página pública (PdvConsentLinkService) — a origem mais forte; as outras são o operador registrando o que o cliente disse.
+export const PDV_CONSENT_SOURCES = ["balcao", "whatsapp", "formulario", "telefone", "link"] as const;
 export type PdvConsentState = "granted" | "revoked" | "unknown";
 
 const clip = (s: unknown, n: number) => String(s ?? "").trim().slice(0, n);

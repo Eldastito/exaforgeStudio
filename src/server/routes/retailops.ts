@@ -1113,6 +1113,28 @@ router.get("/pdv-consent/contactable", requireRole("owner", "admin"), async (req
   const scope = RetailStoreScopeService.allowed(orgId, req.user?.userId || "", req.user?.role || "");
   res.json({ items: PdvConsentService.contactable(orgId, { limit: Number(req.query.limit) || 100, restrictCodes: scope.unrestricted ? undefined : scope.storeCodes }) });
 });
+// ADR-204 D4c — link PESSOAL pro cliente decidir sozinho. O sistema NUNCA envia o link: o operador entrega (QR na tela) ou manda por conta própria.
+router.post("/pdv-consent/:code/link", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const chk = pdvConsentScopeOk(req, String(req.params.code));
+  if (!chk.ok) return res.status(chk.status!).json({ error: chk.error });
+  try {
+    const { PdvConsentLinkService } = await import("../PdvConsentLinkService.js");
+    const out = PdvConsentLinkService.create(req.organizationId, String(req.params.code), req.user?.userId);
+    const base = (process.env.APP_URL || "").replace(/\/$/, "");
+    const url = base ? `${base}${out.path}` : null;
+    let qr: string | null = null;
+    try { const QRCode = (await import("qrcode")).default; qr = await QRCode.toDataURL(url || out.path, { margin: 1, width: 240 }); } catch { /* sem QR: o link copiável basta */ }
+    res.status(201).json({ path: out.path, url, expiresAt: out.expiresAt, qrDataUrl: qr, qrIsAbsolute: !!url });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.delete("/pdv-consent/:code/link", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const chk = pdvConsentScopeOk(req, String(req.params.code));
+  if (!chk.ok) return res.status(chk.status!).json({ error: chk.error });
+  const { PdvConsentLinkService } = await import("../PdvConsentLinkService.js");
+  res.json({ ok: true, ...PdvConsentLinkService.revoke(req.organizationId, String(req.params.code), req.user?.userId) });
+});
 router.get("/pdv-consent/:code", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   const chk = pdvConsentScopeOk(req, String(req.params.code));

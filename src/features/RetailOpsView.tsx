@@ -4226,6 +4226,15 @@ function PdvCustomersTab() {
   const loadCoverage = () => { apiFetch('/api/retailops/pdv-consent/summary').then(r => r.ok ? r.json() : null).then(d => setCoverage(d && !d.error ? d : null)).catch(() => setCoverage(null)); };
   useEffect(() => { loadCoverage(); }, []);
   const SOURCES: Record<string, string> = { balcao: 'No balcão (assinou/disse na loja)', whatsapp: 'Por WhatsApp (o cliente respondeu)', formulario: 'Formulário/cadastro', telefone: 'Por telefone' };
+  const [linkInfo, setLinkInfo] = useState<{ code: string; url: string | null; path: string; qr: string | null; expiresAt: string } | null>(null);
+  const genLink = async (c: any) => {
+    try {
+      const r = await apiFetch(`/api/retailops/pdv-consent/${encodeURIComponent(c.codigo_n)}/link`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não consegui gerar o link.'); return; }
+      setLinkInfo({ code: c.codigo_n, url: d.url, path: d.path, qr: d.qrDataUrl, expiresAt: d.expiresAt });
+    } catch { toast.error('Falha de conexão.'); }
+  };
   const openConsent = (c: any, granted: boolean) => { setEditing(c.codigo_n); setForm({ granted, source: 'balcao', evidence: '' }); };
   const saveConsent = async (c: any) => {
     setSavingConsent(true);
@@ -4311,17 +4320,33 @@ function PdvCustomersTab() {
                   <td className="px-3 py-2 text-zinc-300">{c.nascimento ? c.nascimento.slice(5).split('-').reverse().join('/') : '—'}</td>
                   <td className="px-3 py-2 text-zinc-400">{c.ultima_compra ? c.ultima_compra.split('-').reverse().join('/') : '—'}</td>
                   <td className="px-3 py-2" data-testid="pdv-consent-cell">
-                    {c.consent?.state === 'granted' ? <span className="text-emerald-300" title={c.consent.since || ''}>Autorizou{c.consent.source ? ` (${({ balcao: 'balcão', whatsapp: 'WhatsApp', formulario: 'formulário', telefone: 'telefone' } as Record<string, string>)[c.consent.source] || c.consent.source})` : ''}</span>
+                    {c.consent?.state === 'granted' ? <span className="text-emerald-300" title={c.consent.since || ''}>Autorizou{c.consent.source ? ` (${({ balcao: 'balcão', whatsapp: 'WhatsApp', formulario: 'formulário', telefone: 'telefone', link: 'link do cliente' } as Record<string, string>)[c.consent.source] || c.consent.source})` : ''}</span>
                       : c.consent?.state === 'revoked' ? <span className="text-rose-300" title={c.consent.since || ''}>Recusou/revogou</span>
                       : <span className="text-zinc-500">Sem registro</span>}
                     {canRecord && editing !== c.codigo_n && (
                       <span className="ml-2 inline-flex gap-1.5">
                         {c.consent?.state !== 'granted' && <button onClick={() => openConsent(c, true)} disabled={!c.celular} title={c.celular ? 'Registrar que o cliente autorizou' : 'Sem celular cadastrado — não há por onde falar'} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40">Autorizou</button>}
+                        {c.celular && c.consent?.state !== 'granted' && <button onClick={() => genLink(c)} title="Gera um link pessoal para o cliente decidir sozinho (o sistema não envia)" className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800" data-testid="pdv-consent-link-btn">Link</button>}
                         {c.consent?.state !== 'revoked' && <button onClick={() => openConsent(c, false)} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800">{c.consent?.state === 'granted' ? 'Revogar' : 'Recusou'}</button>}
                       </span>
                     )}
                   </td>
                 </tr>
+                {canRecord && linkInfo?.code === c.codigo_n && (
+                  <tr className="border-t border-zinc-800/40 bg-zinc-900/40" data-testid="pdv-consent-link-panel">
+                    <td colSpan={7} className="px-3 py-2 text-[12px] text-zinc-300 space-y-1.5">
+                      <div>Link pessoal de {c.nome || 'cliente'} (vale até {new Date(linkInfo.expiresAt).toLocaleDateString('pt-BR')}; gerar outro invalida este):</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input readOnly value={linkInfo.url || linkInfo.path} onFocus={e => e.currentTarget.select()} className="min-w-[16rem] flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-100" />
+                        <button onClick={() => { navigator.clipboard?.writeText(linkInfo.url || linkInfo.path).then(() => toast.success('Link copiado.')).catch(() => {}); }} className="rounded border border-zinc-700 px-2.5 py-1 text-xs hover:bg-zinc-800">Copiar</button>
+                        <button onClick={() => setLinkInfo(null)} className="rounded border border-zinc-700 px-2.5 py-1 text-xs hover:bg-zinc-800">Fechar</button>
+                      </div>
+                      {linkInfo.qr && linkInfo.url && <img src={linkInfo.qr} alt="QR do link de consentimento" className="h-32 w-32 rounded bg-white p-1" />}
+                      {!linkInfo.url && <div className="text-amber-300">APP_URL não configurada no servidor — o link acima é relativo; o QR só funciona com endereço completo.</div>}
+                      <div className="text-[11px] text-zinc-500">O ZapFlow NÃO envia este link: pedir autorização por mensagem a quem ainda não autorizou é justamente o que o consentimento evita. Mostre o QR no balcão ou entregue você mesmo.</div>
+                    </td>
+                  </tr>
+                )}
                 {canRecord && editing === c.codigo_n && (
                   <tr className="border-t border-zinc-800/40 bg-zinc-900/40" data-testid="pdv-consent-form">
                     <td colSpan={7} className="px-3 py-2">

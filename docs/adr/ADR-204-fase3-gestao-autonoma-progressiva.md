@@ -179,3 +179,12 @@ D1 (níveis 0–4 como mapa derivado, sem Nível 4), D2 (`dispatchGoverned` recu
 3. **Decisão explícita** sobre D3 (holdout) e sobre quando ligar `outbound_consent_required`, com consentimentos reais já capturados.
 Sem isso, qualquer nova camada de previsão/campanha seria construída sobre números que ninguém conferiu no mundo real.
 
+
+## 29. D4c — Link de consentimento pro cliente decidir sozinho (2026-10-07)
+
+Fecha a pendência do §28 "o cliente aprovar sozinho". O operador gera, na tela Clientes (PDV), um link PESSOAL e TEMPORÁRIO (`/consentimento/:token`); o cliente abre, e toca **Autorizo** ou **Não autorizo** (botões iguais, nada pré-marcado). A decisão cai no MESMO livro `retail_pdv_consents` (origem nova `link`, ator `customer:link`) — não há 2º registro de consentimento.
+
+- Token 32 bytes; só o hash SHA-256 fica no banco (`retail_pdv_consent_links`); 1 link ativo por cliente; validade padrão 14 dias (1–60); pode ser reaberto pra mudar de ideia até vencer.
+- Página pública mostra o mínimo (empresa, 1º nome, final do celular). Rotas `/api/public/consent/:token` (GET/POST `decision`) fora do `requireAuth`, no-store, limite por IP; erros: 404 desconhecido/revogado, 410 vencido.
+- **O sistema NÃO envia o link** (pedir consentimento por mensagem a quem não autorizou é o que o consentimento evita): QR/URL na tela pro operador entregar.
+- Pendente/hipóteses: página não testada em celular real; TTL de 14 dias e link reutilizável são suposições a confirmar; `APP_URL` precisa estar configurada pro QR ser absoluto. Teste: `test:pdv-consent-link` (31).

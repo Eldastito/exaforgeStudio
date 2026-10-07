@@ -12378,6 +12378,22 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_retail_pdv_consents ON retail_pdv_consents (organization_id, customer_code, scope, recorded_at);
   `);
 
+  // ADR-204 D4c — link PESSOAL e temporário pro CLIENTE do PDV decidir sozinho (página pública). Só o HASH do token (SHA-256) é guardado; 1 link ativo por cliente.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS retail_pdv_consent_links (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      customer_code TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      revoked_at DATETIME,
+      last_decision_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_retail_pdv_consent_links ON retail_pdv_consent_links (organization_id, customer_code);
+  `);
+
 };
 
 initDb();

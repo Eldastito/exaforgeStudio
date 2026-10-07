@@ -12453,6 +12453,43 @@ const initDb = () => {
     );
   `);
 
+  // ADR-205 F4.4 — plano de período do dono (versionado, append-only) + linhas (meta de faturamento, orçamento, calendário).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS strategic_plans (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      period_type TEXT NOT NULL,
+      period_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      objective TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      version INTEGER NOT NULL DEFAULT 1,
+      change_note TEXT,
+      created_by TEXT,
+      activated_by TEXT,
+      activated_at DATETIME,
+      closed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_strategic_plans_open ON strategic_plans (organization_id, period_type, period_key) WHERE status IN ('draft','active');
+    CREATE TABLE IF NOT EXISTS strategic_plan_lines (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      label TEXT,
+      category TEXT,
+      amount REAL,
+      event_date TEXT,
+      cash_impact REAL,
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategic_plan_lines ON strategic_plan_lines (organization_id, plan_id, version);
+  `);
+
 };
 
 initDb();

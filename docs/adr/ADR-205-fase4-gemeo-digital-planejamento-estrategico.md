@@ -61,7 +61,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Rotas em `/api/health-center/strategic/*` (ler = gestor; escrever = dono/admin). `test:strategic-decisions` (46, com mutação verificada).
 - **Limites:** o resultado real é **informado por uma pessoa** (o sistema ainda não o mede sozinho); sem UI; sem dados da TOULON. A calibração só diz algo depois de várias decisões com resultado — meses de uso.
 
-## 9. Status F4.3 — EM PR (Benchmark interno normalizado, 2026-10-07)
+## 9. Status F4.3 — MERGED (#1862) (Benchmark interno normalizado, 2026-10-07)
 
 `StoreBenchmarkService` + 1 tabela aditiva (`store_opportunity_profiles`) comparam as lojas **da própria rede** sem cair no "ranking de venda bruta" que o PRD proíbe. Loja grande sempre vence loja pequena em faturamento bruto — comparar exige **normalizar**, e normalizar exige dado que só o dono tem.
 
@@ -73,3 +73,16 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Resultado:** posição vs **mediana** (acima/perto/abaixo, faixa de ±10%) e **perguntas neutras** para quem está ≥25% pior ("o que é diferente nessa loja?"). Nunca causa (RN-F4-8), nunca meta, nunca recomenda fechar loja/contratar/demitir (RN-F4-12). Confiança só `insuficiente`/`baixa`/`media` — um mês não vê sazonalidade.
 - Read-only: não cria ação, sinal nem tarefa. Rotas `GET /api/health-center/benchmark/{stores,profiles}` (ler = gestor) e `PUT …/profiles/:storeId` (dono/admin). `test:store-benchmark` (34, com mutação verificada em 4 regras).
 - **Limites:** só **uma** rede (benchmark externo/entre empresas é F4.8/F4.9, com anonimização e amostra mínima); um único mês; sem UI; **inútil até o dono preencher m² e equipe** — o sistema não inventa. Os limiares (3 lojas, 6 meses, ±10%, ≥25%) são premissas declaradas, **sem calibração com dado real da TOULON**.
+
+## 10. Status F4.4 — EM PR (Plano de período do dono + plano × realizado, 2026-10-07)
+
+`StrategicPlanService` + 2 tabelas aditivas (`strategic_plans`, `strategic_plan_lines`). **Escopo deliberadamente menor que o "Planning Engine" do PRD:** o gate da análise (§6) para a F4.4 era "piloto + D3" e **nenhum dos dois foi cumprido** (o piloto não rodou; não há histórico validado). Por isso a fatia **não projeta nada**: é o plano do dono (intenção) com acompanhamento do realizado. Sem previsão de horizonte longo, sem meta sugerida — para "e se?" existe o `ScenarioEngine` (F4.1).
+
+- **O plano é escrito pelo dono** (só owner/admin cria, revisa, ativa, encerra — RN-F4-2) para um **mês, trimestre ou ano** atual/futuro, com 3 tipos de linha: **meta de faturamento**, **orçamento por categoria** (compras, marketing, pessoal, estoque, aluguel, outros) e **calendário de eventos** com impacto de caixa que o dono declara.
+- **Versionado e append-only:** revisar cria a versão N+1; as anteriores ficam. Um único plano em aberto (rascunho/ativo) por período; encerrado não se revisa, e o período pode ganhar plano novo.
+- **Realizado sempre derivado (RN-004):** faturamento dos fechamentos das lojas; orçamento das **contas a pagar lançadas com a categoria** do plano (comprometido × pago × restante). Sem fechamento → `null` (não "faturou zero"); sem contas a pagar lançadas → orçamento `null` e dito.
+- **Ritmo** = régua linear de calendário (dias decorridos ÷ dias do período, banda ±10%): `ahead`/`on_pace`/`behind`, e após o fim `met`/`missed`. É régua, **não previsão** e não conhece sazonalidade — declarado nos avisos.
+- **Contexto:** mostra o realizado do período anterior e quanto a meta cresce sobre ele, para o dono ver o tamanho da ambição (derivado; não recomenda).
+- **Caixa dos eventos:** soma só o que o dono declarou, rotulada "declarado", **fora** do caixa previsto. Nada é executado (sem ação, tarefa, pedido, mensagem nem sinal — RN-F4-1).
+- Rotas `/api/health-center/plans[/:id[/track|/activate|/close]]` (ler = gestor; escrever = dono/admin). `test:strategic-plan` (34, mutação verificada em 5 regras).
+- **Limites:** só leitura de realizado em nível de período (mês inteiro, não por dia); faturamento só de lojas com fechamento diário; orçamento só do que for lançado; **sem UI**; sem validação com dado real da TOULON. Orçamento comercial consolidado, calendário por loja e horizonte > 13 semanas ficam para depois do piloto.

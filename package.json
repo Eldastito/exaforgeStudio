@@ -955,6 +955,7 @@
     "test:scenario-engine": "tsx scripts/test-scenario-engine.ts",
     "test:strategic-decisions": "tsx scripts/test-strategic-decisions.ts",
     "test:store-benchmark": "tsx scripts/test-store-benchmark.ts",
+    "test:strategic-plan": "tsx scripts/test-strategic-plan.ts",
     "test:network-objective": "tsx scripts/test-network-objective.ts",
     "test:forecast-alerts-screens": "tsx scripts/test-forecast-alerts-screens.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",

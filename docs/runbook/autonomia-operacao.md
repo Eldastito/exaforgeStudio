@@ -318,3 +318,10 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Por que a loja não aparece no ranking:** veja `missing` (faltou m², equipe, faturamento ou custo fixo) e `maturity` (`new` = aberta há menos de 6 meses).
 5. Só dono/admin grava o perfil; quem tem visão completa do negócio lê. O vendedor não vê (mostra faturamento e custo por loja).
 
+## F4.4 — Plano de período (mês/trimestre/ano)
+1. **Criar:** `POST /api/health-center/plans` `{periodType: "month"|"quarter"|"year", periodKey: "2026-11" | "2026-Q4" | "2026", title, objective?, lines: [...]}`. Linhas: `{kind:"revenue_target", amount}` · `{kind:"budget", category:"compras|marketing|pessoal|estoque|aluguel|outros", amount}` · `{kind:"event", label, eventDate, cashImpact?}` (data dentro do período; impacto negativo = saída, é o que VOCÊ declara).
+2. **Ativar:** `POST /plans/:id/activate` (precisa de ao menos uma linha). **Revisar:** `PUT /plans/:id` com as linhas novas — vira a versão seguinte; as antigas ficam guardadas.
+3. **Acompanhar:** `GET /plans/:id/track` mostra meta × faturamento, o ritmo (régua linear de calendário — não é previsão), o orçamento comprometido/pago por categoria e o calendário de eventos.
+4. **Leitura honesta:** faturamento vem dos **fechamentos diários das lojas**; orçamento só enxerga **contas a pagar lançadas** com a categoria do plano. Sem esses lançamentos o campo vem vazio — não é zero.
+5. **Encerrar:** `POST /plans/:id/close`. Só dono/admin escreve; quem tem visão completa do negócio lê.
+

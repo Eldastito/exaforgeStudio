@@ -5820,6 +5820,7 @@ function ScheduleTab() {
           (planilha "MENSAL" do cliente). Grava a cota DIÁRIA da loja, de onde a
           cota por vendedor já deriva. */}
       <MonthlyGoalsCard month={month} />
+      <NetworkObjectiveCard month={month} />
       {storeId && (
         <div className="mt-4">
           <MonthlyQuotaDistributePanel storeId={storeId} month={month} onApplied={loadQuotas} />
@@ -5862,6 +5863,77 @@ function ScheduleTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ADR-204 F3.6b — OBJETIVO DA REDE ("+10% no mês") dividido por loja. Só RENDERIZA o plano do servidor (estimativa, não promessa); tarefas só por clique de uma pessoa.
+function NetworkObjectiveCard({ month }: { month: string }) {
+  const { user } = useAuth();
+  const [pct, setPct] = useState('10');
+  const [plan, setPlan] = useState<any | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const brlv = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+  const calc = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await apiFetch(`/api/retailops/network-objective?pct=${encodeURIComponent(pct)}&month=${encodeURIComponent(month)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { setPlan(null); setErr(d.error || 'Não consegui calcular.'); return; }
+      setPlan(d); setPicked(Object.fromEntries((d.stores || []).map((x: any) => [x.storeId, true])));
+    } catch { setErr('Falha de conexão.'); } finally { setBusy(false); }
+  };
+  const create = async () => {
+    const ids = Object.keys(picked).filter(k => picked[k]);
+    if (!ids.length) { toast.error('Marque pelo menos uma loja.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/retailops/network-objective/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pct: Number(pct), month, storeIds: ids }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { toast.error(d.error || 'Não consegui criar as tarefas.'); return; }
+      toast.success(`${d.created.length} tarefa(s) criada(s)${d.skipped?.length ? `; ${d.skipped.length} já existia(m)` : ''}.`);
+    } catch { toast.error('Falha de conexão.'); } finally { setBusy(false); }
+  };
+  if (user?.role !== 'owner' && user?.role !== 'admin') return null;   // o servidor também recusa; aqui só some o controle
+  const EFF: Record<string, string> = { leve: 'text-emerald-300', moderado: 'text-amber-300', alto: 'text-rose-300' };
+  return (
+    <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4" data-testid="network-objective-card">
+      <h3 className="text-sm font-medium text-zinc-100">Objetivo da rede: quanto cada loja precisa a mais</h3>
+      <p className="mt-1 text-[12px] text-zinc-500">Informe o aumento que você quer no mês. Eu divido pelas lojas a partir da <strong>projeção</strong> de cada uma (o que ela deve fazer se nada mudar). É estimativa, não é promessa, e não altera nenhuma meta.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-sm text-zinc-300">+</span>
+        <input value={pct} onChange={e => setPct(e.target.value.replace(/[^\d.,]/g, ''))} inputMode="decimal" className="w-20 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+        <span className="text-sm text-zinc-300">% em {month.slice(5)}/{month.slice(0, 4)}</span>
+        <button onClick={calc} disabled={busy} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{busy ? 'Calculando…' : 'Calcular'}</button>
+      </div>
+      {err && <p className="mt-2 text-[12px] text-amber-300">{err}</p>}
+      {plan && (
+        <div className="mt-3">
+          {plan.stores.length === 0 ? <p className="text-[12px] text-zinc-400">Nenhuma loja tem projeção confiável neste mês — não há o que dividir.</p> : (
+            <div className="overflow-x-auto rounded-lg border border-zinc-800">
+              <table className="w-full text-[12px]">
+                <thead className="bg-zinc-900/60 text-zinc-400"><tr><th className="px-2 py-1.5"></th><th className="px-2 py-1.5 text-left font-medium">Loja</th><th className="px-2 py-1.5 text-right font-medium">Projeção</th><th className="px-2 py-1.5 text-right font-medium">Alvo</th><th className="px-2 py-1.5 text-right font-medium">A mais por dia útil</th><th className="px-2 py-1.5 text-left font-medium">Esforço</th><th className="px-2 py-1.5 text-right font-medium">Meta</th></tr></thead>
+                <tbody>{plan.stores.map((s: any) => (
+                  <tr key={s.storeId} className="border-t border-zinc-800/70 text-zinc-300">
+                    <td className="px-2 py-1.5"><input type="checkbox" checked={!!picked[s.storeId]} onChange={e => setPicked(p => ({ ...p, [s.storeId]: e.target.checked }))} /></td>
+                    <td className="px-2 py-1.5 text-zinc-200">{s.storeName}</td>
+                    <td className="px-2 py-1.5 text-right">{brlv(s.baseline)}</td>
+                    <td className="px-2 py-1.5 text-right">{brlv(s.target)}</td>
+                    <td className="px-2 py-1.5 text-right">{s.extraPerDay != null ? brlv(s.extraPerDay) : '—'}{s.extraVsTypicalPct != null && <span className="text-zinc-500"> ({s.extraVsTypicalPct}% do dia típico)</span>}</td>
+                    <td className={`px-2 py-1.5 ${EFF[s.effort] || 'text-zinc-500'}`}>{s.effort || '—'}</td>
+                    <td className="px-2 py-1.5 text-right text-zinc-400">{s.goal.amount != null ? `${brlv(s.goal.amount)} (alvo = ${s.goal.targetVsGoalPct}%)` : 'sem meta'}</td>
+                  </tr>))}</tbody>
+              </table>
+            </div>
+          )}
+          {plan.network && <p className="mt-2 text-[12px] text-zinc-300">Rede (só as {plan.network.storesPlanned} loja(s) com projeção): projeção <b>{brlv(plan.network.baseline)}</b> → alvo <b>{brlv(plan.network.target)}</b> (+{brlv(plan.network.extra)}).{plan.network.storesExcluded > 0 && <span className="text-zinc-500"> {plan.network.storesExcluded} loja(s) ficaram de fora.</span>}</p>}
+          {plan.excluded.length > 0 && <ul className="mt-1 list-disc pl-4 text-[11px] text-zinc-500">{plan.excluded.map((e: any) => <li key={e.storeId}>{e.storeName}: {e.reason || 'sem projeção'}</li>)}</ul>}
+          <ul className="mt-1 list-disc pl-4 text-[11px] text-zinc-500">{plan.notes.map((n: string, i: number) => <li key={i}>{n}</li>)}</ul>
+          {plan.stores.length > 0 && <button onClick={create} disabled={busy} className="mt-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">Criar tarefas para as lojas marcadas</button>}
+        </div>
+      )}
     </div>
   );
 }

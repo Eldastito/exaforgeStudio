@@ -121,3 +121,6 @@ Compromisso que depende de cadastro da mesma frase fica `waiting` até o cadastr
 ## 25. Status D4b — EM PR (tela de captura do consentimento)
 Cartão de cobertura + coluna "Consentimento" + registro por cliente na aba **Clientes do PDV** (Retail). `GET /pdv-customers` devolve `consent` por cliente (`statusMany`) e `canRecordConsent`. Sem registro = "Sem registro" (nunca autorizou). **Pendente:** link/QR de opt-in pro cliente e importação em massa; ligar `outbound_consent_required` só depois da captura.
 
+## 26. Status F3.6b — EM PR (objetivo da rede → lojas)
+`NetworkObjectiveService` + rotas `/api/retailops/network-objective*` + card em Operação da Rede. Decisão do dono: rede → lojas. Parte da projeção F3.4; +X% proporcional por loja; R$/dia útil e esforço (premissa não calibrada); loja sem projeção fica de fora; tarefas só por pessoa; meta oficial intocada. **F3.5c (redistribuição por baixo giro): ADIADA por decisão do Bruno (2026-10-07) — não será feita agora.**
+

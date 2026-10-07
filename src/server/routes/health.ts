@@ -128,6 +128,23 @@ const bench = async (req: AuthRequest, res: any, write: boolean) => {
 router.get("/benchmark/stores", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, false); if (!c) return; res.json(c.B.benchmark(c.orgId, { period: req.query.period ? String(req.query.period) : undefined })); } catch (e) { stratFail(res, e); } });
 router.get("/benchmark/profiles", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, false); if (!c) return; res.json({ stores: c.B.listProfiles(c.orgId) }); } catch (e) { stratFail(res, e); } });
 router.put("/benchmark/profiles/:storeId", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, true); if (!c) return; res.json(c.B.setProfile(c.orgId, c.actor, String(req.params.storeId), req.body || {})); } catch (e) { stratFail(res, e); } });
+// ADR-205 F4.4 — plano de período (mês/trimestre/ano) do dono + plano × realizado. LER = gestor (mostra faturamento/orçamento); escrever = dono/admin (RN-F4-2).
+const plan = async (req: AuthRequest, res: any, write: boolean) => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) { res.status(403).json({ error: "O plano mostra faturamento e orçamento — é do gestor." }); return null; }
+  if (write && !["owner", "admin"].includes(String(req.user.role || ""))) { res.status(403).json({ error: "Só o dono ou o administrador cria e altera o plano." }); return null; }
+  const { StrategicPlanService } = await import("../StrategicPlanService.js");
+  return { orgId, P: StrategicPlanService, actor: { userId: (req.user as any).userId || (req.user as any).id, role: String(req.user.role || "") } };
+};
+router.get("/plans", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, false); if (!c) return; res.json({ plans: c.P.list(c.orgId, { periodType: req.query.periodType ? String(req.query.periodType) : undefined, status: req.query.status ? String(req.query.status) : undefined }) }); } catch (e) { stratFail(res, e); } });
+router.get("/plans/:id", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, false); if (!c) return; const p = c.P.get(c.orgId, String(req.params.id)); p ? res.json(p) : res.status(404).json({ error: "Plano não encontrado.", code: "not_found" }); } catch (e) { stratFail(res, e); } });
+router.get("/plans/:id/track", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, false); if (!c) return; res.json(c.P.track(c.orgId, String(req.params.id), { asOf: req.query.asOf ? String(req.query.asOf) : undefined })); } catch (e) { stratFail(res, e); } });
+router.post("/plans", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.status(201).json(c.P.create(c.orgId, c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.revise(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+router.post("/plans/:id/activate", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.activate(c.orgId, String(req.params.id), c.actor)); } catch (e) { stratFail(res, e); } });
+router.post("/plans/:id/close", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.close(c.orgId, String(req.params.id), c.actor, req.body?.note)); } catch (e) { stratFail(res, e); } });
 
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {

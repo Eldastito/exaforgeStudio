@@ -310,3 +310,11 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Comparar:** `GET /strategic/decisions/:id` mostra esperado × real (`within`/`below`/`above`). `GET /strategic/calibration` mostra quantas vezes o cenário acertou (com intervalo; amostra pequena não prova nada).
 5. **Diretrizes:** `category: "principle"` guarda uma orientação ("priorizar margem"); `revisit` reconfirma, `revoke` encerra. `GET /strategic/principles` lista as ativas.
 6. Quando a data de revisão vence sem resultado, aparece um aviso no "Hoje"/Smart Inbox; ele some sozinho quando você registra o resultado.
+
+## F4.3 — Benchmark interno entre lojas
+1. **Preencher o que só o dono sabe:** para cada loja, `PUT /api/health-center/benchmark/profiles/:storeId` com `{areaM2, teamSize, openedOn}` (AAAA-MM-DD). Aluguel/folha/custos fixos já vêm da tela de custos da loja. Campo enviado como `null` limpa só aquele campo.
+2. **Ver o comparativo:** `GET /benchmark/stores` (último mês fechado) ou `?period=AAAA-MM`. Cada métrica diz se **ranqueou** (`ranked`) e, se não, o motivo: `amostra_minima` (menos de 3 lojas comparáveis), `mes_incompleto`.
+3. **Ler com cuidado:** posição vs mediana + perguntas. É para **perguntar**, não para concluir — diferença de resultado não prova causa e não é meta.
+4. **Por que a loja não aparece no ranking:** veja `missing` (faltou m², equipe, faturamento ou custo fixo) e `maturity` (`new` = aberta há menos de 6 meses).
+5. Só dono/admin grava o perfil; quem tem visão completa do negócio lê. O vendedor não vê (mostra faturamento e custo por loja).
+

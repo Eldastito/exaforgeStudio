@@ -12437,6 +12437,22 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_strategic_outcomes ON strategic_decision_outcomes (organization_id, decision_id, metric_key, recorded_at);
   `);
 
+  // ADR-205 F4.3 — dados de oportunidade por loja, INFORMADOS pelo dono (m², equipe, abertura). Atributo atual (upsert + auditoria), não série.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS store_opportunity_profiles (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      store_id TEXT NOT NULL,
+      area_m2 REAL,
+      team_size INTEGER,
+      opened_on TEXT,
+      note TEXT,
+      updated_by TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(organization_id, store_id)
+    );
+  `);
+
 };
 
 initDb();

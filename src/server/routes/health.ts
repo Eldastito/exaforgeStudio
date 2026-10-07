@@ -115,6 +115,19 @@ router.post("/strategic/decisions/:id/decide", async (req: AuthRequest, res): Pr
 router.post("/strategic/decisions/:id/revoke", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.json(c.S.revoke(c.orgId, String(req.params.id), c.actor, req.body?.reason)); } catch (e) { stratFail(res, e); } });
 router.post("/strategic/decisions/:id/revisit", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.json(c.S.revisit(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
 router.post("/strategic/decisions/:id/outcome", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.status(201).json(c.S.recordOutcome(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+// ADR-205 F4.3 — benchmark interno normalizado. LER = gestor (mostra faturamento/custo por loja, §73); gravar o perfil da loja (m², equipe, abertura) = dono/admin.
+const bench = async (req: AuthRequest, res: any, write: boolean) => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) { res.status(403).json({ error: "O comparativo entre lojas mostra faturamento e custo — é do gestor." }); return null; }
+  if (write && !["owner", "admin"].includes(String(req.user.role || ""))) { res.status(403).json({ error: "Só o dono ou o administrador informa os dados da loja." }); return null; }
+  const { StoreBenchmarkService } = await import("../StoreBenchmarkService.js");
+  return { orgId, B: StoreBenchmarkService, actor: { userId: (req.user as any).userId || (req.user as any).id, role: String(req.user.role || "") } };
+};
+router.get("/benchmark/stores", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, false); if (!c) return; res.json(c.B.benchmark(c.orgId, { period: req.query.period ? String(req.query.period) : undefined })); } catch (e) { stratFail(res, e); } });
+router.get("/benchmark/profiles", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, false); if (!c) return; res.json({ stores: c.B.listProfiles(c.orgId) }); } catch (e) { stratFail(res, e); } });
+router.put("/benchmark/profiles/:storeId", async (req: AuthRequest, res): Promise<any> => { try { const c = await bench(req, res, true); if (!c) return; res.json(c.B.setProfile(c.orgId, c.actor, String(req.params.storeId), req.body || {})); } catch (e) { stratFail(res, e); } });
 
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {

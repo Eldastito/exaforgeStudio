@@ -46,3 +46,18 @@ Decisão do dono: "começar a F4.1 com as recomendações" → D1 adotada como r
 - `test:scenario-engine` (42): contrato, validação, faixa, premissas/versão, sensibilidade, cada caso acima, confiança (inclui mutação do gate), isolamento, rota.
 - **Sem UI** nesta fatia (superfície do FalaTu/Central de Saúde vem depois de validar o formato). Dados da TOULON **não** foram usados.
 
+## 8. Status F4.2 — EM PR (Modelo estratégico: decisão → hipótese → resultado, 2026-10-07)
+Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada: registro **antes** do piloto, confiança limitada).
+
+`StrategicDecisionService` + 2 tabelas aditivas (`strategic_decisions`, `strategic_decision_outcomes`) fecham o ciclo que a F4.1 abriu: o cenário vira **decisão registrada**, e o **resultado real** volta para dizer se o motor acertou.
+
+- **Registrar ≠ executar** (RN-F4-1): não cria ação, pedido, pagamento nem tarefa; só **dono/admin** registra e decide (RN-F4-2). Estados: `considering` → `decided`/`rejected` → `revoked`.
+- **Snapshot congelado e calculado no servidor:** o cenário é rodado pelo `ScenarioEngine` na hora do registro (o cliente não envia o resultado) e guardado com `assumptionsVersion`/`engineVersion`/confiança. Mudar vendas ou caixa depois **não** altera o que foi decidido (convenção nº 3).
+- **Faixa esperada:** vem da faixa do cenário; cenário de **caso único** (vendas, contratação) não tem faixa, então usa o valor **± tolerância** (padrão **20%**, declarada e editável — é premissa, não dado).
+- **Resultado APPEND-ONLY:** a última medição vale, a anterior fica no histórico, `basis` fact|estimate dito por quem informou. `compare` devolve `within`/`below`/`above`/`no_actual`/`no_expectation` — **sem expectativa ou sem medição nunca vira "acertou"**.
+- **Calibração:** taxa de resultados dentro da faixa com intervalo de Wilson (reuso de `statsWilson`); `null` sem amostra; amostra pequena é dita ("não é prova de que o motor acerta").
+- **Memória estratégica (PRD §40):** categoria `principle` ("priorizar margem sobre crescimento") — explícita, **revisável** (`revoke`, `revisit`), nunca inferida. Texto livre é dado do dono, truncado e sem controle; quem reusar num prompt trata como não confiável.
+- **Lembrete de revisão:** quando `reviewOn` vence sem resultado (ou a diretriz precisa de revisão), o Scheduler publica UM sinal em `business_signals` (conv. nº 12, fato, sem dinheiro), que **resolve sozinho** ao registrar o resultado ou revisitar.
+- Rotas em `/api/health-center/strategic/*` (ler = gestor; escrever = dono/admin). `test:strategic-decisions` (46, com mutação verificada).
+- **Limites:** o resultado real é **informado por uma pessoa** (o sistema ainda não o mede sozinho); sem UI; sem dados da TOULON. A calibração só diz algo depois de várias decisões com resultado — meses de uso.
+

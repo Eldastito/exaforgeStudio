@@ -965,6 +965,12 @@ export class Scheduler {
       import("./ProfessionalDemandService.js").then((m) => m.ProfessionalDemandService.pass())
         .catch((e) => console.error('[Scheduler] gap de demanda da rede falhou', e));
     } catch (e) { console.error('[Scheduler] pass de gap de demanda falhou', e); }
+    // Decisões estratégicas (ADR-205 F4.2): lembra de registrar o resultado real quando a data de revisão vence — sinal no
+    // `business_signals` (conv. nº 12), resolvido sozinho quando o resultado entra. Advisório; nunca executa. Best-effort.
+    try {
+      import("./StrategicDecisionService.js").then((m) => m.StrategicDecisionService.pass())
+        .catch((e) => console.error('[Scheduler] revisão de decisão estratégica falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de decisão estratégica falhou', e); }
     // Varejo — meses consecutivos abaixo da meta por PESSOA (PRD Fase 1, F1.5): sinal nominal no
     // `business_signals`, 1x/dia, só orgs que ligaram o alerta (opt-in — nomeia pessoas). Best-effort.
     try {

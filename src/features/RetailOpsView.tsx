@@ -764,7 +764,7 @@ function PatternSolutions({ patternId, refreshKey }: { patternId: string; refres
   );
 }
 
-type RetailTab = 'insights' | 'fechamento' | 'malote' | 'comissao' | 'metas' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual';
+type RetailTab = 'insights' | 'fechamento' | 'malote' | 'comissao' | 'metas' | 'escala' | 'resultado' | 'precificar' | 'maisvendidos' | 'cartao' | 'clientes' | 'divergencia' | 'estoque' | 'reposicao' | 'transferencias' | 'equipe' | 'vendedores' | 'padroes' | 'lojavirtual' | 'previsao';
 const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'insights', label: 'Insights', icon: Lightbulb },
   { key: 'fechamento', label: 'Fechamento diário', icon: CalendarDays },
@@ -785,6 +785,7 @@ const TABS: { key: RetailTab; label: string; icon: any }[] = [
   { key: 'equipe', label: 'Equipe & cobrança', icon: Users },
   { key: 'padroes', label: 'Padrões (IA)', icon: Sparkles },
   { key: 'lojavirtual', label: 'Loja virtual → PDV', icon: Globe },
+  { key: 'previsao', label: 'Previsão e alertas', icon: TrendingUp },
 ];
 
 const PATTERN_STATUS: Record<string, { label: string; cls: string }> = {
@@ -1002,6 +1003,7 @@ export function RetailOpsView() {
         </div>
       )}
       {tab === 'insights' && <InsightsTab />}
+      {tab === 'previsao' && <ForecastAlertsTab />}
       {tab === 'fechamento' && <ClosingsTab />}
       {tab === 'malote' && <MaloteTab />}
       {tab === 'comissao' && <CommissionTab />}
@@ -4034,6 +4036,175 @@ function TransfersTab() {
 
 
 
+
+
+// ADR-204 F3.3/F3.4/F3.5 — telas de PREVISÃO do mês, RADAR de exceções e PLANO DO VENDEDOR. Só RENDERIZAM o que o servidor calcula (estimativa ≠ fato;
+// nada altera meta, comissão ou cota). Dado da rede e de pessoas → dono/admin sem trava de loja (o servidor recusa os demais).
+const fmtDM = (d?: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '—');
+function ForecastAlertsTab() {
+  return (
+    <div className="space-y-6" data-testid="forecast-alerts-tab">
+      <p className="text-[12px] text-zinc-500">Previsão, alertas e plano de vendedor são <strong>estimativas e recomendações</strong> sobre os fechamentos já enviados — a hora da venda não é usada. Nada aqui altera meta, comissão ou cota; tarefas só nascem quando uma pessoa clica.</p>
+      <ForecastCard />
+      <RadarCard />
+      <SellerPlanCard />
+    </div>
+  );
+}
+
+function ForecastCard() {
+  const [data, setData] = useState<any | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/retailops/forecast').then(async r => { const d = await r.json().catch(() => ({})); if (!alive) return; if (!r.ok) setErr(r.status === 403 ? 'Esta área é do gestor da rede inteira.' : (d.error || 'Não consegui carregar a previsão.')); else setData(d); }).catch(() => alive && setErr('Falha de conexão.')).finally(() => alive && setLoading(false));
+    return () => { alive = false; };
+  }, []);
+  const PROB: Record<string, string> = { baixa: 'text-rose-300', média: 'text-amber-300', alta: 'text-emerald-300' };
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4" data-testid="forecast-card">
+      <h3 className="text-sm font-medium text-zinc-100">Previsão do mês por loja</h3>
+      <p className="mt-1 text-[12px] text-zinc-500">Quanto cada loja deve fechar o mês, em uma <strong>faixa</strong> (não um número exato), a chance de bater a meta e o que falta por dia útil.</p>
+      {loading && <p className="mt-2 text-xs text-zinc-500">Carregando…</p>}
+      {err && <p className="mt-2 text-[12px] text-amber-300">{err}</p>}
+      {data && (
+        <div className="mt-3 space-y-2">
+          {data.network?.projection && <p className="text-[12px] text-zinc-300">Rede (só as {data.network.storesProjected} loja(s) com projeção): já vendeu <b>{brl(data.network.sold)}</b> · deve fechar entre <b>{brl(data.network.projection.low)}</b> e <b>{brl(data.network.projection.high)}</b> (central {brl(data.network.projection.mid)}; {data.network.projection.band}).{(data.network.storesExcluded || []).length > 0 && <span className="text-zinc-500"> {data.network.storesExcluded.length} loja(s) ficaram de fora.</span>}</p>}
+          <div className="grid gap-2 md:grid-cols-2">
+            {(data.stores || []).map((s: any) => (
+              <div key={s.storeId} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[12px] text-zinc-400" data-testid="forecast-store">
+                <div className="flex items-baseline justify-between gap-2"><span className="text-sm font-medium text-zinc-200">{s.storeName}</span>{s.status === 'ok' && <span className={PROB[s.confidence?.label] || 'text-zinc-400'}>confiança {s.confidence?.label}</span>}</div>
+                {s.status === 'ok' ? (
+                  <>
+                    <div className="mt-1">Já vendeu <b className="text-zinc-200">{brl(s.sold)}</b> · deve fechar entre <b className="text-zinc-200">{brl(s.projection.low)}</b> e <b className="text-zinc-200">{brl(s.projection.high)}</b></div>
+                    {s.goal?.amount != null
+                      ? <div className="mt-0.5">Meta {brl(s.goal.amount)}{s.goalProbability && <> · chance de bater: <b className="text-zinc-200">{s.goalProbability.pct}%</b> ({s.goalProbability.label})</>}{s.falta > 0 && s.neededPerOpenDay != null && <> · falta {brl(s.falta)} (<b className="text-zinc-200">{brl(s.neededPerOpenDay)}</b> por dia útil{s.neededVsTypicalPct != null && <>, {s.neededVsTypicalPct >= 0 ? '+' : ''}{s.neededVsTypicalPct}% do dia típico</>})</>}</div>
+                      : <div className="mt-0.5 text-zinc-500">Sem meta mensal cadastrada — não calculo a chance de bater.</div>}
+                    {(s.confidence?.reasons || []).length > 0 && <div className="mt-0.5 text-zinc-500">Cuidado: {(s.confidence.reasons as string[]).join('; ')}.</div>}
+                  </>
+                ) : <div className="mt-1 text-zinc-500">Sem previsão: {s.reason || s.status}</div>}
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-zinc-600">Estimativa, não promessa. A faixa mede só a variação normal de um dia para outro; não cobre promoção, ruptura de estoque ou mudança de tendência.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RadarCard() {
+  const [data, setData] = useState<any | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => apiFetch('/api/retailops/radar').then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) { setErr(r.status === 403 ? 'Esta área é do gestor da rede inteira.' : (d.error || 'Não consegui carregar o radar.')); setData(null); } else { setErr(null); setData(d); } }).catch(() => setErr('Falha de conexão.'));
+  useEffect(() => { load(); }, []);
+  const toggle = async () => {
+    setBusy(true);
+    try { const r = await apiFetch('/api/retailops/radar/enabled', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !data?.enabled }) }); if (r.ok) await load(); else toast.error('Não consegui alterar.'); } finally { setBusy(false); }
+  };
+  const scan = async () => {
+    setBusy(true);
+    try { const r = await apiFetch('/api/retailops/radar/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); const d = await r.json().catch(() => ({})); if (r.ok) { toast.success(d.published ? `${d.published} aviso(s) publicado(s).` : (d.reason === 'radar_disabled' ? 'Ligue o radar primeiro.' : 'Nada novo pra avisar.')); await load(); } else toast.error('Não consegui verificar.'); } finally { setBusy(false); }
+  };
+  const CLS: Record<string, { label: string; cls: string }> = { technical: { label: 'Dado ou integração', cls: 'text-sky-300' }, business: { label: 'Negócio', cls: 'text-amber-300' }, opportunity: { label: 'Oportunidade', cls: 'text-emerald-300' } };
+  const SKIP: Record<string, string> = { dado_desatualizado: 'A integração de vendas está atrasada — não comparo lojas com dado velho.', sem_vendas: 'Ainda não há vendas do PDV para comparar.' };
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4" data-testid="radar-card">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-zinc-100">Radar: o que está fora do normal</h3>
+        {data && <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[12px] text-zinc-400"><input type="checkbox" checked={!!data.enabled} disabled={busy} onChange={toggle} /> Avisar no sistema quando houver</label>
+          {data.enabled && <button onClick={scan} disabled={busy} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">Verificar e avisar agora</button>}
+        </div>}
+      </div>
+      <p className="mt-1 text-[12px] text-zinc-500">Compara cada loja com o <strong>mesmo dia da semana</strong> das últimas semanas e avisa o que foge muito, além de dados estranhos (preço zerado, venda duplicada, integração parada). Só olha dia já fechado{data?.asOf ? ` (${fmtDM(data.asOf)})` : ''}.</p>
+      {err && <p className="mt-2 text-[12px] text-amber-300">{err}</p>}
+      {data && (
+        <div className="mt-3 space-y-1.5">
+          {(data.skipped || []).map((k: string) => <p key={k} className="text-[12px] text-amber-300">{SKIP[k] || k}</p>)}
+          {(data.findings || []).length === 0 && !(data.skipped || []).length && <p className="text-[12px] text-zinc-400">Nada fora do normal no último dia fechado.</p>}
+          {(data.findings || []).map((f: any, i: number) => (
+            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[12px]" data-testid="radar-finding">
+              <span className={`font-medium ${CLS[f.signalClass]?.cls || 'text-zinc-300'}`}>{CLS[f.signalClass]?.label || f.signalClass}</span>
+              <span className="ml-2 text-zinc-300">{f.summary}</span>
+              {f.basis === 'hypothesis' && <span className="ml-2 text-zinc-500">(hipótese)</span>}
+            </div>
+          ))}
+          {!data.enabled && <p className="text-[11px] text-zinc-600">Radar desligado: você vê esta lista aqui, mas nenhum aviso é enviado ao sistema.</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SellerPlanCard() {
+  const [sellers, setSellers] = useState<any[]>([]);
+  const [sel, setSel] = useState('');
+  const [plan, setPlan] = useState<any | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  useEffect(() => { apiFetch('/api/retailops/sellers').then(r => (r.ok ? r.json() : null)).then(d => setSellers((d?.sellers || []).filter((x: any) => x.id && x.active !== 0))).catch(() => {}); }, []);
+  const load = async (id: string) => {
+    setSel(id); setPlan(null); setErr(null); setPicked({});
+    if (!id) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/retailops/seller-plan/${encodeURIComponent(id)}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setErr(r.status === 403 ? 'Esta área é do dono/admin (e só da sua loja, se você for gerente).' : (d.error || 'Não consegui montar o plano.')); return; }
+      setPlan(d); setPicked(Object.fromEntries(((d.plan14?.items) || []).map((i: any) => [i.key, true])));
+    } catch { setErr('Falha de conexão.'); } finally { setBusy(false); }
+  };
+  const create = async () => {
+    const items = Object.keys(picked).filter(k => picked[k]);
+    if (!items.length) { toast.error('Marque pelo menos um item.'); return; }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/retailops/seller-plan/${encodeURIComponent(sel)}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.ok) { toast.error(d.error || 'Não consegui criar as tarefas.'); return; }
+      toast.success(`${d.created.length} tarefa(s) criada(s)${d.skipped?.length ? `; ${d.skipped.length} já existia(m)` : ''}.`);
+    } catch { toast.error('Falha de conexão.'); } finally { setBusy(false); }
+  };
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4" data-testid="seller-plan-card">
+      <h3 className="text-sm font-medium text-zinc-100">Plano de 14 dias do vendedor</h3>
+      <p className="mt-1 text-[12px] text-zinc-500">Escolha um vendedor para ver o que mudou nos números dele e um plano de conversa para o gerente. <strong>Não é avaliação de desempenho</strong> e não afeta comissão, salário ou cobrança.</p>
+      <select value={sel} onChange={e => load(e.target.value)} className="mt-2 bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+        <option value="">Escolha um vendedor…</option>
+        {sellers.map((s: any) => <option key={s.id} value={s.id}>{s.name || `Matrícula ${s.matricula}`}</option>)}
+      </select>
+      {busy && <span className="ml-2 text-xs text-zinc-500">Carregando…</span>}
+      {err && <p className="mt-2 text-[12px] text-amber-300">{err}</p>}
+      {plan && (
+        <div className="mt-3 space-y-2 text-[12px]">
+          {!plan.enough && <p className="text-zinc-400">{plan.reason || 'Sem números suficientes para recomendar.'}</p>}
+          {plan.enough && plan.reason && !plan.plan14 && <p className="text-zinc-400">{plan.reason}</p>}
+          {(plan.why || []).length > 0 && (
+            <ul className="space-y-1">{plan.why.map((w: any, i: number) => (
+              <li key={i} className="text-zinc-300"><span className={`mr-1.5 rounded border px-1.5 py-0.5 text-[10px] ${w.kind === 'fact' ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'}`}>{w.kind === 'fact' ? 'fato' : 'hipótese'}</span>{w.text}</li>
+            ))}</ul>
+          )}
+          {plan.plan14 && (
+            <div>
+              <p className="text-zinc-400">Plano de {fmtDM(plan.plan14.startDate)} a {fmtDM(plan.plan14.endDate)} — {plan.plan14.note}</p>
+              <ul className="mt-1 space-y-1.5">{plan.plan14.items.map((it: any) => (
+                <li key={it.key} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2" data-testid="seller-plan-item">
+                  <label className="flex items-start gap-2"><input type="checkbox" className="mt-0.5" checked={!!picked[it.key]} onChange={e => setPicked(p => ({ ...p, [it.key]: e.target.checked }))} />
+                    <span><span className="text-zinc-200">{it.title}</span> <span className="text-zinc-500">(até {fmtDM(it.dueDate)})</span><span className="block text-zinc-400">{it.detail}</span></span></label>
+                </li>))}</ul>
+              <button onClick={create} disabled={busy} className="mt-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">Criar tarefas para o gerente</button>
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-600">{plan.disclaimer}</p>
+        </div>
+      )}
+    </section>
+  );
+}
 
 // ---- Clientes do PDV (Fase 3, opt-in) ---------------------------------------
 function PdvCustomersTab() {

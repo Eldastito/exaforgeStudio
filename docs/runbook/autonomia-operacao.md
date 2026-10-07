@@ -295,3 +295,9 @@ Em **Operação da Rede → Vendas e metas → "Previsão e alertas"** (dono/adm
 2. **Ver impacto e ligar** mostra quantos contatos e clientes do PDV deixariam de receber mensagem. Ligado, o bloqueio vale para **todo envio** (inclui respostas de atendimento e cobranças automáticas), não só campanha.
 3. Marque o aceite e **Ligar bloqueio**. Para reverter: **Desligar** (sem confirmação). Tudo fica auditado.
 4. Se "contatos sem consentimento" for alto, **não ligue** antes de registrar consentimentos — o atendimento pode parar de responder esses contatos.
+
+## F4.1 — Scenario Engine ("e se eu fizer isso?")
+- API (só gestor): `POST /api/health-center/simulate/scenario` com `{ "kind": "purchase" | "sales_change" | "hire", "inputs": {...} }`. `GET …/simulate/scenario/kinds` lista as premissas editáveis de cada tipo.
+- Exemplos: compra `{amount:300000, minCash:50000, payInWeeks:4}` · vendas `{changePct:-20}` · contratação `{monthlyCost:2500}`.
+- Leia assim: **faixa** (não número exato), **premissas** (quais são dado, padrão ou informadas por você), **sensibilidade** (qual variável mais muda o resultado) e **confiança** (limitada a média até o piloto validar os dados).
+- É **cenário, não previsão**, e não executa nada. Nova loja, fechamento e backtest ainda não existem.

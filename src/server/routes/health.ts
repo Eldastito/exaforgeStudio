@@ -75,6 +75,25 @@ router.post("/simulate/purchase-scenarios", async (req: AuthRequest, res): Promi
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ADR-205 F4.1 — ScenarioEngine: contrato único de simulação ("e se eu fizer isso?") sobre os simuladores existentes. SÓ ANÁLISE (executes:false), cenário ≠ previsão.
+// Mostra caixa, margem e receita → só quem tem visão completa do negócio (§73). `kinds` é só o catálogo (sem número).
+router.get("/simulate/scenario/kinds", async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const { ScenarioEngine } = await import("../ScenarioEngine.js");
+  res.json({ kinds: ScenarioEngine.kinds() });
+});
+router.post("/simulate/scenario", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const { ContextProjectionService } = await import("../ContextProjectionService.js");
+    if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "O cenário mostra caixa, margem e receita — é do gestor." });
+    const { ScenarioEngine } = await import("../ScenarioEngine.js");
+    const out = ScenarioEngine.run(orgId, String(req.body?.kind || ""), req.body?.inputs && typeof req.body.inputs === "object" ? req.body.inputs : {});
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

@@ -12394,6 +12394,49 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_retail_pdv_consent_links ON retail_pdv_consent_links (organization_id, customer_code);
   `);
 
+  // ADR-205 F4.2 — decisão estratégica → hipótese → resultado real. O snapshot do cenário é CONGELADO (convenção nº 3); o resultado é APPEND-ONLY (a última medição vale).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS strategic_decisions (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'considering',
+      hypothesis TEXT,
+      rationale TEXT,
+      scenario_json TEXT,
+      assumptions_version TEXT,
+      engine_version TEXT,
+      confidence_level TEXT,
+      expect_metric TEXT,
+      expect_unit TEXT,
+      expect_low REAL,
+      expect_high REAL,
+      expect_tolerance_pct REAL,
+      review_on TEXT,
+      created_by TEXT,
+      decided_by TEXT,
+      decided_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategic_decisions_org ON strategic_decisions (organization_id, status, review_on);
+    CREATE TABLE IF NOT EXISTS strategic_decision_outcomes (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      decision_id TEXT NOT NULL,
+      metric_key TEXT NOT NULL,
+      actual_value REAL NOT NULL,
+      unit TEXT,
+      basis TEXT NOT NULL DEFAULT 'fact',
+      source TEXT NOT NULL DEFAULT 'user',
+      note TEXT,
+      recorded_by TEXT,
+      recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategic_outcomes ON strategic_decision_outcomes (organization_id, decision_id, metric_key, recorded_at);
+  `);
+
 };
 
 initDb();

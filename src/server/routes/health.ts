@@ -94,6 +94,28 @@ router.post("/simulate/scenario", async (req: AuthRequest, res): Promise<any> =>
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ADR-205 F4.2 — decisões estratégicas (decisão → hipótese → resultado real). LER mostra caixa/margem → gestor (§73); ESCREVER é do dono/admin (decisão é humana, RN-F4-2).
+const strat = async (req: AuthRequest, res: any, write: boolean) => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) { res.status(403).json({ error: "Decisão estratégica mostra números do negócio — é do gestor." }); return null; }
+  if (write && !["owner", "admin"].includes(String(req.user.role || ""))) { res.status(403).json({ error: "Só o dono ou o administrador registra e decide." }); return null; }
+  const { StrategicDecisionService } = await import("../StrategicDecisionService.js");
+  return { orgId, S: StrategicDecisionService, actor: { userId: (req.user as any).userId || (req.user as any).id, role: String(req.user.role || "") } };
+};
+const stratFail = (res: any, e: any) => res.status(e?.code === "not_found" ? 404 : e?.code ? (e.code === "forbidden" ? 403 : 400) : 500).json({ error: e?.message || "Erro", code: e?.code });
+router.get("/strategic/decisions", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, false); if (!c) return; res.json({ decisions: c.S.list(c.orgId, { status: req.query.status ? String(req.query.status) : undefined, category: req.query.category ? String(req.query.category) : undefined }) }); } catch (e) { stratFail(res, e); } });
+router.get("/strategic/calibration", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, false); if (!c) return; res.json(c.S.calibration(c.orgId)); } catch (e) { stratFail(res, e); } });
+router.get("/strategic/principles", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, false); if (!c) return; res.json({ principles: c.S.principles(c.orgId) }); } catch (e) { stratFail(res, e); } });
+router.get("/strategic/due", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, false); if (!c) return; res.json({ due: c.S.due(c.orgId) }); } catch (e) { stratFail(res, e); } });
+router.get("/strategic/decisions/:id", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, false); if (!c) return; const d = c.S.get(c.orgId, String(req.params.id)); d ? res.json(d) : res.status(404).json({ error: "Decisão não encontrada." }); } catch (e) { stratFail(res, e); } });
+router.post("/strategic/decisions", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.status(201).json(c.S.register(c.orgId, c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+router.post("/strategic/decisions/:id/decide", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.json(c.S.decide(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+router.post("/strategic/decisions/:id/revoke", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.json(c.S.revoke(c.orgId, String(req.params.id), c.actor, req.body?.reason)); } catch (e) { stratFail(res, e); } });
+router.post("/strategic/decisions/:id/revisit", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.json(c.S.revisit(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+router.post("/strategic/decisions/:id/outcome", async (req: AuthRequest, res): Promise<any> => { try { const c = await strat(req, res, true); if (!c) return; res.status(201).json(c.S.recordOutcome(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
+
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

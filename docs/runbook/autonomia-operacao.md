@@ -301,3 +301,12 @@ Em **Operação da Rede → Vendas e metas → "Previsão e alertas"** (dono/adm
 - Exemplos: compra `{amount:300000, minCash:50000, payInWeeks:4}` · vendas `{changePct:-20}` · contratação `{monthlyCost:2500}`.
 - Leia assim: **faixa** (não número exato), **premissas** (quais são dado, padrão ou informadas por você), **sensibilidade** (qual variável mais muda o resultado) e **confiança** (limitada a média até o piloto validar os dados).
 - É **cenário, não previsão**, e não executa nada. Nova loja, fechamento e backtest ainda não existem.
+
+## F4.2 — Decisões estratégicas (decisão → hipótese → resultado)
+API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admin.
+1. **Registrar:** `POST /strategic/decisions` `{category: purchase|sales_change|hire|principle|other, title, hypothesis?, reviewOn?, inputs?, expectMetric?, tolerancePct?}`. Para compra/vendas/contratação o servidor roda o cenário e **congela** o resultado. Nada é executado.
+2. **Decidir:** `POST /strategic/decisions/:id/decide` `{status: "decided"|"rejected", rationale?}`.
+3. **Resultado real:** `POST /strategic/decisions/:id/outcome` `{actual, basis: "fact"|"estimate", note?}` — pode registrar de novo (a última vale; a anterior fica no histórico).
+4. **Comparar:** `GET /strategic/decisions/:id` mostra esperado × real (`within`/`below`/`above`). `GET /strategic/calibration` mostra quantas vezes o cenário acertou (com intervalo; amostra pequena não prova nada).
+5. **Diretrizes:** `category: "principle"` guarda uma orientação ("priorizar margem"); `revisit` reconfirma, `revoke` encerra. `GET /strategic/principles` lista as ativas.
+6. Quando a data de revisão vence sem resultado, aparece um aviso no "Hoje"/Smart Inbox; ele some sozinho quando você registra o resultado.

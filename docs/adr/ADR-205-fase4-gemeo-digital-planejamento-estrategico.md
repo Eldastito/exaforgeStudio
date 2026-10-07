@@ -74,7 +74,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Read-only: não cria ação, sinal nem tarefa. Rotas `GET /api/health-center/benchmark/{stores,profiles}` (ler = gestor) e `PUT …/profiles/:storeId` (dono/admin). `test:store-benchmark` (34, com mutação verificada em 4 regras).
 - **Limites:** só **uma** rede (benchmark externo/entre empresas é F4.8/F4.9, com anonimização e amostra mínima); um único mês; sem UI; **inútil até o dono preencher m² e equipe** — o sistema não inventa. Os limiares (3 lojas, 6 meses, ±10%, ≥25%) são premissas declaradas, **sem calibração com dado real da TOULON**.
 
-## 10. Status F4.4 — EM PR (Plano de período do dono + plano × realizado, 2026-10-07)
+## 10. Status F4.4 — MERGED (#1863) (Plano de período do dono + plano × realizado, 2026-10-07)
 
 `StrategicPlanService` + 2 tabelas aditivas (`strategic_plans`, `strategic_plan_lines`). **Escopo deliberadamente menor que o "Planning Engine" do PRD:** o gate da análise (§6) para a F4.4 era "piloto + D3" e **nenhum dos dois foi cumprido** (o piloto não rodou; não há histórico validado). Por isso a fatia **não projeta nada**: é o plano do dono (intenção) com acompanhamento do realizado. Sem previsão de horizonte longo, sem meta sugerida — para "e se?" existe o `ScenarioEngine` (F4.1).
 
@@ -86,3 +86,14 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Caixa dos eventos:** soma só o que o dono declarou, rotulada "declarado", **fora** do caixa previsto. Nada é executado (sem ação, tarefa, pedido, mensagem nem sinal — RN-F4-1).
 - Rotas `/api/health-center/plans[/:id[/track|/activate|/close]]` (ler = gestor; escrever = dono/admin). `test:strategic-plan` (34, mutação verificada em 5 regras).
 - **Limites:** só leitura de realizado em nível de período (mês inteiro, não por dia); faturamento só de lojas com fechamento diário; orçamento só do que for lançado; **sem UI**; sem validação com dado real da TOULON. Orçamento comercial consolidado, calendário por loja e horizonte > 13 semanas ficam para depois do piloto.
+
+## 11. Status F4.5 — EM PR (Comparação de alternativas de investimento, 2026-10-07)
+
+`CapitalAllocationService` — **compara, não escolhe**. É stateless e read-only: sem tabela, sem gravação. O gate da análise para a F4.5 era "F4.1 + retorno esperado estruturado": a F4.1 existe; o retorno estruturado **não existe no sistema e não pode ser inventado** — por isso ele é a entrada **obrigatória** do dono.
+
+- **Entrada (2 a 8 alternativas):** nome, valor, **retorno mensal esperado em faixa** (pior–melhor), **de onde vem o número** (`source`), **quão firme é** (`basis`: fact|estimate|hypothesis), **risco** (low|medium|high) e **se é reversível**; início do retorno (0–24 meses) e horizonte (1–60, padrão 12). **Nada é preenchido por padrão:** faltou qualquer um desses → o serviço recusa com o motivo. Capital disponível é opcional.
+- **Saída por alternativa:** líquido em faixa (retorno × meses de retorno − investimento), ROI em %, payback em faixa (`null` quando o pior caso não rende — "pode não se pagar", nunca um número otimista), efeito do desembolso no caixa (menor caixa projetado em 13 semanas, **rodado no `ScenarioEngine`** — RN-F4-11), a origem/firmeza que o dono declarou e confiança (`media` só se `fact`; senão `baixa`; **nunca alta**).
+- **Sem vencedor:** não há "melhor", ranking, score nem recomendação. Há (a) **liderança por critério** — menor desembolso, maior potencial, melhor pior caso, payback mais rápido, menor risco, reversíveis — com **empates listados**; (b) **dominância** puramente lógica (custa ≤, rende ≥ nos dois extremos, começa antes, risco ≤, tão reversível), só informativa; (c) com capital informado, as **combinações que cabem**, somando faixas (pior+pior, melhor+melhor), **em ordem de cadastro, não de preferência** (corte em 40).
+- **Decisão é humana (RN-F4-2):** `decisionOwner:"human"`; depois de decidir, registra-se em `/strategic/decisions` (F4.2) para confrontar a hipótese com o resultado real.
+- Rota `POST /api/health-center/capital/compare` (gestor — mostra caixa). `test:capital-allocation` (35, mutação verificada em 7 regras).
+- **Limites:** o resultado é **tão bom quanto o retorno que o dono informa** — se estiver otimista, a comparação também estará; não modela interação entre alternativas (canibalização, mesma equipe, mesmo cliente); o caixa só enxerga 13 semanas e só o desembolso (não o retorno chegando); horizontes diferentes não são diretamente comparáveis (avisado); **sem UI**; sem dado real da TOULON.

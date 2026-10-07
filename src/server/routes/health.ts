@@ -145,6 +145,14 @@ router.post("/plans", async (req: AuthRequest, res): Promise<any> => { try { con
 router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.revise(c.orgId, String(req.params.id), c.actor, req.body || {})); } catch (e) { stratFail(res, e); } });
 router.post("/plans/:id/activate", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.activate(c.orgId, String(req.params.id), c.actor)); } catch (e) { stratFail(res, e); } });
 router.post("/plans/:id/close", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.close(c.orgId, String(req.params.id), c.actor, req.body?.note)); } catch (e) { stratFail(res, e); } });
+// ADR-205 F4.5 — comparação de alternativas de investimento (NÃO escolhe, NÃO ranqueia). Stateless/read-only; mostra caixa → gestor (§73). O retorno esperado é do DONO.
+router.post("/capital/compare", async (req: AuthRequest, res): Promise<any> => { try {
+  const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "A comparação de investimentos mostra caixa e retorno — é do gestor." });
+  const { CapitalAllocationService } = await import("../CapitalAllocationService.js");
+  res.json(CapitalAllocationService.compare(orgId, req.body || {}));
+} catch (e) { stratFail(res, e); } });
 
 // POST /api/health-center/simulate/withdraw — "posso retirar mais?" (ADR-133 Fatia 3).
 router.post("/simulate/withdraw", (req: AuthRequest, res): any => {

@@ -344,6 +344,21 @@ const sellerPlanScope = (req: AuthRequest, res: any, sellerId: string, date: str
   res.status(403).json({ error: "seller_out_of_scope" });
   return false;
 };
+// ADR-204 F3.6b — objetivo da REDE ("+10% no mês") dividido por loja. Plano = leitura; tarefas só por PESSOA (dono/admin), nas lojas que ele alcança.
+router.get("/network-objective", requireOwnerAdmin, async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { NetworkObjectiveService } = await import("../NetworkObjectiveService.js");
+    const out = NetworkObjectiveService.plan(req.organizationId!, { pct: req.query.pct, month: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || "")) ? String(req.query.month) : undefined }, { storeIds: restrictIds(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+});
+router.post("/network-objective/tasks", requireOwnerAdmin, async (req: AuthRequest, res): Promise<any> => {
+  try {
+    const { NetworkObjectiveService } = await import("../NetworkObjectiveService.js");
+    const out = NetworkObjectiveService.createTasks(req.organizationId!, { pct: req.body?.pct, month: /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.body?.month || "")) ? String(req.body.month) : undefined, storeIds: req.body?.storeIds, assignedTo: req.body?.assignedTo }, req.user?.userId, { allowedStoreIds: restrictIds(req) });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (e: any) { res.status(400).json({ ok: false, error: e.message }); }
+});
 router.get("/seller-plan/:sellerId", requireOwnerAdmin, (req: AuthRequest, res): any => {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : todaySP();
   if (!sellerPlanScope(req, res, String(req.params.sellerId), date)) return;

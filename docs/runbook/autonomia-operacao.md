@@ -267,3 +267,13 @@ Só código: 1 serviço novo, 1 ramo no início de `converse` (desligável com `
 **Ainda não existe:** link/QR de opt-in pro próprio cliente aprovar (hoje o operador registra o que o cliente disse/assinou — a honestidade do registro depende de quem opera) e importação em massa.
 **Rollback:** só código + 1 tabela aditiva; flag off restaura o comportamento anterior.
 
+## F3.6b — Objetivo da REDE ("+10% no mês") dividido por loja
+`NetworkObjectiveService` + `GET /api/retailops/network-objective?pct=&month=` + `POST /network-objective/tasks` (dono/admin) + card **"Objetivo da rede: quanto cada loja precisa a mais"** em Operação da Rede (junto da Meta mensal por loja). **Decisão do dono:** o objetivo é da **rede → lojas** (não loja → vendedores).
+
+- **Ponto de partida = a PROJEÇÃO do mês (F3.4)** de cada loja (o que ela faz se nada mudar) — não a meta, não o ano passado. Cada loja recebe **+X% proporcional à própria projeção**; o serviço traduz isso em **R$ a mais por dia útil que falta** e compara com o **dia típico** da loja (esforço leve ≤10% · moderado ≤25% · alto acima — **premissa não calibrada**, declarada).
+- **Loja sem projeção confiável** (histórico < 12 semanas, fechamento atrasado, mês fechado) fica **de fora com o motivo** e **não entra na soma da rede**. Nunca inventa número.
+- **Só recomenda** (`executes:false`): a meta oficial é só LIDA (`retail_store_monthly_goals` intacta, testado). **Tarefa só por clique de uma PESSOA** (rótulo de sistema recusado), 1 por loja marcada, responsável = gerente da loja (senão quem clicou), idempotente por (mês, %, loja), plano **recalculado no servidor** (cliente só escolhe lojas), auditoria `NETWORK_OBJECTIVE_TASKS_CREATED`.
+- **Escopo (ADR-173):** gerente restrito vê só a(s) loja(s) dele e **não recebe o total da rede**; só cria tarefa pra loja do alcance.
+- **Limites:** estimativa, não promessa; divisão proporcional (não otimiza entre lojas); não usa o planejador reverso do Mission OS (ele é de receita da empresa, não por loja); não há "Hoje/Executando" ainda mostrando o objetivo.
+**Rollback:** só código; sem schema.
+

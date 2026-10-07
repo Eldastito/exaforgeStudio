@@ -1107,6 +1107,27 @@ router.get("/pdv-consent/summary", requireNetworkScope, async (req: AuthRequest,
   const { PdvConsentService } = await import("../PdvConsentService.js");
   res.json(PdvConsentService.summary(req.organizationId!));
 });
+// ADR-204 D4d — interruptor do bloqueio de envio sem consentimento (`outbound_consent_required`). Só dono/admin. Ligar exige `acknowledge:true`
+// (a prévia de impacto foi vista) e é auditado com os números; desligar é livre. O gate vale pro sink inteiro, não só pro PDV — por isso a prévia traz os dois.
+router.get("/pdv-consent/guard", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  const { OutboundConsentGuardService } = await import("../OutboundConsentGuardService.js");
+  res.json(OutboundConsentGuardService.impact(req.organizationId));
+});
+router.put("/pdv-consent/guard", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "enabled deve ser true ou false." });
+  const enable = req.body.enabled as boolean;
+  if (enable && req.body?.acknowledge !== true) return res.status(400).json({ error: "acknowledge_required", message: "Para ligar, confirme que viu quantos contatos deixam de receber mensagem." });
+  const { OutboundConsentGuardService } = await import("../OutboundConsentGuardService.js");
+  const before = OutboundConsentGuardService.impact(req.organizationId);
+  OutboundConsentGuardService.setEnabled(req.organizationId, enable);
+  try {
+    const { logAuthEvent } = await import("../auditLog.js");
+    logAuthEvent(req.organizationId, req.user?.userId || "system", null, enable ? "OUTBOUND_CONSENT_GUARD_ON" : "OUTBOUND_CONSENT_GUARD_OFF", { contactsBlocked: before.contacts.withoutConsent, pdvBlocked: before.pdv.blocked });
+  } catch { /* auditoria best-effort */ }
+  res.json(OutboundConsentGuardService.impact(req.organizationId));
+});
 router.get("/pdv-consent/contactable", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   const { PdvConsentService } = await import("../PdvConsentService.js");

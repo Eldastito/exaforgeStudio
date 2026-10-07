@@ -4225,7 +4225,21 @@ function PdvCustomersTab() {
   const [savingConsent, setSavingConsent] = useState(false);
   const loadCoverage = () => { apiFetch('/api/retailops/pdv-consent/summary').then(r => r.ok ? r.json() : null).then(d => setCoverage(d && !d.error ? d : null)).catch(() => setCoverage(null)); };
   useEffect(() => { loadCoverage(); }, []);
+  useEffect(() => { if (canRecord && !guard) loadGuard(); /* eslint-disable-next-line */ }, [canRecord]);
   const SOURCES: Record<string, string> = { balcao: 'No balcão (assinou/disse na loja)', whatsapp: 'Por WhatsApp (o cliente respondeu)', formulario: 'Formulário/cadastro', telefone: 'Por telefone' };
+  const [guard, setGuard] = useState<any | null>(null);
+  const [guardAck, setGuardAck] = useState(false);
+  const [guardOpen, setGuardOpen] = useState(false);
+  const loadGuard = async () => { try { const r = await apiFetch('/api/retailops/pdv-consent/guard'); setGuard(r.ok ? await r.json() : null); } catch { setGuard(null); } };
+  const setGuardEnabled = async (enabled: boolean) => {
+    try {
+      const r = await apiFetch('/api/retailops/pdv-consent/guard', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, acknowledge: enabled ? guardAck : undefined }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.message || d.error || 'Não consegui alterar.'); return; }
+      setGuard(d); setGuardOpen(false); setGuardAck(false);
+      toast.success(enabled ? 'Bloqueio ligado.' : 'Bloqueio desligado.');
+    } catch { toast.error('Falha de conexão.'); }
+  };
   const [linkInfo, setLinkInfo] = useState<{ code: string; url: string | null; path: string; qr: string | null; expiresAt: string } | null>(null);
   const genLink = async (c: any) => {
     try {
@@ -4278,6 +4292,32 @@ function PdvCustomersTab() {
             </div>
           ) : <div className="mt-1">Sem clientes ativos na base.</div>}
           <div className="mt-1 text-zinc-500">"Sem registro" não é autorização: só recebe mensagem quem autorizou e tem celular.</div>
+          {canRecord && (
+            <div className="mt-2 border-t border-zinc-800 pt-2" data-testid="pdv-consent-guard">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-zinc-200">Bloqueio de envio sem consentimento:</span>
+                {guard ? <span className={guard.enabled ? 'text-amber-300' : 'text-zinc-400'}>{guard.enabled ? 'LIGADO' : 'desligado'}</span> : <span className="text-zinc-500">não carregado</span>}
+                {!guard && <button onClick={loadGuard} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] hover:bg-zinc-800">Ver</button>}
+                {guard && !guard.enabled && !guardOpen && <button onClick={() => { setGuardOpen(true); loadGuard(); }} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] hover:bg-zinc-800" data-testid="pdv-guard-open">Ver impacto e ligar</button>}
+                {guard?.enabled && <button onClick={() => setGuardEnabled(false)} className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] hover:bg-zinc-800" data-testid="pdv-guard-off">Desligar</button>}
+              </div>
+              {guard && guardOpen && !guard.enabled && (
+                <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1.5" data-testid="pdv-guard-impact">
+                  <div>Ligado, o sistema <b>recusa qualquer mensagem</b> (não só campanha: inclui respostas de atendimento e cobranças automáticas) para:</div>
+                  <ul className="list-disc pl-5">
+                    <li><b className="text-amber-300">{guard.contacts.withoutConsent}</b> de {guard.contacts.total} contatos do WhatsApp/Instagram sem consentimento registrado;</li>
+                    <li><b className="text-amber-300">{guard.pdv.blocked}</b> de {guard.pdv.withPhone} clientes do PDV com celular que ainda não autorizaram.</li>
+                  </ul>
+                  <div className="text-zinc-500">Se o número de contatos for alto, o atendimento pelo WhatsApp pode parar de responder esses contatos. Dá pra desligar a qualquer momento.</div>
+                  <label className="flex items-start gap-2"><input type="checkbox" checked={guardAck} onChange={e => setGuardAck(e.target.checked)} className="mt-0.5" data-testid="pdv-guard-ack" /><span>Entendi quantos contatos deixam de receber mensagens.</span></label>
+                  <div className="flex gap-2">
+                    <button disabled={!guardAck} onClick={() => setGuardEnabled(true)} className="rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-40" data-testid="pdv-guard-on">Ligar bloqueio</button>
+                    <button onClick={() => { setGuardOpen(false); setGuardAck(false); }} className="rounded border border-zinc-700 px-2.5 py-1 text-xs hover:bg-zinc-800">Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div className="mb-3 flex items-center gap-2 flex-wrap">

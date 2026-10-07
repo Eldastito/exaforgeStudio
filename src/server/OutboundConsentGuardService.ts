@@ -131,6 +131,27 @@ export class OutboundConsentGuardService {
   }
 
   /**
+   * ADR-204 D4d — PRÉVIA do que a flag bloquearia, read-only. O gate vale pro SINK inteiro (`sendMessage`), não só pra campanha:
+   * todo `contact` da org sem `comunicacoes` e todo cliente do PDV sem autorização passam a ser recusados. Espelha `evaluate`
+   * (mesma consulta de `hasConsent`: existe linha granted=1) pra a prévia não prometer o que o gate não faz.
+   */
+  static impact(orgId: string): {
+    enabled: boolean;
+    contacts: { total: number; withConsent: number; withoutConsent: number };
+    pdv: { withPhone: number; authorized: number; blocked: number };
+  } {
+    const total = (db.prepare(`SELECT COUNT(*) c FROM contacts WHERE organization_id = ? AND identifier IS NOT NULL AND TRIM(identifier) <> ''`).get(orgId) as any).c as number;
+    const withConsent = (db.prepare(`SELECT COUNT(*) c FROM contacts k WHERE k.organization_id = ? AND k.identifier IS NOT NULL AND TRIM(k.identifier) <> ''
+      AND EXISTS (SELECT 1 FROM contact_consents x WHERE x.organization_id = k.organization_id AND x.contact_id = k.id AND x.consent_type = ? AND x.granted = 1)`).get(orgId, OUTBOUND_CONSENT_SCOPE) as any).c as number;
+    const s = PdvConsentService.summary(orgId);
+    return {
+      enabled: this.isEnabled(orgId),
+      contacts: { total, withConsent, withoutConsent: total - withConsent },
+      pdv: { withPhone: s.withPhone, authorized: s.contactable, blocked: s.withPhone - s.contactable },
+    };
+  }
+
+  /**
    * Lookup contato por identifier. Retorna só o primeiro match — se um
    * identifier bate em 2 contatos da mesma org (raro; dado sujo), o guard
    * usa o primeiro por rowid e SEMPRE APLICA a regra pra ele. É defensivo:

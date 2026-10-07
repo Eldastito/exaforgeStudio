@@ -46,7 +46,7 @@ Decisão do dono: "começar a F4.1 com as recomendações" → D1 adotada como r
 - `test:scenario-engine` (42): contrato, validação, faixa, premissas/versão, sensibilidade, cada caso acima, confiança (inclui mutação do gate), isolamento, rota.
 - **Sem UI** nesta fatia (superfície do FalaTu/Central de Saúde vem depois de validar o formato). Dados da TOULON **não** foram usados.
 
-## 8. Status F4.2 — EM PR (Modelo estratégico: decisão → hipótese → resultado, 2026-10-07)
+## 8. Status F4.2 — MERGED (#1861) (Modelo estratégico: decisão → hipótese → resultado, 2026-10-07)
 Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada: registro **antes** do piloto, confiança limitada).
 
 `StrategicDecisionService` + 2 tabelas aditivas (`strategic_decisions`, `strategic_decision_outcomes`) fecham o ciclo que a F4.1 abriu: o cenário vira **decisão registrada**, e o **resultado real** volta para dizer se o motor acertou.
@@ -61,3 +61,15 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Rotas em `/api/health-center/strategic/*` (ler = gestor; escrever = dono/admin). `test:strategic-decisions` (46, com mutação verificada).
 - **Limites:** o resultado real é **informado por uma pessoa** (o sistema ainda não o mede sozinho); sem UI; sem dados da TOULON. A calibração só diz algo depois de várias decisões com resultado — meses de uso.
 
+## 9. Status F4.3 — EM PR (Benchmark interno normalizado, 2026-10-07)
+
+`StoreBenchmarkService` + 1 tabela aditiva (`store_opportunity_profiles`) comparam as lojas **da própria rede** sem cair no "ranking de venda bruta" que o PRD proíbe. Loja grande sempre vence loja pequena em faturamento bruto — comparar exige **normalizar**, e normalizar exige dado que só o dono tem.
+
+- **O que é dado do dono (novo):** m² da loja, tamanho da equipe, data de abertura — `PUT /benchmark/profiles/:storeId` (só dono/admin; atributo atual com auditoria, não série). Aluguel, folha e custos fixos **já existiam** (`RetailStoreCostService`) e o faturamento vem dos fechamentos: o serviço só **compõe** (RN-F4-11).
+- **Métricas:** faturamento por m², faturamento por pessoa, custo fixo sobre faturamento (nesta, menor é melhor).
+- **Sem dado, sem comparação:** insumo faltando → `null` por loja (null ≠ 0) e a loja entra em `missing`. Faturamento 0 = "sem fechamento no mês", não "vendeu zero".
+- **Amostra mínima (D, 3 lojas comparáveis por métrica):** abaixo disso `ranked:false` + motivo. Com 2 lojas qualquer "ranking" é uma subtração.
+- **Loja nova (<6 meses de abertura) fica fora do ranking** e é dita; abertura desconhecida entra, com aviso. **Mês corrente não ranqueia** (faturamento parcial contra custo fixo cheio); o padrão é o último mês fechado.
+- **Resultado:** posição vs **mediana** (acima/perto/abaixo, faixa de ±10%) e **perguntas neutras** para quem está ≥25% pior ("o que é diferente nessa loja?"). Nunca causa (RN-F4-8), nunca meta, nunca recomenda fechar loja/contratar/demitir (RN-F4-12). Confiança só `insuficiente`/`baixa`/`media` — um mês não vê sazonalidade.
+- Read-only: não cria ação, sinal nem tarefa. Rotas `GET /api/health-center/benchmark/{stores,profiles}` (ler = gestor) e `PUT …/profiles/:storeId` (dono/admin). `test:store-benchmark` (34, com mutação verificada em 4 regras).
+- **Limites:** só **uma** rede (benchmark externo/entre empresas é F4.8/F4.9, com anonimização e amostra mínima); um único mês; sem UI; **inútil até o dono preencher m² e equipe** — o sistema não inventa. Os limiares (3 lojas, 6 meses, ±10%, ≥25%) são premissas declaradas, **sem calibração com dado real da TOULON**.

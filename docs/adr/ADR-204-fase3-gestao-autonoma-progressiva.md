@@ -195,3 +195,12 @@ Fecha a pendência do §28 "o cliente aprovar sozinho". O operador gera, na tela
 - Página pública mostra o mínimo (empresa, 1º nome, final do celular). Rotas `/api/public/consent/:token` (GET/POST `decision`) fora do `requireAuth`, no-store, limite por IP; erros: 404 desconhecido/revogado, 410 vencido.
 - **O sistema NÃO envia o link** (pedir consentimento por mensagem a quem não autorizou é o que o consentimento evita): QR/URL na tela pro operador entregar.
 - Pendente/hipóteses: página não testada em celular real; TTL de 14 dias e link reutilizável são suposições a confirmar; `APP_URL` precisa estar configurada pro QR ser absoluto. Teste: `test:pdv-consent-link` (31).
+
+## 30. D4d — Interruptor do bloqueio de envio sem consentimento (2026-10-07)
+
+Antes só existia `OutboundConsentGuardService.setEnabled` em código; o dono não tinha como ligar `outbound_consent_required`. Agora há `GET/PUT /api/retailops/pdv-consent/guard` (owner/admin) e um painel no cartão de consentimento de Clientes (PDV).
+
+- **O achado que justifica o cuidado:** o gate está no **sink** (`MessageProviderService.sendMessage`), então, ligado, ele recusa **qualquer** mensagem a um `contact` sem consentimento `comunicacoes` registrado e a cliente do PDV sem autorização — **inclusive resposta de atendimento e cobrança automática**, não só campanha. Nenhum chamador trata `OutboundBlockedError` (só o gate e o sink a referenciam). Por isso a **prévia de impacto** traz os dois números (contatos do WhatsApp/Instagram sem consentimento · clientes do PDV com celular sem autorização).
+- **Ligar exige `acknowledge:true` no servidor** (a tela sozinha não basta), é auditado (`OUTBOUND_CONSENT_GUARD_ON/OFF` em `auth_audit_logs`, só contagens) e desligar é livre. Padrão segue desligado (0-regressão).
+- `OutboundConsentGuardService.impact` espelha `evaluate` (mesma regra de `hasConsent`); read-only. `test:outbound-consent-switch` (17).
+- **Não decidido por mim:** *quando* ligar. Recomendação: só depois de olhar a prévia na TOULON; se o nº de contatos sem consentimento for alto, ligar bloquearia respostas de atendimento até que esses consentimentos existam.

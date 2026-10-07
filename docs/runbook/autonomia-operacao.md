@@ -289,3 +289,9 @@ Em **Operação da Rede → Vendas e metas → "Previsão e alertas"** (dono/adm
 2. Mostre o **QR** no balcão ou copie o link e entregue você mesmo. O ZapFlow não envia.
 3. O cliente escolhe Autorizo / Não autorizo; aparece como "(link do cliente)". Vale até a data mostrada; gerar outro link invalida o anterior.
 4. Requer `APP_URL` no servidor (senão o link é relativo e o QR não serve). Rota pública: `/api/public/consent/:token`.
+
+## D4d — Interruptor do bloqueio de envio sem consentimento
+1. Clientes (PDV) → cartão "Consentimento para receber mensagens" → **Bloqueio de envio sem consentimento** (só dono/admin).
+2. **Ver impacto e ligar** mostra quantos contatos e clientes do PDV deixariam de receber mensagem. Ligado, o bloqueio vale para **todo envio** (inclui respostas de atendimento e cobranças automáticas), não só campanha.
+3. Marque o aceite e **Ligar bloqueio**. Para reverter: **Desligar** (sem confirmação). Tudo fica auditado.
+4. Se "contatos sem consentimento" for alto, **não ligue** antes de registrar consentimentos — o atendimento pode parar de responder esses contatos.

@@ -31,3 +31,18 @@ F4.1 Scenario Engine · F4.2 modelo estratégico · F4.3 benchmark interno · F4
 
 ## 6. Limites desta F4.0
 Nenhum dado de produção foi acessado. Nenhuma simulação foi feita. Os números do print são cotas diárias e ilustram, não calibram.
+
+## 7. Status F4.1 — EM PR (Scenario Engine, 2026-10-07)
+Decisão do dono: "começar a F4.1 com as recomendações" → D1 adotada como recomendada (motor + registro **antes** do piloto, com confiança limitada); D2–D5 seguem abertas e **não** bloqueiam esta fatia.
+
+`ScenarioEngine` (`src/server/ScenarioEngine.ts`) é um **contrato**, não um 2º simulador (RN-F4-11): os cálculos continuam em `PurchaseScenarioService`/`CashForecastService`/`DecisionSimulatorService`; o motor padroniza a saída. Três tipos: **compra de estoque** (3 cenários), **vendas ±X%** e **contratação**. Rota `POST /api/health-center/simulate/scenario` (+ `GET …/kinds`), só gestor (§73).
+
+- **Cenário ≠ previsão:** `type:"scenario"`, `isForecast:false`, frase "se estas premissas ocorrerem… Não é uma previsão". **Nunca executa** (`executes:false`; nada é gravado).
+- **Premissas:** cada uma com origem `data`/`default`/`user` e `editable`; `assumptionsVersion` = hash (F4.2 persiste e compara com o real). Alterar premissa = rodar de novo com outro valor.
+- **Faixa:** `range.display` arredonda (2 algarismos; 3 a partir de 1 mi) — nunca centavos.
+- **Sensibilidade:** re-roda o cálculo canônico variando um driver por vez e ranqueia por efeito. Compra: valor (preço do fornecedor) e prazo. Vendas: variação % e margem. Contratação: custo. **Declarado como não modelado:** entrada, remarcação (markdown), custos fixos, quanto o contratado vende.
+- **Confiança:** limitada a "média" enquanto `PILOT_VALIDATED=false` (ADR-204 §28.5), com o motivo dito; dado ausente → null e confiança baixa.
+- **Casos do PRD §54 cobertos aqui:** venda −20%, venda +20%, fornecedor aumenta o preço, prazo reduz, compra grande de coleção, contratação. **NÃO cobertos (sem dado/sem motor):** nova loja, fechamento, estoque encalha (só o encalhe medido que a compra já mostra), campanha abaixo, meta agressiva, comissão alterada (F4.7).
+- `test:scenario-engine` (42): contrato, validação, faixa, premissas/versão, sensibilidade, cada caso acima, confiança (inclui mutação do gate), isolamento, rota.
+- **Sem UI** nesta fatia (superfície do FalaTu/Central de Saúde vem depois de validar o formato). Dados da TOULON **não** foram usados.
+

@@ -346,3 +346,11 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Isto NÃO muda nenhum número.** Ele só lista quais premissas você pode querer revisar (as mesmas editáveis do simulador) e perguntas para você se fazer. Quem refaz o cenário com outro valor é você.
 5. O texto vem de fonte externa: confira a fonte antes de agir. Não há comparação com outras empresas.
 
+## F4.10 — Board Review mensal / QBR trimestral
+
+`GET /api/health-center/board-review?period=month|quarter` (gestor). Compõe, do período **fechado** anterior: resultado e metas, plano × realizado, decisões (revisões vencidas + calibração), benchmark das lojas, fornecedores e contexto de mercado. Cada seção diz por que está vazia; a pauta lista só fatos medidos. **Não envia, não grava, não decide.**
+
+- Pra a revisão ter conteúdo: cadastrar o plano do período (F4.4), registrar decisões (F4.2), preencher m²/equipe das lojas (F4.3), ordens de compra pelo ciclo cotação→ordem (F4.6).
+- `pilot.validated=false` enquanto o piloto da TOULON não rodar; a confiança fica `baixa`.
+- Sem exportação nem UI ainda.
+

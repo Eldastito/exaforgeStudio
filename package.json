@@ -957,6 +957,7 @@
     "test:store-benchmark": "tsx scripts/test-store-benchmark.ts",
     "test:strategic-plan": "tsx scripts/test-strategic-plan.ts",
     "test:capital-allocation": "tsx scripts/test-capital-allocation.ts",
+    "test:supplier-intelligence": "tsx scripts/test-supplier-intelligence.ts",
     "test:network-objective": "tsx scripts/test-network-objective.ts",
     "test:forecast-alerts-screens": "tsx scripts/test-forecast-alerts-screens.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",

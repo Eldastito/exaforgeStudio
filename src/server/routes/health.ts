@@ -146,6 +146,20 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => { try { 
 router.post("/plans/:id/activate", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.activate(c.orgId, String(req.params.id), c.actor)); } catch (e) { stratFail(res, e); } });
 router.post("/plans/:id/close", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.close(c.orgId, String(req.params.id), c.actor, req.body?.note)); } catch (e) { stratFail(res, e); } });
 // ADR-205 F4.5 — comparação de alternativas de investimento (NÃO escolhe, NÃO ranqueia). Stateless/read-only; mostra caixa → gestor (§73). O retorno esperado é do DONO.
+// ADR-205 F4.6 — inteligência de fornecedores (concentração, ficha, rascunho de pauta de negociação). Read-only; mostra valor de compra → gestor (§73). Nunca contata o fornecedor.
+const suppliers = async (req: AuthRequest, res: any) => {
+  const orgId = req.organizationId;
+  if (!orgId || !req.user) { res.status(401).json({ error: "Unauthorized" }); return null; }
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) { res.status(403).json({ error: "A inteligência de fornecedores mostra valores de compra — é do gestor." }); return null; }
+  const { SupplierIntelligenceService } = await import("../SupplierIntelligenceService.js");
+  const q = (k: string) => (req.query[k] ? String(req.query[k]) : undefined);
+  return { orgId, S: SupplierIntelligenceService, opts: { from: q("from"), to: q("to") } };
+};
+router.get("/suppliers/overview", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.overview(c.orgId, c.opts)); } catch (e) { stratFail(res, e); } });
+router.get("/suppliers/concentration", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.concentration(c.orgId, c.opts)); } catch (e) { stratFail(res, e); } });
+router.get("/suppliers/:key", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.supplier(c.orgId, String(req.params.key), c.opts)); } catch (e) { stratFail(res, e); } });
+router.get("/suppliers/:key/negotiation-brief", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.negotiationBrief(c.orgId, String(req.params.key), c.opts)); } catch (e) { stratFail(res, e); } });
 router.post("/capital/compare", async (req: AuthRequest, res): Promise<any> => { try {
   const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const { ContextProjectionService } = await import("../ContextProjectionService.js");

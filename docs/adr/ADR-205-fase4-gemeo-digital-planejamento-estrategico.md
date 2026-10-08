@@ -87,7 +87,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Rotas `/api/health-center/plans[/:id[/track|/activate|/close]]` (ler = gestor; escrever = dono/admin). `test:strategic-plan` (34, mutação verificada em 5 regras).
 - **Limites:** só leitura de realizado em nível de período (mês inteiro, não por dia); faturamento só de lojas com fechamento diário; orçamento só do que for lançado; **sem UI**; sem validação com dado real da TOULON. Orçamento comercial consolidado, calendário por loja e horizonte > 13 semanas ficam para depois do piloto.
 
-## 11. Status F4.5 — EM PR (Comparação de alternativas de investimento, 2026-10-07)
+## 11. Status F4.5 — MERGED (#1864) (Comparação de alternativas de investimento, 2026-10-07)
 
 `CapitalAllocationService` — **compara, não escolhe**. É stateless e read-only: sem tabela, sem gravação. O gate da análise para a F4.5 era "F4.1 + retorno esperado estruturado": a F4.1 existe; o retorno estruturado **não existe no sistema e não pode ser inventado** — por isso ele é a entrada **obrigatória** do dono.
 
@@ -97,3 +97,14 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Decisão é humana (RN-F4-2):** `decisionOwner:"human"`; depois de decidir, registra-se em `/strategic/decisions` (F4.2) para confrontar a hipótese com o resultado real.
 - Rota `POST /api/health-center/capital/compare` (gestor — mostra caixa). `test:capital-allocation` (35, mutação verificada em 7 regras).
 - **Limites:** o resultado é **tão bom quanto o retorno que o dono informa** — se estiver otimista, a comparação também estará; não modela interação entre alternativas (canibalização, mesma equipe, mesmo cliente); o caixa só enxerga 13 semanas e só o desembolso (não o retorno chegando); horizontes diferentes não são diretamente comparáveis (avisado); **sem UI**; sem dado real da TOULON.
+
+## 12. Status F4.6 — EM PR (Inteligência de fornecedores + pauta de negociação, 2026-10-08)
+
+`SupplierIntelligenceService` — **composição read-only**, sem tabela nova e sem gravação. O gate da análise para a F4.6 era "cobertura de compras conferida" e **ele não está cumprido** (a cobertura real da TOULON nunca foi conferida). Por isso a fatia **mede e mostra a própria cobertura** em vez de pressupô-la.
+
+- **Concentração** (`GET /suppliers/concentration`): parcela de cada fornecedor no valor das ordens de compra do período (padrão: 180 dias; ordens canceladas e sem valor ficam de fora e as sem valor são contadas à parte — null ≠ 0), índice HHI e faixa (maior fornecedor ≥30% média, ≥50% alta; `single_supplier` com um só). É **informação, não conselho**: nunca "troque de fornecedor". Limiares declarados, sem calibração.
+- **Cobertura primeiro (RN-F4-6):** o sistema só enxerga compra feita pelo ciclo cotação→ordem. `coverage` compara o valor das ordens com as contas a pagar da categoria `compras` **sem ordem ligada** — esse dinheiro está fora da concentração. Abaixo de 70% o aviso é explícito; sem nenhum dos dois lados, `null` (não 100%).
+- **Ficha do fornecedor** (`GET /suppliers/:key`): entrega prometida × realizada, completude e divergências (**reuso do `SupplierPerformanceService`**, nenhum recálculo), prazo médio de pagamento (das contas a pagar ligadas às ordens) e variação de preço do **mesmo produto** (primeira × última compra do período) — cada número com o tamanho da amostra; confiança `media` só com ≥3 ordens.
+- **Pauta de negociação** (`GET /suppliers/:key/negotiation-brief`): **rascunho**, nunca enviado. Só entram pontos que o histórico sustenta e com **amostra mínima de 2 ordens** (o que ficou de fora é dito em `omitted`); cada ponto traz a evidência e o tamanho da amostra. **Não inventa desconto, prazo-alvo nem contraproposta** — o pedido sugerido não contém número — e não acusa o fornecedor (diferença não prova culpa, RN-F4-8). Reconhece o que vai bem (pontual, completo). Sem fato que se sustente → `insufficient_history`, sem texto.
+- Dinheiro de compra é do gestor (§73); `GET /api/health-center/suppliers/{overview,concentration,:key,:key/negotiation-brief}`. `test:supplier-intelligence` (36, mutação verificada em 6 regras).
+- **Limites:** só o que passou pelo ciclo cotação→ordem; o rascunho **não é enviado** a ninguém (sem WhatsApp/e-mail); a variação de preço não separa reajuste de mudança de especificação; nenhuma validação com dado real da TOULON; sem UI.

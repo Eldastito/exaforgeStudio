@@ -332,3 +332,10 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Com `capitalAvailable`**, veja as combinações que cabem (em ordem de cadastro, sem preferência). As faixas são somadas e **não** consideram uma alternativa atrapalhando a outra.
 5. **Decidiu?** Registre em `POST /strategic/decisions` (F4.2): lá a hipótese fica guardada e, depois, você informa o resultado real.
 
+## F4.6 — Fornecedores: concentração e pauta de negociação
+1. **Comece pela cobertura:** `GET /api/health-center/suppliers/concentration` (aceita `?from=AAAA-MM-DD&to=AAAA-MM-DD`; padrão 180 dias). Olhe `coverage.orderCoveragePct` ANTES da parcela de cada fornecedor: é a fatia das suas compras que passou por ordem no sistema. Se for baixa, a concentração mostra só uma parte do que você compra.
+2. **Faixa de concentração é informação:** ≥30% do maior fornecedor = média, ≥50% = alta. Não é recomendação de trocar de fornecedor, e os limiares não foram calibrados com a sua operação.
+3. **Ficha:** `GET /suppliers/:key` (`:key` = `supplierKey` da concentração). Mostra entrega prometida × realizada, completude, divergências, prazo de pagamento e variação de preço — sempre com quantas ordens sustentam o número.
+4. **Pauta:** `GET /suppliers/:key/negotiation-brief` devolve um **rascunho** com os pontos que o histórico sustenta e a evidência de cada um. Ele **não envia nada** ao fornecedor e **não sugere desconto nem prazo-alvo** — você define a proposta. Pontos com menos de 2 ordens aparecem em `omitted`.
+5. Só quem tem visão completa do negócio lê (mostra valores de compra).
+

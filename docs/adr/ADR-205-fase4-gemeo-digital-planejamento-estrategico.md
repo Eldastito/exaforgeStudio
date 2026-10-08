@@ -132,7 +132,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Gestor-only (mostra números do negócio, §73). `test:board-review` (22, mutação verificada em 6 regras).
 - **Limites:** no trimestre o briefing de resultado cobre só o último mês (o serviço é mensal); sem plano cadastrado para o período a seção diz isso; **sem exportação (PDF/planilha) e sem UI**; não agenda nem envia a revisão; **nada validado com a TOULON** — o piloto continua sendo a pendência real.
 
-## 15. Status F4.7 — EM PR (Backtest da previsão do mês, 2026-10-08)
+## 15. Status F4.7 — MERGED (#1868) (Backtest da previsão do mês, 2026-10-08)
 
 **Escopo reduzido de propósito.** O PRD §28–30 pede backtest de política, comissão e campanha. O gate da análise era "histórico confiável por vendedor/dia" e **ele não está cumprido** (ninguém conferiu a base de vendas por vendedor; as regras de comissão não foram validadas como dado; holdout/consentimento seguem pendentes). Fazer esse backtest agora produziria um número bonito sobre dado não conferido. O que dá para provar honestamente com a base que **é** oficial (fechamentos diários por loja) é o backtest da **previsão do mês** (ADR-204 F3.4): ela merece a confiança que declara?
 
@@ -145,4 +145,15 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Confiança nunca "alta"; `promise:false` (RN-F4-8: backtest ≠ promessa). `test:forecast-backtest` (22, mutação verificada em 7 regras).
 - **Muda no código existente:** só `RetailForecastService.dailyTotals` passou de `private` a público (leitura dos totais diários); nenhuma lógica alterada (`test:retail-forecast` 38/38).
 - **Limites:** o replay lê os fechamentos como estão hoje (correções posteriores entram), com a meta e os dias de loja fechada de hoje; lojas e checkpoints do mesmo mês não são independentes (o intervalo real é mais largo); só funciona para loja com ≥12 semanas antes do ponto de leitura; **não cobre comissão, política nem campanha** (continua dependendo do histórico por vendedor/dia e do holdout); sem UI; nada visto com dado real da TOULON.
+
+## 16. Status F4.8 — EM PR (Group Intelligence, 2026-10-08)
+
+`GroupIntelligenceService` — **comparação entre as operações de um grupo** (ADR-199), por **FAN-OUT**: para cada operação chama, uma org por vez, o `StoreBenchmarkService.benchmark` (F4.3, já isolado por organização) e agrega o que ele devolve. **Nenhum SQL de negócio cruza organizações** (a única leitura direta é o nome/nicho da própria org, uma por vez) e **nada de cliente, contato, venda individual ou vendedor** entra — só faturamento, m², equipe e custo fixo agregados por loja. Atrás de `FEATURE_ORG_GROUPS` (sem a flag → 404); gate da análise "flag ligada": **na TOULON ela precisa estar ligada para a tela existir**.
+
+- `GET /api/groups/:groupId/intelligence?period=AAAA-MM` (padrão: mês anterior). Só owner/admin e só o dono do grupo (outro dono → 404, não revela).
+- **Por operação:** faturamento, faturamento por m², por pessoa e custo fixo sobre faturamento — razões **ponderadas** (Σ numerador ÷ Σ denominador das mesmas lojas, não média de médias), com **cobertura** (lojas usadas × elegíveis). Loja nova (abaixo da maturidade do F4.3) fica fora da razão e isso é dito. Sem dado → `null`, nunca 0.
+- **Ranking só com amostra mínima e mesmo nicho (RN-F4-9):** ≥3 operações do **mesmo nicho conhecido** e mês fechado → mediana, posição (acima/perto/abaixo, ±10%) e **perguntas neutras** para quem está ≥25% pior. Caso contrário os valores aparecem **lado a lado sem ranking**, com o motivo (`amostra_minima` · `nichos_diferentes` · `nicho_desconhecido` · `mes_incompleto`).
+- **Degradação graciosa:** operação que falha vira `partial`, sai dos totais, o painel não cai.
+- Nunca causa (RN-F4-8), nunca meta nem recomenda fechar/vender/trocar operação (RN-F4-12). Confiança: `insuficiente` sem ranking, `baixa` com ranking, `media` só com ≥5 operações de cobertura completa — **nunca alta** (um mês, sem sazonalidade). Só leitura. `test:group-intelligence` (25, mutação verificada em 7 regras).
+- **Limites:** só comparação **interna do grupo** — **benchmark entre empresas de fora (plataforma) continua NÃO feito** (exigiria amostra mínima e anonimização entre tenants, §79); um único mês; depende de m², equipe e custo fixo preenchidos em cada operação (sem isso a operação não entra); um grupo de 2 operações só mostra valores lado a lado; sem UI; nada visto com dado real da TOULON/Democrata.
 

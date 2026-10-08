@@ -11,6 +11,7 @@ import { OrgGroupService } from "../OrgGroupService.js";
 import { OrgGroupProvisioningService } from "../OrgGroupProvisioningService.js";
 import { GroupConsolidationService } from "../GroupConsolidationService.js";
 import { GroupBillingService } from "../GroupBillingService.js";
+import { GroupIntelligenceService } from "../GroupIntelligenceService.js";
 import { PlanService } from "../PlanService.js";
 import { OrgGroupStaffService } from "../OrgGroupStaffService.js";
 import { logAuthEvent } from "../auditLog.js";
@@ -90,6 +91,25 @@ router.get("/:groupId/consolidated", requireRole("owner", "admin"), (req: AuthRe
   const month = String(req.query.month || new Date().toISOString().slice(0, 7));
   const onlyOrg = req.query.orgId ? String(req.query.orgId) : undefined;
   res.json(GroupConsolidationService.consolidateMonthly(groupId, month, { onlyOrg }));
+});
+
+/**
+ * ADR-205 F4.8 — comparação ENTRE as operações do grupo (fan-out sobre o benchmark F4.3, read-only, nunca mistura cliente/venda).
+ * ?period=YYYY-MM (default: mês anterior). Dinheiro → owner/admin; o grupo precisa ser do dono da sessão (isolamento). Sem a flag → 404.
+ */
+router.get("/:groupId/intelligence", requireRole("owner", "admin"), (req: AuthRequest, res: Response): any => {
+  if (!gate(req, res)) return;
+  const identityId = AccountIdentityService.identityIdForUser(req.user!.userId);
+  const groupId = String(req.params.groupId || "");
+  const group = OrgGroupService.getGroup(groupId);
+  if (!group || !identityId || group.ownerIdentityId !== identityId) {
+    return res.status(404).json({ error: "Not found" }); // não revela grupo de outro dono
+  }
+  try {
+    res.json(GroupIntelligenceService.compare(groupId, { period: req.query.period ? String(req.query.period) : undefined }));
+  } catch (e: any) {
+    res.status(e?.code === "invalid_period" ? 400 : 500).json({ error: e?.message || "failed", code: e?.code });
+  }
 });
 
 /**

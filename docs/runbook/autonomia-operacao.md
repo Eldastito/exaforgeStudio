@@ -358,3 +358,7 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 
 `GET /api/health-center/forecast-backtest?months=3&checkpoints=10,15,20` (gestor). Reexecuta a previsão do mês em meses passados fechados e compara com o que realmente aconteceu: a faixa de 80% acertou ~80%? Leia o `overall.verdict`: `insufficient_data` = poucas comparações (normal em loja com menos de ~4 meses de histórico); `band_too_narrow` = a faixa vem sendo apertada demais (não confie na faixa como "quase certo"); `band_conservative` = folgada demais. **Não é promessa nem recalibra nada.** `bias.medianErrorPct > 0` = a previsão tende a ficar acima do real. Não cobre comissão/política/campanha.
 
+## F4.8 — Comparação entre as operações do grupo
+
+`GET /api/groups/:groupId/intelligence?period=AAAA-MM` (owner/admin do grupo; exige `FEATURE_ORG_GROUPS`). Compara as operações do grupo por faturamento por m², por pessoa e custo fixo sobre faturamento. Pra ter conteúdo: cada operação precisa ter m², equipe e custo fixo cadastrados nas suas lojas (F4.3) e fechamentos do mês. **Ranking só com 3+ operações do mesmo nicho** em mês fechado — fora disso aparecem só os valores lado a lado, com o motivo. As perguntas são pontos de partida, não conclusão. Não mistura clientes nem vendas individuais; benchmark com empresas de fora do grupo não existe.
+

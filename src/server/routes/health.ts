@@ -177,6 +177,14 @@ router.get("/board-review", async (req: AuthRequest, res): Promise<any> => { try
   const { BoardReviewService } = await import("../BoardReviewService.js");
   res.json(BoardReviewService.review(orgId, req.user, { period: req.query.period ? String(req.query.period) : "month" }));
 } catch (e) { stratFail(res, e); } });
+// ADR-205 F4.7 — backtest da previsão do mês (replay do RetailForecastService em meses passados). Read-only; mostra faturamento → gestor (§73). Não é promessa.
+router.get("/forecast-backtest", async (req: AuthRequest, res): Promise<any> => { try {
+  const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "O backtest da previsão mostra faturamento — é do gestor." });
+  const { ForecastBacktestService } = await import("../ForecastBacktestService.js");
+  res.json(ForecastBacktestService.run(orgId, { months: req.query.months, checkpoints: req.query.checkpoints }));
+} catch (e) { stratFail(res, e); } });
 router.post("/capital/compare", async (req: AuthRequest, res): Promise<any> => { try {
   const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const { ContextProjectionService } = await import("../ContextProjectionService.js");

@@ -63,7 +63,7 @@ function probabilityLabel(p: number): string {
 
 export class RetailForecastService {
   /** Total oficial por dia da loja (fechamentos aceitos). */
-  private static dailyTotals(orgId: string, storeId: string, from: string, to: string): Map<string, number> {
+  static dailyTotals(orgId: string, storeId: string, from: string, to: string): Map<string, number> {
     const off = officialSaleSql(officialSaleSourceOf(orgId));
     const rows = db.prepare(`SELECT closing_date d, SUM(${off}) t FROM retail_daily_closings WHERE organization_id = ? AND store_id = ? AND closing_date BETWEEN ? AND ? AND status IN ${CLOSED_OK} GROUP BY closing_date`).all(orgId, storeId, from, to) as any[];
     const m = new Map<string, number>();

@@ -109,7 +109,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Dinheiro de compra é do gestor (§73); `GET /api/health-center/suppliers/{overview,concentration,:key,:key/negotiation-brief}`. `test:supplier-intelligence` (36, mutação verificada em 6 regras).
 - **Limites:** só o que passou pelo ciclo cotação→ordem; o rascunho **não é enviado** a ninguém (sem WhatsApp/e-mail); a variação de preço não separa reajuste de mudança de especificação; nenhuma validação com dado real da TOULON; sem UI.
 
-## 13. Status F4.9 — EM PR (Contexto externo ao lado da decisão, 2026-10-08)
+## 13. Status F4.9 — MERGED (#1866) (Contexto externo ao lado da decisão, 2026-10-08)
 
 `ExternalDecisionContextService` — **consumo**, não pesquisa. Lê o que o admin master já publicou no pool compartilhado e anonimizado (ADR-156/157) via `ResearchBrokerService`, que respeita o **opt-in** da empresa e a **validade**, e **nunca chama o provedor**. Sem tabela nova; a única escrita possível é o cache por-org (L2) que o próprio broker já grava. Escolhida antes da F4.7/F4.8 porque não depende de histórico por vendedor nem da flag de Grupo.
 
@@ -120,3 +120,14 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Confiança só `baixa`/`media`:** `media` apenas com ao menos uma fonte viva datada.
 - Gestor lê (decisão estratégica). `test:external-decision-context` (29, mutação verificada em 7 regras — e o teste achou uma lacuna própria na mutação da data de coleta, corrigida).
 - **O que NÃO entrega:** **benchmark entre empresas** (a parte de "plataforma" do RN-F4-9) — exigiria amostra mínima e anonimização cross-tenant e fica fora; o sistema **não pesquisa sozinho** (o conteúdo depende do admin master publicar); sem UI; sem validação com a TOULON; o conteúdo só existe se alguém publicar pesquisa do nicho `moda`.
+
+## 14. Status F4.10 — EM PR (Board Review mensal / QBR trimestral, 2026-10-08)
+
+`BoardReviewService` — **composição read-only** de uma pauta executiva sobre o que a Fase 3/4 já entrega; sem tabela, sem gravação, sem envio. O gate da análise era "F4.1–F4.4 + piloto" e **o piloto NÃO rodou**: por isso a revisão declara isso na própria resposta (`pilot.validated=false`) e a confiança é sempre `baixa`.
+
+- **Período FECHADO** (`GET /api/health-center/board-review?period=month|quarter`): mês anterior ou trimestre anterior — nunca o corrente.
+- **Seis seções, cada uma com `available` + motivo** (fonte que falha ou sem dado vira seção indisponível, nunca preenchida): resultado e metas (`PeriodicBriefingService` mensal) · plano × realizado (`StrategicPlanService.track`, avaliado no dia seguinte ao fim do período, então "met/missed", não "ritmo") · decisões estratégicas (revisões vencidas + calibração) · benchmark interno (último mês do período) · fornecedores (concentração + cobertura) · contexto de mercado (tipo `plan`).
+- **Pauta só com fatos já medidos pelas fontes:** revisão de decisão vencida, plano não atingido/abaixo do ritmo, metas e lojas abaixo, fornecedor concentrado, cobertura de compras baixa, seção sem dado. **Não conclui causa nem recomenda ação.**
+- **Lacunas herdadas declaradas** em `notCovered`: margem confiável, estoque, clientes e campanhas (do briefing) + benchmark entre empresas.
+- Gestor-only (mostra números do negócio, §73). `test:board-review` (22, mutação verificada em 6 regras).
+- **Limites:** no trimestre o briefing de resultado cobre só o último mês (o serviço é mensal); sem plano cadastrado para o período a seção diz isso; **sem exportação (PDF/planilha) e sem UI**; não agenda nem envia a revisão; **nada validado com a TOULON** — o piloto continua sendo a pendência real.

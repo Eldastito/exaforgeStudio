@@ -169,6 +169,14 @@ router.get("/suppliers/overview", async (req: AuthRequest, res): Promise<any> =>
 router.get("/suppliers/concentration", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.concentration(c.orgId, c.opts)); } catch (e) { stratFail(res, e); } });
 router.get("/suppliers/:key", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.supplier(c.orgId, String(req.params.key), c.opts)); } catch (e) { stratFail(res, e); } });
 router.get("/suppliers/:key/negotiation-brief", async (req: AuthRequest, res): Promise<any> => { try { const c = await suppliers(req, res); if (!c) return; res.json(c.S.negotiationBrief(c.orgId, String(req.params.key), c.opts)); } catch (e) { stratFail(res, e); } });
+// ADR-205 F4.10 — Board Review mensal / QBR trimestral. Composição read-only; números do negócio → gestor (§73). Não envia nem executa nada.
+router.get("/board-review", async (req: AuthRequest, res): Promise<any> => { try {
+  const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "O Board Review mostra números do negócio — é do gestor." });
+  const { BoardReviewService } = await import("../BoardReviewService.js");
+  res.json(BoardReviewService.review(orgId, req.user, { period: req.query.period ? String(req.query.period) : "month" }));
+} catch (e) { stratFail(res, e); } });
 router.post("/capital/compare", async (req: AuthRequest, res): Promise<any> => { try {
   const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
   const { ContextProjectionService } = await import("../ContextProjectionService.js");

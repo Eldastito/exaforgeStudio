@@ -50,8 +50,21 @@ async function main() {
 
   // ── (2) Tutor ──
   const mB = morning(B);
-  check("manhã (vendas, sem saída): 'Vendas registradas R$ 4.975,62 (sem saídas lançadas)' — NÃO 'Caixa'", /Vendas registradas R\$ 4\.975,62 \(sem saídas lançadas\)/.test(mB) && !/Caixa R\$/.test(mB), mB);
-  check("manhã (entradas manuais, sem saída): 'Entradas registradas …'", /Entradas registradas R\$ 500,00 \(sem saídas lançadas\)/.test(morning(C)), morning(C));
+  const spToday = (await import("../src/server/FalaTuBriefingDigestService.js")).FalaTuBriefingDigestService.spParts(new Date()).dateSP;
+  for (const o of [B, C]) db.prepare("UPDATE cash_events SET event_date = ? WHERE organization_id = ?").run(spToday, o);   // data do lançamento = hoje em Brasília (o default do ledger é UTC)
+  const mB2 = morning(B);
+  check("manhã (vendas, sem saída): mostra o ACUMULADO do mês e da semana (não o total desde sempre) — 'Vendas registradas no mês R$ 4.975,62 · na semana R$ 4.975,62 (sem saídas lançadas)', NÃO 'Caixa'", /Vendas registradas no mês R\$ 4\.975,62 · na semana R\$ 4\.975,62 \(sem saídas lançadas\)/.test(mB2) && !/Caixa R\$/.test(mB2), mB2);
+  check("manhã (entradas manuais, sem saída): 'Entradas registradas no mês … · na semana …'", /Entradas registradas no mês R\$ 500,00 · na semana R\$ 500,00 \(sem saídas lançadas\)/.test(morning(C)), morning(C));
+  // período: 14/10/2026 (quarta) → mês = 01/10..14/10, semana = seg 12/10..14/10; o que é de outro mês/antes da semana não entra
+  const E = org("E");
+  ev(E, "in", 7000, "retail_closing", "2026-09-30"); ev(E, "in", 100, "retail_closing", "2026-10-01"); ev(E, "in", 200, "retail_closing", "2026-10-12"); ev(E, "in", 50, "retail_closing", "2026-10-14");
+  const NOW = new Date("2026-10-14T12:00:00Z");
+  const mE = (T.morningBrief(E, NOW).text.split("\n").find((l) => l.startsWith("💰")) || "");
+  check("manhã: mês acumulado = 01/10→hoje (R$ 350,00; o mês anterior NÃO entra) e semana = segunda→hoje (R$ 250,00; 01/10 fica fora)", /Vendas registradas no mês R\$ 350,00 · na semana R\$ 250,00 \(sem saídas lançadas\)/.test(mE), mE);
+  check("o total desde sempre (R$ 7.350,00) não aparece mais na manhã", !/7\.350,00/.test(mE) && L.entradasRegistradas(E) === 7350);
+  const per = T.entradasMesESemana(E, NOW);
+  check("janelas do período declaradas: mês desde 01/10, semana desde segunda 12/10; isolamento (outra org não soma)", per.mesDesde === "2026-10-01" && per.semanaDesde === "2026-10-12" && per.mes === 350 && per.semana === 250 && T.entradasMesESemana(A, NOW).mes === 0);
+  check("virada de mês: a semana que começa em segunda 28/09 cruza o mês (semana pode ser maior que o mês) e é calculada por data, não por contagem", (() => { const F = org("F"); ev(F, "in", 300, "retail_closing", "2026-09-29"); ev(F, "in", 40, "retail_closing", "2026-10-01"); const p = T.entradasMesESemana(F, new Date("2026-10-01T12:00:00Z")); return p.semanaDesde === "2026-09-28" && p.semana === 340 && p.mes === 40; })());
   const mD = morning(D);
   check("manhã (com saída lançada): segue 'Caixa R$ 700,00' (0-regressão)", /Caixa R\$ 700,00/.test(mD), mD);
   check("manhã sem lançamento nenhum: 'Caixa —' (já era assim)", /Caixa —/.test(morning(A)), morning(A));

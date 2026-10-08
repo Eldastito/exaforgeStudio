@@ -80,7 +80,7 @@ export class BusinessTutorService {
   }
 
   /** Texto do resumo da manhã — determinístico a partir da Central de Saúde. */
-  static morningBrief(orgId: string): { text: string; priorityCount: number; status: string } {
+  static morningBrief(orgId: string, now: Date = new Date()): { text: string; priorityCount: number; status: string } {
     const ov = BusinessHealthService.overview(orgId) as any;
     const priorities = Array.isArray(ov?.priorities) ? ov.priorities : [];
     const lines: string[] = [];
@@ -138,8 +138,10 @@ export class BusinessTutorService {
     // contas a receber/pagar não "deve zero" — o dado não existe aqui. Overview sem a informação (`tracking` ausente) segue como antes.
     const tk = k.tracking || { receivables: true, payables: true, cashEvents: true, cashBasis: "caixa" };
     // Sem NENHUMA saída lançada o "saldo" é só a soma do que entrou (ex.: toda venda de loja lançada como entrada): chamar de "Caixa" engana.
-    const caixaPart = tk.cashBasis === "vendas" ? `Vendas registradas ${brl(k.entradasRegistradas)} (sem saídas lançadas)`
-      : tk.cashBasis === "entradas" ? `Entradas registradas ${brl(k.entradasRegistradas)} (sem saídas lançadas)`
+    // Sem saída lançada o número útil pro dono é o ACUMULADO do período (mês e semana), não o total desde sempre: ele não compara com nada.
+    const entradasPeriodo = this.entradasMesESemana(orgId, now);
+    const caixaPart = tk.cashBasis === "vendas" ? `Vendas registradas no mês ${brl(entradasPeriodo.mes)} · na semana ${brl(entradasPeriodo.semana)} (sem saídas lançadas)`
+      : tk.cashBasis === "entradas" ? `Entradas registradas no mês ${brl(entradasPeriodo.mes)} · na semana ${brl(entradasPeriodo.semana)} (sem saídas lançadas)`
       : `Caixa ${tk.cashEvents || Number(k.caixaAtual) !== 0 ? brl(k.caixaAtual) : "—"}`;
     const kpiParts = [caixaPart, `a receber ${tk.receivables ? brl(k.aReceber) : "—"}`, `a pagar ${tk.payables ? brl(k.aPagar) : "—"}`];
     if (Number.isFinite(k.survivalDays) && k.survivalDays > 0 && k.survivalDays < 999) kpiParts.push(`~${Math.round(k.survivalDays)} dias de caixa`);
@@ -150,6 +152,19 @@ export class BusinessTutorService {
     lines.push("Abra a *Central de Saúde* no ZappFlow para agir. 💪");
 
     return { text: lines.join("\n"), priorityCount: priorities.length, status: ov?.status || "saudavel" };
+  }
+
+  /** Entradas registradas no financeiro: mês corrente (dia 1 → hoje) e semana corrente (segunda → hoje), datas em Brasília. Lê só `cash_events` (mesma fonte do total). */
+  static entradasMesESemana(orgId: string, now: Date): { mes: number; semana: number; mesDesde: string; semanaDesde: string } {
+    const { dateSP } = FalaTuBriefingDigestService.spParts(now);
+    const t = new Date(`${dateSP}T00:00:00Z`);
+    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    const semanaDesde = t.toISOString().slice(0, 10), mesDesde = `${dateSP.slice(0, 7)}-01`;
+    return {
+      mes: FinancialLedgerService.realizedCash(orgId, mesDesde, dateSP).inflow,
+      semana: FinancialLedgerService.realizedCash(orgId, semanaDesde, dateSP).inflow,
+      mesDesde, semanaDesde,
+    };
   }
 
   /**

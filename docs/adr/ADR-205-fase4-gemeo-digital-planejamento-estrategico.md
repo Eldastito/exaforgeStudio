@@ -98,7 +98,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Rota `POST /api/health-center/capital/compare` (gestor — mostra caixa). `test:capital-allocation` (35, mutação verificada em 7 regras).
 - **Limites:** o resultado é **tão bom quanto o retorno que o dono informa** — se estiver otimista, a comparação também estará; não modela interação entre alternativas (canibalização, mesma equipe, mesmo cliente); o caixa só enxerga 13 semanas e só o desembolso (não o retorno chegando); horizontes diferentes não são diretamente comparáveis (avisado); **sem UI**; sem dado real da TOULON.
 
-## 12. Status F4.6 — EM PR (Inteligência de fornecedores + pauta de negociação, 2026-10-08)
+## 12. Status F4.6 — MERGED (#1865) (Inteligência de fornecedores + pauta de negociação, 2026-10-08)
 
 `SupplierIntelligenceService` — **composição read-only**, sem tabela nova e sem gravação. O gate da análise para a F4.6 era "cobertura de compras conferida" e **ele não está cumprido** (a cobertura real da TOULON nunca foi conferida). Por isso a fatia **mede e mostra a própria cobertura** em vez de pressupô-la.
 
@@ -108,3 +108,15 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Pauta de negociação** (`GET /suppliers/:key/negotiation-brief`): **rascunho**, nunca enviado. Só entram pontos que o histórico sustenta e com **amostra mínima de 2 ordens** (o que ficou de fora é dito em `omitted`); cada ponto traz a evidência e o tamanho da amostra. **Não inventa desconto, prazo-alvo nem contraproposta** — o pedido sugerido não contém número — e não acusa o fornecedor (diferença não prova culpa, RN-F4-8). Reconhece o que vai bem (pontual, completo). Sem fato que se sustente → `insufficient_history`, sem texto.
 - Dinheiro de compra é do gestor (§73); `GET /api/health-center/suppliers/{overview,concentration,:key,:key/negotiation-brief}`. `test:supplier-intelligence` (36, mutação verificada em 6 regras).
 - **Limites:** só o que passou pelo ciclo cotação→ordem; o rascunho **não é enviado** a ninguém (sem WhatsApp/e-mail); a variação de preço não separa reajuste de mudança de especificação; nenhuma validação com dado real da TOULON; sem UI.
+
+## 13. Status F4.9 — EM PR (Contexto externo ao lado da decisão, 2026-10-08)
+
+`ExternalDecisionContextService` — **consumo**, não pesquisa. Lê o que o admin master já publicou no pool compartilhado e anonimizado (ADR-156/157) via `ResearchBrokerService`, que respeita o **opt-in** da empresa e a **validade**, e **nunca chama o provedor**. Sem tabela nova; a única escrita possível é o cache por-org (L2) que o próprio broker já grava. Escolhida antes da F4.7/F4.8 porque não depende de histórico por vendedor nem da flag de Grupo.
+
+- **Por tipo de decisão** (`GET /api/health-center/external-context?kind=purchase|sales_change|hire|capital|plan|supplier`): usa uma taxonomia fechada de tópicos (ex.: compra → demanda e sazonalidade · preço e prazo de fornecedores · tendências de coleção); aceita até 5 tópicos livres, saneados (3–80 caracteres, sem marcação). O nicho vem de `organization_settings.vertical`; sem nicho ou sem opt-in → vazio e honesto, com o motivo.
+- **Fonte e data em cada item (RN-F4-7):** fontes com tier A/B/C, data de coleta, quando foi gerado e até quando vale. **Síntese do modelo ≠ fonte viva:** só é "fonte_viva" quem tem evidência `live` **com fonte A/B datada**; uma entrada que se declara `live` sem isso é **rebaixada** a "síntese do modelo" e **não exibe data de coleta**. Contexto com mais de 60 dias é marcado como defasado; entrada vencida some.
+- **Não mexe em número (`affectsCalculations:false`):** nada aqui roda ou altera cenário, plano ou comparação (teste: o mesmo cenário antes e depois tem as mesmas premissas e métricas). Em vez disso aponta **quais premissas editáveis** o dono pode querer revisitar — as do `ScenarioEngine`, reaproveitadas via `kinds()` — e faz **perguntas**, nunca conclusão (RN-F4-8).
+- **Texto externo é dado não confiável:** limpo de caracteres de controle, truncado (resumo ≤600; ≤5 fatores de ≤160) e marcado `untrusted:true`.
+- **Confiança só `baixa`/`media`:** `media` apenas com ao menos uma fonte viva datada.
+- Gestor lê (decisão estratégica). `test:external-decision-context` (29, mutação verificada em 7 regras — e o teste achou uma lacuna própria na mutação da data de coleta, corrigida).
+- **O que NÃO entrega:** **benchmark entre empresas** (a parte de "plataforma" do RN-F4-9) — exigiria amostra mínima e anonimização cross-tenant e fica fora; o sistema **não pesquisa sozinho** (o conteúdo depende do admin master publicar); sem UI; sem validação com a TOULON; o conteúdo só existe se alguém publicar pesquisa do nicho `moda`.

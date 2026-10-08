@@ -339,3 +339,10 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 4. **Pauta:** `GET /suppliers/:key/negotiation-brief` devolve um **rascunho** com os pontos que o histórico sustenta e a evidência de cada um. Ele **não envia nada** ao fornecedor e **não sugere desconto nem prazo-alvo** — você define a proposta. Pontos com menos de 2 ordens aparecem em `omitted`.
 5. Só quem tem visão completa do negócio lê (mostra valores de compra).
 
+## F4.9 — Contexto de mercado ao lado de uma decisão
+1. **Pré-requisitos (senão vem vazio):** a empresa precisa ter **nicho cadastrado** e a **inteligência externa ligada** (opt-in); e o **admin master** precisa ter publicado pesquisa fresca desse nicho. O sistema **não pesquisa sozinho**.
+2. **Consultar:** `GET /api/health-center/external-context?kind=purchase` (também `sales_change`, `hire`, `capital`, `plan`, `supplier`). Tópicos próprios: `&topics=tema um,tema dois` (até 5).
+3. **Ler as etiquetas:** `fonte_viva` = tem fonte oficial/verificável **com data de coleta**; `sintese_do_modelo` = resumo produzido pelo modelo, **sem fonte viva** — use como hipótese, não como evidência. Item `stale` tem mais de 60 dias.
+4. **Isto NÃO muda nenhum número.** Ele só lista quais premissas você pode querer revisar (as mesmas editáveis do simulador) e perguntas para você se fazer. Quem refaz o cenário com outro valor é você.
+5. O texto vem de fonte externa: confira a fonte antes de agir. Não há comparação com outras empresas.
+

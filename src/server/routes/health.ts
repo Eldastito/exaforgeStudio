@@ -146,6 +146,15 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => { try { 
 router.post("/plans/:id/activate", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.activate(c.orgId, String(req.params.id), c.actor)); } catch (e) { stratFail(res, e); } });
 router.post("/plans/:id/close", async (req: AuthRequest, res): Promise<any> => { try { const c = await plan(req, res, true); if (!c) return; res.json(c.P.close(c.orgId, String(req.params.id), c.actor, req.body?.note)); } catch (e) { stratFail(res, e); } });
 // ADR-205 F4.5 — comparação de alternativas de investimento (NÃO escolhe, NÃO ranqueia). Stateless/read-only; mostra caixa → gestor (§73). O retorno esperado é do DONO.
+// ADR-205 F4.9 — contexto EXTERNO (mercado/nicho) ao lado de uma decisão. Consumo do pool compartilhado via broker (nunca pesquisa). NÃO altera número nenhum. Decisão estratégica → gestor.
+router.get("/external-context", async (req: AuthRequest, res): Promise<any> => { try {
+  const orgId = req.organizationId; if (!orgId || !req.user) return res.status(401).json({ error: "Unauthorized" });
+  const { ContextProjectionService } = await import("../ContextProjectionService.js");
+  if (!ContextProjectionService.hasFullBusinessVisibility(orgId, req.user)) return res.status(403).json({ error: "O contexto de mercado para decisões estratégicas é do gestor." });
+  const { ExternalDecisionContextService } = await import("../ExternalDecisionContextService.js");
+  const q = (k: string) => (req.query[k] ? String(req.query[k]) : undefined);
+  res.json(ExternalDecisionContextService.forDecision(orgId, { kind: String(req.query.kind || ""), topics: q("topics") ? String(req.query.topics).split(",").map((t) => t.trim()).filter(Boolean) : undefined, region: q("region"), timeframe: q("timeframe") }));
+} catch (e) { stratFail(res, e); } });
 // ADR-205 F4.6 — inteligência de fornecedores (concentração, ficha, rascunho de pauta de negociação). Read-only; mostra valor de compra → gestor (§73). Nunca contata o fornecedor.
 const suppliers = async (req: AuthRequest, res: any) => {
   const orgId = req.organizationId;

@@ -32,7 +32,7 @@ F4.1 Scenario Engine · F4.2 modelo estratégico · F4.3 benchmark interno · F4
 ## 6. Limites desta F4.0
 Nenhum dado de produção foi acessado. Nenhuma simulação foi feita. Os números do print são cotas diárias e ilustram, não calibram.
 
-## 7. Status F4.1 — EM PR (Scenario Engine, 2026-10-07)
+## 7. Status F4.1 — MERGED (#1860) (Scenario Engine, 2026-10-07)
 Decisão do dono: "começar a F4.1 com as recomendações" → D1 adotada como recomendada (motor + registro **antes** do piloto, com confiança limitada); D2–D5 seguem abertas e **não** bloqueiam esta fatia.
 
 `ScenarioEngine` (`src/server/ScenarioEngine.ts`) é um **contrato**, não um 2º simulador (RN-F4-11): os cálculos continuam em `PurchaseScenarioService`/`CashForecastService`/`DecisionSimulatorService`; o motor padroniza a saída. Três tipos: **compra de estoque** (3 cenários), **vendas ±X%** e **contratação**. Rota `POST /api/health-center/simulate/scenario` (+ `GET …/kinds`), só gestor (§73).
@@ -146,7 +146,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Muda no código existente:** só `RetailForecastService.dailyTotals` passou de `private` a público (leitura dos totais diários); nenhuma lógica alterada (`test:retail-forecast` 38/38).
 - **Limites:** o replay lê os fechamentos como estão hoje (correções posteriores entram), com a meta e os dias de loja fechada de hoje; lojas e checkpoints do mesmo mês não são independentes (o intervalo real é mais largo); só funciona para loja com ≥12 semanas antes do ponto de leitura; **não cobre comissão, política nem campanha** (continua dependendo do histórico por vendedor/dia e do holdout); sem UI; nada visto com dado real da TOULON.
 
-## 16. Status F4.8 — EM PR (Group Intelligence, 2026-10-08)
+## 16. Status F4.8 — MERGED (#1870) (Group Intelligence, 2026-10-08)
 
 `GroupIntelligenceService` — **comparação entre as operações de um grupo** (ADR-199), por **FAN-OUT**: para cada operação chama, uma org por vez, o `StoreBenchmarkService.benchmark` (F4.3, já isolado por organização) e agrega o que ele devolve. **Nenhum SQL de negócio cruza organizações** (a única leitura direta é o nome/nicho da própria org, uma por vez) e **nada de cliente, contato, venda individual ou vendedor** entra — só faturamento, m², equipe e custo fixo agregados por loja. Atrás de `FEATURE_ORG_GROUPS` (sem a flag → 404); gate da análise "flag ligada": **na TOULON ela precisa estar ligada para a tela existir**.
 
@@ -156,4 +156,8 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Degradação graciosa:** operação que falha vira `partial`, sai dos totais, o painel não cai.
 - Nunca causa (RN-F4-8), nunca meta nem recomenda fechar/vender/trocar operação (RN-F4-12). Confiança: `insuficiente` sem ranking, `baixa` com ranking, `media` só com ≥5 operações de cobertura completa — **nunca alta** (um mês, sem sazonalidade). Só leitura. `test:group-intelligence` (25, mutação verificada em 7 regras).
 - **Limites:** só comparação **interna do grupo** — **benchmark entre empresas de fora (plataforma) continua NÃO feito** (exigiria amostra mínima e anonimização entre tenants, §79); um único mês; depende de m², equipe e custo fixo preenchidos em cada operação (sem isso a operação não entra); um grupo de 2 operações só mostra valores lado a lado; sem UI; nada visto com dado real da TOULON/Democrata.
+
+## 17. Estado da Fase 4 (2026-10-08)
+
+**Código F4.1–F4.10 completo e mergeado** (F4.1–F4.6, F4.7 reduzida, F4.8, F4.9, F4.10). **Nada foi validado com dado real da TOULON e o piloto não rodou** — por isso todas as confianças seguem limitadas, `ScenarioEngine.PILOT_VALIDATED=false` e nenhuma fatia tem tela. Pendências de validação (do dono): m²/equipe/abertura por loja (F4.3), um plano de período (F4.4), uma comparação real de investimentos (F4.5), cobertura de compras por ordem (F4.6), nicho + inteligência externa ligados e pesquisa do nicho publicada (F4.9), `FEATURE_ORG_GROUPS` ligada (F4.8). Fora de escopo declarado: backtest de comissão/política/campanha (falta histórico por vendedor/dia conferido, F4.7) e benchmark entre empresas de fora do grupo (F4.8/F4.9, exige anonimização entre tenants). A Fase 4 só pode ser dada como encerrada por decisão do dono, como as Fases 2 e 3.
 

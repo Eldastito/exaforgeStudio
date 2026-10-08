@@ -354,3 +354,7 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 - `pilot.validated=false` enquanto o piloto da TOULON não rodar; a confiança fica `baixa`.
 - Sem exportação nem UI ainda.
 
+## F4.7 — Backtest da previsão do mês
+
+`GET /api/health-center/forecast-backtest?months=3&checkpoints=10,15,20` (gestor). Reexecuta a previsão do mês em meses passados fechados e compara com o que realmente aconteceu: a faixa de 80% acertou ~80%? Leia o `overall.verdict`: `insufficient_data` = poucas comparações (normal em loja com menos de ~4 meses de histórico); `band_too_narrow` = a faixa vem sendo apertada demais (não confie na faixa como "quase certo"); `band_conservative` = folgada demais. **Não é promessa nem recalibra nada.** `bias.medianErrorPct > 0` = a previsão tende a ficar acima do real. Não cobre comissão/política/campanha.
+

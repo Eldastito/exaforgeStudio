@@ -121,7 +121,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - Gestor lê (decisão estratégica). `test:external-decision-context` (29, mutação verificada em 7 regras — e o teste achou uma lacuna própria na mutação da data de coleta, corrigida).
 - **O que NÃO entrega:** **benchmark entre empresas** (a parte de "plataforma" do RN-F4-9) — exigiria amostra mínima e anonimização cross-tenant e fica fora; o sistema **não pesquisa sozinho** (o conteúdo depende do admin master publicar); sem UI; sem validação com a TOULON; o conteúdo só existe se alguém publicar pesquisa do nicho `moda`.
 
-## 14. Status F4.10 — EM PR (Board Review mensal / QBR trimestral, 2026-10-08)
+## 14. Status F4.10 — MERGED (#1867) (Board Review mensal / QBR trimestral, 2026-10-08)
 
 `BoardReviewService` — **composição read-only** de uma pauta executiva sobre o que a Fase 3/4 já entrega; sem tabela, sem gravação, sem envio. O gate da análise era "F4.1–F4.4 + piloto" e **o piloto NÃO rodou**: por isso a revisão declara isso na própria resposta (`pilot.validated=false`) e a confiança é sempre `baixa`.
 
@@ -131,3 +131,18 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 - **Lacunas herdadas declaradas** em `notCovered`: margem confiável, estoque, clientes e campanhas (do briefing) + benchmark entre empresas.
 - Gestor-only (mostra números do negócio, §73). `test:board-review` (22, mutação verificada em 6 regras).
 - **Limites:** no trimestre o briefing de resultado cobre só o último mês (o serviço é mensal); sem plano cadastrado para o período a seção diz isso; **sem exportação (PDF/planilha) e sem UI**; não agenda nem envia a revisão; **nada validado com a TOULON** — o piloto continua sendo a pendência real.
+
+## 15. Status F4.7 — EM PR (Backtest da previsão do mês, 2026-10-08)
+
+**Escopo reduzido de propósito.** O PRD §28–30 pede backtest de política, comissão e campanha. O gate da análise era "histórico confiável por vendedor/dia" e **ele não está cumprido** (ninguém conferiu a base de vendas por vendedor; as regras de comissão não foram validadas como dado; holdout/consentimento seguem pendentes). Fazer esse backtest agora produziria um número bonito sobre dado não conferido. O que dá para provar honestamente com a base que **é** oficial (fechamentos diários por loja) é o backtest da **previsão do mês** (ADR-204 F3.4): ela merece a confiança que declara?
+
+`ForecastBacktestService` — **replay** do mesmo `RetailForecastService.storeForecast` (nenhum cálculo duplicado) em datas passadas, comparado ao fechamento real do mês. Só leitura; não grava nem recalibra.
+
+- `GET /api/health-center/forecast-backtest?months=1..12&checkpoints=10,15,20` (gestor — mostra faturamento). Padrão: últimos 3 meses fechados, lendo a previsão nos dias 10/15/20.
+- **Por comparação:** faixa (baixo/central/alto), real, se caiu dentro da faixa, erro % assinado (>0 = previsão acima do real) e largura da faixa. **Por loja, por ponto de leitura e geral** (o geral é o ponto de leitura com mais amostras — pontos do mesmo mês não são independentes, então não se empilham).
+- **Veredito honesto:** taxa de acerto da faixa de 80% com intervalo de Wilson → `insufficient_data` (<8 amostras) · `band_too_narrow` (limite superior abaixo de 80%) · `band_conservative` (limite inferior acima de 80%) · `compatible_with_nominal`. Também vieses (mediana do erro, erro absoluto médio) e, havendo meta cadastrada, a probabilidade declarada de bater a meta × o que aconteceu.
+- **Mês real só vale completo:** mês de loja com dia de funcionamento sem fechamento é descartado e contado (`actualIncomplete`). Quando a previsão se recusou (histórico curto, dado atrasado) conta em `skipped.forecastRefused` — recusar também é informação.
+- Confiança nunca "alta"; `promise:false` (RN-F4-8: backtest ≠ promessa). `test:forecast-backtest` (22, mutação verificada em 7 regras).
+- **Muda no código existente:** só `RetailForecastService.dailyTotals` passou de `private` a público (leitura dos totais diários); nenhuma lógica alterada (`test:retail-forecast` 38/38).
+- **Limites:** o replay lê os fechamentos como estão hoje (correções posteriores entram), com a meta e os dias de loja fechada de hoje; lojas e checkpoints do mesmo mês não são independentes (o intervalo real é mais largo); só funciona para loja com ≥12 semanas antes do ponto de leitura; **não cobre comissão, política nem campanha** (continua dependendo do histórico por vendedor/dia e do holdout); sem UI; nada visto com dado real da TOULON.
+

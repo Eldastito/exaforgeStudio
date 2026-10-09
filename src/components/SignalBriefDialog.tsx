@@ -23,7 +23,7 @@ const fmtImpact = (i: NonNullable<Brief['impact']>) => {
   if (i.restricted || i.amount === null) return 'há impacto (valor reservado ao gestor)';
   const n = i.amount.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   if (i.unit === 'BRL') return `R$ ${n}`;
-  return `${n}${i.unit ? ` ${i.unit === 'units' ? 'un' : i.unit}` : ''}`;
+  return `${n}${i.unit ? ` ${i.unit === 'units' ? 'un' : i.unit === 'items' ? 'itens' : i.unit}` : ''}`;
 };
 
 export default function SignalBriefDialog({ signal, onClose, onConfirm }: { signal: any; onClose: () => void; onConfirm: () => Promise<void> | void }) {

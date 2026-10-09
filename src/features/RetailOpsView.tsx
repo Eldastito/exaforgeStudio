@@ -331,7 +331,7 @@ function InsightsTab() {
   const priorities: any[] = data?.priorities || [];
   const patterns: any[] = data?.patterns || [];
   const sev = data?.bySeverity || {};
-  const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : (im.unit || '')}`.trim()) : null;
+  const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : im.unit === 'items' ? 'itens' : (im.unit || '')}`.trim()) : null;
 
   return (
     <div>
@@ -447,7 +447,7 @@ function InsightsTab() {
               <div key={a.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
                 <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
                 <span className="text-sm text-zinc-200">{a.title}</span>
-                {a.expected_impact != null && <span className="text-[11px] text-zinc-500">· esperado {a.impact_unit === 'BRL' ? brl(a.expected_impact) : `${a.expected_impact} ${a.impact_unit === 'units' ? 'un' : (a.impact_unit || '')}`.trim()}</span>}
+                {a.expected_impact != null && <span className="text-[11px] text-zinc-500">· esperado {a.impact_unit === 'BRL' ? brl(a.expected_impact) : `${a.expected_impact} ${a.impact_unit === 'units' ? 'un' : a.impact_unit === 'items' ? 'itens' : (a.impact_unit || '')}`.trim()}</span>}
                 {a.status === 'done' && a.result_amount != null && <span className="text-[11px] text-emerald-300">· realizado {a.impact_unit === 'BRL' ? brl(a.result_amount) : a.result_amount}</span>}
                 <div className="ml-auto flex items-center gap-1.5">
                   {a.status === 'awaiting_approval' && <button onClick={() => actionOp(a, 'approve')} className="rounded border border-emerald-500/30 px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-emerald-500/10">Aprovar</button>}
@@ -7223,6 +7223,7 @@ function NegativeStockTab() {
                 <th className="px-3 py-2 text-right font-medium">Saldo</th>
                 <th className="px-3 py-2 text-right font-medium" title="Quantidade só para sair do negativo (até zero)">Até zero</th>
                 <th className="px-3 py-2 text-right font-medium" title="Quantidade para chegar na meta de estoque (exige meta configurada)">Falta p/ meta</th>
+                <th className="px-3 py-2 text-left font-medium" title="Dias desde que o sistema viu este negativo. Negativo que some em 1–2 dias costuma ser entrada lançada com atraso; o que dura é falta real.">Aberto há</th>
                 <th className="px-3 py-2 text-left font-medium">Atualização</th>
               </tr></thead>
               <tbody>
@@ -7248,6 +7249,7 @@ function NegativeStockTab() {
                         ? <button onClick={() => setPolicyRow(it)} className="font-semibold text-orange-300 hover:underline" title="Editar a meta de estoque desta peça">{it.shortage_qty}</button>
                         : <button onClick={() => setPolicyRow(it)} className="text-[11px] rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-800" title="Defina o estoque-alvo desta peça para calcular a falta">Definir meta</button>}
                     </td>
+                    <td className="px-3 py-2 text-zinc-400 text-[12px] whitespace-nowrap">{it.days_open == null ? '—' : it.days_open === 0 ? 'hoje' : `${it.days_open} dia${it.days_open === 1 ? '' : 's'}`}</td>
                     <td className="px-3 py-2 text-zinc-500 text-[12px] whitespace-nowrap">{it.source_synced_at ? String(it.source_synced_at).slice(0, 10).split('-').reverse().join('/') : '—'}</td>
                   </tr>
                 ))}

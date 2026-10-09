@@ -161,7 +161,7 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 
 **Código F4.1–F4.10 completo e mergeado** (F4.1–F4.6, F4.7 reduzida, F4.8, F4.9, F4.10). **Nada foi validado com dado real da TOULON e o piloto não rodou** — por isso todas as confianças seguem limitadas, `ScenarioEngine.PILOT_VALIDATED=false` e nenhuma fatia tem tela. Pendências de validação (do dono): m²/equipe/abertura por loja (F4.3), um plano de período (F4.4), uma comparação real de investimentos (F4.5), cobertura de compras por ordem (F4.6), nicho + inteligência externa ligados e pesquisa do nicho publicada (F4.9), `FEATURE_ORG_GROUPS` ligada (F4.8). Fora de escopo declarado: backtest de comissão/política/campanha (falta histórico por vendedor/dia conferido, F4.7) e benchmark entre empresas de fora do grupo (F4.8/F4.9, exige anonimização entre tenants). A Fase 4 só pode ser dada como encerrada por decisão do dono, como as Fases 2 e 3.
 
-## 18. Status F4.8b — EM PR (aba "Inteligência" no Grupo, 2026-10-08)
+## 18. Status F4.8b — MERGED (#1872) (aba "Inteligência" no Grupo, 2026-10-08)
 
 UI-only sobre a rota já testada `GET /api/groups/:groupId/intelligence` (§16). Nova aba **"Inteligência"** no `OrgGroupView` (`src/features/orggroup/`), ao lado de Operações/Consolidado/Equipe/Fatura. Rótulos e formatação em funções **puras** (`intelligenceLabels.ts`) — a tela **não calcula nada**, só exibe o que o servidor devolveu.
 
@@ -171,3 +171,12 @@ UI-only sobre a rota já testada `GET /api/groups/:groupId/intelligence` (§16).
 - `test:group-intelligence-ui` (17, mutação verificada em 7 pontos): rótulos puros + fiação (aba ligada, rota real montada no router, estados, sem cálculo próprio). **Não foi aberto no navegador** — o teste prova a lógica e a fiação, não a aparência; `tsc` e `vite build` verdes.
 - **Limites:** a aba só aparece com `FEATURE_ORG_GROUPS` ligada e só é útil depois que m²/equipe/custo fixo estiverem preenchidos nas lojas de cada operação; sem isso mostra os motivos, não números.
 
+
+## 19. Ajustes de leitura do estoque negativo (TOULON — coleção de ciclo único, 2026-10-09)
+
+Não é fatia da Fase 4; correção de leitura vista pelo Bruno em Operação da Rede → Insights.
+- "303 un" era a CONTAGEM de itens (um alerta por loja+produto+cor/tamanho) rotulada como unidades. O sinal `retail_store_stockout` passa a usar a unidade `items` ("itens") e a evidência traz `items` e `pieces` (soma do saldo negativo, em módulo); o texto diz "N itens (cor/tamanho) com M peças a menos".
+- Reaproveita a estratégia de reposição que já existe (`collection_sellout`, "Fim de coleção") como marcador de ciclo único — sem flag nova. Nela o sinal carrega `singleCycle` (leitura: entrada/recebimento lançado depois da venda) e o padrão "estoque negativo recorrente" deixa de nascer (cada coleção é um ciclo só). Reposição contínua: 0-regressão.
+- `retail_stock_alerts.first_detected_at` (aditiva) guarda quando o negativo ABERTO foi visto pela 1ª vez (`detected_at` é reescrito a cada sincronização). `listNegative` devolve `days_open` (null se desconhecido — nunca inventa) e a tela ganha "Aberto há".
+- Fora de escopo, declarado: a origem do "Repor o estoque… esperado 160 un" não foi encontrada; "peças" só são somadas onde há saldo em `retail_store_inventory`.
+- Teste: `test:stock-negative-clarity` (19, mutação verificada).

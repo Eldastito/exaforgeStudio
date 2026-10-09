@@ -6,6 +6,7 @@ import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailTransferService } from "./RetailTransferService.js";
 import { haversineKm } from "./geo.js";
 import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
  * RetailOpsSignalPublisher — conecta as OPERAÇÕES de varejo (loja virtual,
@@ -94,14 +95,22 @@ export class RetailOpsSignalPublisher {
     }
 
     // Ruptura ativa: loja com muitos alertas de estoque negativo abertos agora.
-    const stockouts = db.prepare("SELECT store_id, COUNT(*) AS n FROM retail_stock_alerts WHERE organization_id = ? AND alert_type = 'negative_stock' AND status = 'open' AND store_id IS NOT NULL GROUP BY store_id").all(orgId) as any[];
+    // `n` conta ITENS (um alerta por loja+produto+cor/tamanho), NÃO peças — por isso a unidade é "items" e as peças
+    // negativas (soma do saldo < 0, em módulo) vão à parte na evidência. `singleCycle` (estratégia "fim de coleção")
+    // troca a leitura: em coleção de ciclo único, negativo costuma ser entrada/recebimento lançado depois da venda.
+    const singleCycle = RetailReplenishmentStrategyService.strategy(orgId) === "collection_sellout";
+    const stockouts = db.prepare(`SELECT a.store_id, COUNT(*) AS n, COALESCE(SUM(CASE WHEN i.quantity_available < 0 THEN -i.quantity_available ELSE 0 END), 0) AS pieces
+        FROM retail_stock_alerts a
+        LEFT JOIN retail_store_inventory i ON i.organization_id = a.organization_id AND i.store_id = a.store_id
+         AND i.product_service_id = a.product_service_id AND i.variant_id = COALESCE(a.variant_id, '')
+       WHERE a.organization_id = ? AND a.alert_type = 'negative_stock' AND a.status = 'open' AND a.store_id IS NOT NULL GROUP BY a.store_id`).all(orgId) as any[];
     for (const so of stockouts) {
       if (Number(so.n) < 3) continue;
       const storeName = (db.prepare("SELECT name FROM retail_stores WHERE id = ? AND organization_id = ?").get(so.store_id, orgId) as any)?.name || "loja";
       pub({
         domain: "inventory", signalType: "retail_store_stockout", severity: "risk",
-        impactAmount: Number(so.n), impactUnit: "units", sourceEntityType: "retail_store", sourceEntityId: so.store_id,
-        evidence: { store: storeName, alerts: Number(so.n) }, dedupeKey: `retail_ops:stockout:${so.store_id}`,
+        impactAmount: Number(so.n), impactUnit: "items", sourceEntityType: "retail_store", sourceEntityId: so.store_id,
+        evidence: { store: storeName, alerts: Number(so.n), items: Number(so.n), pieces: Number(so.pieces) || 0, singleCycle }, dedupeKey: `retail_ops:stockout:${so.store_id}`,
       });
     }
 

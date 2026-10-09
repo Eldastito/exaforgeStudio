@@ -161,3 +161,13 @@ Decisão do dono: "começar a F4.2 com as recomendações" (D1 como recomendada:
 
 **Código F4.1–F4.10 completo e mergeado** (F4.1–F4.6, F4.7 reduzida, F4.8, F4.9, F4.10). **Nada foi validado com dado real da TOULON e o piloto não rodou** — por isso todas as confianças seguem limitadas, `ScenarioEngine.PILOT_VALIDATED=false` e nenhuma fatia tem tela. Pendências de validação (do dono): m²/equipe/abertura por loja (F4.3), um plano de período (F4.4), uma comparação real de investimentos (F4.5), cobertura de compras por ordem (F4.6), nicho + inteligência externa ligados e pesquisa do nicho publicada (F4.9), `FEATURE_ORG_GROUPS` ligada (F4.8). Fora de escopo declarado: backtest de comissão/política/campanha (falta histórico por vendedor/dia conferido, F4.7) e benchmark entre empresas de fora do grupo (F4.8/F4.9, exige anonimização entre tenants). A Fase 4 só pode ser dada como encerrada por decisão do dono, como as Fases 2 e 3.
 
+## 18. Status F4.8b — EM PR (aba "Inteligência" no Grupo, 2026-10-08)
+
+UI-only sobre a rota já testada `GET /api/groups/:groupId/intelligence` (§16). Nova aba **"Inteligência"** no `OrgGroupView` (`src/features/orggroup/`), ao lado de Operações/Consolidado/Equipe/Fatura. Rótulos e formatação em funções **puras** (`intelligenceLabels.ts`) — a tela **não calcula nada**, só exibe o que o servidor devolveu.
+
+- Seletor de mês (padrão: mês anterior). Por indicador (faturamento por m², por pessoa, custo fixo sobre faturamento): valor de cada operação lado a lado; com ranking → mediana, posição ("melhor/perto/pior que a mediana", já normalizada pelo servidor — no custo fixo, menor é melhor) e as perguntas neutras; **sem ranking → o motivo em português** (amostra mínima, nichos diferentes, nicho não cadastrado, mês aberto) e os valores mesmo assim.
+- Honestidade: dado ausente → "—" (nunca R$ 0,00); cobertura incompleta dita ("1 de 2 loja(s) com dado"); operação indisponível avisada; avisos do servidor sempre visíveis; confiança nunca "alta"; nenhuma recomendação de ação.
+- Estados: carregando, sem grupo, 403 (só dono/admin), 400 (período), erro HTTP e falha de rede — todos com mensagem.
+- `test:group-intelligence-ui` (17, mutação verificada em 7 pontos): rótulos puros + fiação (aba ligada, rota real montada no router, estados, sem cálculo próprio). **Não foi aberto no navegador** — o teste prova a lógica e a fiação, não a aparência; `tsc` e `vite build` verdes.
+- **Limites:** a aba só aparece com `FEATURE_ORG_GROUPS` ligada e só é útil depois que m²/equipe/custo fixo estiverem preenchidos nas lojas de cada operação; sem isso mostra os motivos, não números.
+

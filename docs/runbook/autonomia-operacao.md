@@ -362,3 +362,5 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 
 `GET /api/groups/:groupId/intelligence?period=AAAA-MM` (owner/admin do grupo; exige `FEATURE_ORG_GROUPS`). Compara as operações do grupo por faturamento por m², por pessoa e custo fixo sobre faturamento. Pra ter conteúdo: cada operação precisa ter m², equipe e custo fixo cadastrados nas suas lojas (F4.3) e fechamentos do mês. **Ranking só com 3+ operações do mesmo nicho** em mês fechado — fora disso aparecem só os valores lado a lado, com o motivo. As perguntas são pontos de partida, não conclusão. Não mistura clientes nem vendas individuais; benchmark com empresas de fora do grupo não existe.
 
+Tela: aba **Inteligência** em Grupo (mesma rota). Se aparecer só "Preciso de pelo menos 3 operações…" ou "—", é falta de dado cadastrado (m², equipe, custo fixo), não erro.
+

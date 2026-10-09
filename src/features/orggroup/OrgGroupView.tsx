@@ -1,20 +1,22 @@
 /**
- * OrgGroupView — ADR-199 (UI): tela do ZapFlow Grupo. Três abas sobre as APIs já
+ * OrgGroupView — ADR-199 (UI): tela do ZapFlow Grupo. Abas sobre as APIs já
  * testadas (/api/groups*): Operações (lista + provisionar nova operação), Consolidado
- * (dashboard fan-out por marca) e Fatura (prévia consolidada ou separada por pagador).
+ * (dashboard fan-out por marca), Inteligência (comparação entre operações, ADR-205 F4.8),
+ * Equipe e Fatura (prévia consolidada ou separada por pagador).
  *
  * Feature gated no servidor (404 sem FEATURE_ORG_GROUPS) → mostra estado honesto. Dinheiro
  * é role-gated na rota (owner/admin); 402/403 vira aviso, nunca inventa número.
  */
 import React, { useEffect, useState } from 'react';
-import { Building2, Plus, RefreshCw, Receipt, LayoutGrid, LogIn, Users, ArrowRightLeft } from 'lucide-react';
+import { Building2, Plus, RefreshCw, Receipt, LayoutGrid, LogIn, Users, ArrowRightLeft, Scale } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { previousMonth, formatMetricValue, reasonLabel, positionLabel, confidenceLabel, coverageLabel } from './intelligenceLabels';
 
 const brl = (n: number | null | undefined) =>
   n == null ? '—' : Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-type Tab = 'ops' | 'consolidated' | 'billing' | 'staff';
+type Tab = 'ops' | 'consolidated' | 'intelligence' | 'billing' | 'staff';
 
 export function OrgGroupView() {
   const [groupId, setGroupId] = useState<string | null>(null);
@@ -46,11 +48,13 @@ export function OrgGroupView() {
       <div className="flex gap-1 border-b border-zinc-800 mb-5">
         <TabBtn active={tab === 'ops'} onClick={() => setTab('ops')} icon={<LayoutGrid className="w-4 h-4" />}>Operações</TabBtn>
         <TabBtn active={tab === 'consolidated'} onClick={() => setTab('consolidated')} icon={<RefreshCw className="w-4 h-4" />}>Consolidado</TabBtn>
+        <TabBtn active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<Scale className="w-4 h-4" />}>Inteligência</TabBtn>
         <TabBtn active={tab === 'staff'} onClick={() => setTab('staff')} icon={<Users className="w-4 h-4" />}>Equipe</TabBtn>
         <TabBtn active={tab === 'billing'} onClick={() => setTab('billing')} icon={<Receipt className="w-4 h-4" />}>Fatura</TabBtn>
       </div>
       {tab === 'ops' && <OpsTab groupId={groupId} onGroupCreated={setGroupId} />}
       {tab === 'consolidated' && <ConsolidatedTab groupId={groupId} />}
+      {tab === 'intelligence' && <IntelligenceTab groupId={groupId} />}
       {tab === 'staff' && <StaffTab groupId={groupId} />}
       {tab === 'billing' && <BillingTab groupId={groupId} />}
     </Wrap>
@@ -260,6 +264,105 @@ function ConsolidatedTab({ groupId }: { groupId: string | null }) {
             ))}
           </div>
           {data.partial?.length > 0 && <p className="text-xs text-amber-500/80">{data.partial.length} operação(ões) indisponível(is) — mostradas como parciais.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------- Inteligência: comparação entre as operações (ADR-205 F4.8) ----------
+function IntelligenceTab({ groupId }: { groupId: string | null }) {
+  const [month, setMonth] = useState(() => previousMonth(new Date().toISOString().slice(0, 10)));
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    if (!groupId) return;
+    setLoading(true); setErr(null);
+    try {
+      const r = await apiFetch(`/api/groups/${groupId}/intelligence?period=${month}`);
+      if (r.ok) setData(await r.json());
+      else {
+        setData(null);
+        const d = await r.json().catch(() => ({}));
+        setErr(r.status === 403 ? 'Só o dono ou o administrador vê a comparação entre as operações.'
+          : r.status === 400 ? (d?.error || 'Período inválido.')
+          : `Não foi possível carregar a comparação (HTTP ${r.status}).`);
+      }
+    } catch { setData(null); setErr('Falha de rede ao carregar a comparação.'); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [groupId, month]);
+
+  if (!groupId) return <Empty title="Sem grupo" msg="Adicione operações na aba Operações." />;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-500">
+        Compara as operações do grupo por faturamento por m², por pessoa e custo fixo — lado a lado, sem misturar clientes nem vendas.
+        É um ponto de partida para perguntar, não uma conclusão: praça, formato de loja e equipe mudam o resultado.
+      </p>
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-zinc-400">Mês</label>
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+          className="rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-sm text-zinc-100" />
+      </div>
+      {loading && <p className="text-sm text-zinc-500">Carregando…</p>}
+      {err && <p className="text-sm text-amber-400">{err}</p>}
+      {!loading && data && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Stat label="Faturamento (operações com dado)" value={brl(data.totals?.revenue)} />
+            <Stat label="Operações com dado" value={`${data.totals?.operationsWithRevenue ?? 0} de ${data.totals?.operationsTotal ?? 0}`} />
+          </div>
+          {(data.operations || []).some((o: any) => o.partial) && (
+            <p className="text-xs text-amber-500/80">Operação(ões) indisponível(is) agora: ficaram de fora desta comparação.</p>
+          )}
+          {(data.metrics || []).map((m: any) => (
+            <div key={m.key} className="rounded-xl border border-zinc-800 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-zinc-900/60">
+                <p className="text-sm text-zinc-200">{m.label}</p>
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                  {m.ranked && m.median != null && <span>mediana {formatMetricValue(m.unit, m.median)}</span>}
+                  {confidenceLabel(m.confidence) && <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{confidenceLabel(m.confidence)}</span>}
+                </div>
+              </div>
+              {!m.ranked && reasonLabel(m.reason) && <p className="px-4 py-2 text-xs text-zinc-500 border-b border-zinc-800">{reasonLabel(m.reason)}</p>}
+              <div className="divide-y divide-zinc-800">
+                {(m.operations || []).map((o: any) => {
+                  const pos = positionLabel(o.position);
+                  const cov = coverageLabel(o.coverage);
+                  return (
+                    <div key={o.organizationId} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm text-zinc-100 truncate">{o.businessName || o.organizationId}</p>
+                        {cov && <p className="text-[11px] text-zinc-500">{cov}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {pos && (
+                          <span className={`text-[11px] px-1.5 py-0.5 rounded border ${pos.tone === 'good' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : pos.tone === 'warn' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-zinc-800 text-zinc-400 border-zinc-700'}`}>
+                            {pos.text}{o.gapVsMedianPct != null ? ` (${o.gapVsMedianPct > 0 ? '+' : ''}${o.gapVsMedianPct}%)` : ''}
+                          </span>
+                        )}
+                        <span className="text-sm text-zinc-300">{formatMetricValue(m.unit, o.value)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {(m.questions || []).length > 0 && (
+                <ul className="px-4 py-2 border-t border-zinc-800 space-y-1">
+                  {m.questions.map((q: string, i: number) => <li key={i} className="text-xs text-indigo-300">• {q}</li>)}
+                </ul>
+              )}
+            </div>
+          ))}
+          {(data.caveats || []).length > 0 && (
+            <ul className="space-y-1">
+              {data.caveats.map((c: string, i: number) => <li key={i} className="text-[11px] text-zinc-500">• {c}</li>)}
+            </ul>
+          )}
         </>
       )}
     </div>

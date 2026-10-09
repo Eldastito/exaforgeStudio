@@ -962,6 +962,7 @@
     "test:board-review": "tsx scripts/test-board-review.ts",
     "test:forecast-backtest": "tsx scripts/test-forecast-backtest.ts",
     "test:group-intelligence": "tsx scripts/test-group-intelligence.ts",
+    "test:group-intelligence-ui": "tsx scripts/test-group-intelligence-ui.ts",
     "test:network-objective": "tsx scripts/test-network-objective.ts",
     "test:forecast-alerts-screens": "tsx scripts/test-forecast-alerts-screens.ts",
     "test:rbac-default-deny": "tsx scripts/test-rbac-default-deny.ts",

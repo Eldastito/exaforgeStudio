@@ -180,3 +180,12 @@ Não é fatia da Fase 4; correção de leitura vista pelo Bruno em Operação da
 - `retail_stock_alerts.first_detected_at` (aditiva) guarda quando o negativo ABERTO foi visto pela 1ª vez (`detected_at` é reescrito a cada sincronização). `listNegative` devolve `days_open` (null se desconhecido — nunca inventa) e a tela ganha "Aberto há".
 - Fora de escopo, declarado: a origem do "Repor o estoque… esperado 160 un" não foi encontrada; "peças" só são somadas onde há saldo em `retail_store_inventory`.
 - Teste: `test:stock-negative-clarity` (19, mutação verificada).
+
+## 20. Status F4.11 — EM PR (tela "Revisão do mês", 2026-10-09)
+
+Primeira tela de uma fatia da Fase 4 que o dono usa sem pedir ao suporte. Critério do dono: não pode fugir de facilitar o uso do ZapFlow.
+- **Onde**: cartão recolhido DENTRO da Central de Saúde (`BoardReviewCard`), sem item de menu novo; só owner/admin (a rota já barra o resto, §73); só chama a API quando o dono abre.
+- **O que mostra**: pauta de FATOS primeiro (revisão vencida, plano fora do ritmo, metas, concentração de fornecedor); depois as seções que têm dado (resultado, plano × realizado, decisões, benchmark das lojas, fornecedores, contexto de mercado); "ainda sem dado" por último. Alterna Mês/Trimestre. Aviso do piloto visível enquanto `pilot.validated=false`; confiança nunca "alta".
+- **O que NÃO faz**: não calcula nada (só exibe o que a F4.10 compôs), não recomenda, não envia, não executa; texto externo vira texto puro (sem link/HTML) e a síntese do modelo é rotulada como hipótese.
+- **Servidor**: único ajuste — a seção `lojas` passa a entregar `unit` da métrica (a tela não adivinha R$ × %).
+- **Não verificado**: a tela não foi vista no navegador (só tipos, build e teste de fiação/rótulos). Teste: `test:board-review-ui` (19, 3 mutações verificadas); `test:board-review` (22) segue verde.

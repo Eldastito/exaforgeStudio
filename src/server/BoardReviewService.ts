@@ -87,7 +87,7 @@ export class BoardReviewService {
       bench = StoreBenchmarkService.benchmark(orgId, { period: lastMonth });
       const ranked = bench.metrics.filter((m: any) => m.ranked);
       if (!ranked.length) return { reason: `sem comparação possível em ${lastMonth} (amostra mínima de lojas ou dados de m²/equipe/custo faltando)` };
-      return { data: { period: bench.period, coversOnly: period === "quarter" ? "último mês do trimestre" : "mês fechado", metrics: ranked.map((m: any) => ({ key: m.key, label: m.label, median: m.median, confidence: m.confidence, questions: m.questions })), caveats: bench.caveats } };
+      return { data: { period: bench.period, coversOnly: period === "quarter" ? "último mês do trimestre" : "mês fechado", metrics: ranked.map((m: any) => ({ key: m.key, label: m.label, unit: m.unit, median: m.median, confidence: m.confidence, questions: m.questions })), caveats: bench.caveats } };
     });
 
     let conc: any = null;

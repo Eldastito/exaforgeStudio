@@ -364,3 +364,7 @@ API (`/api/health-center/strategic/…`): ler = gestor; escrever = só dono/admi
 
 Tela: aba **Inteligência** em Grupo (mesma rota). Se aparecer só "Preciso de pelo menos 3 operações…" ou "—", é falta de dado cadastrado (m², equipe, custo fixo), não erro.
 
+
+## F4.11 — tela "Revisão do mês" (Central de Saúde)
+
+Central de Saúde → cartão **Revisão do mês** (owner/admin). Abre → carrega `GET /api/health-center/board-review?period=month|quarter`. Se a pauta vier vazia e várias seções em "Ainda sem dado", é falta de cadastro (plano do período, m²/equipe, decisões registradas, nicho + inteligência externa), não erro. "Esta revisão é só do gestor" = usuário sem visão completa de negócio. O aviso âmbar do piloto some só quando `ScenarioEngine.PILOT_VALIDATED` for verdadeiro (decisão do dono, após o piloto).

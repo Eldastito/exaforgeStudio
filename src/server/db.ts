@@ -12490,6 +12490,9 @@ const initDb = () => {
     CREATE INDEX IF NOT EXISTS idx_strategic_plan_lines ON strategic_plan_lines (organization_id, plan_id, version);
   `);
 
+  // Estoque negativo: data da 1ª detecção do negativo ABERTO (detected_at é reescrito a cada sincronização, então não serve p/ "há quantos dias").
+  try { db.exec(`ALTER TABLE retail_stock_alerts ADD COLUMN first_detected_at DATETIME`); } catch(e){}
+
 };
 
 initDb();

@@ -64,7 +64,7 @@ const STRATEGIC_DEFAULT = 0.6;
 const URGENCY: Record<string, number> = { critical: 1.0, risk: 0.7, attention: 0.4, info: 0.15 };
 
 // Preferência por unidade (PRD §9.2: "Impacto em BRL tem preferência").
-const UNIT_PREF: Record<string, number> = { BRL: 1.0, hours: 0.85, units: 0.85, percent: 0.85, score: 0.85 };
+const UNIT_PREF: Record<string, number> = { BRL: 1.0, hours: 0.85, units: 0.85, items: 0.85, percent: 0.85, score: 0.85 };
 
 // Mapa sinal → ação recomendada (rótulo + action_type p/ resolver a aprovação).
 const ACTION_MAP: Record<string, { actionType: string; label: string }> = {

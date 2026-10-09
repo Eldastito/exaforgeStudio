@@ -34,6 +34,9 @@ type Entry = {
   actionWillDo: string;
   affected?: Affected;
   audience?: "owner" | "technical";
+  /** Leitura que depende da evidência (ex.: coleção de ciclo único). null/undefined → usa `meaning`/`actionWillDo`. */
+  meaningWhen?: (ev: any) => string | null | undefined;
+  actionWillDoWhen?: (ev: any) => string | null | undefined;
 };
 
 export const DOMAIN_LABEL: Record<string, string> = {
@@ -55,6 +58,15 @@ const CATALOG: Record<string, Entry> = {
   retail_store_stockout: {
     title: (ev) => inStore(ev, "Produtos com divergência de estoque identificados"),
     meaning: "O saldo de alguns itens ficou negativo: em geral é venda sem entrada, transferência não lançada ou sincronização atrasada.",
+    // Itens = cor/tamanho (um alerta por produto+cor+tamanho); peças = soma do que está faltando lançar. Só diz o que a evidência traz.
+    meaningWhen: (ev) => {
+      const items = num(ev?.items), pieces = num(ev?.pieces);
+      const head = items !== null ? `${items} ${items === 1 ? "item (cor/tamanho)" : "itens (cor/tamanho)"}${pieces ? ` com ${pieces} ${pieces === 1 ? "peça" : "peças"} a menos no sistema` : ""}. ` : "";
+      return ev?.singleCycle
+        ? `${head}Como a loja trabalha cada coleção uma vez só, saldo negativo costuma ser entrada ou recebimento lançado depois da venda — confira se a mercadoria foi recebida e lançada.`
+        : head ? `${head}Em geral é venda sem entrada, transferência não lançada ou sincronização atrasada.` : null;
+    },
+    actionWillDoWhen: (ev) => ev?.singleCycle ? "Cria uma tarefa para conferir se o recebimento dessas peças foi lançado no sistema." : null,
     actionLabel: "Investigar divergência", actionWillDo: "Cria uma tarefa para conferir os itens com saldo negativo e descobrir a causa.", affected: "yes",
   },
   retail_transfer_suggested: {
@@ -265,7 +277,10 @@ export function presentSignal(input: SignalInput): SignalPresentation {
   if (entry) {
     let title: string;
     try { title = typeof entry.title === "function" ? entry.title(ev) : entry.title; } catch { title = typeof entry.title === "function" ? "Ponto de atenção" : entry.title; }
-    return { title, meaning: entry.meaning, actionLabel: entry.actionLabel, actionWillDo: entry.actionWillDo, operationAffected: entry.affected || "unknown", audience: entry.audience || "owner", domainLabel: dl, known: true };
+    let meaning = entry.meaning, actionWillDo = entry.actionWillDo;
+    try { meaning = entry.meaningWhen?.(ev) || meaning; } catch { /* mantém o texto fixo */ }
+    try { actionWillDo = entry.actionWillDoWhen?.(ev) || actionWillDo; } catch { /* idem */ }
+    return { title, meaning, actionLabel: entry.actionLabel, actionWillDo, operationAffected: entry.affected || "unknown", audience: entry.audience || "owner", domainLabel: dl, known: true };
   }
   const fb = FALLBACK_BY_ACTION[String(input.actionType || "")] || FALLBACK_DEFAULT;
   return {

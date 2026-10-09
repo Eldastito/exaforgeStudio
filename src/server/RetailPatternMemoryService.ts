@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { chat, isAIConfigured } from "./llm.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 const OUTCOMES = ["worked", "no_effect", "backfired"] as const;
 type Outcome = typeof OUTCOMES[number];
@@ -270,7 +271,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
         BusinessSignalService.publish(orgId, {
           domain: "retail_ops", signalType: p.pattern_type, severity, basis: "fact",
           confidence: Number(p.confidence) || 0.5,
-          impactAmount: Number(ev.evidenceCount) || null, impactUnit: "units",
+          impactAmount: Number(ev.evidenceCount) || null, impactUnit: p.pattern_type === "estoque_negativo_recorrente" ? "items" : "units",
           sourceService: "RetailPatternMemoryService", sourceEntityType: "retail_store_pattern", sourceEntityId: p.id,
           evidence: { store: storeName, description: p.description, occurrences: p.occurrences, effectiveness: stats?.effectiveness ?? null, acted: stats?.acted ?? 0, ...ev },
           dedupeKey,
@@ -341,7 +342,9 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
 
     const candidates = [
       ...this.detectDivergenceRecurrence(orgId, from, asOf),
-      ...this.detectNegativeStockRecurrence(orgId, from, asOf),
+      // Coleção de ciclo único (estratégia "fim de coleção"): negativo não é "recorrente" — cada coleção é um ciclo só e o
+      // mesmo item reaparecer é entrada/recebimento atrasado. O sinal pontual (stockout) já cobre; sem padrão, sem "visto Nx".
+      ...(RetailReplenishmentStrategyService.strategy(orgId) === "collection_sellout" ? [] : this.detectNegativeStockRecurrence(orgId, from, asOf)),
       ...this.detectBelowQuotaRecurrence(orgId, from, asOf),
       ...this.detectLateClosingRecurrence(orgId, from, asOf),
     ];

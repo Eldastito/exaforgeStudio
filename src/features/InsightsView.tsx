@@ -36,8 +36,8 @@ const DOMAIN_LABEL: Record<string, string> = {
   agenda: 'Agenda', consumption: 'Consumo', security: 'Segurança', compliance: 'Compliance',
 };
 const domLabel = (d: string) => DOMAIN_LABEL[d] || d;
-const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : (im.unit || '')}`.trim()) : null;
-const fmtVal = (v: any, unit: any) => unit === 'BRL' ? brl(v) : `${v} ${unit === 'units' ? 'un' : (unit || '')}`.trim();
+const fmtImpact = (im: any) => im ? (im.unit === 'BRL' ? brl(im.amount) : `${im.amount} ${im.unit === 'units' ? 'un' : im.unit === 'items' ? 'itens' : (im.unit || '')}`.trim()) : null;
+const fmtVal = (v: any, unit: any) => unit === 'BRL' ? brl(v) : `${v} ${unit === 'units' ? 'un' : unit === 'items' ? 'itens' : (unit || '')}`.trim();
 
 function PrioritiesPanel() {
   const [data, setData] = useState<any | null>(null);

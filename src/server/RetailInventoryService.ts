@@ -55,9 +55,10 @@ export class RetailInventoryService {
   private static evaluateAlert(orgId: string, storeId: string, productId: string, variantId: string | null | undefined, qty: number): void {
     if (qty < 0) {
       db.prepare(
-        `INSERT INTO retail_stock_alerts (id, organization_id, store_id, product_service_id, variant_id, alert_type, quantity, status)
-         VALUES (?, ?, ?, ?, ?, 'negative_stock', ?, 'open')
+        `INSERT INTO retail_stock_alerts (id, organization_id, store_id, product_service_id, variant_id, alert_type, quantity, status, first_detected_at)
+         VALUES (?, ?, ?, ?, ?, 'negative_stock', ?, 'open', CURRENT_TIMESTAMP)
          ON CONFLICT(organization_id, store_id, product_service_id, variant_id, alert_type) DO UPDATE SET
+           first_detected_at = CASE WHEN retail_stock_alerts.status = 'open' AND retail_stock_alerts.first_detected_at IS NOT NULL THEN retail_stock_alerts.first_detected_at ELSE CURRENT_TIMESTAMP END,
            quantity = excluded.quantity, status = 'open', detected_at = CURRENT_TIMESTAMP, resolved_at = NULL, resolution_note = NULL`
       ).run(randomUUID(), orgId, storeId, productId, vk(variantId), qty);
     } else {
@@ -109,7 +110,10 @@ export class RetailInventoryService {
               pv.name AS variant_name, pv.color AS variant_color, pv.size AS variant_size,
               pv.external_ref AS variant_sku,
               COALESCE(pv.sku, p.ean) AS variant_ean,
-              i.updated_at AS source_synced_at
+              i.updated_at AS source_synced_at,
+              (SELECT a.first_detected_at FROM retail_stock_alerts a
+                WHERE a.organization_id = i.organization_id AND a.store_id = i.store_id AND a.product_service_id = i.product_service_id
+                  AND a.variant_id = COALESCE(i.variant_id, '') AND a.alert_type = 'negative_stock' AND a.status = 'open') AS negative_since
          ${base} ORDER BY i.quantity_available ASC LIMIT ? OFFSET ?`
     ).all(...args, limit, offset) as any[];
 
@@ -118,7 +122,12 @@ export class RetailInventoryService {
     // "Meta não configurada", nunca falta inventada). Resolve por precedência;
     // curto-circuita se a org não tem NENHUMA política.
     const orgHasPolicies = RetailStockPolicyService.hasAny(orgId);
+    const nowMs = Date.now();
     for (const it of items) {
+      // Dias em aberto desde que o ZapFlow VIU o negativo (first_detected_at nasce na 1ª detecção após esta coluna existir;
+      // alerta legado sem a data → null, nunca inventa). Negativo que dura dias é falta real; o que some no dia é lançamento atrasado.
+      const since = it.negative_since ? Date.parse(String(it.negative_since).replace(" ", "T") + "Z") : NaN;
+      it.days_open = Number.isFinite(since) ? Math.max(0, Math.floor((nowMs - since) / 86400000)) : null;
       const pol = orgHasPolicies
         ? RetailStockPolicyService.resolve(orgId, it.store_id, it.product_service_id, it.variant_id)
         : null;

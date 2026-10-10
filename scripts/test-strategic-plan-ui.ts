@@ -58,7 +58,7 @@ async function main() {
 
   // ── fiação ──
   const card = read("src/features/strategicplan/StrategicPlanCard.tsx"), hc = read("src/features/HealthCenterView.tsx"), router = read("src/server/routes/health.ts");
-  check("o cartão está na Central de Saúde (sem menu novo)", /<StrategicPlanCard \/>/.test(hc) && !/strategicplan/i.test(read("src/features/Sidebar.tsx")));
+  check("o cartão está na Central de Saúde (sem menu novo)", /import\('@\/src\/features\/strategicplan\/StrategicPlanCard'\)/.test(hc) && /<StrategicPlanCard \/>/.test(hc) && !/strategicplan/i.test(read("src/features/Sidebar.tsx")));
   check("usa as rotas REAIS de plano (existem no router)", /\/api\/health-center\/plans\?periodType=month/.test(card) && /router\.get\("\/plans"/.test(router) && /router\.post\("\/plans"/.test(router) && /router\.put\("\/plans\/:id"/.test(router) && /\/activate/.test(card) && /router\.post\("\/plans\/:id\/activate"/.test(router));
   check("só owner/admin vê o cartão", /user\?\.role !== 'owner' && user\?\.role !== 'admin'\) return null/.test(card));
   check("não carrega ao montar: só ao abrir", !/useEffect/.test(card) && /if \(next && !loaded/.test(card));

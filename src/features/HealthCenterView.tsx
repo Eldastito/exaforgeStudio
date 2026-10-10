@@ -1,5 +1,5 @@
 import { visibleTriggers, hiddenAttention } from '@/src/lib/healthTriggers';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { HeartPulse, Loader2, ArrowRight, TrendingUp, Wallet, AlertTriangle, Check, Target, X, Sparkles, GraduationCap, ClipboardList, Circle, MessageCircle, Send, ChevronDown, ShieldCheck, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
@@ -7,8 +7,9 @@ import { formatBRL } from '@/src/lib/metric';
 import { cashHeadline } from '@/src/features/cashBasis';
 import { useStore } from '@/src/store/useStore';
 import type { ViewMode } from '@/src/store/useStore';
-import { BoardReviewCard } from '@/src/features/boardreview/BoardReviewCard';
-import { StrategicPlanCard } from '@/src/features/strategicplan/StrategicPlanCard';
+// Cartões da Fase 4: carregados sob demanda — o bundle principal já está colado no limite de 4 MiB do cache do PWA (vite.config.ts).
+const BoardReviewCard = lazy(() => import('@/src/features/boardreview/BoardReviewCard').then((m) => ({ default: m.BoardReviewCard })));
+const StrategicPlanCard = lazy(() => import('@/src/features/strategicplan/StrategicPlanCard').then((m) => ({ default: m.StrategicPlanCard })));
 
 // Central de Saúde e Decisão (ADR-126 Fatia 1) — a tela-síntese: status geral +
 // as 3 prioridades do dia com impacto em R$ e uma ação. Global (todas as verticais).
@@ -158,8 +159,10 @@ export function HealthCenterView() {
 
         <SetupChecklistCard />
 
-        <StrategicPlanCard />
-        <BoardReviewCard />
+        <Suspense fallback={null}>
+          <StrategicPlanCard />
+          <BoardReviewCard />
+        </Suspense>
 
         {/* Índice de Sobrevivência (ADR-127) */}
         {idx && (() => {

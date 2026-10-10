@@ -34,7 +34,7 @@ async function main() {
   const card = read("src/features/boardreview/BoardReviewCard.tsx");
   const hc = read("src/features/HealthCenterView.tsx");
   const router = read("src/server/routes/health.ts");
-  check("o cartão está na Central de Saúde (sem menu novo)", /import \{ BoardReviewCard \}/.test(hc) && /<BoardReviewCard \/>/.test(hc) && !/board_review|boardreview/.test(read("src/features/Sidebar.tsx")));
+  check("o cartão está na Central de Saúde (sem menu novo)", /import\('@\/src\/features\/boardreview\/BoardReviewCard'\)/.test(hc) && /<BoardReviewCard \/>/.test(hc) && !/board_review|boardreview/.test(read("src/features/Sidebar.tsx")));
   check("consome a rota REAL, que existe no router", /\/api\/health-center\/board-review\?period=/.test(card) && /router\.get\("\/board-review"/.test(router));
   check("só aparece pra owner/admin (e a rota barra o resto)", /user\?\.role !== 'owner' && user\?\.role !== 'admin'\) return null/.test(card));
   check("não carrega ao montar: só ao abrir (toggle chama load)", !/useEffect/.test(card) && /if \(next && !data/.test(card));

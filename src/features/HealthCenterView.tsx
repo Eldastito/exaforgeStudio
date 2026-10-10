@@ -9,6 +9,7 @@ import { useStore } from '@/src/store/useStore';
 import type { ViewMode } from '@/src/store/useStore';
 // Cartões da Fase 4: carregados sob demanda — o bundle principal já está colado no limite de 4 MiB do cache do PWA (vite.config.ts).
 const BoardReviewCard = lazy(() => import('@/src/features/boardreview/BoardReviewCard').then((m) => ({ default: m.BoardReviewCard })));
+const ScenarioCard = lazy(() => import('@/src/features/scenario/ScenarioCard').then((m) => ({ default: m.ScenarioCard })));
 const StrategicPlanCard = lazy(() => import('@/src/features/strategicplan/StrategicPlanCard').then((m) => ({ default: m.StrategicPlanCard })));
 
 // Central de Saúde e Decisão (ADR-126 Fatia 1) — a tela-síntese: status geral +
@@ -161,6 +162,7 @@ export function HealthCenterView() {
 
         <Suspense fallback={null}>
           <StrategicPlanCard />
+          <ScenarioCard />
           <BoardReviewCard />
         </Suspense>
 

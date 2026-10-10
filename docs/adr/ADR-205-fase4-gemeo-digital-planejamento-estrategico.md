@@ -181,7 +181,7 @@ Não é fatia da Fase 4; correção de leitura vista pelo Bruno em Operação da
 - Fora de escopo, declarado: a origem do "Repor o estoque… esperado 160 un" não foi encontrada; "peças" só são somadas onde há saldo em `retail_store_inventory`.
 - Teste: `test:stock-negative-clarity` (19, mutação verificada).
 
-## 20. Status F4.11 — EM PR (tela "Revisão do mês", 2026-10-09)
+## 20. Status F4.11 — MERGED (#1874) (tela "Revisão do mês", 2026-10-09)
 
 Primeira tela de uma fatia da Fase 4 que o dono usa sem pedir ao suporte. Critério do dono: não pode fugir de facilitar o uso do ZapFlow.
 - **Onde**: cartão recolhido DENTRO da Central de Saúde (`BoardReviewCard`), sem item de menu novo; só owner/admin (a rota já barra o resto, §73); só chama a API quando o dono abre.

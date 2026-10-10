@@ -10,11 +10,15 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
+import { mock } from "node:test";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "zf-sellerdiag-"));
 process.env.DATA_DIR = tmpDir;
 process.env.NODE_ENV = "production";
 process.env.JWT_SECRET = "test-secret-para-sellerdiag-1234567890";
+// Os dados são de 08–09/2026 e o briefing/ferramenta leem a data REAL de hoje (30 dias): sem congelar o relógio, o teste quebra quando a janela
+// anda (apareceu em 10/10/2026, vermelho também na main). Só `Date` é congelado — timers e IO seguem normais.
+mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-30T15:00:00Z") });
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = "") { console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : ` — ${detail}`}`); if (!ok) failures++; }

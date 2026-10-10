@@ -376,3 +376,7 @@ Central de Saúde → cartão **Plano do mês** (owner/admin). Sem plano: digite
 ## F4.13 — formulário de orçamento e eventos (Plano do mês)
 
 Central de Saúde → Plano do mês → **Orçamento e eventos** (precisa existir o plano do mês: defina a meta primeiro). Orçamento: escolha a categoria e digite o valor do mês; repetir a categoria troca o valor. O gasto acompanhado vem das contas a pagar LANÇADAS com a mesma categoria ("não dá para acompanhar" = contas a pagar não lançadas). Evento: nome, data dentro do mês e, se quiser, quanto vai entrar/sair do caixa — é o que você declara, não uma previsão. Para corrigir um evento, remova e cadastre de novo. Cada alteração cria uma versão nova do plano (as anteriores ficam).
+
+## F4.14 — tela "E se...?" (Central de Saúde)
+
+Central de Saúde → cartão **E se...?** (owner/admin). Escolha o tipo (compra de estoque · vendas sobem ou caem · contratação), digite as premissas e clique "Simular". O resultado é uma FAIXA aproximada, com as premissas e a origem de cada uma, o que mais mexe no resultado e o que a simulação não cobre. É simulação, não previsão: nada é executado nem gravado. Se aparecer "Cadastre seus custos…", falta margem cadastrada; "sem vendas" = informe a receita de 30 dias no campo opcional. Confiança nunca passa de "média" enquanto o piloto não validar (ADR-205 §17). Servidor sem mudança (F4.1).

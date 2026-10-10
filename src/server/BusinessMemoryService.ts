@@ -31,12 +31,14 @@ export class BusinessMemoryService {
       confidence: Number(p.confidence), occurrences: Number(p.occurrences || 0),
       firstSeen: p.first_seen_date || null, lastSeen: p.last_seen_date || null,
     });
-    const rules = by("rule").map((p) => ({ ...card(p), confirmedBy: p.manager_decided_by || null, confirmedAt: p.manager_decided_at || null, note: p.manager_note || null }));
+    const rules = by("rule").map((p) => ({ ...card(p), validFrom: p.valid_from || null, validUntil: p.valid_until || null, confirmedBy: p.manager_decided_by || null, confirmedAt: p.manager_decided_at || null, note: p.manager_note || null }));
     const hypotheses = by("hypothesis").map((p) => ({
       ...card(p),
       // Só o que o motor contou (ocorrências reais desde a 1ª vez) — não inventa "X de Y semanas".
       question: `Identifiquei isso ${p.occurrences} vez${Number(p.occurrences) === 1 ? "" : "es"}${BR(p.first_seen_date) ? ` desde ${BR(p.first_seen_date)}` : ""}. Considera uma regra da empresa?`,
     }));
+    // F5.1: regra com prazo vencido sai das "regras" e pede revisão — nunca segue vigente em silêncio.
+    const expired = by("expired").map((p) => ({ ...card(p), confirmedBy: p.manager_decided_by || null, validUntil: p.valid_until || null, note: "Prazo vencido — confirme de novo (defina nova validade) ou revogue." }));
     const rejected = by("rejected").map((p) => ({ ...card(p), rejectedBy: p.manager_decided_by || null, rejectedAt: p.manager_decided_at || null, note: p.manager_note || null }));
     const observed = by("observed");
 
@@ -52,8 +54,8 @@ export class BusinessMemoryService {
     try { learnings = (LearningEpisodeService.episodes(orgId, { onlyAssured: true, limit: 10 }).episodes || []).map((e: any) => ({ patternId: e.patternId, description: e.description, learningState: e.learningState, assuredEffectiveness: e.assuredEffectiveness, assuredActed: e.assuredActed })); } catch { /* sem aprendizado ainda */ }
 
     return {
-      counts: { rules: rules.length, hypotheses: hypotheses.length, observed: observed.length, rejected: rejected.length, learnings: learnings.length },
-      rules: rules.slice(0, SHOW), hypotheses: hypotheses.slice(0, SHOW), observed: observed.slice(0, 10).map(card), rejected: rejected.slice(0, SHOW),
+      counts: { rules: rules.length, expired: expired.length, hypotheses: hypotheses.length, observed: observed.length, rejected: rejected.length, learnings: learnings.length },
+      rules: rules.slice(0, SHOW), expired: expired.slice(0, SHOW), hypotheses: hypotheses.slice(0, SHOW), observed: observed.slice(0, 10).map(card), rejected: rejected.slice(0, SHOW),
       preferences, policies, alwaysHuman, learnings,
       note: "Read-model derivado (RN-004). Hipótese não é regra: só uma pessoa confirma (RN-F3-4).",
     };

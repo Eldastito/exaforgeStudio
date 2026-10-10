@@ -380,3 +380,6 @@ Central de Saúde → Plano do mês → **Orçamento e eventos** (precisa existi
 ## F4.14 — tela "E se...?" (Central de Saúde)
 
 Central de Saúde → cartão **E se...?** (owner/admin). Escolha o tipo (compra de estoque · vendas sobem ou caem · contratação), digite as premissas e clique "Simular". O resultado é uma FAIXA aproximada, com as premissas e a origem de cada uma, o que mais mexe no resultado e o que a simulação não cobre. É simulação, não previsão: nada é executado nem gravado. Se aparecer "Cadastre seus custos…", falta margem cadastrada; "sem vendas" = informe a receita de 30 dias no campo opcional. Confiança nunca passa de "média" enquanto o piloto não validar (ADR-205 §17). Servidor sem mudança (F4.1).
+
+## F5.1 — validade, expiração e conflito de regras (API)
+Regra confirmada pode ter prazo: `POST /api/insights/patterns/:id/validity` `{validFrom?, validUntil?, note?}` (AAAA-MM-DD; vazio limpa). Prazo vencido → a regra aparece em `expired` no `/api/insights/memory` (não em `rules`) e pede nova confirmação ou revogação. `GET /api/insights/memory/conflicts` lista pares de regras vigentes sobre o mesmo assunto; o mesmo conflito aparece como sinal "Qual está vigente?" no radar (domínio memory). Resolver: dar prazo a uma delas ou revogar uma. `GET /api/insights/patterns/:id/provenance` responde "por que você acha isso?". Sem tela ainda.

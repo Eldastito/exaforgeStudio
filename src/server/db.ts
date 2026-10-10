@@ -12336,12 +12336,15 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_decided_by TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_decided_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE business_patterns ADD COLUMN manager_note TEXT`); } catch(e){}
+  // ADR-206 F5.1 — Knowledge Governance: validade da REGRA confirmada (aditivo; NULL = sem prazo, 0-regressão).
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN valid_from DATE`); } catch(e){}
+  try { db.exec(`ALTER TABLE business_patterns ADD COLUMN valid_until DATE`); } catch(e){}
   db.exec(`
     CREATE TABLE IF NOT EXISTS business_pattern_decisions (
       id TEXT PRIMARY KEY,
       organization_id TEXT NOT NULL,
       pattern_id TEXT NOT NULL,
-      decision TEXT NOT NULL,            -- confirmed | rejected | revoked
+      decision TEXT NOT NULL,            -- confirmed | rejected | revoked | validity (F5.1)
       decided_by TEXT NOT NULL,
       note TEXT,
       confidence_at REAL,

@@ -115,6 +115,31 @@ router.post("/patterns/:id/decision", requireRole("owner", "admin"), (req: AuthR
   res.json({ ok: true, stage: out.stage });
 });
 
+// POST /api/insights/patterns/:id/validity — ADR-206 F5.1: o GESTOR define o prazo da regra confirmada. `{ validFrom?, validUntil?, note? }` (AAAA-MM-DD; vazio = sem limite). owner/admin.
+router.post("/patterns/:id/validity", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = PatternMemoryService.setValidity(orgId, String(req.params.id || ""), req.user?.userId, { validFrom: req.body?.validFrom, validUntil: req.body?.validUntil }, req.body?.note);
+  if (!out.ok) return res.status(400).json({ ok: false, error: out.error });
+  res.json({ ok: true, stage: out.stage });
+});
+
+// GET /api/insights/memory/conflicts — duas regras vigentes sobre o mesmo assunto: pergunta "qual está vigente?" (nunca escolhe).
+router.get("/memory/conflicts", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ conflicts: PatternMemoryService.conflicts(orgId) });
+});
+
+// GET /api/insights/patterns/:id/provenance — "por que você acha isso?": origem, quem decidiu, prazo, evidência, histórico.
+router.get("/patterns/:id/provenance", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = PatternMemoryService.provenance(orgId, String(req.params.id || ""));
+  if (!out) return res.status(404).json({ error: "Padrão não encontrado." });
+  res.json(out);
+});
+
 // GET /api/insights/patterns/:id/decisions — histórico das decisões do gestor sobre o padrão.
 router.get("/patterns/:id/decisions", (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

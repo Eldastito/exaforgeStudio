@@ -23,9 +23,27 @@ RN-F5-1 org vence arquétipo vence vertical vence plataforma · RN-F5-2 conhecim
 - **D5** Políticas herdáveis de grupo / shared services: emendar não-objetivos do ADR-199 ou descartar? *Recomendação: descartar nesta fase.*
 - **D6** Quantas organizações reais mínimas para benchmark externo (k-anonimato)? Hoje 0 no banco do repositório.
 
+## 4b. Decisões do dono (2026-10-10 — "siga as recomendações")
+- **D1** NÃO autorizado: aprendizado/benchmark ENTRE clientes continua fora de escopo (ADR-166 §79 mantido). F5.6/F5.7 do PRD (rede e benchmark entre empresas) ficam BLOQUEADAS.
+- **D2** A Fase 5 abre só com F5.1–F5.5 (sem 2º cliente, sem menu novo).
+- **D3** "Auto" da escada = Nível 3 existente (executar dentro de limites); Nível 4 segue bloqueado.
+- **D4** Rebaixamento automático de autonomia permitido, SÓ para baixo; subir exige humano.
+- **D5** Políticas herdáveis de grupo / shared services: descartadas nesta fase.
+- **D6** Sem benchmark entre empresas, não há mínimo a definir agora (segue em aberto até D1 mudar).
+
 ## 5. Plano (reordenado pela auditoria)
 Ordem proposta: **F5.1** Knowledge Governance (validade, expirado, conflito, origem) · **F5.2** Arquétipos (catálogo + precedência) · **F5.3** Playbook Registry (versão, vertical, arquétipo, autonomia máxima, pré-condições) · **F5.4** escada única + shadow + regressão automática · **F5.5** avaliação/eficácia por versão e backtest de playbook (limitado pelo histórico disponível) · **F5.6** onboarding conversacional por arquétipo · **F5.7** aprendizado negativo estruturado · **F5.8** Strategic Policy com pesos · **F5.9** Product/Customer Intelligence + NBA (máx. 3 prioridades) · **F5.10** orquestração multi-competência atrás do FalaTu (via SkillOS Planner, não `MaestroService`) · **F5.11** biblioteca de playbooks em Empresa → IA · **BLOQUEADAS por D1/D6:** Intelligence Network e Benchmark entre empresas. **F5.12** piloto/certificação TOULON (+ 2º cliente quando existir).
 Cada fatia = 1 PR draft, flag opt-in, aditivo, teste com mutações.
 
 ## 6. Limites desta F5.0
 Documento apenas. Nada foi medido com dado real. Alguns serviços (†) foram avaliados por cabeçalho, não por leitura integral. Não houve acesso à base de produção.
+
+## 7. Status F5.1 — EM PR (Knowledge Governance, 2026-10-10)
+Estende o `PatternMemoryService` (motor único, RN-F5-12) — sem tabela nova, sem menu novo, sem tela.
+- **Validade** (`valid_from`/`valid_until`, colunas aditivas em `business_patterns`, NULL = sem prazo = 0-regressão): só uma PESSOA define (rótulo de sistema recusado), só em regra CONFIRMADA; datas `AAAA-MM-DD` validadas; mudança no histórico append-only (`decision='validity'`) e na auditoria; revogar a decisão limpa o prazo.
+- **Expirado** é estágio DERIVADO (`stageOf`): regra confirmada com prazo vencido deixa de valer e sai de "regras" no `/memory` (lista própria `expired`, com aviso). Nunca grava status; hipótese não expira.
+- **Conflito** (RN-F5-3): duas regras confirmadas e em vigor, mesmo domínio+escopo+tipo, chaves diferentes → PERGUNTA "qual está vigente?" (sinal `memory/rule_conflict` no `business_signals`, publicado no `learn`, resolvido sozinho quando some). O sistema nunca escolhe; resolver = uma pessoa dá prazo ou revoga. É heurística de "mesmo assunto" — pode haver falso positivo, por isso é pergunta, não bloqueio.
+- **Proveniência** (`provenance`): origem (regra do sistema/IA/pessoa), quem e quando decidiu, prazo, evidência e histórico — só o gravado.
+- Rotas: `POST /api/insights/patterns/:id/validity` (owner/admin), `GET /api/insights/memory/conflicts`, `GET /api/insights/patterns/:id/provenance`.
+- Teste: `test:knowledge-governance` (52; 5 mutações verificadas — expiração, conflito por escopo, exigir regra confirmada, limpar prazo ao revogar). Regressão verde: `test:business-memory` 60, `test:pattern-memory` 19, `test:enterprise-learning-assured` 28, `test:assured-effectiveness` 12, `test:learning-episode` 17, `test:historical-evidence` 8, `test:learning-prior` 14, `test:retail-pattern-memory` 32.
+- **Limites**: sem tela (validade e conflito só por API; a tela de Memória não mostra o prazo ainda); o conflito é por assunto (domínio+escopo+tipo), não semântico — dois detectores com tipos diferentes sobre a mesma coisa não conflitam; nenhum documento/planilha entra como fonte (a proveniência cobre só `business_patterns`); `refuted` segue declarado e nunca atribuído (ADR-166 achado c). Nada validado com dado real da TOULON.

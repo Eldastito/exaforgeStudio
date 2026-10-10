@@ -372,3 +372,7 @@ Central de Saúde → cartão **Revisão do mês** (owner/admin). Abre → carre
 ## F4.12 — tela "Plano do mês" (Central de Saúde)
 
 Central de Saúde → cartão **Plano do mês** (owner/admin). Sem plano: digite a meta de faturamento e clique "Definir meta do mês" (cria e ativa). Com plano: mostra realizado × meta, ritmo, orçamento e eventos; "Alterar meta" cria nova versão e mantém orçamento/eventos. "Ainda sem fechamento de loja" = nenhuma loja fechou o dia no período (não é erro nem zero). "Contas a pagar não lançadas" = o orçamento da categoria não tem como ser acompanhado. Orçamento por categoria e eventos ainda são cadastrados pela API `POST/PUT /api/health-center/plans`.
+
+## F4.13 — formulário de orçamento e eventos (Plano do mês)
+
+Central de Saúde → Plano do mês → **Orçamento e eventos** (precisa existir o plano do mês: defina a meta primeiro). Orçamento: escolha a categoria e digite o valor do mês; repetir a categoria troca o valor. O gasto acompanhado vem das contas a pagar LANÇADAS com a mesma categoria ("não dá para acompanhar" = contas a pagar não lançadas). Evento: nome, data dentro do mês e, se quiser, quanto vai entrar/sair do caixa — é o que você declara, não uma previsão. Para corrigir um evento, remova e cadastre de novo. Cada alteração cria uma versão nova do plano (as anteriores ficam).

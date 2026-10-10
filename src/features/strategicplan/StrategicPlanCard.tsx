@@ -3,12 +3,13 @@ import { Target, ChevronDown, Loader2 } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { periodLabel } from '@/src/features/boardreview/boardReviewLabels';
-import { currentMonthKeySP, parseMoneyInput, withRevenueTarget, revenueTargetOf, revenueLine, previousLine, budgetLines, eventLines } from './planLabels';
+import { currentMonthKeySP, parseMoneyInput, withRevenueTarget, revenueTargetOf, revenueLine, previousLine, budgetLines, eventLines, BUDGET_CATEGORY_OPTIONS, withBudget, withoutBudget, withEvent, withoutEvent, parseCashImpact, eventError, budgetItemsOf, eventItemsOf } from './planLabels';
+import { brlOrDash } from '@/src/features/boardreview/boardReviewLabels';
 
 /**
  * Plano do mês (ADR-205 F4.4/F4.12) dentro da Central de Saúde — SEM menu novo. O dono digita UMA coisa (a meta de faturamento do mês) e acompanha o
  * realizado. O plano é decisão dele: a tela não sugere meta nem prevê nada. Orçamento e eventos já cadastrados são preservados ao alterar a meta.
- * Só carrega ao abrir. Dinheiro é do gestor (§73): a rota recusa os demais e o cartão nem aparece pra eles.
+ * O orçamento por categoria e os eventos do mês também são do dono (formulário abaixo do resumo). Só carrega ao abrir. Dinheiro é do gestor (§73): a rota recusa os demais e o cartão nem aparece pra eles.
  */
 export function StrategicPlanCard() {
   const { user } = useAuth();
@@ -21,6 +22,7 @@ export function StrategicPlanCard() {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [editLines, setEditLines] = useState(false);
 
   if (user?.role !== 'owner' && user?.role !== 'admin') return null;
   const monthKey = currentMonthKeySP();
@@ -64,6 +66,12 @@ export function StrategicPlanCard() {
     } catch (e: any) { setMsg(e.message); }
     setBusy(false);
   };
+  // Orçamento e eventos: cada alteração é uma revisão do plano (versão N+1, as anteriores ficam) com TODAS as linhas — a meta e o que já estava cadastrado voltam junto.
+  const saveLines = async (lines: any[], note: string): Promise<boolean> => {
+    setBusy(true); setMsg(null);
+    try { await call(`/api/health-center/plans/${plan.id}`, 'PUT', { lines, changeNote: note }); await load(); setBusy(false); return true; }
+    catch (e: any) { setMsg(e.message); setBusy(false); return false; }
+  };
   const activate = async () => {
     setBusy(true); setMsg(null);
     try { await call(`/api/health-center/plans/${plan.id}/activate`, 'POST'); await load(); } catch (e: any) { setMsg(e.message); }
@@ -101,7 +109,9 @@ export function StrategicPlanCard() {
               <div className="flex gap-2">
                 {plan.status === 'draft' && <button disabled={busy} onClick={activate} className="rounded-lg bg-emerald-600/80 hover:bg-emerald-600 px-3 py-1.5 text-xs text-white disabled:opacity-50">Ativar plano</button>}
                 {!editing && <button onClick={() => { setEditing(true); setValue(target != null ? String(target).replace('.', ',') : ''); setMsg(null); }} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Alterar meta</button>}
+                <button onClick={() => setEditLines((v) => !v)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">{editLines ? 'Fechar orçamento e eventos' : 'Orçamento e eventos'}</button>
               </div>
+              {editLines && <LinesEditor plan={plan} busy={busy} onSave={saveLines} />}
             </>
           )}
           {showForm && state === 'idle' && (
@@ -118,6 +128,82 @@ export function StrategicPlanCard() {
           {msg && <p className="text-[12px] text-amber-300">{msg}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+function LinesEditor({ plan, busy, onSave }: { plan: any; busy: boolean; onSave: (lines: any[], note: string) => Promise<boolean> }) {
+  const [cat, setCat] = useState(BUDGET_CATEGORY_OPTIONS[0].value);
+  const [budget, setBudget] = useState('');
+  const [label, setLabel] = useState('');
+  const [date, setDate] = useState('');
+  const [dir, setDir] = useState('none');
+  const [cash, setCash] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const budgets = budgetItemsOf(plan), events = eventItemsOf(plan);
+
+  const addBudget = async () => {
+    const amount = parseMoneyInput(budget);
+    if (amount == null) { setErr('Digite o orçamento em reais, maior que zero (ex.: 5.000).'); return; }
+    setErr(null);
+    if (await onSave(withBudget(plan.lines, cat, amount), `Orçamento de ${cat} definido`)) setBudget('');
+  };
+  const addEvent = async () => {
+    const e = eventError(label, date, plan.from, plan.to);
+    if (e) { setErr(e); return; }
+    const c = parseCashImpact(dir, cash);
+    if (!c.ok) { setErr('Digite o valor do caixa em reais, maior que zero — ou escolha "Não informar".'); return; }
+    setErr(null);
+    if (await onSave(withEvent(plan.lines, { label: label.trim(), eventDate: date, cashImpact: c.value }), `Evento "${label.trim()}" cadastrado`)) { setLabel(''); setDate(''); setCash(''); setDir('none'); }
+  };
+  const field = 'bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100';
+  const btn = 'rounded-lg bg-emerald-600/80 hover:bg-emerald-600 px-3 py-1.5 text-xs text-white disabled:opacity-50';
+
+  return (
+    <div className="mt-3 space-y-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div>
+        <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Orçamento por categoria</div>
+        {budgets.length === 0 && <p className="text-[12px] text-zinc-500 mb-1">Nenhum orçamento definido neste plano.</p>}
+        <ul className="space-y-1 mb-2">
+          {budgets.map((b) => (
+            <li key={b.category} className="flex items-center justify-between gap-2 text-sm text-zinc-300">
+              <span>{b.label}: {brlOrDash(b.amount)}</span>
+              <button disabled={busy} onClick={() => onSave(withoutBudget(plan.lines, b.category), `Orçamento de ${b.category} removido`)} className="text-[11px] text-zinc-400 hover:text-red-300 disabled:opacity-50">remover</button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex gap-2 flex-wrap">
+          <select value={cat} onChange={(e) => setCat(e.target.value)} className={field} aria-label="Categoria">{BUDGET_CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+          <input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" placeholder="valor do mês, ex.: 5.000" className={`${field} flex-1 min-w-[140px]`} />
+          <button disabled={busy} onClick={addBudget} className={btn}>Definir orçamento</button>
+        </div>
+        <p className="text-[11px] text-zinc-500 mt-1">Se a categoria já tem orçamento, o valor é trocado. O gasto vem das contas a pagar lançadas com essa categoria.</p>
+      </div>
+      <div>
+        <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Eventos do mês</div>
+        {events.length === 0 && <p className="text-[12px] text-zinc-500 mb-1">Nenhum evento cadastrado.</p>}
+        <ul className="space-y-1 mb-2">
+          {events.map((e) => (
+            <li key={`${e.label}|${e.eventDate}`} className="flex items-center justify-between gap-2 text-sm text-zinc-300">
+              <span>{e.label} — {String(e.eventDate).split('-').reverse().join('/')}{e.cashImpact != null ? ` · caixa declarado ${brlOrDash(e.cashImpact)}` : ''}</span>
+              <button disabled={busy} onClick={() => onSave(withoutEvent(plan.lines, e.label, e.eventDate), `Evento "${e.label}" removido`)} className="text-[11px] text-zinc-400 hover:text-red-300 disabled:opacity-50">remover</button>
+            </li>
+          ))}
+        </ul>
+        <div className="flex gap-2 flex-wrap">
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="nome (ex.: Liquidação)" className={`${field} flex-1 min-w-[140px]`} />
+          <input type="date" value={date} min={plan.from} max={plan.to} onChange={(e) => setDate(e.target.value)} className={field} aria-label="Data do evento" />
+        </div>
+        <div className="flex gap-2 flex-wrap mt-2">
+          <select value={dir} onChange={(e) => setDir(e.target.value)} className={field} aria-label="Impacto no caixa">
+            <option value="none">Caixa: não informar</option><option value="in">Caixa: vai entrar</option><option value="out">Caixa: vai sair</option>
+          </select>
+          {dir !== 'none' && <input value={cash} onChange={(e) => setCash(e.target.value)} inputMode="decimal" placeholder="valor, ex.: 20.000" className={`${field} w-40`} />}
+          <button disabled={busy} onClick={addEvent} className={btn}>Cadastrar evento</button>
+        </div>
+        <p className="text-[11px] text-zinc-500 mt-1">O impacto no caixa é o que VOCÊ declara — não é previsão e não entra no caixa previsto.</p>
+      </div>
+      {err && <p className="text-[12px] text-amber-300">{err}</p>}
     </div>
   );
 }

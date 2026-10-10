@@ -190,7 +190,7 @@ Primeira tela de uma fatia da Fase 4 que o dono usa sem pedir ao suporte. Crité
 - **Servidor**: único ajuste — a seção `lojas` passa a entregar `unit` da métrica (a tela não adivinha R$ × %).
 - **Não verificado**: a tela não foi vista no navegador (só tipos, build e teste de fiação/rótulos). Teste: `test:board-review-ui` (19, 3 mutações verificadas); `test:board-review` (22) segue verde.
 
-## 21. Status F4.12 — EM PR (tela "Plano do mês", 2026-10-10)
+## 21. Status F4.12 — MERGED (#1876) (tela "Plano do mês", 2026-10-10)
 
 Segunda tela de uma fatia da Fase 4, mesmo critério do dono (não pode fugir de facilitar o uso): cartão `StrategicPlanCard` recolhido DENTRO da Central de Saúde, sem menu novo, só owner/admin, só chama a API ao abrir.
 - **O dono digita uma coisa**: a meta de faturamento do mês (aceita "150.000", "150.000,50", "R$ 150.000"; inválido/zero → pede de novo, nunca chuta). A tela cria o plano do mês corrente (F4.4) e o ativa — o clique do dono é a decisão. Mês corrente calculado em São Paulo.

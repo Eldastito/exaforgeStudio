@@ -209,7 +209,7 @@ Fecha o limite declarado na F4.12 (orçamento por categoria e eventos só pela A
 - **Servidor**: nenhuma mudança. **Não verificado**: tela não vista no navegador. Teste: `test:strategic-plan-ui` (38, 5 mutações verificadas — duplicar categoria, sinal da saída, data fora do período, caixa ausente virando 0, data livre na tela); `test:strategic-plan` (34) e `test:board-review-ui` (19) seguem verdes.
 - **Limite**: cada alteração gera uma versão (várias seguidas = várias versões); sem edição de evento (remove e cadastra de novo).
 
-## 23. Status F4.14 — EM PR (tela do cenário "e se?" na Central de Saúde, 2026-10-10)
+## 23. Status F4.14 — MERGED (#1880) (tela do cenário "e se?" na Central de Saúde, 2026-10-10)
 
 Tela para o `ScenarioEngine` da F4.1 (que só tinha rota). Cartão **"E se...?"** DENTRO da Central de Saúde — sem menu novo, só owner/admin, só carrega ao abrir, chunk próprio (`lazy`; bundle principal inalterado, 4.187 kB).
 - **Fluxo**: abre → `GET /simulate/scenario/kinds` (tipos e campos vêm do servidor: compra, vendas sobem/caem, contratação) → o dono escolhe e digita as premissas → `POST /simulate/scenario`. Premissa obrigatória faltando ou ilegível vira frase de erro na tela (nunca número chutado); opcional em branco é omitida (o motor usa o padrão e diz qual); zero vale onde faz sentido (caixa mínimo).

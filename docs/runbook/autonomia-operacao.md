@@ -368,3 +368,7 @@ Tela: aba **Inteligência** em Grupo (mesma rota). Se aparecer só "Preciso de p
 ## F4.11 — tela "Revisão do mês" (Central de Saúde)
 
 Central de Saúde → cartão **Revisão do mês** (owner/admin). Abre → carrega `GET /api/health-center/board-review?period=month|quarter`. Se a pauta vier vazia e várias seções em "Ainda sem dado", é falta de cadastro (plano do período, m²/equipe, decisões registradas, nicho + inteligência externa), não erro. "Esta revisão é só do gestor" = usuário sem visão completa de negócio. O aviso âmbar do piloto some só quando `ScenarioEngine.PILOT_VALIDATED` for verdadeiro (decisão do dono, após o piloto).
+
+## F4.12 — tela "Plano do mês" (Central de Saúde)
+
+Central de Saúde → cartão **Plano do mês** (owner/admin). Sem plano: digite a meta de faturamento e clique "Definir meta do mês" (cria e ativa). Com plano: mostra realizado × meta, ritmo, orçamento e eventos; "Alterar meta" cria nova versão e mantém orçamento/eventos. "Ainda sem fechamento de loja" = nenhuma loja fechou o dia no período (não é erro nem zero). "Contas a pagar não lançadas" = o orçamento da categoria não tem como ser acompanhado. Orçamento por categoria e eventos ainda são cadastrados pela API `POST/PUT /api/health-center/plans`.

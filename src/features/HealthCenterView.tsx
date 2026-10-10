@@ -8,6 +8,7 @@ import { cashHeadline } from '@/src/features/cashBasis';
 import { useStore } from '@/src/store/useStore';
 import type { ViewMode } from '@/src/store/useStore';
 import { BoardReviewCard } from '@/src/features/boardreview/BoardReviewCard';
+import { StrategicPlanCard } from '@/src/features/strategicplan/StrategicPlanCard';
 
 // Central de Saúde e Decisão (ADR-126 Fatia 1) — a tela-síntese: status geral +
 // as 3 prioridades do dia com impacto em R$ e uma ação. Global (todas as verticais).
@@ -157,6 +158,7 @@ export function HealthCenterView() {
 
         <SetupChecklistCard />
 
+        <StrategicPlanCard />
         <BoardReviewCard />
 
         {/* Índice de Sobrevivência (ADR-127) */}

@@ -200,7 +200,7 @@ Segunda tela de uma fatia da Fase 4, mesmo critério do dono (não pode fugir de
 - **Servidor**: nenhuma mudança. **Não verificado**: tela não vista no navegador (tipos, build e teste de fiação/rótulos/corpo contra o serviço real). Teste: `test:strategic-plan-ui` (22, 4 mutações verificadas); `test:strategic-plan` (34) e `test:board-review-ui` (19) seguem verdes.
 - **Bundle (achado do CI do #1876)**: o bundle principal está colado no limite de 4 MiB do cache do PWA (`vite.config.ts`, `maximumFileSizeToCacheInBytes`); o cartão do plano o estourou (4.201 kB) e o build falhou. Os dois cartões da Central de Saúde (`BoardReviewCard`, `StrategicPlanCard`) passam a ser `React.lazy` (bundle 4.187 kB, folga de só ~7 kB). A folga continua pequena: qualquer crescimento do frontend volta a quebrar o build — decisão do dono entre subir o limite ou dividir mais o bundle.
 
-## 22. Status F4.13 — EM PR (formulário de orçamento e eventos no "Plano do mês", 2026-10-10)
+## 22. Status F4.13 — MERGED (#1878) (formulário de orçamento e eventos no "Plano do mês", 2026-10-10)
 
 Fecha o limite declarado na F4.12 (orçamento por categoria e eventos só pela API). Mesmo cartão `StrategicPlanCard`, botão "Orçamento e eventos"; sem menu novo, só owner/admin, só carrega ao abrir (o formulário vive no chunk já sob demanda — bundle principal inalterado, 4.187 kB).
 - **Orçamento**: categoria (compras, marketing, pessoal, estoque, aluguel, outros) + valor; se a categoria já tem orçamento, o valor é trocado (duas linhas da mesma categoria contariam o gasto lançado em dobro no acompanhamento); remover tira só aquela categoria.

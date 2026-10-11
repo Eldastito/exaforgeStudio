@@ -12498,6 +12498,8 @@ const initDb = () => {
   // Estoque negativo: data da 1ª detecção do negativo ABERTO (detected_at é reescrito a cada sincronização, então não serve p/ "há quantos dias").
   try { db.exec(`ALTER TABLE retail_stock_alerts ADD COLUMN first_detected_at DATETIME`); } catch(e){}
 
+  // ADR-206 F5.4 — regressão automática de autonomia (só pra baixo: auto → prepare). Opt-in (nº 10, default 0); sem a flag só avalia, não age.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN autonomy_regression_enabled INTEGER DEFAULT 0`); } catch(e){}
 };
 
 initDb();

@@ -24,6 +24,8 @@ import { wilsonInterval, intervalConfidenceLabel, WilsonInterval } from "./stats
  * narra. Frugal: 1 chamada de LLM por passe (sobre o resumo). Opt-in por org. Isolado.
  */
 
+const SYSTEM_ACTOR = /^(rule|ai|runtime|system|scheduler|agent|autopilot|mission|playbook|process|cron|bot)([:_\-\s]|$)/i;
+const todayISO = () => new Date().toISOString().slice(0, 10);
 const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, Number(n) || 0));
 
@@ -84,7 +86,9 @@ export class PatternMemoryService {
    * não é regra; `hypothesis` = a recorrência validou (`validated`) mas ninguém decidiu — continua sendo só hipótese;
    * `observed` = candidato; `dormant` = parou de aparecer. A confirmação humana vence o estado automático.
    */
-  static stageOf(p: { status?: string; manager_decision?: string | null }): "rule" | "rejected" | "hypothesis" | "observed" | "dormant" {
+  static stageOf(p: { status?: string; manager_decision?: string | null; valid_until?: string | null }, today: string = todayISO()): "rule" | "rejected" | "hypothesis" | "observed" | "dormant" | "expired" {
+    // ADR-206 F5.1 (RN-F5-2): regra com prazo vencido deixa de VALER — vira "expirado" (pede revisão), nunca segue vigente em silêncio.
+    if (p.manager_decision === "confirmed" && p.valid_until && p.valid_until < today) return "expired";
     if (p.manager_decision === "confirmed") return "rule";
     if (p.manager_decision === "rejected") return "rejected";
     if (p.status === "validated") return "hypothesis";
@@ -102,7 +106,7 @@ export class PatternMemoryService {
   static decide(orgId: string, patternId: string, decision: "confirmed" | "rejected" | "revoked", decidedBy: string | null | undefined, note?: string | null): { ok: boolean; error?: string; stage?: string; pattern?: any } {
     const by = String(decidedBy || "").trim();
     if (!by) return { ok: false, error: "A decisão exige uma pessoa identificada." };
-    if (/^(rule|ai|runtime|system|scheduler|agent|autopilot|mission|playbook|process|cron|bot)([:_\-\s]|$)/i.test(by)) return { ok: false, error: "Só uma pessoa confirma uma regra da empresa — a IA não confirma o próprio aprendizado." };
+    if (SYSTEM_ACTOR.test(by)) return { ok: false, error: "Só uma pessoa confirma uma regra da empresa — a IA não confirma o próprio aprendizado." };
     if (!["confirmed", "rejected", "revoked"].includes(decision)) return { ok: false, error: "Decisão inválida." };
     const p = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
     if (!p) return { ok: false, error: "Padrão não encontrado." };
@@ -111,7 +115,7 @@ export class PatternMemoryService {
     const cleanNote = note ? String(note).trim().slice(0, 500) || null : null;
     const tx = db.transaction(() => {
       if (decision === "revoked") {
-        db.prepare("UPDATE business_patterns SET manager_decision = NULL, manager_decided_by = NULL, manager_decided_at = NULL, manager_note = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(patternId, orgId);
+        db.prepare("UPDATE business_patterns SET manager_decision = NULL, manager_decided_by = NULL, manager_decided_at = NULL, manager_note = NULL, valid_from = NULL, valid_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(patternId, orgId);
       } else {
         db.prepare("UPDATE business_patterns SET manager_decision = ?, manager_decided_by = ?, manager_decided_at = CURRENT_TIMESTAMP, manager_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(decision, by, cleanNote, patternId, orgId);
       }
@@ -129,6 +133,104 @@ export class PatternMemoryService {
   /** Histórico de decisões do gestor sobre um padrão (mais novo primeiro). */
   static decisions(orgId: string, patternId: string): any[] {
     return db.prepare("SELECT decision, decided_by, note, confidence_at, occurrences_at, created_at FROM business_pattern_decisions WHERE organization_id = ? AND pattern_id = ? ORDER BY created_at DESC, rowid DESC").all(orgId, patternId) as any[];
+  }
+
+  // ── KNOWLEDGE GOVERNANCE (ADR-206 F5.1 · RN-F5-2/3): validade, expiração, conflito, proveniência ──────────────────────
+  /**
+   * Define o PRAZO de uma regra confirmada (`valid_from`/`valid_until`, `YYYY-MM-DD`; vazio = sem limite naquele lado).
+   * Só uma PESSOA define (mesma regra do `decide`: rótulo de sistema é recusado). Só regra confirmada tem prazo — o que ainda é
+   * hipótese não vale nada pra durar. Prazo vencido move a regra para "expirado" (derivado, não gravado). A mudança fica no
+   * histórico append-only (`business_pattern_decisions`, decision `validity`) e na auditoria.
+   */
+  static setValidity(orgId: string, patternId: string, by: string | null | undefined, v: { validFrom?: string | null; validUntil?: string | null }, note?: string | null): { ok: boolean; error?: string; stage?: string; pattern?: any } {
+    const who = String(by || "").trim();
+    if (!who) return { ok: false, error: "Definir validade exige uma pessoa identificada." };
+    if (SYSTEM_ACTOR.test(who)) return { ok: false, error: "Só uma pessoa define a validade de uma regra da empresa." };
+    const iso = (x: unknown) => { const t = String(x ?? "").trim(); return t ? (/^\d{4}-\d{2}-\d{2}$/.test(t) && !isNaN(Date.parse(t)) ? t : null) : ""; };
+    const from = iso(v?.validFrom), until = iso(v?.validUntil);
+    if (from === null || until === null) return { ok: false, error: "Data inválida — use AAAA-MM-DD." };
+    if (from && until && from > until) return { ok: false, error: "O início da validade não pode ser depois do fim." };
+    const p = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
+    if (!p) return { ok: false, error: "Padrão não encontrado." };
+    if (p.manager_decision !== "confirmed") return { ok: false, error: "Só uma regra confirmada por uma pessoa tem validade." };
+    const cleanNote = note ? String(note).trim().slice(0, 500) || null : null;
+    db.transaction(() => {
+      db.prepare("UPDATE business_patterns SET valid_from = ?, valid_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?").run(from || null, until || null, patternId, orgId);
+      db.prepare("INSERT INTO business_pattern_decisions (id, organization_id, pattern_id, decision, decided_by, note, confidence_at, occurrences_at) VALUES (?, ?, ?, 'validity', ?, ?, ?, ?)")
+        .run(randomUUID(), orgId, patternId, who, [`${from || "—"} → ${until || "—"}`, cleanNote].filter(Boolean).join(" · "), p.confidence, p.occurrences);
+    })();
+    try { logAuthEvent(orgId, who, null, "PATTERN_VALIDITY_SET", { patternId, domain: p.domain, validFrom: from || null, validUntil: until || null }); } catch { /* best-effort */ }
+    const fresh = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
+    return { ok: true, stage: this.stageOf(fresh), pattern: fresh };
+  }
+
+  /** Regra em VIGOR hoje: confirmada por pessoa, já começou e não venceu. (Confirmada sem prazo vale sempre.) */
+  static inForce(p: { manager_decision?: string | null; valid_from?: string | null; valid_until?: string | null }, today: string = todayISO()): boolean {
+    if (p.manager_decision !== "confirmed") return false;
+    if (p.valid_from && p.valid_from > today) return false;
+    if (p.valid_until && p.valid_until < today) return false;
+    return true;
+  }
+
+  /**
+   * CONFLITOS entre regras (RN-F5-3): duas regras confirmadas e em vigor sobre o MESMO assunto (mesmo domínio + escopo + tipo)
+   * mas com chaves diferentes. É heurística de "mesmo assunto" — por isso a saída é uma PERGUNTA ("qual está vigente?"), nunca
+   * uma escolha: o sistema não decide qual vence. Resolver = uma pessoa dá um prazo a uma delas ou a revoga. Read-only, isolado.
+   */
+  static conflicts(orgId: string, today: string = todayISO()): Array<{ a: any; b: any; question: string }> {
+    const rules = (db.prepare("SELECT * FROM business_patterns WHERE organization_id = ? AND manager_decision = 'confirmed' ORDER BY created_at, id").all(orgId) as any[]).filter((p) => this.inForce(p, today));
+    const out: Array<{ a: any; b: any; question: string }> = [];
+    const slim = (p: any) => ({ id: p.id, domain: p.domain, patternType: p.pattern_type, patternKey: p.pattern_key, description: p.description || null, confirmedBy: p.manager_decided_by || null, confirmedAt: p.manager_decided_at || null, validFrom: p.valid_from || null, validUntil: p.valid_until || null });
+    for (let i = 0; i < rules.length; i++) for (let j = i + 1; j < rules.length; j++) {
+      const x = rules[i], y = rules[j];
+      if (x.domain !== y.domain || (x.scope_id || "") !== (y.scope_id || "") || x.pattern_type !== y.pattern_type) continue; // mesmo domínio+escopo+tipo e chaves distintas (o índice único garante que a chave nunca repete)
+      out.push({ a: slim(x), b: slim(y), question: "Encontrei duas regras diferentes sobre o mesmo assunto. Qual está vigente?" });
+    }
+    return out;
+  }
+
+  /** Publica cada conflito no ledger (`business_signals`, domínio memory — nunca tabela de alerta) e resolve os que deixaram de existir. */
+  static publishConflicts(orgId: string, today: string = todayISO()): { published: number; resolved: number } {
+    const list = this.conflicts(orgId, today);
+    const keep = new Set<string>();
+    let published = 0;
+    for (const c of list) {
+      const dedupeKey = `memory:conflict:${[c.a.id, c.b.id].sort().join(":")}`;
+      keep.add(dedupeKey);
+      try {
+        BusinessSignalService.publish(orgId, {
+          domain: "memory", signalType: "rule_conflict", severity: "attention", basis: "hypothesis",
+          confidence: 0.5, impactAmount: null, impactUnit: null,
+          sourceService: "PatternMemoryService", sourceEntityType: "business_pattern", sourceEntityId: c.a.id,
+          evidence: { question: c.question, ruleA: c.a.description || c.a.patternKey, ruleB: c.b.description || c.b.patternKey, ids: [c.a.id, c.b.id] },
+          dedupeKey,
+        } as any);
+        published++;
+      } catch { /* best-effort */ }
+    }
+    let resolved = 0;
+    const open = db.prepare(`SELECT dedupe_key FROM business_signals WHERE organization_id = ? AND domain = 'memory' AND signal_type = 'rule_conflict' AND status NOT IN ('resolved','dismissed')`).all(orgId) as any[];
+    for (const o of open) if (!keep.has(o.dedupe_key)) { try { if (BusinessSignalService.resolveByDedupe(orgId, o.dedupe_key).ok) resolved++; } catch { /* noop */ } }
+    return { published, resolved };
+  }
+
+  /**
+   * PROVENIÊNCIA ("por que você acha isso?"): de onde veio o conhecimento e quem o sustenta — origem (regra do sistema · IA · pessoa),
+   * a pessoa/data da decisão, o prazo, a evidência registrada e o histórico. Só devolve o que foi gravado; nada é reconstruído.
+   */
+  static provenance(orgId: string, patternId: string, today: string = todayISO()): any | null {
+    const p = db.prepare("SELECT * FROM business_patterns WHERE id = ? AND organization_id = ?").get(patternId, orgId) as any;
+    if (!p) return null;
+    let evidence: any = null; try { evidence = p.evidence_json ? JSON.parse(p.evidence_json) : null; } catch { /* ilegível → null */ }
+    return {
+      id: p.id, domain: p.domain, patternType: p.pattern_type, description: p.description || null,
+      origin: p.created_by_type === "user" ? "person" : p.created_by_type === "ai" ? "ai" : "system_rule",
+      stage: this.stageOf(p, today), inForce: this.inForce(p, today),
+      decidedBy: p.manager_decided_by || null, decidedAt: p.manager_decided_at || null, decisionNote: p.manager_note || null,
+      validFrom: p.valid_from || null, validUntil: p.valid_until || null,
+      occurrences: Number(p.occurrences || 0), firstSeen: p.first_seen_date || null, lastSeen: p.last_seen_date || null,
+      evidence, history: this.decisions(orgId, patternId),
+    };
   }
 
   /**
@@ -448,6 +550,7 @@ Responda em JSON: {"descriptions": {"<chave>": "frase"}} usando exatamente as ch
     const decayed = this.decayStale(orgId, domain, opts.handledTypes, seen);
     const sig = this.publishSignals(orgId, domain, { sourceService: opts.sourceService, handledTypes: opts.handledTypes });
     try { this.requestConfirmations(orgId); } catch { /* best-effort: perguntar nunca derruba o aprendizado */ }
+    try { this.publishConflicts(orgId); } catch { /* best-effort: conflito entre regras vira pergunta no ledger, nunca derruba o aprendizado */ }
     return { detected: candidates.length, validated, decayed, published: sig.published, resolved: sig.resolved };
   }
 }

@@ -386,3 +386,6 @@ Regra confirmada pode ter prazo: `POST /api/insights/patterns/:id/validity` `{va
 
 ## F5.2 — modelo de operação (arquétipo) da empresa (API)
 `GET /api/retail-ops/archetype` mostra o modelo de operação atual, a pergunta pendente ("repõe as mesmas peças ou trabalha por coleção?") e, para cada política, o valor efetivo e DE ONDE veio (organização, arquétipo, vertical ou plataforma). `PUT /api/retail-ops/archetype` `{archetype: "moda_colecao" | "moda_reposicao_continua" | null}` escolhe (só pessoa; só se cabe na vertical). O arquétipo só preenche o que a empresa NÃO definiu: se ela já marcou "Fim de coleção" (ou o contrário) em Operação da Rede, essa escolha vence. Sem arquétipo, nada muda. Sem tela ainda.
+
+## F5.3 — catálogo de playbooks versionado (API)
+`GET /api/runtime/playbook-registry` lista os playbooks da plataforma (cobrança, recuperação de vendas, fechamento diário) com vertical, risco, autonomia máxima, pré-condições e estágio, e mostra por empresa: se cabe, se foi adotado, se a autonomia configurada passa do teto e a eficácia de cada versão (concluídas ÷ concluídas+falhas, com n e margem; sem dado aparece vazio, nunca 0%). É só leitura: não ativa nem inicia nada. Nenhum playbook é "certificado" — isso exige o piloto com dado real. Publicar nova versão de um playbook = nova entrada no catálogo (deploy), nunca edição da anterior.

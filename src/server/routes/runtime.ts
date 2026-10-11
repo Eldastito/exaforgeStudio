@@ -10,6 +10,7 @@ import { CollectionPlaybookService } from "../CollectionPlaybook.js";
 import { SalesRecoveryPlaybookService } from "../SalesRecoveryPlaybook.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalProcessRouterService } from "../SignalProcessRouterService.js";
+import { PlaybookRegistryService } from "../PlaybookRegistryService.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -53,6 +54,11 @@ router.post("/definitions", (req: AuthRequest, res): any => {
   try {
     res.json(ProcessRuntimeService.defineProcess(req.organizationId!, b, actorId(req)));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ADR-206 F5.3 — Playbook Registry: catálogo de plataforma (versionado, só leitura) + situação desta empresa. Não ativa nem inicia nada.
+router.get("/playbook-registry", (req: AuthRequest, res): any => {
+  res.json({ ...PlaybookRegistryService.catalog(), forOrg: PlaybookRegistryService.forOrg(req.organizationId!) });
 });
 
 router.get("/definitions", (req: AuthRequest, res): any => {

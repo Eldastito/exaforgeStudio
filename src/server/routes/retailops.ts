@@ -154,6 +154,7 @@ import { RetailDayBriefService, DEFAULT_NIGHT_TIME } from "../RetailDayBriefServ
 import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js";
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
 import { RetailReplenishmentStrategyService } from "../RetailReplenishmentStrategyService.js";
+import { BusinessArchetypeService } from "../BusinessArchetypeService.js";
 import { RetailCommissionImportService } from "../RetailCommissionImportService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
@@ -2182,6 +2183,22 @@ router.put("/stock/replenishment-strategy", requireNetworkScope, (req: AuthReque
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json({ strategy: RetailReplenishmentStrategyService.setStrategy(orgId, String(req.body?.strategy || ""), req.user?.userId) }); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ADR-206 F5.2 — Arquétipo Operacional: o modelo de operação (Moda — coleção × reposição contínua) preenche, como DEFAULT, o que a empresa
+// não definiu sozinha (organização > arquétipo > vertical > plataforma). Leitura livre; escolher exige escopo de rede (como a estratégia de reposição) e é só de PESSOA.
+router.get("/archetype", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(BusinessArchetypeService.explain(orgId));
+});
+router.put("/archetype", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const raw = req.body?.archetype;
+  const out = BusinessArchetypeService.select(orgId, raw === null || raw === "" ? null : String(raw), req.user?.userId);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json(BusinessArchetypeService.explain(orgId));
 });
 
 router.get("/stock/by-store/:storeId", requireStoreAccess(inParam("storeId")), (req: AuthRequest, res): any => {

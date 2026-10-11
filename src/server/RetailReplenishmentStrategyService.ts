@@ -19,6 +19,7 @@
 import db from "./db.js";
 import { RetailStockPolicyService } from "./RetailStockPolicyService.js";
 import { logAuthEvent } from "./auditLog.js";
+import { BusinessArchetypeService } from "./BusinessArchetypeService.js";
 
 export type ReplenishmentStrategy = "continuous_replenishment" | "collection_sellout";
 export const STRATEGIES: ReplenishmentStrategy[] = ["continuous_replenishment", "collection_sellout"];
@@ -49,10 +50,13 @@ export class RetailReplenishmentStrategyService {
     return { state, problem: false, label: "Em ciclo" };
   }
 
+  /**
+   * Estratégia EFETIVA, pela precedência organização > arquétipo > vertical > plataforma (ADR-206 F5.2, RN-F5-1): o que a empresa
+   * configurou vence; sem escolha própria, vale o arquétipo; sem nenhum, o padrão de sempre (continuous — 0-regressão).
+   */
   static strategy(orgId: string): ReplenishmentStrategy {
     try {
-      const r = db.prepare(`SELECT retail_replenishment_strategy AS s FROM organization_settings WHERE organization_id = ?`).get(orgId) as any;
-      return r?.s === "collection_sellout" ? "collection_sellout" : "continuous_replenishment";
+      return BusinessArchetypeService.resolve(orgId, "retail_replenishment_strategy")?.value === "collection_sellout" ? "collection_sellout" : "continuous_replenishment";
     } catch { return "continuous_replenishment"; }
   }
 

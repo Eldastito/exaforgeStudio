@@ -9,6 +9,7 @@ import { ApprovalPolicyService } from "../ApprovalPolicyService.js";
 import { ExecutionTraceService } from "../ExecutionTraceService.js";
 import { ContextProjectionService } from "../ContextProjectionService.js";
 import { AutonomyKillSwitchService } from "../AutonomyKillSwitchService.js";
+import { AutonomyRegressionService } from "../AutonomyRegressionService.js";
 import { PermissionService } from "../PermissionService.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 
@@ -40,6 +41,22 @@ router.get("/autonomy/overview", (req: AuthRequest, res): any => {
 router.get("/autonomy/status", (req: AuthRequest, res): any => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ...AutonomyKillSwitchService.status(req.organizationId), canGovern: canGovernAutonomy(req) });
+});
+
+// ADR-206 F5.4 — escada única (observe·shadow·recommend·prepare·auto·paused) por política + avaliação de regressão (read-only).
+// A regressão só DESCE (auto → prepare); subir de volta é ato humano. Ligar/desligar o rebaixamento automático é do dono.
+router.get("/autonomy/ladder", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ ...AutonomyRegressionService.ladder(req.organizationId), canGovern: canGovernAutonomy(req) });
+});
+router.get("/autonomy/regression", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: AutonomyRegressionService.isEnabled(req.organizationId), ...AutonomyRegressionService.assess(req.organizationId) });
+});
+router.post("/autonomy/regression/enabled", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  if (!canGovernAutonomy(req)) return res.status(403).json({ error: "Só o dono liga ou desliga o rebaixamento automático." });
+  res.json({ enabled: AutonomyRegressionService.setEnabled(req.organizationId, req.body?.enabled === true) });
 });
 
 // POST /api/actions/autonomy/pause { reason, domain?, actionType? } — sem domain/actionType = a empresa inteira.

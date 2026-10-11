@@ -12339,6 +12339,8 @@ const initDb = () => {
   // ADR-206 F5.1 — Knowledge Governance: validade da REGRA confirmada (aditivo; NULL = sem prazo, 0-regressão).
   try { db.exec(`ALTER TABLE business_patterns ADD COLUMN valid_from DATE`); } catch(e){}
   try { db.exec(`ALTER TABLE business_patterns ADD COLUMN valid_until DATE`); } catch(e){}
+  // ADR-206 F5.2 — Arquétipo Operacional da empresa (aditivo; NULL = nenhum, 0-regressão).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN business_archetype TEXT`); } catch(e){}
   db.exec(`
     CREATE TABLE IF NOT EXISTS business_pattern_decisions (
       id TEXT PRIMARY KEY,

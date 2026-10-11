@@ -383,3 +383,6 @@ Central de Saúde → cartão **E se...?** (owner/admin). Escolha o tipo (compra
 
 ## F5.1 — validade, expiração e conflito de regras (API)
 Regra confirmada pode ter prazo: `POST /api/insights/patterns/:id/validity` `{validFrom?, validUntil?, note?}` (AAAA-MM-DD; vazio limpa). Prazo vencido → a regra aparece em `expired` no `/api/insights/memory` (não em `rules`) e pede nova confirmação ou revogação. `GET /api/insights/memory/conflicts` lista pares de regras vigentes sobre o mesmo assunto; o mesmo conflito aparece como sinal "Qual está vigente?" no radar (domínio memory). Resolver: dar prazo a uma delas ou revogar uma. `GET /api/insights/patterns/:id/provenance` responde "por que você acha isso?". Sem tela ainda.
+
+## F5.2 — modelo de operação (arquétipo) da empresa (API)
+`GET /api/retail-ops/archetype` mostra o modelo de operação atual, a pergunta pendente ("repõe as mesmas peças ou trabalha por coleção?") e, para cada política, o valor efetivo e DE ONDE veio (organização, arquétipo, vertical ou plataforma). `PUT /api/retail-ops/archetype` `{archetype: "moda_colecao" | "moda_reposicao_continua" | null}` escolhe (só pessoa; só se cabe na vertical). O arquétipo só preenche o que a empresa NÃO definiu: se ela já marcou "Fim de coleção" (ou o contrário) em Operação da Rede, essa escolha vence. Sem arquétipo, nada muda. Sem tela ainda.

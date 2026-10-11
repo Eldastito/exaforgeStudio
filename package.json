@@ -1032,6 +1032,7 @@
     "test:pattern-memory": "tsx scripts/test-pattern-memory.ts",
     "test:knowledge-governance": "tsx scripts/test-knowledge-governance.ts",
     "test:business-archetype": "tsx scripts/test-business-archetype.ts",
+    "test:playbook-registry": "tsx scripts/test-playbook-registry.ts",
     "test:procurement-patterns": "tsx scripts/test-procurement-patterns.ts",
     "test:finance-people-patterns": "tsx scripts/test-finance-people-patterns.ts",
     "test:inventory-patterns": "tsx scripts/test-inventory-patterns.ts",

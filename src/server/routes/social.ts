@@ -20,6 +20,7 @@ import { GrowthAutopilotService } from "../GrowthAutopilotService.js";
 import { GrowthOptimizationService } from "../GrowthOptimizationService.js";
 import { InstagramCommentIntentService } from "../InstagramCommentIntentService.js";
 import { GrowthEngineService } from "../GrowthEngineService.js";
+import { CampaignStockGuardService } from "../CampaignStockGuardService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -543,6 +544,16 @@ router.get("/growth-engine", requireRole("owner", "admin"), async (req: AuthRequ
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(await GrowthEngineService.overview(orgId)); }
   catch (e: any) { res.status(500).json({ error: "Não foi possível montar o Motor de Crescimento agora." }); }
+});
+
+// ── ADR-207 F12: estoque ↔ campanha — produtos em campanha com saldo baixo/esgotado (só unidades; sem dinheiro) ──
+router.get("/campaign-stock", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(CampaignStockGuardService.overview(orgId));
+});
+router.post("/campaign-stock/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(CampaignStockGuardService.scan(orgId));
 });
 
 export default router;

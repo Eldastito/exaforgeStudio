@@ -1,3 +1,5 @@
+import { StorefrontStockService } from "./StorefrontStockService.js";
+import { LOW_STOCK_UNITS } from "./CampaignStockGuardService.js";
 import db from "./db.js";
 import { BusinessSignalService } from "./BusinessSignalService.js";
 
@@ -59,6 +61,9 @@ export class ProductOpportunityService {
 
     const out: ProductCandidate[] = [];
     for (const r of rows) {
+      // ADR-207 F12 (estoque ↔ campanha): não promover peça que a operação mal consegue entregar. Usa o MESMO saldo vendável da
+      // vitrine (disponível − reservado, estoque próprio + por loja); com pouco saldo a campanha criaria demanda sem como atender.
+      if (StorefrontStockService.sellable(r.id) <= LOW_STOCK_UNITS) continue;
       const price = Number(r.price) || 0;
       const avgCost = Number(r.avg_cost) || 0;
       // Grounding (RN-CG-09): sem custo conhecido a margem é desconhecida → não é candidato.

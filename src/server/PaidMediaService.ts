@@ -1,3 +1,4 @@
+import { CampaignStockGuardService } from "./CampaignStockGuardService.js";
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { ChannelEconomicsService } from "./ChannelEconomicsService.js";
@@ -44,6 +45,13 @@ export class PaidMediaService {
       quality: e.quality, missing: e.missing, notModeled: e.notModeled,
       minProfitPerSale: round2(minProfit),
     };
+    // ADR-207 F12: avisa se o produto tem pouco/nenhum saldo vendável — não impulsionar o que não dá para entregar. Não bloqueia a conta.
+    const stock = CampaignStockGuardService.status(orgId, e.productId);
+    if (stock) {
+      base.stock = { state: stock.state, units: stock.units };
+      if (stock.state === "out") base.warnings = ["Produto esgotado na vitrine: não impulsione antes de repor."];
+      else if (stock.state === "low") base.warnings = [`Restam só ${stock.units} unidade(s) vendáveis: o anúncio pode esgotar o produto rápido.`];
+    }
     const contribution = e.contribution.amount;
     if (contribution == null) return { ...base, viable: null, reason: "contribution_unknown", message: `Sem número: falta ${e.missing.join(", ") || "dado"}. Não dá para calcular o limite de mídia.`, contributionPerSale: null };
     base.contributionPerSale = round2(contribution);

@@ -927,6 +927,12 @@ export class Scheduler {
       import("./ProductOpportunityService.js").then((m) => m.ProductOpportunityService.pass())
         .catch((e) => console.error('[Scheduler] product opportunity falhou', e));
     } catch (e) { console.error('[Scheduler] pass de product opportunity falhou', e); }
+    // Estoque ↔ campanha (ADR-207 F12): produto em campanha (link curto ativo / post ligado) com saldo baixo ou esgotado → aviso
+    // em `business_signals` (sem tabela paralela; só avisa, não pausa nada).
+    try {
+      import("./CampaignStockGuardService.js").then((m) => m.CampaignStockGuardService.pass())
+        .catch((e) => console.error('[Scheduler] campaign stock guard falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de campaign stock guard falhou', e); }
     // Radar contextual do varejo (ADR-204 F3.3): dia fechado da loja fora do normal + qualidade de dado (preço/duplicidade/
     // integração/comissão) → `business_signals`. Opt-in por empresa (`retail_radar_enabled`); nunca usa hora do PDV.
     try {

@@ -1222,6 +1222,8 @@ export class Scheduler {
     try { this.reputationEscalationPass(); } catch (e: any) { console.error('[Scheduler] reputation escalation detector F11 falhou', e?.message); }
     // ADR-159 F5 — progressive autonomy (propõe elevação por evidência; nunca aplica).
     await this.progressiveAutonomyPass().catch(e => console.error('[Scheduler] progressive autonomy F5 falhou', e));
+    // ADR-206 F5.7 — pergunta ativa "por que não funcionou?" (sinal por padrão com desfecho negativo sem motivo; some ao ser respondida).
+    try { const { NegativeLearningService } = await import('./NegativeLearningService.js'); NegativeLearningService.runAll(); } catch (e: any) { console.error('[Scheduler] negative learning F5.7 falhou', e?.message); }
     // ADR-206 F5.4 — regressão automática de autonomia (só pra baixo; opt-in por empresa).
     try { const { AutonomyRegressionService } = await import('./AutonomyRegressionService.js'); const r = AutonomyRegressionService.runAll(); if (r.regressed > 0) console.info(`[Autonomy F5.4] ${r.regressed} política(s) rebaixada(s) em ${r.orgs} org(s).`); } catch (e: any) { console.error('[Scheduler] autonomy regression F5.4 falhou', e?.message); }
     // ADR-159 F6 — detector de anomalia (rajada de execuções falhas → business_signals).

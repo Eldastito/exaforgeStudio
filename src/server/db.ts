@@ -12500,6 +12500,25 @@ const initDb = () => {
 
   // ADR-206 F5.4 — regressão automática de autonomia (só pra baixo: auto → prepare). Opt-in (nº 10, default 0); sem a flag só avalia, não age.
   try { db.exec(`ALTER TABLE organization_settings ADD COLUMN autonomy_regression_enabled INTEGER DEFAULT 0`); } catch(e){}
+  // ADR-206 F5.7 — aprendizado negativo estruturado: motivo ("por que não funcionou?") por desfecho negativo. Append-only; UNIQUE(org,desfecho,motivo).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pattern_negative_reasons (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        outcome_id TEXT NOT NULL,
+        pattern_id TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        note TEXT,
+        answered_by TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pattern_negative_reasons_uniq
+        ON pattern_negative_reasons (organization_id, outcome_id, reason_code);
+      CREATE INDEX IF NOT EXISTS idx_pattern_negative_reasons_pattern
+        ON pattern_negative_reasons (organization_id, pattern_id);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar pattern_negative_reasons (ADR-206 F5.7)', e); }
 };
 
 initDb();

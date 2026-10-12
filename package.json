@@ -1036,6 +1036,7 @@
     "test:autonomy-regression": "tsx scripts/test-autonomy-regression.ts",
     "test:playbook-backtest": "tsx scripts/test-playbook-backtest.ts",
     "test:archetype-interview": "tsx scripts/test-archetype-interview.ts",
+    "test:negative-learning": "tsx scripts/test-negative-learning.ts",
     "test:procurement-patterns": "tsx scripts/test-procurement-patterns.ts",
     "test:finance-people-patterns": "tsx scripts/test-finance-people-patterns.ts",
     "test:inventory-patterns": "tsx scripts/test-inventory-patterns.ts",

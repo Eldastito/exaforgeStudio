@@ -224,7 +224,7 @@ export class PlanService {
     const row = (kind: string) => {
       try {
         return (db.prepare(
-          `SELECT COUNT(*) as c FROM studio_creations WHERE organization_id = ? AND kind = ? AND COALESCE(status,'done') != 'error' AND created_at >= datetime('now','start of month')`
+          `SELECT COUNT(*) as c FROM studio_creations WHERE organization_id = ? AND kind = ? AND COALESCE(status,'done') != 'error' AND COALESCE(source,'generated') = 'generated' AND created_at >= datetime('now','start of month')`
         ).get(orgId, kind) as any)?.c || 0;
       } catch { return 0; }
     };

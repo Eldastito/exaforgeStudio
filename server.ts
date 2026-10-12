@@ -190,6 +190,7 @@ import { dispatchIncomingMessage } from "./src/server/webhookProcessor.js";
 import { classifyWhatsappJid } from "./src/server/whatsappJid.js";
 import { markEvolutionChannelStatusByIdentifier } from "./src/server/evolutionChannelStatus.js";
 import { MetaWebhookLogService } from "./src/server/MetaWebhookLogService.js";
+import { InstagramCommentIntentService } from "./src/server/InstagramCommentIntentService.js";
 import { setUsageContext, moduleFromApiPath } from "./src/server/usageContext.js";
 import { maybeFetchEvolutionAvatar } from "./src/server/evolutionAvatar.js";
 import db from "./src/server/db.js";
@@ -1359,6 +1360,9 @@ async function startServer() {
               console.log("[IG Webhook] Evento sem texto reconhecido (tipo):", Object.keys(messaging).join(','));
             }
           }
+        } else if (entry?.changes?.[0]?.field === 'comments' && InstagramCommentIntentService.ingestChange(businessId, entry.changes[0])) {
+          // ADR-207 F9 — comentário tratado pela leitura de intenção (opt-in por empresa): NÃO vira "DM" do atendente.
+          // Empresa sem a flag / canal não casado → ingestChange devolve false e cai no caminho de sempre abaixo.
         } else if (entry?.changes?.[0]?.value?.from) {
           // Formato alternativo via changes (alguns eventos de comentário/mensagem).
           const v = entry.changes[0].value;

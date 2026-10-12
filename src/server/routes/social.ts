@@ -18,6 +18,7 @@ import { ContentRevenueAttributionService } from "../ContentRevenueAttributionSe
 import { ProductOpportunityService } from "../ProductOpportunityService.js";
 import { GrowthAutopilotService } from "../GrowthAutopilotService.js";
 import { GrowthOptimizationService } from "../GrowthOptimizationService.js";
+import { InstagramCommentIntentService } from "../InstagramCommentIntentService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -508,6 +509,32 @@ router.get("/attribution/revenue", requireRole("owner", "admin"), deprecateTo("/
   const correlationId = String(req.query?.correlationId || "").trim();
   if (!correlationId) return res.status(400).json({ error: "Informe o correlationId." });
   res.json(ContentRevenueAttributionService.revenueFor(orgId, correlationId));
+});
+
+// ── ADR-207 F9: comentário do Instagram → intenção comercial (entende e avisa; NÃO envia) ──
+router.get("/instagram/comments/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ enabled: InstagramCommentIntentService.enabled(orgId) });
+});
+router.put("/instagram/comments/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = InstagramCommentIntentService.setEnabled(orgId, req.body?.enabled === true);
+  logAuthEvent(orgId, (req as any).user?.userId || null, null, "IG_COMMENT_INTENT_SET", { enabled: out.enabled });
+  res.json(out);
+});
+router.get("/instagram/comments", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(InstagramCommentIntentService.list(orgId, { status: String(req.query.status || "") || undefined, intent: String(req.query.intent || "") || undefined, limit: Number(req.query.limit) || undefined }));
+});
+router.post("/instagram/comments/:id/dismiss", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!InstagramCommentIntentService.dismiss(orgId, String(req.params.id))) return res.status(404).json({ error: "Comentário não encontrado ou já tratado." });
+  res.json({ ok: true });
+});
+router.put("/instagram/media-product", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(InstagramCommentIntentService.linkMedia(orgId, String(req.body?.mediaId || ""), req.body?.productId ? String(req.body.productId) : null)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

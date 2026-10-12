@@ -12628,6 +12628,37 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_absorbed REAL`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_cep TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_rule TEXT`); } catch(e){}
+  // ADR-207 F9 — comentário do Instagram → intenção comercial (parte A: entender e avisar; não envia). Opt-in, aditivo.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN ig_comment_intent_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS instagram_comment_intents (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        comment_id TEXT NOT NULL,
+        media_id TEXT,
+        from_id TEXT,
+        from_username TEXT,
+        snippet TEXT,
+        intent TEXT NOT NULL,
+        product_id TEXT,
+        product_via TEXT,
+        draft_reply TEXT,
+        needs_human INTEGER DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'new',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, comment_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ig_comment_intents_org ON instagram_comment_intents (organization_id, status, created_at);
+      CREATE TABLE IF NOT EXISTS instagram_media_products (
+        organization_id TEXT NOT NULL,
+        media_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (organization_id, media_id)
+      );
+    `);
+  } catch(e){}
 };
 
 initDb();

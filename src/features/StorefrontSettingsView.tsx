@@ -902,6 +902,9 @@ export function StorefrontSettingsView() {
         {/* Links de campanha (ADR-207 F5) */}
         <ShortLinksSection products={products} />
 
+        {/* Economia por canal + desconto seguro (ADR-207 F6) */}
+        <ChannelEconomicsSection products={products} />
+
         {/* Cupons de desconto */}
         <CouponsSection />
       </div>
@@ -1381,6 +1384,172 @@ function ShortLinksSection({ products }: { products: Array<{ id: string; name: s
           <p className="text-[11px] text-zinc-600">Os números são atribuídos pelo link que o cliente clicou — é a origem informada, não prova de que foi a campanha que causou a compra.</p>
         </div>
       )}
+    </section>
+  );
+}
+
+type EconSettings = { floorPercent: number | null; online: { taxPercent: number | null; paymentFeePercent: number | null; paymentFeeFixed: number | null; packagingFixed: number | null } };
+const QUALITY_UI: Record<string, { dot: string; label: string }> = {
+  reliable: { dot: '🟢', label: 'Confiável' }, partial: { dot: '🟡', label: 'Parcial' }, insufficient: { dot: '🔴', label: 'Insuficiente' },
+};
+
+// Economia por canal (ADR-207 F6): quanto sobra de cada venda na loja física × virtual e o maior desconto que respeita a sua
+// margem mínima. SÓ LEITURA/CÁLCULO — não muda preço nem cria cupom. Custo ausente = sem número (nunca inventa).
+function ChannelEconomicsSection({ products }: { products: Array<{ id: string; name: string }> }) {
+  const [quality, setQuality] = useState<any>(null);
+  const [cfg, setCfg] = useState<EconSettings | null>(null);
+  const [form, setForm] = useState({ floor: '', tax: '', fee: '', feeFixed: '', pack: '' });
+  const [saving, setSaving] = useState(false);
+  const [couponType, setCouponType] = useState<'percent' | 'fixed'>('percent');
+  const [couponValue, setCouponValue] = useState('');
+  const [couponRes, setCouponRes] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
+  const [pid, setPid] = useState('');
+  const [storeId, setStoreId] = useState('');
+  const [prod, setProd] = useState<any>(null);
+  const [safe, setSafe] = useState<any>(null);
+
+  const fmt = (v: number | null | undefined) => (v == null ? '' : String(v));
+  const brl = (v: number | null | undefined) => (v == null ? '—' : `R$ ${Number(v).toFixed(2)}`);
+  const pct = (v: number | null | undefined) => (v == null ? '—' : `${v}%`);
+  const load = async () => {
+    try {
+      const [q, c] = await Promise.all([apiFetch('/api/storefront/economics/quality').then((r) => r.json()), apiFetch('/api/storefront/economics/settings').then((r) => r.json())]);
+      setQuality(q); setCfg(c);
+      setForm({ floor: fmt(c.floorPercent), tax: fmt(c.online?.taxPercent), fee: fmt(c.online?.paymentFeePercent), feeFixed: fmt(c.online?.paymentFeeFixed), pack: fmt(c.online?.packagingFixed) });
+    } catch (e) { console.error(e); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const num = (v: string): number | null => (v.trim() === '' ? null : Number(v.replace(',', '.')));
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/storefront/economics/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ floorPercent: num(form.floor), online: { taxPercent: num(form.tax), paymentFeePercent: num(form.fee), paymentFeeFixed: num(form.feeFixed), packagingFixed: num(form.pack) } }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível salvar.'); return; }
+      toast.success('Salvo.'); setCouponRes(null); setSafe(null); load();
+    } finally { setSaving(false); }
+  };
+  const checkCoupon = async () => {
+    const v = num(couponValue);
+    if (v == null || !(v > 0)) { toast.error('Informe o desconto.'); return; }
+    setChecking(true);
+    try {
+      const res = await apiFetch('/api/storefront/economics/coupon-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: couponType, value: v }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível verificar.'); return; }
+      setCouponRes(d);
+    } finally { setChecking(false); }
+  };
+  const lookup = async (productId: string, store: string) => {
+    setPid(productId); setStoreId(store); setProd(null); setSafe(null);
+    if (!productId) return;
+    const qs = store ? `?storeId=${encodeURIComponent(store)}` : '';
+    const [a, b] = await Promise.all([
+      apiFetch(`/api/storefront/economics/product/${productId}${qs}`).then((r) => r.json()).catch(() => null),
+      apiFetch(`/api/storefront/economics/safe-discount/${productId}`).then((r) => r.json()).catch(() => null),
+    ]);
+    setProd(a); setSafe(b);
+  };
+
+  const q = quality ? QUALITY_UI[quality.status] : null;
+  const Col = ({ title, e }: { title: string; e: any }) => (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <p className="text-xs text-zinc-500">{title} {e ? <span>{QUALITY_UI[e.quality]?.dot}</span> : null}</p>
+      {!e ? <p className="text-sm text-zinc-500 mt-1">—</p> : e.contribution.amount == null ? (
+        <p className="text-sm text-zinc-400 mt-1">Sem número: falta {e.missing.join(', ') || 'dado'}.</p>
+      ) : (
+        <>
+          <p className="text-xl font-bold text-emerald-300 mt-1">{brl(e.contribution.amount)} <span className="text-sm font-normal text-zinc-400">({pct(e.contribution.percent)})</span></p>
+          {e.contribution.upperBound && <p className="text-[11px] text-amber-300 mt-0.5">Teto: falta informar {[...e.missing, ...(e.notModeled || [])].join(', ')}.</p>}
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-emerald-400" /> Economia e desconto seguro</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Quanto sobra de cada venda na loja física e na virtual, e o maior desconto que ainda respeita a sua margem mínima. Só calcula — não muda preço nem cria cupom.</p>
+        </div>
+        {q && <span className="text-xs rounded-full border border-zinc-700 px-2.5 py-1 text-zinc-300">{q.dot} Qualidade dos dados: {q.label}</span>}
+      </div>
+      {quality?.gaps?.length > 0 && <p className="mt-2 text-xs text-amber-300">Para o cálculo ficar confiável: {quality.gaps.join(' · ')}.</p>}
+
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <Field label="Margem mínima (%)"><input className={inputClass} inputMode="decimal" value={form.floor} onChange={(e) => setForm({ ...form, floor: e.target.value })} placeholder="ex.: 25" /></Field>
+        <Field label="Imposto online (%)"><input className={inputClass} inputMode="decimal" value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} placeholder="ex.: 6" /></Field>
+        <Field label="Taxa de pagamento (%)"><input className={inputClass} inputMode="decimal" value={form.fee} onChange={(e) => setForm({ ...form, fee: e.target.value })} placeholder="ex.: 1" /></Field>
+        <Field label="Tarifa fixa (R$)"><input className={inputClass} inputMode="decimal" value={form.feeFixed} onChange={(e) => setForm({ ...form, feeFixed: e.target.value })} placeholder="opcional" /></Field>
+        <Field label="Embalagem (R$/pedido)"><input className={inputClass} inputMode="decimal" value={form.pack} onChange={(e) => setForm({ ...form, pack: e.target.value })} placeholder="ex.: 4" /></Field>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-[11px] text-zinc-600">Em branco = ainda não informado (não é zero). Os custos da loja física vêm do cadastro da loja em Retail Ops.</p>
+        <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={save} disabled={saving || !cfg}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar'}</Button>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+        <p className="text-sm text-zinc-200 font-medium">Posso dar esse desconto no catálogo?</p>
+        <div className="mt-2 flex items-end gap-2 flex-wrap">
+          <select className={`${inputClass} !w-auto`} value={couponType} onChange={(e) => setCouponType(e.target.value as any)}><option value="percent">%</option><option value="fixed">R$</option></select>
+          <input className={`${inputClass} !w-28`} inputMode="decimal" value={couponValue} onChange={(e) => setCouponValue(e.target.value)} placeholder="ex.: 20" />
+          <Button variant="ghost" onClick={checkCoupon} disabled={checking}>{checking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verificar'}</Button>
+        </div>
+        {couponRes && (
+          <div className="mt-3 text-sm text-zinc-300 space-y-1">
+            <p>Dos <b>{couponRes.evaluated}</b> produtos: <b className="text-emerald-300">{couponRes.counts.supports}</b> suportam · <b className="text-amber-300">{couponRes.counts.supportsLess}</b> só suportam menos · <b className="text-red-300">{couponRes.counts.belowFloor}</b> ficariam abaixo da margem mínima · <b>{couponRes.counts.unconfirmed}</b> sem confirmação · <b>{couponRes.counts.unknown}</b> sem dados</p>
+            {couponRes.examples.supportsLess.slice(0, 5).map((x: any) => <p key={x.productId} className="text-xs text-zinc-500">{x.name}: até {x.maxPercent}%</p>)}
+            <p className="text-[11px] text-zinc-600">{couponRes.note}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+        <p className="text-sm text-zinc-200 font-medium">Quanto sobra em um produto</p>
+        <div className="mt-2 flex gap-2 flex-wrap">
+          <select className={`${inputClass} !w-auto min-w-[220px]`} value={pid} onChange={(e) => lookup(e.target.value, storeId)}>
+            <option value="">— escolher produto —</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          {prod?.physical?.stores?.length > 1 && (
+            <select className={`${inputClass} !w-auto`} value={storeId} onChange={(e) => lookup(pid, e.target.value)}>
+              <option value="">— loja física —</option>
+              {prod.physical.stores.map((st: any) => <option key={st.id} value={st.id}>{st.name}</option>)}
+            </select>
+          )}
+        </div>
+        {prod && (
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Col title={`Loja física${prod.physical?.storeName ? ` · ${prod.physical.storeName}` : ''}`} e={prod.physical} />
+            <Col title="Loja virtual" e={prod.online} />
+          </div>
+        )}
+        {prod?.difference && <p className="mt-2 text-xs text-zinc-400">Diferença a favor da loja virtual: <b className="text-zinc-200">{brl(prod.difference.amount)}</b> por venda{prod.difference.upperBound ? ' (teto — há custos sem informar)' : ''}.</p>}
+        {safe && (
+          <div className="mt-3 text-sm">
+            {safe.status === 'unavailable' ? <p className="text-zinc-400">Desconto seguro indisponível: {safe.reason}</p> : (
+              <>
+                <p className="text-zinc-200">{safe.status === 'safe' ? 'Desconto máximo seguro' : 'Teto de desconto (não é garantia)'}: <b className="text-emerald-300">{pct(safe.maxPercent)}</b>{safe.reason ? <span className="text-zinc-500"> — {safe.reason}</span> : null}</p>
+                {safe.caveat && <p className="text-xs text-amber-300 mt-0.5">{safe.caveat}</p>}
+                <div className="mt-2 grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                  {safe.scenarios.map((c: any) => (
+                    <div key={c.discountPercent} className={`rounded border px-2 py-1 text-center text-[11px] ${c.aboveFloor ? 'border-emerald-500/30 text-emerald-200' : 'border-red-500/40 text-red-300'}`}>
+                      <div className="font-semibold">{c.discountPercent}%</div><div>{brl(c.contribution)}</div><div className="opacity-70">{pct(c.contributionPercent)}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <p className="mt-3 text-[11px] text-zinc-600">Margem de contribuição = preço − custo da peça − custos variáveis do canal (imposto, taxas, comissão, embalagem). Aluguel e folha fixa não entram: para decidir um desconto vale o custo da própria venda.</p>
+      </div>
     </section>
   );
 }

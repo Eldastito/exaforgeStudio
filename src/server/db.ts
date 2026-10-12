@@ -12590,6 +12590,23 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_storefront_short_links_org ON storefront_short_links (organization_id, active, created_at);
     `);
   } catch(e){}
+  // ADR-207 F6 — ECONOMIA POR CANAL (fachada read-only): só o que SÓ o dono sabe. NULL = ainda não informado (≠ 0).
+  // Piso = margem de contribuição mínima (% do preço líquido) que nenhum desconto pode romper. Custos físicos NÃO vivem aqui:
+  // vêm de retail_store_variable_costs / retail_store_pos_fee_rules / retail_commission_rules (uma fonte só).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_economics_settings (
+        organization_id TEXT PRIMARY KEY,
+        floor_percent REAL,
+        online_tax_percent REAL,
+        online_payment_fee_percent REAL,
+        online_payment_fee_fixed REAL,
+        online_packaging_fixed REAL,
+        updated_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){}
 };
 
 initDb();

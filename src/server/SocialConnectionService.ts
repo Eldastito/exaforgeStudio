@@ -20,6 +20,7 @@
  * Isolamento multi-tenant (convenção #1): `orgId` é sempre o 1º arg; toda query filtra
  * `organization_id`; UNIQUE(org,channel) garante 1 conexão por canal por org.
  */
+import { AssistedChannelProvider, isAssistedChannel } from "./AssistedChannelProvider.js";
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { EncryptionService } from "./EncryptionService.js";
@@ -195,6 +196,10 @@ export class SocialConnectionService {
     // Provider REAL do Facebook (F14): mesmo padrão do IG (opt-in, credencial no `channels`).
     if (channel === "facebook" && providerName === "facebook") {
       return new FacebookChannelProvider(orgId);
+    }
+    // Canais sem API conectada (F13c): modo ASSISTIDO opt-in — zero capacidades, publish → manual_required.
+    if (providerName === "assisted" && isAssistedChannel(channel)) {
+      return new AssistedChannelProvider(channel);
     }
     if (providerName === "stub" || !this.isKnownChannel(channel) || channel === "stub") {
       const c = cfg.capabilities || {};

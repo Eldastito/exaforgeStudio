@@ -35,7 +35,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | **F12 ✅ #1906** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
-| **F13b parcial (EM PR)** · F13c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
+| **F13b parcial (MERGED #1909)** · **F13c parcial (EM PR)** | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
 - **Link**: `/loja/:slug?zf_source=instagram&zf_campaign=linen_out26&zf_content=reel_143&zf_ref=campaign:linen` (e o mesmo em `/produto/:p`). O slug nunca muda por campanha; link antigo segue igual.
@@ -190,3 +190,11 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Entrega**: `VideoPostProductionService.plan` monta o **plano de edição por canal** (enquadrar → gancho nos primeiros segundos → segmentos cronometrados → remover pausas → legenda queimada → título → CTA) sobre o roteiro existente (F4, que reusa gancho F3 e Brand DNA F1) e as normas de canal (F5). Termo proibido pela marca já vem saneado; duração nunca passa da do bruto informado; canal desconhecido vai para `skipped`. Sem tabela nova, sem LLM.
 - **NÃO entrega**: editar o arquivo de vídeo. `render.status` é sempre `awaiting_provider`. `capabilities()` DESCOBRE o ambiente (ffmpeg no servidor? `VIDEO_TRANSCRIBE_URL`?) e hoje o render segue desligado mesmo com ffmpeg — falta upload de vídeo grande, fila, transcrição e ffmpeg no Dockerfile (terceiro/infra), e não há como testar edição real neste ambiente.
 - Rotas `GET /api/studio/video-post/capabilities` e `POST /api/studio/video-post/plan`. Sem tela (como Hook/Roteiro da F3/F4). Teste `test:video-post-production` (20).
+
+
+## 19. F13c — EM PR (2026-10-12), PARCIAL: TikTok / LinkedIn / YouTube / X em modo assistido
+
+- **Por que parcial**: publicar nesses 4 canais por API exige app aprovado pela plataforma, OAuth e, no TikTok/YouTube, auditoria do app (terceiro). Nada disso foi integrado nem testado contra as plataformas reais.
+- **Entrega**: `AssistedChannelProvider` — zero capacidades descobertas, `publish`/`schedule` → `manual_required`, leituras `capability_unavailable` (analytics ausente ≠ zero), health `not_connected`; o Hub roteia por opt-in (`provider=assisted`, só nos 4 canais; default e demais canais inalterados). `PublishPackageService.build` devolve por canal o conteúdo ADAPTADO às normas (F5: limite de legenda, hashtags, formato, CTA), passos manuais e o site do canal; em formato de vídeo + `topic`, anexa o plano de edição (F13b). Termo proibido pela marca recusa (não reescreve). Canal com API real (instagram/facebook) e desconhecido vão para `skipped`. Não publica nem grava nada.
+- **Limite honesto**: sem API não há analytics — a publicação manual NÃO entra no ciclo medido (resultado/aprendizado) e o pacote avisa isso. Registrar link/métricas à mão não foi feito.
+- Rota `POST /api/studio/publish-package`. Sem tela. Teste `test:assisted-channels` (23).

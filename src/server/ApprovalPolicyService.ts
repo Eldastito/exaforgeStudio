@@ -63,7 +63,7 @@ const ACTION_LABELS: Record<string, string> = {
   prepare_campaign: "Preparar campanha", send_campaign: "Enviar campanha", prepare_purchase: "Preparar compra", send_quote_request: "Pedir cotação",
   collection: "Cobrança", collection_followup: "Cobrança — acompanhamento", collection_resend_pix: "Cobrança — reenvio do PIX", collection_promise_followup: "Cobrança — promessa de pagamento",
   sales_recovery_send: "Recuperação de venda", prospect_outreach_whatsapp: "Prospecção por WhatsApp", prospect_outreach_email: "Prospecção por e-mail",
-  social_publish: "Publicação em redes sociais", growth_optimization: "Otimização de conteúdo", auto_booking: "Agendamento automático",
+  social_publish: "Publicação em redes sociais", instagram_comment_reply: "Resposta a comentário do Instagram", growth_optimization: "Otimização de conteúdo", auto_booking: "Agendamento automático",
   refund: "Reembolso", retail_transfer: "Transferência de estoque entre lojas", retail_post_closing: "Lançamento do fechamento da loja", retail_closing_review: "Revisão do fechamento da loja",
   order_reship: "Reenvio de pedido", ticket_assign: "Atribuir atendimento", internal_handoff: "Repasse para a equipe", customer_private_message: "Mensagem privada ao cliente",
 };
@@ -88,6 +88,8 @@ const DEFAULTS: Record<string, { policy: ApprovalPolicy; role?: string }> = {
   // ADR-167 F11 — publicação social exige aprovação humana por padrão (governança
   // on por default; o Autonomy Contract pode liberar/bloquear por banda).
   social_publish: { policy: "single" },
+  // ADR-207 F9b — resposta a comentário/Direct do Instagram: fala com cliente em nome da marca → aprovação humana por padrão.
+  instagram_comment_reply: { policy: "single" },
 };
 
 const DEFAULT_FALLBACK: { policy: ApprovalPolicy; role?: string } = { policy: "single" };

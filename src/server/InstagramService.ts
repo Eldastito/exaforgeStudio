@@ -193,6 +193,42 @@ ${topCaptions.map((c, i) => `(${i + 1}) ${c}`).join("\n") || "(sem legendas)"}`;
     return { mediaId: String(pub.id) };
   }
 
+  // ───────── ADR-207 F9b: responder comentário (público) / resposta privada (Direct) ─────────
+  // Documentação da Meta (Instagram API with Instagram Login): resposta pública = POST /{comment-id}/replies (message);
+  // resposta privada = POST /{ig-user-id}/messages com recipient.comment_id — 1 por comentário, até 7 dias depois do comentário.
+  // Escopos: instagram_business_manage_comments / instagram_business_manage_messages (App Review da Meta em produção).
+  // `fetchFn` é injetável (teste sem rede). Permissão negada/escopo ausente vira erro com prefixo próprio, nunca sucesso fingido.
+  private static graphError(data: any, status: number, scope: string): Error {
+    const code = Number(data?.error?.code);
+    const msg = String(data?.error?.message || `Instagram ${status}`);
+    if (status === 401 || status === 403 || [10, 190, 200, 299].includes(code) || /permission|not authorized|scope/i.test(msg)) {
+      return new Error(`Aguardando permissão da Meta (${scope}): ${msg}`);
+    }
+    return new Error(msg);
+  }
+
+  static async replyToComment(orgId: string, commentId: string, text: string, fetchFn: typeof fetch = fetch): Promise<{ id: string | null }> {
+    const ch = this.getChannel(orgId);
+    if (!ch) throw new Error("Instagram não conectado.");
+    const body = new URLSearchParams({ message: text, access_token: ch.token });
+    const res = await fetchFn(`${GRAPH}/${encodeURIComponent(commentId)}/replies`, { method: "POST", body });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw this.graphError(data, res.status, "instagram_business_manage_comments");
+    return { id: data?.id ? String(data.id) : null };
+  }
+
+  static async privateReply(orgId: string, commentId: string, text: string, fetchFn: typeof fetch = fetch): Promise<{ id: string | null }> {
+    const ch = this.getChannel(orgId);
+    if (!ch) throw new Error("Instagram não conectado.");
+    const res = await fetchFn(`${GRAPH}/${encodeURIComponent(ch.igId)}/messages?access_token=${encodeURIComponent(ch.token)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient: { comment_id: commentId }, message: { text } }),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw this.graphError(data, res.status, "instagram_business_manage_messages");
+    return { id: data?.message_id ? String(data.message_id) : null };
+  }
+
   /**
    * Passe do agendador: publica os posts agendados cuja hora chegou. Roda em
    * lote, isolado por organização, e marca cada post como 'published' ou

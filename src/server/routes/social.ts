@@ -22,6 +22,7 @@ import { InstagramCommentIntentService } from "../InstagramCommentIntentService.
 import { GrowthEngineService } from "../GrowthEngineService.js";
 import { CampaignStockGuardService } from "../CampaignStockGuardService.js";
 import { ContentBroadcastService } from "../ContentBroadcastService.js";
+import { InstagramCommentReplyService } from "../InstagramCommentReplyService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -570,6 +571,24 @@ router.post("/content-broadcast", requireRole("owner", "admin"), async (req: Aut
     if ((out as any).created) logAuthEvent(orgId, (req as any).user?.userId || null, null, "CONTENT_BROADCAST_DRAFTED", { channel: out.channel, campaignId: (out as any).campaignId });
     res.json(out);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── ADR-207 F9b: responder comentário / Direct — SEMPRE comando governado (propõe → pessoa aprova → executa) ──
+router.post("/instagram/comments/:id/reply", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = InstagramCommentReplyService.propose(orgId, (req as any).user?.userId || null, { intentId: String(req.params.id), kind: req.body?.kind, text: req.body?.text != null ? String(req.body.text) : null });
+    if (!out.deduped) logAuthEvent(orgId, (req as any).user?.userId || null, null, "IG_COMMENT_REPLY_PROPOSED", { actionId: out.action?.id, kind: req.body?.kind });
+    res.json({ actionId: out.action?.id, status: out.action?.status, deduped: out.deduped });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/instagram/comment-replies/:actionId/execute", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await InstagramCommentReplyService.execute(orgId, String(req.params.actionId));
+    logAuthEvent(orgId, (req as any).user?.userId || null, null, "IG_COMMENT_REPLY_EXECUTED", { actionId: req.params.actionId });
+    res.json({ ok: true, summary: out?.summary ?? null });
+  } catch (e: any) { res.status(409).json({ error: e.message }); }
 });
 
 export default router;

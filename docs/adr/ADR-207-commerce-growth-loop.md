@@ -35,7 +35,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | **F12 ✅ #1906** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
-| **F13a (EM PR)** · F13b/c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
+| **F9b (EM PR)** · F13b/c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
 - **Link**: `/loja/:slug?zf_source=instagram&zf_campaign=linen_out26&zf_content=reel_143&zf_ref=campaign:linen` (e o mesmo em `/produto/:p`). O slug nunca muda por campanha; link antigo segue igual.
@@ -164,7 +164,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Sem tabela nova, sem coluna nova. Teste `test:campaign-stock-guard` (38 checks; 15 mutações, as relevantes pegas).
 - **Limites**: o limiar de "baixo" (5 unidades) é uma constante **não calibrada** com dado real (o certo seria proporcional ao ritmo de venda); "em campanha" só enxerga link curto ativo e post ligado — anúncio criado direto na Meta, ou conteúdo sem produto ligado, não é visto; não há "redução automática de exposição" nem substituição de peça (só aviso); o passe é horário, então um esgotamento rápido pode demorar até 1 hora para virar aviso; não vi a tela no navegador.
 
-## 16. F13a — EM PR (2026-10-12): conteúdo → WhatsApp / e-mail (prepara, nunca envia)
+## 16. F13a — MERGED #1907 (2026-10-12): conteúdo → WhatsApp / e-mail (prepara, nunca envia)
 
 - **Auditoria**: o motor de Campanhas já existe (rascunho → disparo humano; anti-ban, limite diário, opt-out, guarda de consentimento no envio) e o descadastro "SAIR" já é tratado pelo webhook. **Não existe** envio de e-mail em massa para clientes (o transporte de e-mail do sistema só escreve para o e-mail do próprio usuário) nem link de descadastro por e-mail.
 - **WhatsApp**: `ContentBroadcastService.draft` transforma a legenda do conteúdo (calendário editorial) em **RASCUNHO de campanha** no motor existente — quem dispara é uma pessoa, na tela de Campanhas (a aprovação humana; mesmo padrão do RIC). Texto limpo (sem hashtags, tamanho limitado), `Oi {nome}!`, link da loja com a origem (`zf_source=whatsapp`, `zf_campaign`, `zf_content` → funil da F1, origem do contato da F2, resultado da F10) e a instrução real de descadastro ("responda SAIR").
@@ -174,3 +174,12 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Tela**: em "Aprovar" (rascunhos) e "Programados" do Motor de Crescimento, "Usar em WhatsApp / e-mail" (canal + público + prévia + criar rascunho / copiar texto). Rota `POST /api/social/content-broadcast` (dono/admin, auditada). Sem tabela nem coluna nova.
 - Teste `test:content-broadcast` (40 checks; 14 mutações pegas).
 - **Limites**: e-mail não é enviado pelo sistema; a mensagem de WhatsApp é só texto (sem imagem); o consentimento de comunicação precisa já estar registrado (se a base é do PDV/ERP sem consentimento, o público fica vazio — dito); o texto vem da legenda do Instagram (não é reescrito para mensagem direta); o envio em si continua sendo o da tela de Campanhas (anti-ban e limite diário dela); não vi a tela no navegador. **F13b** (vídeo bruto → vídeo pronto) e **F13c** (TikTok/LinkedIn/YouTube/X) seguem pendentes e dependem de terceiros.
+
+
+## 17. F9b — EM PR (2026-10-12): responder comentário / Direct do Instagram, GOVERNADO
+
+- **Fluxo**: o dono escolhe "Responder no comentário" ou "Responder no Direct" (texto do rascunho da F9a, editável; reclamação exige texto próprio) → `InstagramCommentReplyService.propose` cria uma `decision_action` `instagram_comment_reply` que nasce **aguardando aprovação** (política `single`) → uma pessoa aprova → `execute` (CommandExecutor) envia. Propor nunca envia; executar sem aprovação é recusado; 2º envio é barrado (ação terminal + trava durável `replied_public_at`/`replied_private_at`).
+- **Meta** (documentação oficial): resposta pública = `POST /{comment-id}/replies`; resposta privada = `POST /{ig-user-id}/messages` com `recipient.comment_id` — **1 por comentário, até 7 dias** (recusado antes de chamar a Meta), texto até 1000 bytes (público 2000 caracteres).
+- **Permissões**: exige `instagram_business_manage_comments` / `instagram_business_manage_messages`, que dependem do **App Review da Meta**. Sem elas a chamada falha como "Aguardando permissão da Meta (escopo)": nada é marcado como respondido e a mesma ação pode ser reenviada depois. **Não testado contra a Meta real** (transporte simulado nos testes).
+- Respondeu → comentário vira `answered`, aviso em `business_signals` é resolvido. Rotas `POST /api/social/instagram/comments/:id/reply` e `/comment-replies/:actionId/execute` (dono/admin, auditadas). Tela: botões na seção "Comentários do Instagram" (Aprovar e enviar).
+- Teste `test:instagram-comment-reply` (38 checks).

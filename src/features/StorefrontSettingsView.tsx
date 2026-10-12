@@ -1340,13 +1340,39 @@ function InstagramCommentsSection() {
     toast.success(on ? 'Leitura de comentários ligada.' : 'Desligada.'); load();
   };
   const dismiss = async (id: string) => { await apiFetch(`/api/social/instagram/comments/${id}/dismiss`, { method: 'POST' }); load(); };
+  const [editing, setEditing] = useState<{ id: string; kind: 'public' | 'private'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const propose = async () => {
+    if (!editing) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/social/instagram/comments/${editing.id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: editing.kind, text: editing.text.trim() || undefined }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível preparar a resposta.'); return; }
+      toast.success('Resposta preparada. Falta você aprovar e enviar.'); setEditing(null); load();
+    } finally { setBusy(false); }
+  };
+  // Aprovar = decisão humana explícita; só depois dela o servidor envia (o envio exige ação aprovada).
+  const approveAndSend = async (pr: { actionId: string; status: string }) => {
+    setBusy(true);
+    try {
+      if (pr.status === 'awaiting_approval') {
+        const a = await apiFetch(`/api/actions/${pr.actionId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        if (!a.ok) { const d = await a.json().catch(() => ({})); toast.error(d.error || 'Não foi possível aprovar.'); return; }
+      }
+      const r = await apiFetch(`/api/social/instagram/comment-replies/${pr.actionId}/execute`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível enviar.'); load(); return; }
+      toast.success('Resposta enviada.'); load();
+    } finally { setBusy(false); }
+  };
   if (enabled === null) return null;
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-zinc-100">Comentários do Instagram</h3>
-          <p className="text-xs text-zinc-500">Identifica quem comenta querendo comprar e prepara um rascunho de resposta. Não envia nada sozinho.</p>
+          <p className="text-xs text-zinc-500">Identifica quem comenta querendo comprar e prepara um rascunho. Só envia depois que você aprovar, e depende da Meta liberar as permissões do app.</p>
         </div>
         <label className="flex items-center gap-2 text-xs text-zinc-300">
           <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} /> Ligado
@@ -1366,6 +1392,27 @@ function InstagramCommentsSection() {
                 {c.draftReply ? <button className="text-fuchsia-300 hover:underline" onClick={() => { navigator.clipboard?.writeText(c.draftReply); toast.success('Rascunho copiado.'); }}>Copiar rascunho</button> : null}
                 <button className="text-zinc-400 hover:underline" onClick={() => dismiss(c.id)}>Dispensar</button>
               </div>
+              <div className="flex flex-wrap gap-3 pt-1">
+                {!c.repliedPublicAt && !(c.pendingReplies || []).some((p: any) => p.kind === 'public') && <button className="text-emerald-300 hover:underline" onClick={() => setEditing({ id: c.id, kind: 'public', text: c.draftReply || '' })}>Responder no comentário</button>}
+                {!c.repliedPrivateAt && !(c.pendingReplies || []).some((p: any) => p.kind === 'private') && <button className="text-emerald-300 hover:underline" onClick={() => setEditing({ id: c.id, kind: 'private', text: c.draftReply || '' })}>Responder no Direct</button>}
+                {c.repliedPublicAt ? <span className="text-zinc-500">Comentário respondido ✓</span> : null}
+                {c.repliedPrivateAt ? <span className="text-zinc-500">Direct enviado ✓</span> : null}
+                {(c.pendingReplies || []).map((p: any) => (
+                  <button key={p.actionId} disabled={busy} className="text-amber-300 hover:underline disabled:opacity-50" onClick={() => approveAndSend(p)}>
+                    Aprovar e enviar ({p.kind === 'public' ? 'comentário' : 'Direct'})
+                  </button>
+                ))}
+              </div>
+              {editing?.id === c.id && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-zinc-400">{editing.kind === 'public' ? 'Resposta pública no comentário' : 'Mensagem no Direct (até 7 dias após o comentário, 1 por comentário)'}</p>
+                  <textarea className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-2 text-xs text-zinc-100" rows={3} value={editing.text} onChange={(e) => setEditing({ ...editing, text: e.target.value })} placeholder="Escreva o texto (reclamação não tem rascunho automático)" />
+                  <div className="flex gap-3">
+                    <button disabled={busy} className="text-fuchsia-300 hover:underline disabled:opacity-50" onClick={propose}>Preparar resposta</button>
+                    <button className="text-zinc-400 hover:underline" onClick={() => setEditing(null)}>Cancelar</button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -48,16 +48,46 @@ async function main() {
   const other = await V.plan(orgB, { topic: "camisa de linho", channels: ["instagram"] });
   check("4.2 isolamento: a marca de outra empresa não vaza", other.plans[0].caveats.every((c) => !/saneado/.test(c)));
 
-  check("5.1 render honesto: awaiting_provider, nunca 'pronto'", p.render.status === "awaiting_provider" && p.render.capabilities.renderImplemented === false && /não está ligada/.test(p.render.reason));
-  const savedPath = process.env.FFMPEG_PATH, savedUrl = process.env.VIDEO_TRANSCRIBE_URL;
-  process.env.FFMPEG_PATH = "/nonexistent/ffmpeg"; delete process.env.VIDEO_TRANSCRIBE_URL;
-  const c0 = new StubVideoPostProvider().capabilities();
-  check("5.2 sem ffmpeg e sem transcrição: nada disponível, com o motivo dito", !c0.ffmpeg && !c0.transcription && !c0.canRenderTrimReframe && !c0.canRenderCaptions && c0.notes.some((n) => /ffmpeg/.test(n)) && c0.notes.some((n) => /transcrição/.test(n)));
+  check("5.1 render: com ffmpeg empacotado, 'partial_available' (corte+enquadramento), nunca 'tudo pronto'", p.render.status === "partial_available" && p.render.capabilities.renderImplemented === true && p.render.capabilities.canRenderCaptions === false && /seguem manuais/.test(p.render.reason));
+  const { FfmpegService } = await import("../src/server/FfmpegService.js");
+  process.env.FFMPEG_PATH = "/nonexistent/ffmpeg"; FfmpegService.resetCache();
+  const c0 = await new StubVideoPostProvider().capabilities();
+  check("5.2 sem ffmpeg: nada disponível, mensagem de cliente (sem erro técnico)", !c0.ffmpeg && !c0.canRenderTrimReframe && !c0.renderImplemented && c0.notes.some((n) => /não está disponível neste servidor/.test(n)));
+  const pNo = await V.plan(orgA, { topic: "x", channels: ["instagram"] });
+  check("5.3 sem ffmpeg o PLANO segue funcionando (status 'unavailable')", pNo.plans.length === 1 && pNo.render.status === "unavailable");
+  delete process.env.FFMPEG_PATH; FfmpegService.resetCache();
   process.env.VIDEO_TRANSCRIBE_URL = "https://x.test/t";
-  const c1 = new StubVideoPostProvider().capabilities();
-  check("5.3 transcrição configurada sozinha não habilita legenda (precisa de ffmpeg)", c1.transcription && !c1.canRenderCaptions);
-  if (savedPath === undefined) delete process.env.FFMPEG_PATH; else process.env.FFMPEG_PATH = savedPath;
-  if (savedUrl === undefined) delete process.env.VIDEO_TRANSCRIBE_URL; else process.env.VIDEO_TRANSCRIBE_URL = savedUrl;
+  const c1 = await new StubVideoPostProvider().capabilities();
+  check("5.5 transcrição configurada não liga legenda (não implementada)", c1.transcription && !c1.canRenderCaptions);
+  delete process.env.VIDEO_TRANSCRIBE_URL;
+
+  // render real
+  const mediaDir = path.join(tmpDir, "media"); fs.mkdirSync(mediaDir, { recursive: true });
+  const srcName = "studio_fixture.mp4";
+  const gen = await FfmpegService.run(["-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=15:duration=30", "-f", "lavfi", "-i", "sine=frequency=440:duration=30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path.join(mediaDir, srcName)]);
+  check("6.0 fixture de vídeo gerada", gen.code === 0);
+  const cid = randomUUID(), imgId = randomUUID(), otherId = randomUUID(), pendId = randomUUID();
+  db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', 'p', ?, 'done')").run(cid, orgA, `/media/${srcName}`);
+  db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'image', 'p', '/media/a.png', 'done')").run(imgId, orgA);
+  db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', 'p', ?, 'done')").run(otherId, orgB, `/media/${srcName}`);
+  db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', 'p', NULL, 'processing')").run(pendId, orgA);
+  process.env.FFMPEG_PATH = "/nonexistent/ffmpeg"; FfmpegService.resetCache();
+  const noFf = await rej(() => V.render(orgA, { creationId: cid, channel: "tiktok", topic: "x" }));
+  delete process.env.FFMPEG_PATH; FfmpegService.resetCache();
+  check("6.0b sem ffmpeg o render recusa com mensagem de cliente e não cria criação", /não está disponível neste servidor/.test(noFf) && !/ffmpeg_|spawn|ENOENT/.test(noFf) && (db.prepare("SELECT COUNT(*) n FROM studio_creations WHERE organization_id = ? AND prompt LIKE 'edição%'").get(orgA) as any).n === 0);
+  const rr = await V.render(orgA, { creationId: cid, channel: "tiktok", topic: "camisa de linho", objectiveId: "vendas" });
+  const outFile = path.join(mediaDir, path.basename(rr.mediaUrl));
+  const probe = await FfmpegService.run(["-i", outFile]);
+  const dm = /Video:[^\n]*?(\d{2,5})x(\d{2,5})/.exec(probe.stderr)!;
+  check("6.1 render cria arquivo novo 9:16 (TikTok) com duração do plano", fs.existsSync(outFile) && Math.abs(+dm[1] / +dm[2] - 9 / 16) < 0.03 && rr.durationSec > 0 && rr.aspect === "9:16");
+  check("6.2 o original é preservado e o resultado vira NOVA criação do Estúdio", fs.existsSync(path.join(mediaDir, srcName)) && rr.creationId !== cid && (db.prepare("SELECT media_url FROM studio_creations WHERE id = ? AND organization_id = ?").get(rr.creationId, orgA) as any)?.media_url === rr.mediaUrl);
+  check("6.3 diz o que foi aplicado e o que NÃO foi", rr.applied.join() === "corte,enquadramento" && rr.notApplied.includes("legenda") && rr.notApplied.includes("título"));
+  check("6.4 vídeo de outra empresa / imagem / ainda processando → recusa", /não encontrado/.test(await rej(() => V.render(orgA, { creationId: otherId, channel: "tiktok", topic: "x" }))) && /não encontrado/.test(await rej(() => V.render(orgA, { creationId: imgId, channel: "tiktok", topic: "x" }))) && /ainda não está pronto/.test(await rej(() => V.render(orgA, { creationId: pendId, channel: "tiktok", topic: "x" }))));
+  check("6.5 canal desconhecido recusa", /não suportado/.test(await rej(() => V.render(orgA, { creationId: cid, channel: "orkut", topic: "x" }))));
+  const traversal = randomUUID();
+  db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', 'p', '/media/../secret.mp4', 'done')").run(traversal, orgA);
+  fs.copyFileSync(path.join(mediaDir, srcName), path.join(tmpDir, "secret.mp4"));
+  check("6.6 media_url com ../ nunca sai da pasta de mídia (usa só o nome do arquivo)", /Não encontrei o arquivo/.test(await rej(() => V.render(orgA, { creationId: traversal, channel: "tiktok", topic: "x" }))));
 
   // rotas
   const app = express(); app.use(express.json());
@@ -67,10 +97,12 @@ async function main() {
   const port: number = await new Promise((rs) => server.listen(0, () => rs((server.address() as any).port)));
   const call = async (org: string | null, method: string, p2: string, body?: any) => { const r = await fetch(`http://127.0.0.1:${port}/api/studio${p2}`, { method, headers: { "Content-Type": "application/json", ...(org ? { "x-org": org } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})) as any }; };
   const r1 = await call(orgA, "POST", "/video-post/plan", { topic: "camisa de linho", channels: ["tiktok"] });
-  check("6.1 rota de plano devolve o plano", r1.status === 200 && r1.body.plans?.[0]?.channel === "tiktok");
-  check("6.2 rota recusa sem tópico (400) e sem login (401)", (await call(orgA, "POST", "/video-post/plan", { channels: ["tiktok"] })).status === 400 && (await call(null, "POST", "/video-post/plan", { topic: "x", channels: ["tiktok"] })).status === 401);
+  check("7.1 rota de plano devolve o plano", r1.status === 200 && r1.body.plans?.[0]?.channel === "tiktok");
+  check("7.2 rota recusa sem tópico (400) e sem login (401)", (await call(orgA, "POST", "/video-post/plan", { channels: ["tiktok"] })).status === 400 && (await call(null, "POST", "/video-post/plan", { topic: "x", channels: ["tiktok"] })).status === 401);
   const r3 = await call(orgA, "GET", "/video-post/capabilities");
-  check("6.3 rota de capacidades", r3.status === 200 && r3.body.renderImplemented === false && (await call(null, "GET", "/video-post/capabilities")).status === 401);
+  check("7.3 rota de capacidades", r3.status === 200 && r3.body.renderImplemented === true && (await call(null, "GET", "/video-post/capabilities")).status === 401);
+  const r4 = await call(orgA, "POST", "/video-post/render", { creationId: cid, channel: "instagram", topic: "camisa de linho" });
+  check("7.4 rota de render devolve a nova criação; 400 para vídeo inexistente; 401 sem login", r4.status === 200 && r4.body.applied?.length === 2 && (await call(orgA, "POST", "/video-post/render", { creationId: "nao", channel: "instagram", topic: "x" })).status === 400 && (await call(null, "POST", "/video-post/render", {})).status === 401);
   server.close();
 
   for (const x of results) console.log(`${x.ok ? "✅" : "❌"} ${x.name}${x.ok ? "" : "  → " + x.detail}`);

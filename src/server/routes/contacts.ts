@@ -4,6 +4,7 @@ import { AuthRequest } from "../middleware/auth.js";
 import { CustomerProfileService } from "../CustomerProfileService.js";
 import { CustomerMemoryService } from "../CustomerMemoryService.js";
 import { RetailStoreScopeService } from "../RetailStoreScopeService.js";
+import { ContactOriginService } from "../ContactOriginService.js";
 
 const router = Router();
 
@@ -37,7 +38,9 @@ router.get("/", (req: AuthRequest, res): any => {
     let sql = `SELECT id, name, identifier, profile_pic_url, lead_temperature, lead_score, purchase_count,
                       total_spent, avg_ticket, last_purchase_at, last_contact_at, tags, notes, created_at,
                       COALESCE(is_supplier,0) AS is_supplier, supplier_categories,
-                      memory_facts, memory_summary, memory_updated_at
+                      memory_facts, memory_summary, memory_updated_at,
+                      first_touch_channel, first_touch_campaign, first_touch_content, first_touch_ref, first_touch_at,
+                      (SELECT provider FROM channels WHERE id = contacts.channel_id AND organization_id = contacts.organization_id) AS channel_provider
                FROM contacts WHERE organization_id = ?`;
     const params: any[] = [orgId];
     const scope = contactsStoreScope(orgId, req.user);
@@ -53,10 +56,38 @@ router.get("/", (req: AuthRequest, res): any => {
     sql += sort === 'spent'
       ? ` ORDER BY total_spent DESC, last_contact_at DESC`
       : ` ORDER BY COALESCE(lead_score,0) DESC, last_contact_at DESC`;
-    res.json(db.prepare(sql).all(...params));
+    // ADR-207 F2 — origem efetiva (registrada, ou inferida do canal e rotulada). Campos antigos intactos.
+    const rows = (db.prepare(sql).all(...params) as any[]).map((r) => {
+      const { channel_provider, ...rest } = r;
+      return { ...rest, origin: ContactOriginService.effective(r) };
+    });
+    res.json(rows);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/contacts/origin-summary — de onde vêm os contatos (ADR-207 F2). Receita por origem só dono/administrador (§73).
+router.get("/origin-summary", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const role = String((req.user as any)?.role || "").toLowerCase();
+    res.json(ContactOriginService.summary(orgId, { includeMoney: role === "owner" || role === "admin", scope: contactsStoreScope(orgId, req.user) }));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/contacts/:id/origin — a história de UM contato: origem, canal atual, onde converteu, toques de campanha. Respeita o recorte de loja.
+router.get("/:id/origin", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const scope = contactsStoreScope(orgId, req.user);
+    const visible = db.prepare(`SELECT 1 FROM contacts WHERE id = ? AND organization_id = ?${scope.clause}`).get(req.params.id, orgId, ...scope.args);
+    const o = visible ? ContactOriginService.originOf(orgId, req.params.id) : null;
+    if (!o) return res.status(404).json({ error: "Contato não encontrado." });
+    res.json(o);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/contacts/segments — contagens úteis para campanhas/CRM

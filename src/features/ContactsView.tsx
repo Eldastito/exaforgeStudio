@@ -6,6 +6,7 @@ import { Avatar } from '@/src/components/ui/Avatar';
 import { apiFetch } from '@/src/lib/api';
 import { EmptyState } from '@/src/components/EmptyState';
 import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
+import { originLine, originChannelLabel, type OriginView } from '@/src/lib/contactOrigin';
 
 type Contact = {
   id: string; name?: string; identifier: string; profile_pic_url?: string;
@@ -13,6 +14,7 @@ type Contact = {
   avg_ticket?: number; last_purchase_at?: string; last_contact_at?: string; tags?: string;
   is_supplier?: number; supplier_categories?: string;
   memory_facts?: string; memory_summary?: string; memory_updated_at?: string;
+  origin?: OriginView;
 };
 
 const scoreBand = (s?: number): { label: string; cls: string; bar: string } => {
@@ -40,6 +42,7 @@ const FILTERS = [
 export function ContactsView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [segments, setSegments] = useState<any>(null);
+  const [origins, setOrigins] = useState<any>(null);
   const [filter, setFilter] = useState('todos');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
@@ -61,9 +64,11 @@ export function ContactsView() {
     Promise.all([
       apiFetch(url).then(r => r.json()).catch(() => []),
       apiFetch('/api/contacts/segments').then(r => r.json()).catch(() => null),
-    ]).then(([cs, seg]) => {
+      apiFetch('/api/contacts/origin-summary').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([cs, seg, org]) => {
       setContacts(Array.isArray(cs) ? cs : []);
       setSegments(seg);
+      setOrigins(org);
     }).finally(() => setLoading(false));
   };
 
@@ -141,6 +146,20 @@ export function ContactsView() {
         </div>
       )}
 
+      {/* De onde vêm os contatos (ADR-207 F2): origem registrada; contatos antigos mostram o canal da 1ª conversa. */}
+      {origins?.byChannel?.length > 0 && (
+        <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+          <div className="text-[11px] text-zinc-500 mb-2">De onde vêm seus contatos</div>
+          <div className="flex flex-wrap gap-2">
+            {origins.byChannel.slice(0, 6).map((o: any) => (
+              <span key={o.channel ?? 'unknown'} className="text-xs px-2.5 py-1 rounded-lg border border-zinc-800 text-zinc-300">
+                {originChannelLabel(o.channel)} · {o.contacts}{o.buyers > 0 ? ` (${o.buyers} já compraram)` : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-4">
         {FILTERS.map(f => (
           <button key={f.id} onClick={() => setFilter(f.id)}
@@ -200,6 +219,11 @@ export function ContactsView() {
                   <div className="flex items-center gap-1 mt-0.5 text-xs text-zinc-500">
                     <Phone className="w-3 h-3" /> {c.identifier}
                   </div>
+                  {originLine(c.origin) && (
+                    <div className="mt-0.5 text-[11px] text-zinc-500" title={c.origin?.basis === 'inferred_channel' ? 'Origem inferida do canal da primeira conversa' : 'Origem registrada quando o contato chegou'}>
+                      Origem: {originLine(c.origin)}
+                    </div>
+                  )}
                 </div>
               </div>
               {/* Lead Score */}

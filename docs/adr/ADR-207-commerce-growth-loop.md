@@ -1,6 +1,6 @@
 # ADR-207 — Commerce Growth Loop: redes sociais → CRM → Loja Virtual ZapFlow → venda → resultado
 
-Status: **EM ANDAMENTO.** F1 em PR. Origem: conversa "ZapFlow — Atualizações de outubro (redes sociais)" + PRD Fase 6A (2026-10-12). Decisão do dono (2026-10-12): implementar as funcionalidades da conversa **desde que fiquem simples de usar, não quebrem o que já funciona e não possam tirar o ZapFlow do ar**. "Quadbase" = codebase e "Kit Hub" = GitHub (erro de digitação): não existe projeto externo a localizar; o gate da F0 do PRD sobre isso está dissolvido.
+Status: **EM ANDAMENTO.** F1 MERGED (#1895); F2 em PR. Origem: conversa "ZapFlow — Atualizações de outubro (redes sociais)" + PRD Fase 6A (2026-10-12). Decisão do dono (2026-10-12): implementar as funcionalidades da conversa **desde que fiquem simples de usar, não quebrem o que já funciona e não possam tirar o ZapFlow do ar**. "Quadbase" = codebase e "Kit Hub" = GitHub (erro de digitação): não existe projeto externo a localizar; o gate da F0 do PRD sobre isso está dissolvido.
 
 ## 1. O que a auditoria do código achou (verificado no `main`)
 | Peça | Estado |
@@ -23,8 +23,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 ## 3. Fatias (cada uma = 1 PR; ordem por valor e risco)
 | # | Fatia | Depende de terceiro? |
 | --- | --- | --- |
-| **F1** | **Atribuição social → loja**: `zf_source/zf_campaign/zf_content/zf_ref` no link da loja; visita e pedido gravam a origem; lead ligado ao conteúdo pelo token do link; funil derivado `GET /api/storefront/attribution` | não |
-| F2 | CRM: **origem imutável** (first touch) + canal atual + canal de conversão + forma de recebimento; "Instagram → WhatsApp" não apaga o Instagram | não |
+| **F1 ✅ #1895** | **Atribuição social → loja**: `zf_source/zf_campaign/zf_content/zf_ref` no link da loja; visita e pedido gravam a origem; lead ligado ao conteúdo pelo token do link; funil derivado `GET /api/storefront/attribution` | não |
+| **F2 (EM PR)** | CRM: **origem imutável** (first touch) + canal atual + canal de conversão + forma de recebimento; "Instagram → WhatsApp" não apaga o Instagram | não |
 | F3 | **Retirar na loja** no checkout: só lojas com estoque confiável, reserva atômica já na criação do pedido, reserva expira se não pagar; atrás de flag | Alterdata (qualidade do estoque) |
 | F4 | Fila **"separar agora"** para o pedido com retirada (sinal + estados separado/pronto/retirado); fecha o buraco "vendi a última peça na loja física" | não (write-back no PDV = Alterdata) |
 | F5 | Link curto `/loja/:slug/go/:codigo` + gerador de link de campanha + vitrine "visto no Instagram" | não |
@@ -44,3 +44,13 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Funil** (`GET /api/storefront/attribution?days=`, só dono/administrador): por canal/campanha/conteúdo — visitas, cliques, pedidos, pagos, receita **paga** (fato) e **aguardando** (à parte, nunca somada), conversão (null sem visitas), margem do pago (null sem custo conhecido). Pedidos sem origem aparecem à parte. Rotulado "atribuição declarada pelo link, não prova de causa".
 - Teste `test:storefront-attribution` (42 checks; 10 mutações pegas — 2 guardas são defesa em profundidade: o filtro de org no UPDATE do pedido e o `contactId` antes do lead, ambos já protegidos por outra camada). Regressão verde: `storefront-seller-attribution`, `storefront-stock`, `content-lead-attribution`, `content-revenue-attribution`.
 - **Limites**: nada gera o link ainda (F5) — hoje o dono monta a URL à mão; não vê no navegador (só testes e build); a atribuição é declarada pelo link (qualquer um pode digitar `zf_*`); a receita dos relatórios ADR-168 continua olhando o último pedido pago do contato, não este pedido (o funil novo lê o pedido); não há tela (só API).
+
+## 5. F2 — EM PR (2026-10-12): origem do contato no CRM
+- **O que o CRM passa a guardar**, separado em quatro coisas que não se misturam: **origem** (onde o contato apareceu pela 1ª vez — gravada UMA vez, imutável), **canal atual** (o canal do cadastro dele, derivado), **conversão** (onde a compra aconteceu: loja virtual ZapFlow / atendimento IA / equipe — derivada do pedido pago) e **toques** (as atribuições de campanha de cada pedido, da F1 — o histórico, não a origem). WhatsApp depois do Instagram **não** apaga o Instagram.
+- **Como a origem nasce**: contato NOVO criado por mensagem recebida (webhook de WhatsApp/Instagram/Facebook) ganha o canal por onde chegou (`ContactOriginService.recordFromNewContact`, best-effort logo depois do INSERT; falhar nunca atrapalha o atendimento). Colunas aditivas `contacts.first_touch_{channel,campaign,content,ref,at}`; `UPDATE … WHERE first_touch_channel IS NULL` garante a imutabilidade.
+- **Contato antigo**: sem backfill. A leitura mostra a origem **inferida do canal da 1ª conversa**, rotulada `inferred_channel` ("WhatsApp (pelo canal da 1ª conversa)"); nada é gravado na inferência; sem canal conhecido → "desconhecida". O mesmo humano em dois canais continua sendo dois contatos (nada de unificar por palpite — PRD §76).
+- **API**: a lista `GET /api/contacts` ganha `origin` (campos antigos intactos); `GET /api/contacts/:id/origin` (história de um contato, respeita o recorte de loja do CRM — ADR-173); `GET /api/contacts/origin-summary` (de onde vêm os contatos: contatos, quantos já compraram, taxa; **receita por origem só dono/administrador**, §73).
+- **Tela**: cartão do contato mostra "Origem: Instagram · campanha" (ou a inferida, rotulada); faixa "De onde vêm seus contatos" no topo do CRM.
+- Teste `test:contact-origin` (41 checks; sobe o webhook e as rotas REAIS; 11 mutações pegas — 2 guardas são defesa em profundidade: o recorte de loja no `/:id/origin` só é exercitado com usuário restrito, já coberto por `test:contacts-store-scope`). Regressão verde: `contacts-store-scope`, `meta-webhook-dedup`, `whatsapp-webhook-channel`, `storefront-attribution`.
+- **Limites**: não grava origem por conta própria para contatos que só aparecem no PDV/ERP (Alterdata) — esses ficam "desconhecida" até haver dado; a origem de campanha (`campaign/content`) só é preenchida por quem chamar `recordFirstTouch` com ela (a F9 — comentário/Direct com contexto — será o 1º); "forma de recebimento" (entrega × retirada) entra com a F3; não vi no navegador.
+

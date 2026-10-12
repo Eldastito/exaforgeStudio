@@ -911,6 +911,9 @@ export function StorefrontSettingsView() {
         {/* Comentários do Instagram → intenção (ADR-207 F9) */}
         <InstagramCommentsSection />
 
+        {/* Mídia paga — calculadora e resultado (ADR-207 F10) */}
+        <PaidMediaSection products={products} />
+
         {/* Frete (ADR-207 F7) */}
         <ShippingPolicySection products={products} />
 
@@ -1367,6 +1370,89 @@ function InstagramCommentsSection() {
           ))}
         </ul>
       ))}
+    </div>
+  );
+}
+
+// Mídia paga, etapa 1 (ADR-207 F10): calculadora + resultado. NÃO cria nem altera anúncio — você cria a campanha na plataforma
+// e lança aqui quanto gastou. Plano = ESTIMATIVA com os números que você informar; sem custo da peça, fica em branco.
+function PaidMediaSection({ products }: { products: Array<{ id: string; name: string }> }) {
+  const [f, setF] = useState({ productId: '', minProfit: '', budget: '', cpc: '', conv: '' });
+  const [plan, setPlan] = useState<any>(null);
+  const [calc, setCalc] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const [sp, setSp] = useState({ campaign: '', amount: '' });
+  const brl = (v: number | null | undefined) => (v == null ? '—' : `R$ ${Number(v).toFixed(2)}`);
+  const x = (v: number | null | undefined) => (v == null ? '—' : `${v}x`);
+  const num = (v: string) => (v.trim() === '' ? null : Number(v.replace(',', '.')));
+  const loadRes = () => apiFetch('/api/storefront/economics/media-results').then((r) => r.json()).then(setRes).catch(() => {});
+  useEffect(() => { loadRes(); }, []);
+  const simulate = async () => {
+    if (!f.productId) { toast.error('Escolha o produto.'); return; }
+    setCalc(true);
+    try {
+      const scenarios = num(f.cpc) && num(f.conv) ? [{ label: 'seu cenário', cpc: num(f.cpc), conversionPct: num(f.conv) }] : undefined;
+      const r = await apiFetch('/api/storefront/economics/media-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: f.productId, minProfitPerSale: num(f.minProfit), budget: num(f.budget), scenarios }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível calcular.'); return; }
+      setPlan(d);
+    } finally { setCalc(false); }
+  };
+  const addSpend = async () => {
+    const r = await apiFetch('/api/storefront/economics/media-spend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campaign: sp.campaign, amount: num(sp.amount) }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { toast.error(d.error || 'Não foi possível lançar.'); return; }
+    toast.success('Gasto lançado.'); setSp({ campaign: sp.campaign, amount: '' }); loadRes();
+  };
+  const inp = 'rounded-lg bg-zinc-950 border border-zinc-800 px-2 py-1.5 text-xs text-zinc-100';
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-100">Mídia paga: quanto posso gastar?</h3>
+        <p className="text-xs text-zinc-500">Calculadora. Não cria nem altera anúncio: você cria a campanha na plataforma e lança aqui o que gastou.</p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <select className={inp} value={f.productId} onChange={(e) => setF({ ...f, productId: e.target.value })}><option value="">Produto…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <input className={inp} placeholder="Lucro mínimo por venda (R$)" value={f.minProfit} onChange={(e) => setF({ ...f, minProfit: e.target.value })} />
+        <input className={inp} placeholder="Orçamento de mídia (R$)" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} />
+        <input className={inp} placeholder="CPC que você espera (R$)" value={f.cpc} onChange={(e) => setF({ ...f, cpc: e.target.value })} />
+        <input className={inp} placeholder="Conversão esperada (%)" value={f.conv} onChange={(e) => setF({ ...f, conv: e.target.value })} />
+      </div>
+      <button className="text-xs px-3 py-1.5 rounded-lg bg-fuchsia-600 text-white disabled:opacity-50" disabled={calc} onClick={simulate}>Calcular</button>
+      {plan && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs space-y-1 text-zinc-300">
+          {plan.message ? <p className="text-amber-300">{plan.message}</p> : null}
+          {plan.contributionPerSale != null && <p>Sobra por venda antes da mídia: <b>{brl(plan.contributionPerSale)}</b>{plan.contributionIsUpperBound ? ' (teto: faltam custos do canal)' : ''}</p>}
+          {plan.viable && (<>
+            <p>CAC máximo (quanto pagar por venda): <b className="text-emerald-300">{brl(plan.maxCac)}</b></p>
+            <p>ROAS mínimo: <b>{x(plan.minRoasAtMaxCac)}</b> · ROAS de equilíbrio: {x(plan.breakEvenRoas)} · POAS mínimo: {x(plan.minPoas)}</p>
+            {plan.salesToBreakEven != null && <p>Com {brl(plan.budget)}: precisa de {plan.salesToBreakEven} vendas ({brl(plan.revenueToBreakEven)}) para empatar; no teto de CAC o orçamento compra {plan.salesAtMaxCac} vendas.</p>}
+            {(plan.scenarios || []).map((s: any) => (
+              <p key={s.label}>{s.label}: {s.orders} pedidos, CAC {brl(s.cac)} {s.withinMaxCac ? '(dentro do limite)' : '(ACIMA do limite)'}, lucro {brl(s.profit)}, ROAS {x(s.roas)}, POAS {x(s.poas)}</p>
+            ))}
+          </>)}
+          <p className="text-zinc-500">{plan.note}</p>
+        </div>
+      )}
+      <div className="border-t border-zinc-800 pt-3 space-y-2">
+        <p className="text-xs font-medium text-zinc-200">O que a campanha deu de verdade</p>
+        <div className="flex flex-wrap gap-2">
+          <input className={inp} placeholder="Campanha (nome do link)" value={sp.campaign} onChange={(e) => setSp({ ...sp, campaign: e.target.value })} />
+          <input className={inp} placeholder="Gastou (R$)" value={sp.amount} onChange={(e) => setSp({ ...sp, amount: e.target.value })} />
+          <button className="text-xs px-3 py-1.5 rounded-lg bg-zinc-700 text-white" onClick={addSpend}>Lançar gasto</button>
+        </div>
+        {res && res.campaigns?.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-zinc-500 text-left"><th className="py-1 pr-3">Campanha</th><th className="pr-3">Gasto</th><th className="pr-3">Pedidos pagos</th><th className="pr-3">ROAS</th><th className="pr-3">Lucro</th><th className="pr-3">POAS</th><th>Custo/pedido pago</th></tr></thead>
+              <tbody>{res.campaigns.map((c: any) => (
+                <tr key={c.campaign} className="border-t border-zinc-800 text-zinc-200"><td className="py-1 pr-3 font-medium">{c.campaign}</td><td className="pr-3">{brl(c.spend)}</td><td className="pr-3">{c.paidOrders}</td><td className="pr-3">{x(c.roas)}</td><td className="pr-3">{brl(c.profit)}{c.contributionIsUpperBound ? '*' : ''}</td><td className="pr-3">{x(c.poas)}</td><td>{brl(c.costPerPaidOrder)}</td></tr>
+              ))}</tbody>
+            </table>
+            <p className="text-[11px] text-zinc-500 mt-1">{res.note} * teto: faltam custos do canal.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

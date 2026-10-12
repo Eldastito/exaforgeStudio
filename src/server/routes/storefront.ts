@@ -1,3 +1,4 @@
+import { PaidMediaService } from "../PaidMediaService.js";
 import { CampaignAiCostService } from "../CampaignAiCostService.js";
 import { Router } from "express";
 import db from "../db.js";
@@ -344,6 +345,31 @@ router.put("/economics/settings", requireRole("owner", "admin"), (req: AuthReque
 router.get("/economics/ai-cost", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(CampaignAiCostService.report(orgId, { days: Number(req.query.days) || 30 }));
+});
+router.post("/economics/media-plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    res.json(PaidMediaService.plan(orgId, { productId: String(b.productId || ""), minProfitPerSale: Number(b.minProfitPerSale), budget: b.budget == null || b.budget === "" ? null : Number(b.budget), fixedCampaignCost: b.fixedCampaignCost == null || b.fixedCampaignCost === "" ? null : Number(b.fixedCampaignCost), scenarios: Array.isArray(b.scenarios) ? b.scenarios : undefined }));
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.get("/economics/media-spend", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ entries: PaidMediaService.listSpend(orgId, { campaign: String(req.query.campaign || "") || undefined }) });
+});
+router.post("/economics/media-spend", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(PaidMediaService.addSpend(orgId, { campaign: String(req.body?.campaign || ""), amount: Number(req.body?.amount), spentOn: req.body?.spentOn, note: req.body?.note }, (req as any).user?.userId || null)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.delete("/economics/media-spend/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!PaidMediaService.removeSpend(orgId, String(req.params.id))) return res.status(404).json({ error: "Lançamento não encontrado." });
+  res.json({ ok: true });
+});
+router.get("/economics/media-results", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(PaidMediaService.results(orgId, { days: Number(req.query.days) || 30 }));
 });
 router.get("/economics/quality", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(ChannelEconomicsService.dataQuality(getOrgId(req), req.query.storeId ? String(req.query.storeId) : null)); }

@@ -9,6 +9,7 @@ import { CampaignObjectiveContractService } from "../CampaignObjectiveContractSe
 import { HookIntelligenceService } from "../HookIntelligenceService.js";
 import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
+import { VideoPostProductionService } from "../VideoPostProductionService.js";
 import { StudioVisualRecipeService, VisualRecipeError } from "../StudioVisualRecipeService.js";
 
 const router = Router();
@@ -219,6 +220,29 @@ router.post("/channel-adaptation", (req: AuthRequest, res): any => {
     hashtags: Array.isArray(req.body?.hashtags) ? req.body.hashtags.map((h: any) => String(h)) : [],
   };
   res.json(ChannelAdaptationService.adaptMany(base, channels));
+});
+
+// ── Video Post-Production (ADR-207 F13b) — plano de edição vídeo bruto → pronto (não edita o arquivo) ──
+
+// GET /api/studio/video-post/capabilities — o que o servidor consegue de fato (descoberto)
+router.get("/video-post/capabilities", (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(VideoPostProductionService.capabilities());
+});
+
+// POST /api/studio/video-post/plan { topic, objectiveId?, channels:[...], sourceDurationSec? }
+router.post("/video-post/plan", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const out = await VideoPostProductionService.plan(orgId, {
+      topic: String(req.body?.topic || ""),
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      channels: Array.isArray(req.body?.channels) ? req.body.channels.map((c: any) => String(c)) : [],
+      sourceDurationSec: req.body?.sourceDurationSec ?? null,
+    });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao montar o plano." }); }
 });
 
 // ── Script Intelligence (PRD 11 / ADR-168 F4) — roteiro/storyboard de vídeo grounded ──

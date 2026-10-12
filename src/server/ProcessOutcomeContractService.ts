@@ -77,17 +77,11 @@ export class ProcessOutcomeContractService {
   }
 
   /**
-   * Avalia o Outcome Contract de uma instância de processo. Read-only.
-   * verdict: `success` | `failure` | `indeterminate` | `no_contract`.
-   * Failure tem precedência sobre success (um processo que bateu a condição de FALHA
-   * não é "sucesso" mesmo que a de sucesso também bata — RN-OA-1 conservador).
+   * Núcleo PURO do veredito: aplica o contrato de UMA definição (`success/failure_conditions_json`) sobre UMA instância.
+   * Extraído de `evaluate` sem mudar comportamento — o backtest de playbook (ADR-206 F5.5) reusa o MESMO avaliador pra
+   * reaplicar o contrato de uma versão ao histórico. Não lê o banco, não muda FSM.
    */
-  static evaluate(orgId: string, instanceId: string): any {
-    if (!orgId || !instanceId) return { found: false, verdict: "no_contract" };
-    const inst = db.prepare(`SELECT * FROM process_instances WHERE id = ? AND organization_id = ?`).get(instanceId, orgId) as any;
-    if (!inst) return { found: false, verdict: "no_contract" };
-    const def = db.prepare(`SELECT success_conditions_json, failure_conditions_json FROM process_definitions WHERE id = ? AND organization_id = ?`).get(inst.process_definition_id, orgId) as any;
-
+  static verdictFor(def: { success_conditions_json?: string | null; failure_conditions_json?: string | null } | null | undefined, inst: any): { verdict: string; contract?: any } {
     const rawSuccess = def?.success_conditions_json ? safeParse(def.success_conditions_json) : null;
     const rawFailure = def?.failure_conditions_json ? safeParse(def.failure_conditions_json) : null;
     const successCond = toCondition(rawSuccess);
@@ -95,9 +89,7 @@ export class ProcessOutcomeContractService {
 
     const hasSuccess = rawSuccess != null;
     const hasFailure = rawFailure != null;
-    if (!hasSuccess && !hasFailure) {
-      return { found: true, instanceId, status: inst.status, verdict: "no_contract", note: "Processo sem Outcome Contract definido (RN-OA-2 — não inventa sucesso)." };
-    }
+    if (!hasSuccess && !hasFailure) return { verdict: "no_contract" };
 
     const ctx = this.contextOf(inst);
     // Condição presente mas não-normalizável → unevaluable (nunca "passou" — RN-OA-2).
@@ -109,16 +101,37 @@ export class ProcessOutcomeContractService {
     let verdict: string;
     if (failureMet === true) verdict = "failure";               // falha tem precedência
     else if (successMet === true && !failureUnevaluable) verdict = "success";
-    else if (successUnevaluable || failureUnevaluable) verdict = "indeterminate";
-    else verdict = "indeterminate";                             // definido mas ainda não satisfeito
+    else verdict = "indeterminate";                             // não avaliável ou definido mas ainda não satisfeito
 
     return {
-      found: true, instanceId, processType: inst.process_type, status: inst.status,
       verdict,
       contract: {
         success: { defined: hasSuccess, met: successMet, unevaluable: successUnevaluable },
         failure: { defined: hasFailure, met: failureMet, unevaluable: failureUnevaluable },
       },
+    };
+  }
+
+  /**
+   * Avalia o Outcome Contract de uma instância de processo. Read-only.
+   * verdict: `success` | `failure` | `indeterminate` | `no_contract`.
+   * Failure tem precedência sobre success (um processo que bateu a condição de FALHA
+   * não é "sucesso" mesmo que a de sucesso também bata — RN-OA-1 conservador).
+   */
+  static evaluate(orgId: string, instanceId: string): any {
+    if (!orgId || !instanceId) return { found: false, verdict: "no_contract" };
+    const inst = db.prepare(`SELECT * FROM process_instances WHERE id = ? AND organization_id = ?`).get(instanceId, orgId) as any;
+    if (!inst) return { found: false, verdict: "no_contract" };
+    const def = db.prepare(`SELECT success_conditions_json, failure_conditions_json FROM process_definitions WHERE id = ? AND organization_id = ?`).get(inst.process_definition_id, orgId) as any;
+    const v = this.verdictFor(def, inst);
+    if (v.verdict === "no_contract") {
+      return { found: true, instanceId, status: inst.status, verdict: "no_contract", note: "Processo sem Outcome Contract definido (RN-OA-2 — não inventa sucesso)." };
+    }
+    const { verdict, contract } = v;
+    return {
+      found: true, instanceId, processType: inst.process_type, status: inst.status,
+      verdict,
+      contract,
       note: "Veredito DERIVADO read-only (RN-OA-3) — NÃO muda a FSM da instância; falha tem precedência sobre sucesso (RN-OA-1).",
     };
   }

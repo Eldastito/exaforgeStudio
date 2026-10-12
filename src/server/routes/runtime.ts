@@ -11,6 +11,7 @@ import { SalesRecoveryPlaybookService } from "../SalesRecoveryPlaybook.js";
 import { BusinessSignalService } from "../BusinessSignalService.js";
 import { SignalProcessRouterService } from "../SignalProcessRouterService.js";
 import { PlaybookRegistryService } from "../PlaybookRegistryService.js";
+import { PlaybookBacktestService } from "../PlaybookBacktestService.js";
 
 /**
  * Rotas do Execution Runtime (ADR-152 F1.1). Duas camadas de gate:
@@ -59,6 +60,15 @@ router.post("/definitions", (req: AuthRequest, res): any => {
 // ADR-206 F5.3 — Playbook Registry: catálogo de plataforma (versionado, só leitura) + situação desta empresa. Não ativa nem inicia nada.
 router.get("/playbook-registry", (req: AuthRequest, res): any => {
   res.json({ ...PlaybookRegistryService.catalog(), forOrg: PlaybookRegistryService.forOrg(req.organizationId!) });
+});
+
+// ADR-206 F5.5 — backtest de playbook: reaplica o contrato de sucesso/falha de uma versão ao histórico e compara com o que aconteceu.
+// Read-only; não executa nada nem muda instância. Backtest ≠ promessa.
+router.get("/playbook-registry/backtest", (req: AuthRequest, res): any => {
+  const processType = typeof req.query.processType === "string" ? req.query.processType : "";
+  if (!processType) return res.status(400).json({ error: "processType obrigatório." });
+  const definitionId = typeof req.query.definitionId === "string" ? req.query.definitionId : undefined;
+  res.json(PlaybookBacktestService.backtest(req.organizationId!, processType, { definitionId }));
 });
 
 router.get("/definitions", (req: AuthRequest, res): any => {

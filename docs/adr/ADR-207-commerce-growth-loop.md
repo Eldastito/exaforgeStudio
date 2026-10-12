@@ -35,7 +35,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | **F12 ✅ #1906** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
-| **F13b parcial (MERGED #1909)** · **F13c parcial (EM PR)** | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
+| **F13b (parcial, MERGED #1909; corte+enquadramento EM PR)** · **F13c parcial (EM PR)** | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
 - **Link**: `/loja/:slug?zf_source=instagram&zf_campaign=linen_out26&zf_content=reel_143&zf_ref=campaign:linen` (e o mesmo em `/produto/:p`). O slug nunca muda por campanha; link antigo segue igual.
@@ -198,3 +198,11 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Entrega**: `AssistedChannelProvider` — zero capacidades descobertas, `publish`/`schedule` → `manual_required`, leituras `capability_unavailable` (analytics ausente ≠ zero), health `not_connected`; o Hub roteia por opt-in (`provider=assisted`, só nos 4 canais; default e demais canais inalterados). `PublishPackageService.build` devolve por canal o conteúdo ADAPTADO às normas (F5: limite de legenda, hashtags, formato, CTA), passos manuais e o site do canal; em formato de vídeo + `topic`, anexa o plano de edição (F13b). Termo proibido pela marca recusa (não reescreve). Canal com API real (instagram/facebook) e desconhecido vão para `skipped`. Não publica nem grava nada.
 - **Limite honesto**: sem API não há analytics — a publicação manual NÃO entra no ciclo medido (resultado/aprendizado) e o pacote avisa isso. Registrar link/métricas à mão não foi feito.
 - Rota `POST /api/studio/publish-package`. Sem tela. Teste `test:assisted-channels` (23).
+
+
+## 20. F13b (2ª etapa) — EM PR (2026-10-12): corte e enquadramento reais com ffmpeg empacotado
+
+- **Decisão**: em vez de provider de vídeo externo (conta/chave de terceiro), usar o binário empacotado `ffmpeg-static`, que funciona sem instalar nada no sistema. Declarado como `optionalDependencies`: se o download do binário falhar no build/deploy, a instalação NÃO falha — o app sobe e o processamento de vídeo fica "indisponível" (mensagem de cliente, resto do sistema intacto). `FFMPEG_PATH` sobrepõe com um binário do sistema.
+- **`FfmpegService`** (`src/server/FfmpegService.ts`; fora de `media/` porque o `.gitignore` ignora essa pasta): ÚNICO ponto de execução do ffmpeg; `spawn` com array (sem shell), timeout com kill, limites (entrada/saída/jobs simultâneos/tempo, configuráveis por env `FFMPEG_*`), pasta temporária por job sempre removida, entrada nunca alterada, erros por código controlado, log estruturado sem conteúdo. Carrega o binário por `import()` dinâmico (o build do servidor é CJS). Concorrência por semáforo em memória — NÃO foi criada 2ª fila; o render é síncrono (clipes curtos), não passa pelo `JobQueueService`.
+- **Operações**: thumbnail JPG, corte + enquadramento (crop central 9:16/1:1/16:9, H.264/AAC). `VideoPostProductionService.render` aplica o plano do canal a um vídeo do Estúdio (`POST /api/studio/video-post/render`), salva como NOVA criação (original preservado; só o nome do arquivo é usado — sem path traversal) e devolve o que foi aplicado (corte, enquadramento) e o que NÃO foi (legenda, remoção de pausas, título, CTA na imagem — legenda exige transcrição; os demais não foram feitos).
+- **Ainda não**: upload de vídeo próprio (hoje edita vídeos gerados no Estúdio), execução em fila/worker separado, legenda automática, tela. Testes: `test:ffmpeg-service` (22, com ffmpeg real) e `test:video-post-production` (30).

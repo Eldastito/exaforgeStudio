@@ -246,9 +246,23 @@ router.post("/publish-package", async (req: AuthRequest, res): Promise<any> => {
 // ── Video Post-Production (ADR-207 F13b) — plano de edição vídeo bruto → pronto (não edita o arquivo) ──
 
 // GET /api/studio/video-post/capabilities — o que o servidor consegue de fato (descoberto)
-router.get("/video-post/capabilities", (req: AuthRequest, res): any => {
+router.get("/video-post/capabilities", async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
-  res.json(VideoPostProductionService.capabilities());
+  res.json(await VideoPostProductionService.capabilities());
+});
+
+// POST /api/studio/video-post/render { creationId, channel, topic, objectiveId? } — corta e enquadra um vídeo do Estúdio
+router.post("/video-post/render", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(await VideoPostProductionService.render(orgId, {
+      creationId: String(req.body?.creationId || ""),
+      channel: String(req.body?.channel || ""),
+      topic: String(req.body?.topic || ""),
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+    }));
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao editar o vídeo." }); }
 });
 
 // POST /api/studio/video-post/plan { topic, objectiveId?, channels:[...], sourceDurationSec? }

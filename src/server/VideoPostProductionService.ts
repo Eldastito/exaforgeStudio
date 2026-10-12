@@ -6,15 +6,21 @@
  *    queimada, título, CTA, enquadramento) montado sobre o que já existe — roteiro (F4/`ScriptIntelligenceService`, que por
  *    sua vez reusa gancho F3 e Brand DNA F1) e normas de canal (F5/`ChannelAdaptationService`). É o roteiro que o dono, um
  *    editor ou um provider segue. NÃO existe 2º gerador de roteiro/gancho (§37).
- *  - `capabilities`: o que o SERVIDOR realmente consegue fazer, DESCOBERTO (binário `ffmpeg` presente? serviço de
- *    transcrição configurado?) — nunca presumido (RN-SI-06). Editar o arquivo de fato NÃO é feito aqui: `render.status`
- *    diz "awaiting_provider" e o motivo (precisa de ffmpeg + transcrição no servidor, ou provider externo — terceiro).
+ *  - `capabilities`: o que o SERVIDOR realmente consegue fazer, DESCOBERTO (`FfmpegService.available()` roda `-version`;
+ *    serviço de transcrição configurado?) — nunca presumido (RN-SI-06).
+ *  - `render` (parcial): com ffmpeg disponível, CORTA e ENQUADRA (crop central) um vídeo do Estúdio conforme o plano do canal
+ *    e salva como NOVA criação (a original nunca é alterada). NÃO aplica legenda (exige transcrição), remoção de pausas,
+ *    título nem CTA na imagem — a resposta diz o que foi aplicado e o que não foi. Todo ffmpeg passa por `FfmpegService`.
  *
  * Guardrails: RN-CG-09 (grounded — só o que foi informado; canal desconhecido rejeitado; duração-fonte desconhecida não
  * é inventada), RN-CG-04 (termo proibido pela marca já saneado pelo roteiro/gancho), PUBLISHED≠RESULTADO (plano ≠ vídeo
  * pronto: nada é publicado, nada é marcado como editado), publicar segue sendo `social_publish` governado (F11 PRD 10).
  */
-import { spawnSync } from "child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import db from "./db.js";
+import { FfmpegService, FfmpegError } from "./FfmpegService.js";
 import { ScriptIntelligenceService } from "./ScriptIntelligenceService.js";
 import { ChannelAdaptationService, SocialChannelName } from "./ChannelAdaptationService.js";
 
@@ -23,27 +29,27 @@ export interface VideoPostCapabilities {
   transcription: boolean;          // VIDEO_TRANSCRIBE_URL configurado (legenda automática exige)
   canRenderTrimReframe: boolean;   // corte + enquadramento (só ffmpeg)
   canRenderCaptions: boolean;      // legenda queimada (ffmpeg + transcrição)
-  renderImplemented: false;        // o render de arquivo NÃO está implementado nesta fatia
+  renderImplemented: boolean;      // true quando há ffmpeg: corte + enquadramento (legenda/silêncio/título NÃO)
   notes: string[];
 }
 
 export interface VideoPostProvider {
   id: string;
-  capabilities(): VideoPostCapabilities;
+  capabilities(): Promise<VideoPostCapabilities> | VideoPostCapabilities;
 }
 
-/** Provider honesto: descobre o ambiente e declara que o render ainda não está ligado. */
+/** Provider embutido: ffmpeg do próprio servidor (`ffmpeg-static`), descoberto — nunca presumido. */
 export class StubVideoPostProvider implements VideoPostProvider {
-  id = "stub";
-  capabilities(): VideoPostCapabilities {
-    let ffmpeg = false;
-    try { ffmpeg = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-version"], { timeout: 3000 }).status === 0; } catch { ffmpeg = false; }
+  id = "ffmpeg";
+  async capabilities(): Promise<VideoPostCapabilities> {
+    const av = await FfmpegService.available();
+    const ffmpeg = av.available;
     const transcription = !!process.env.VIDEO_TRANSCRIBE_URL;
     const notes: string[] = [];
-    if (!ffmpeg) notes.push("ffmpeg não encontrado no servidor — corte/enquadramento não podem ser feitos aqui.");
+    if (!ffmpeg) notes.push("O processamento de vídeo não está disponível neste servidor no momento (ffmpeg).");
+    else notes.push("Disponível: corte e enquadramento. Legenda automática, remoção de pausas, título e CTA na imagem ainda não são aplicados.");
     if (!transcription) notes.push("Sem serviço de transcrição configurado — legenda automática indisponível.");
-    notes.push("A edição do arquivo ainda não está ligada: use o plano abaixo no seu editor ou conecte um provider de vídeo.");
-    return { ffmpeg, transcription, canRenderTrimReframe: ffmpeg, canRenderCaptions: ffmpeg && transcription, renderImplemented: false, notes };
+    return { ffmpeg, transcription, canRenderTrimReframe: ffmpeg, canRenderCaptions: false, renderImplemented: ffmpeg, notes };
   }
 }
 
@@ -65,9 +71,25 @@ export interface ChannelEditPlan {
 export interface VideoPostPlan {
   topic: string; objectiveId: string | null; sourceDurationSec: number | null;
   plans: ChannelEditPlan[]; skipped: { channel: string; reason: string }[];
-  render: { status: "awaiting_provider"; provider: string; capabilities: VideoPostCapabilities; reason: string };
+  render: { status: "partial_available" | "unavailable"; provider: string; capabilities: VideoPostCapabilities; reason: string };
   note: string;
 }
+
+export interface VideoRenderResult {
+  creationId: string; mediaUrl: string; channel: string; aspect: string; startSec: number; durationSec: number;
+  applied: string[]; notApplied: string[]; outputBytes: number; note: string;
+}
+
+const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
+const RENDER_MESSAGES: Record<string, string> = {
+  ffmpeg_unavailable: "O processamento de vídeo não está disponível neste servidor no momento.",
+  input_not_found: "Não encontrei o arquivo desse vídeo.",
+  input_too_large: "Esse vídeo é grande demais para ser editado aqui.",
+  timeout: "A edição demorou demais e foi interrompida. Tente um vídeo menor.",
+  ffmpeg_failed: "Não consegui editar esse vídeo. Tente outro arquivo.",
+  output_too_large: "O vídeo editado ficou grande demais.",
+  busy: "Há edições demais em andamento. Tente de novo em instantes.",
+};
 
 function clip(s: string, max: number): string { return s.length <= max ? s : s.slice(0, Math.max(0, max - 1)).trimEnd() + "…"; }
 function cap(s: string): string { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
@@ -75,7 +97,7 @@ function cap(s: string): string { return s ? s.charAt(0).toUpperCase() + s.slice
 export class VideoPostProductionService {
   static provider: VideoPostProvider = new StubVideoPostProvider();
 
-  static capabilities(): VideoPostCapabilities { return this.provider.capabilities(); }
+  static async capabilities(): Promise<VideoPostCapabilities> { return this.provider.capabilities(); }
 
   static async plan(orgId: string, input: { topic: string; objectiveId?: string | null; channels: string[]; sourceDurationSec?: number | null }): Promise<VideoPostPlan> {
     const topic = String(input?.topic || "").trim();
@@ -131,12 +153,47 @@ export class VideoPostProductionService {
       plans.push({ channel: ch, label, aspect: norm.aspect, targetDurationSec: t + ctaLen, title, hookText: script.hook, ctaText, steps, caveats });
     }
 
-    const capabilities = this.provider.capabilities();
+    const capabilities = await this.provider.capabilities();
     return {
       topic, objectiveId: script.objectiveId, sourceDurationSec: source, plans, skipped,
-      render: { status: "awaiting_provider", provider: this.provider.id, capabilities, reason: "A edição automática do arquivo ainda não está ligada neste servidor; o plano é o roteiro de edição." },
+      render: capabilities.renderImplemented
+        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar e enquadrar automaticamente; legenda, remoção de pausas, título e CTA na imagem seguem manuais (use o plano)." }
+        : { status: "unavailable", provider: this.provider.id, capabilities, reason: "O processamento de vídeo não está disponível neste servidor no momento; o plano é o roteiro de edição." },
       note: "Plano de edição, não vídeo pronto. Enquadramentos são recomendações editoriais (não limites oficiais). Publicar segue pelo fluxo governado.",
     };
+  }
+
+  /**
+   * Corta e enquadra um vídeo do Estúdio da empresa conforme o plano do canal. Entrada: `creationId` (kind video, pronto).
+   * A criação original é preservada; o resultado vira uma NOVA criação. Erros do ffmpeg viram mensagem de cliente.
+   */
+  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null }): Promise<VideoRenderResult> {
+    const row = db.prepare("SELECT id, kind, media_url, status FROM studio_creations WHERE id = ? AND organization_id = ?").get(String(input?.creationId || ""), orgId) as any;
+    if (!row || row.kind !== "video") throw new Error("Vídeo do Estúdio não encontrado.");
+    if (row.status && row.status !== "done") throw new Error("Esse vídeo ainda não está pronto.");
+    const base = path.basename(String(row.media_url || ""));
+    if (!base || !/\.(mp4|mov|webm)$/i.test(base)) throw new Error("Esse vídeo não tem um arquivo editável.");
+    const inputPath = path.join(MEDIA_DIR, base);
+
+    const plan = await this.plan(orgId, { topic: input.topic, objectiveId: input.objectiveId ?? null, channels: [input.channel] });
+    const cp = plan.plans[0];
+    if (!cp) throw new Error("Canal não suportado para edição.");
+    const aspect = cp.aspect as "9:16" | "1:1" | "16:9";
+    const outName = `studio_${randomUUID()}.mp4`;
+    try {
+      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect });
+      const mediaUrl = `/media/${outName}`;
+      const id = randomUUID();
+      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', ?, ?, 'done')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento)`, mediaUrl);
+      return {
+        creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: cp.targetDurationSec,
+        applied: ["corte", "enquadramento"], notApplied: ["legenda", "remoção de pausas", "título", "CTA na imagem"], outputBytes: r.outputBytes,
+        note: "Cortei do início até a duração do plano e enquadrei no formato do canal. O vídeo original não foi alterado. O restante do plano segue manual.",
+      };
+    } catch (e: any) {
+      if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);
+      throw e;
+    }
   }
 }
 

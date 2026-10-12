@@ -184,7 +184,7 @@ export class FalaTuMultiActionService {
    * Liga o compromisso ao cadastro anterior da MESMA frase: (a) o compromisso cita o nome cadastrado ("…com João Silva…") ou (b) diz
    * "com ele/ela" e há UM só cadastro antes (ambíguo → não adivinha). O pronome é trocado pelo nome só na hora de preparar.
    */
-  private static linkDependencies(items: MultiItem[]): void {
+  static linkDependencies(items: MultiItem[]): void {
     const L = "A-Za-zÀ-ú";
     const norm = (s: string) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
     const contacts = items.map((it, idx) => ({ it, idx, name: it.kind === "record_contact" ? FalatuRecordService.parseContact(it.text).name : null })).filter((c) => c.name);

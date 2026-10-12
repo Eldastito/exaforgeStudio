@@ -8,6 +8,7 @@ import { SkillOsPlannerService } from "../SkillOsPlannerService.js";
 import { SkillOsEvalService } from "../SkillOsEvalService.js";
 import { SkillOsRolloutService } from "../SkillOsRolloutService.js";
 import { SkillOsPilotSeeder } from "../SkillOsPilotSeeder.js";
+import { FalaTuSkillMapService } from "../FalaTuSkillMapService.js";
 import { ROLLOUT_STAGES, RolloutStage } from "../skillosModel.js";
 
 /**
@@ -167,6 +168,32 @@ router.post("/seed-pilots", requireRole("owner", "admin"), (req: AuthRequest, re
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(SkillOsPilotSeeder.seedPilots()); }
   catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// GET /api/skillos/falatu-map — ADR-206 F5.10: quais ações do FalaTu têm capacidade no SkillOS.
+router.get("/falatu-map", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ mapping: FalaTuSkillMapService.mapping() });
+});
+
+// POST /api/skillos/seed-falatu — registra (opt-in, idempotente, `shadow`) as 3 capacidades do FalaTu. Não promove.
+router.post("/seed-falatu", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(FalaTuSkillMapService.register()); }
+  catch (e: any) { res.status(500).json({ error: String(e?.message || e) }); }
+});
+
+// POST /api/skillos/falatu-plan { text, vertical? } — plano de uma frase pelo Planner. Só planeja: não grava, não executa.
+router.post("/falatu-plan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  const text = String(b.text || "").trim();
+  if (!text) return res.status(400).json({ error: "text obrigatório" });
+  if (text.length > 1000) return res.status(400).json({ error: "text excede 1000 caracteres" });
+  try {
+    res.json(FalaTuSkillMapService.plan(orgId, req.user, text, { today: new Date().toISOString().slice(0, 10), vertical: b.vertical ?? null }));
+  } catch (e: any) { res.status(400).json({ error: String(e?.message || e) }); }
 });
 
 // POST /api/skillos/promote-pilots { percent? } — promoção §68 dos 3 pilotos `shadow`→

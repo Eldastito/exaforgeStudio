@@ -33,8 +33,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F8 (EM PR)** | Custo de IA por campanha (medidor atual + `campaign/content/correlation`) | não |
 | **F9a ✅ #1903** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
-| **F11 (EM PR)** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
-| F12 | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
+| **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
+| **F12 (EM PR)** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
 | F13 | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
@@ -142,7 +142,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Teste `test:paid-media` (45 checks, contas conferidas à mão; 18 mutações pegas).
 - **Limites**: sem API da Meta (criar/otimizar anúncio = etapas 2–4 do PRD, dependem de Marketing API + revisão); ROAS/POAS dependem de o dono lançar o gasto e de a campanha ter o **mesmo nome** do link; pedido sem `attr_campaign` (cliente que chegou sem o link) não entra; nenhuma regra automática do tipo "CAC > X → pausar" (etapa 4); o lucro usa a contribuição (aluguel/folha fora); não vi a tela no navegador.
 
-## 14. F11 — EM PR (2026-10-12): Motor de Crescimento (uma tela, sem motor novo)
+## 14. F11 — MERGED #1905 (2026-10-12): Motor de Crescimento (uma tela, sem motor novo)
 
 - **Achado da auditoria**: o Brand DNA 2.0 (ADR-168 F1) e o Contrato de Objetivo de Campanha (F2) existiam **só no servidor — nenhuma tela os usava**. Sem isso o dono não conseguia nem preencher a marca nem escolher o objetivo. A ativação guiada abaixo é, na prática, a primeira tela deles.
 - **Experiência, não motor** (PRD: "uma camada de composição e UX"): `GrowthEngineService.overview` só **lê** o que os serviços existentes já produzem — Radar (ideias de conteúdo e de produto + comentários com interesse de compra), Criar (briefings prontos para o Estúdio), Aprovar (publicações aguardando aprovação, aprovadas prontas para publicar e rascunhos do calendário), Programados, Resultados (publicações medidas, campanhas da loja, mídia paga que o dono lançou, metas) e Aprendizados (o que funcionou, campeãs). Nenhum Scheduler, Estúdio, tabela, flag ou regra novos.
@@ -152,3 +152,14 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Onde fica**: no topo do Estúdio de Criação (painel recolhível, carregado sob demanda; aberto no primeiro acesso, fechado depois de ativado). **Sem menu novo.** Rota `GET /api/social/growth-engine` só dono/administrador (tem aprovação e dinheiro).
 - Teste `test:growth-engine` (29 checks; serviço e rota reais; mutações pegas).
 - **Limites**: vídeo bruto → vídeo final e conteúdo → e-mail/WhatsApp/newsletter (itens 4 e 5 do PRD) **não** estão aqui (F13); "Fala Tu → Brand DNA" é um formulário guiado, não conversa livre; o painel depende de o usuário ter o módulo Estúdio e ser dono/administrador (gerente restrito não vê); a lista de ideias vem de oportunidades já detectadas (não roda pesquisa); não vi a tela no navegador.
+
+## 15. F12 — EM PR (2026-10-12): estoque ↔ campanha
+
+- **Regra do PRD**: nunca atrair cliente para uma peça que a operação não consegue entregar. Duas pontas:
+  1. **Antes de criar** — `ProductOpportunityService.candidates` (que alimenta o Radar, o Growth Brief e as propostas do Autopilot) passa a exigir **saldo vendável > 5 unidades**, pelo mesmo cálculo da vitrine (`StorefrontStockService.sellable` = disponível − reservado, estoque próprio + por loja). Peça com 3 unidades — ou 20 com 18 reservadas — deixa de ser sugerida para campanha. **Mudança de comportamento da F11 do ADR-168**: o teste `test:product-opportunity` tinha um produto com 5 unidades (agora corretamente fora); o fixture foi para 8.
+  2. **Durante a campanha** — `CampaignStockGuardService`: vigia os produtos "em campanha" (link curto ativo da F5 ou post do Instagram ligado a produto da F9a — nunca por palpite). Saldo ≤ 5 → aviso `attention`; esgotado → `risk`; repôs → o aviso se resolve sozinho; faltou de novo → reabre o **mesmo** aviso; saiu de campanha → resolve. Um aviso por produto em `business_signals` (convenção nº 12), **só unidades, sem R$**. Uma pessoa que dispensou/resolveu o aviso não é contrariada (o sistema só reabre o que ele mesmo fechou).
+- **Produto sem controle de estoque** não tem "esgotado": estado `unknown`, nunca alerta nem bloqueia (null ≠ zero).
+- **O sistema só AVISA** (recomendação ≠ execução): não pausa anúncio, não arquiva link curto, não troca a peça. A vitrine já marca "esgotado" e bloqueia a compra sozinha. Mídia paga (`media-plan`) devolve `stock` e `warnings` quando o produto está baixo/esgotado, sem bloquear a conta.
+- **Superfícies**: Radar do Motor de Crescimento lista os avisos abertos; `GET /api/social/campaign-stock` (produtos em campanha, do mais crítico ao menos) e `POST /campaign-stock/scan` (dono/administrador); passe do Scheduler (mesma cadência dos outros passes horários).
+- Sem tabela nova, sem coluna nova. Teste `test:campaign-stock-guard` (38 checks; 15 mutações, as relevantes pegas).
+- **Limites**: o limiar de "baixo" (5 unidades) é uma constante **não calibrada** com dado real (o certo seria proporcional ao ritmo de venda); "em campanha" só enxerga link curto ativo e post ligado — anúncio criado direto na Meta, ou conteúdo sem produto ligado, não é visto; não há "redução automática de exposição" nem substituição de peça (só aviso); o passe é horário, então um esgotamento rápido pode demorar até 1 hora para virar aviso; não vi a tela no navegador.

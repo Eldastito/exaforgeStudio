@@ -1,3 +1,4 @@
+import { CampaignStockGuardService } from "./CampaignStockGuardService.js";
 import db from "./db.js";
 import { InstagramService } from "./InstagramService.js";
 import { FacebookService } from "./FacebookService.js";
@@ -85,7 +86,9 @@ export class GrowthEngineService {
         const l = InstagramCommentIntentService.list(orgId, { status: "new", limit: 200 });
         commentsToAnswer = (l.comments as any[]).filter((c) => ["price", "availability", "buy"].includes(c.intent)).length;
       } catch { /* leitura de comentários desligada/indisponível */ }
-      return { whatToPost: brief.whatToPost.slice(0, 8), commentsToAnswer };
+      let stockAlerts: any[] = [];
+      try { stockAlerts = CampaignStockGuardService.alerts(orgId); } catch { /* sem alertas */ }
+      return { whatToPost: brief.whatToPost.slice(0, 8), commentsToAnswer, stockAlerts };
     });
 
     const create = safe(() => {

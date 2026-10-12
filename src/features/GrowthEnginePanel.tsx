@@ -123,6 +123,9 @@ export default function GrowthEnginePanel({ onUseBriefing }: { onUseBriefing: (t
                 {data.radar.whatToPost.length === 0 ? <Empty>Nenhuma ideia agora. O Radar só sugere o que tem base (assunto do nicho, produto em estoque de boa margem parado).</Empty> : (
                   <ul className="space-y-1.5">{data.radar.whatToPost.map((w: any) => <li key={`${w.kind}:${w.ref}`}><b>{w.label}</b> <span className="text-zinc-400">— {w.reason}</span></li>)}</ul>
                 )}
+                {(data.radar.stockAlerts || []).map((a: any, i: number) => (
+                  <p key={i} className={`text-xs ${a.state === 'out' ? 'text-red-300' : 'text-amber-300'}`}>{a.state === 'out' ? '⛔' : '⚠️'} {a.product || 'Produto'}: {a.state === 'out' ? 'esgotado' : `restam ${a.units}`} e ainda em campanha. {a.note}</p>
+                ))}
                 {data.radar.commentsToAnswer > 0 && <p className="text-xs text-amber-300">{data.radar.commentsToAnswer} comentário{data.radar.commentsToAnswer > 1 ? 's' : ''} no Instagram com interesse de compra (veja em Loja virtual → Comentários do Instagram).</p>}
               </>
             ))}

@@ -58,7 +58,7 @@ async function main() {
 
   // ── 4. dry-run (sem publish) não escreve sinal ──
   const org2 = orgB;
-  const p2 = product(org2, "Alta margem B", 200); stock(org2, p2, 5, 50); // 75% margem
+  const p2 = product(org2, "Alta margem B", 200); stock(org2, p2, 8, 50); // 75% margem (8 un. > limiar de estoque baixo da F12; com 5 já não seria promovido)
   const dry = PO.match(org2, { publish: false });
   check("4.1 dry-run devolve candidato", dry.matched === 1 && dry.opportunities[0].signalId === "");
   check("4.2 dry-run não escreve sinal", Number((db.prepare(`SELECT COUNT(*) AS n FROM business_signals WHERE organization_id = ?`).get(org2) as any).n) === 0);

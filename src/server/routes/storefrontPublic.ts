@@ -1,3 +1,4 @@
+import { StorefrontAttributionService } from "../StorefrontAttributionService.js";
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -398,7 +399,10 @@ router.post("/store/:slug/event", (req, res): any => {
     const type = String(req.body?.type || "");
     if (!["view", "product_click"].includes(type)) return res.status(204).end();
     const productId = type === "product_click" ? (req.body?.productId || null) : null;
-    db.prepare(
+    // ADR-207 F1 — atribuição social (opcional). Sem ela, o INSERT é o mesmo de sempre.
+    const attr = StorefrontAttributionService.sanitize(req.body?.attribution);
+    if (attr) StorefrontAttributionService.recordEvent(store.organization_id, uuidv4(), type, productId, attr);
+    else db.prepare(
       "INSERT INTO storefront_events (id, organization_id, type, product_id) VALUES (?, ?, ?, ?)"
     ).run(uuidv4(), store.organization_id, type, productId);
   } catch (e) { /* best-effort */ }
@@ -542,6 +546,8 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       }
     });
     tx();
+    // ADR-207 F1 — atribuição social do pedido (best-effort: nunca derruba a venda). O contato vem do token do link (org validada), nunca do body.
+    try { StorefrontAttributionService.attachToOrder(orgId, orderId, StorefrontAttributionService.sanitize(body.attribution), contactId); } catch { /* noop */ }
     // E-mail informado no checkout: guarda no contato (se houver) para confirmações.
     const customerEmail = (body.customer?.email || "").trim();
     if (customerEmail && contactId) {

@@ -34,8 +34,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F9a ✅ #1903** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
-| **F12 (EM PR)** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
-| F13 | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
+| **F12 ✅ #1906** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
+| **F13a (EM PR)** · F13b/c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
 - **Link**: `/loja/:slug?zf_source=instagram&zf_campaign=linen_out26&zf_content=reel_143&zf_ref=campaign:linen` (e o mesmo em `/produto/:p`). O slug nunca muda por campanha; link antigo segue igual.
@@ -153,7 +153,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Teste `test:growth-engine` (29 checks; serviço e rota reais; mutações pegas).
 - **Limites**: vídeo bruto → vídeo final e conteúdo → e-mail/WhatsApp/newsletter (itens 4 e 5 do PRD) **não** estão aqui (F13); "Fala Tu → Brand DNA" é um formulário guiado, não conversa livre; o painel depende de o usuário ter o módulo Estúdio e ser dono/administrador (gerente restrito não vê); a lista de ideias vem de oportunidades já detectadas (não roda pesquisa); não vi a tela no navegador.
 
-## 15. F12 — EM PR (2026-10-12): estoque ↔ campanha
+## 15. F12 — MERGED #1906 (2026-10-12): estoque ↔ campanha
 
 - **Regra do PRD**: nunca atrair cliente para uma peça que a operação não consegue entregar. Duas pontas:
   1. **Antes de criar** — `ProductOpportunityService.candidates` (que alimenta o Radar, o Growth Brief e as propostas do Autopilot) passa a exigir **saldo vendável > 5 unidades**, pelo mesmo cálculo da vitrine (`StorefrontStockService.sellable` = disponível − reservado, estoque próprio + por loja). Peça com 3 unidades — ou 20 com 18 reservadas — deixa de ser sugerida para campanha. **Mudança de comportamento da F11 do ADR-168**: o teste `test:product-opportunity` tinha um produto com 5 unidades (agora corretamente fora); o fixture foi para 8.
@@ -163,3 +163,14 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Superfícies**: Radar do Motor de Crescimento lista os avisos abertos; `GET /api/social/campaign-stock` (produtos em campanha, do mais crítico ao menos) e `POST /campaign-stock/scan` (dono/administrador); passe do Scheduler (mesma cadência dos outros passes horários).
 - Sem tabela nova, sem coluna nova. Teste `test:campaign-stock-guard` (38 checks; 15 mutações, as relevantes pegas).
 - **Limites**: o limiar de "baixo" (5 unidades) é uma constante **não calibrada** com dado real (o certo seria proporcional ao ritmo de venda); "em campanha" só enxerga link curto ativo e post ligado — anúncio criado direto na Meta, ou conteúdo sem produto ligado, não é visto; não há "redução automática de exposição" nem substituição de peça (só aviso); o passe é horário, então um esgotamento rápido pode demorar até 1 hora para virar aviso; não vi a tela no navegador.
+
+## 16. F13a — EM PR (2026-10-12): conteúdo → WhatsApp / e-mail (prepara, nunca envia)
+
+- **Auditoria**: o motor de Campanhas já existe (rascunho → disparo humano; anti-ban, limite diário, opt-out, guarda de consentimento no envio) e o descadastro "SAIR" já é tratado pelo webhook. **Não existe** envio de e-mail em massa para clientes (o transporte de e-mail do sistema só escreve para o e-mail do próprio usuário) nem link de descadastro por e-mail.
+- **WhatsApp**: `ContentBroadcastService.draft` transforma a legenda do conteúdo (calendário editorial) em **RASCUNHO de campanha** no motor existente — quem dispara é uma pessoa, na tela de Campanhas (a aprovação humana; mesmo padrão do RIC). Texto limpo (sem hashtags, tamanho limitado), `Oi {nome}!`, link da loja com a origem (`zf_source=whatsapp`, `zf_campaign`, `zf_content` → funil da F1, origem do contato da F2, resultado da F10) e a instrução real de descadastro ("responda SAIR").
+- **Público** = segmento do CRM ∩ sem `marketing_opt_out` ∩ **com consentimento `comunicacoes` registrado** — sempre, sem opção de afrouxar (a rota ignora `requireConsent:false`). Mostra quantos ficaram de fora por falta de consentimento. Limite de 500 por rascunho.
+- **E-mail**: devolve assunto + texto + HTML (escapado) prontos e a contagem do público (só quem tem e-mail cadastrado e consentimento), `sendable:false`. O dono copia e usa a ferramenta dele. Não é feito aqui porque enviar exige transporte novo + link de descadastro funcional.
+- **Recusas**: termo proibido pela marca (Brand DNA) recusa a geração; conteúdo cancelado/sem texto/de outra empresa; produto de outra empresa; sem loja publicada → mensagem sem link (dito). Idempotente: o mesmo conteúdo não cria um 2º rascunho aberto. `dryRun` mostra a prévia sem criar nada. Resposta sem telefone/e-mail de cliente.
+- **Tela**: em "Aprovar" (rascunhos) e "Programados" do Motor de Crescimento, "Usar em WhatsApp / e-mail" (canal + público + prévia + criar rascunho / copiar texto). Rota `POST /api/social/content-broadcast` (dono/admin, auditada). Sem tabela nem coluna nova.
+- Teste `test:content-broadcast` (40 checks; 14 mutações pegas).
+- **Limites**: e-mail não é enviado pelo sistema; a mensagem de WhatsApp é só texto (sem imagem); o consentimento de comunicação precisa já estar registrado (se a base é do PDV/ERP sem consentimento, o público fica vazio — dito); o texto vem da legenda do Instagram (não é reescrito para mensagem direta); o envio em si continua sendo o da tela de Campanhas (anti-ban e limite diário dela); não vi a tela no navegador. **F13b** (vídeo bruto → vídeo pronto) e **F13c** (TikTok/LinkedIn/YouTube/X) seguem pendentes e dependem de terceiros.

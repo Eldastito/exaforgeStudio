@@ -41,6 +41,7 @@
     "test:store-pickup-queue": "tsx scripts/test-store-pickup-queue.ts",
     "test:storefront-short-links": "tsx scripts/test-storefront-short-links.ts",
     "test:instagram-comment-intent": "tsx scripts/test-instagram-comment-intent.ts",
+    "test:paid-media": "tsx scripts/test-paid-media.ts",
     "test:campaign-ai-cost": "tsx scripts/test-campaign-ai-cost.ts",
     "test:channel-economics": "tsx scripts/test-channel-economics.ts",
     "test:shipping-policy": "tsx scripts/test-shipping-policy.ts",

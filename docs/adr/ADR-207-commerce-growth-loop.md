@@ -31,8 +31,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F6 ✅ #1900** | **Economia por canal** (fachada read-only): margem de contribuição física × online, qualidade do dado (confiável/parcial/insuficiente), **desconto máximo seguro** sobre os cupons existentes; piso opcional | não (precisa o dono informar piso/impostos) |
 | **F7 ✅ #1901** | **Frete**: regras definidas pelo dono (retirada grátis, fixo, por faixa, grátis acima de X **e** acima do piso) aplicadas no checkout; cotação por transportadora em fatia posterior | cotação: Correios/Melhor Envio (contrato) |
 | **F8 (EM PR)** | Custo de IA por campanha (medidor atual + `campaign/content/correlation`) | não |
-| **F9a (EM PR)** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
-| F10 | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
+| **F9a ✅ #1903** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
+| **F10 (EM PR)** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | F11 | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | F12 | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
 | F13 | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
@@ -118,7 +118,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Sem tabela nova, sem coluna nova. Teste `test:campaign-ai-cost` (30 checks; serviço e rota reais; mutações pegas, incluindo a de "contar correlação que não é de campanha").
 - **Limites**: o custo é **estimado pela tabela de preço do ledger**, não é a fatura do provedor; vídeo (Veo) não grava custo no ledger hoje → não entra; só o Estúdio marca (atendimento por IA, Fala Tu etc. caem em "sem campanha" — o contato nem sempre tem campanha no 1º toque); o slug da campanha precisa ser o mesmo dos links da F5 (a tela não valida isso); não vi no navegador.
 
-## 12. F9a — EM PR (2026-10-12): comentário do Instagram → intenção comercial (entende e avisa; NÃO envia)
+## 12. F9a — MERGED #1903 (2026-10-12): comentário do Instagram → intenção comercial (entende e avisa; NÃO envia)
 
 - **Achado da auditoria (comportamento existente, não alterado com a flag desligada)**: o webhook do Instagram, num evento de comentário (`changes[].field = comments`), caía no ramo "alternativo" e tratava o comentário como se fosse uma DM do comentarista — o atendente de IA tentava "responder" a um comentário público como se fosse conversa. Com a flag ligada, o comentário passa a ser desviado para esta leitura de intenção (e **não** vira conversa).
 - **Opt-in por empresa** (`ig_comment_intent_enabled`, default 0). Desligada, empresa sem canal casado, ou evento que não é comentário: `ingestChange` devolve `false` e o webhook segue o caminho de sempre, byte a byte.
@@ -129,3 +129,15 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Rotas** (dono/administrador): `GET/PUT /api/social/instagram/comments/settings`, `GET /api/social/instagram/comments`, `POST .../comments/:id/dismiss`, `PUT /api/social/instagram/media-product`. Tela: cartão "Comentários do Instagram" na configuração da loja (liga/desliga, lista, copiar rascunho, dispensar).
 - 2 tabelas aditivas (`instagram_comment_intents`, `instagram_media_products`) + 1 coluna (`ig_comment_intent_enabled`). Teste `test:instagram-comment-intent` (55 checks; mutações pegas, incluindo isolamento por empresa, dedupe e "nunca resposta automática à reclamação").
 - **Limites / F9b**: **nada é enviado** — responder o comentário ou mandar Direct ("resposta privada") será a F9b, como comando GOVERNADO (aprovação → executor → confirmação) e só com a permissão aprovada pela Meta (App Review). Não testei contra a Meta de verdade: o formato do evento `comments` segue a documentação; a primeira conexão real deve ser conferida no console de webhooks (`MetaWebhookLogService`). A intenção por palavra erra (ironia, gíria, outro idioma); "quero" em "quero saber o preço" cai em preço de propósito. Não vi a tela no navegador.
+
+## 13. F10 — EM PR (2026-10-12): mídia paga, etapa 1 (calculadora + resultado real, sem API de anúncios)
+
+- **Não cria, não altera e não pausa anúncio.** Você cria a campanha na plataforma; o ZapFlow faz a conta e mostra o resultado.
+- **Plano** (`POST /api/storefront/economics/media-plan`, dono/admin): a partir da margem de **contribuição online** do produto (a mesma conta da F6/F7) e do **lucro mínimo por venda que o dono exige**, calcula: **CAC máximo** (contribuição − lucro mínimo), ROAS mínimo no teto, ROAS de equilíbrio, POAS mínimo e, com orçamento, vendas para empatar e quantas vendas o orçamento compra no teto de CAC. Custo fixo da campanha (IA/produção/frete reservado) entra no equilíbrio. **Cenários só com CPC e conversão que o dono informar** (até 3) — nenhuma faixa conservador/base/otimista é inventada. É **estimativa**, dita como tal.
+- **Honestidade**: produto sem custo da peça → "sem número" (não vira 0 nem "viável"); contribuição que não cobre o lucro exigido → "inviável"; custo do canal incompleto → a margem é marcada como **teto**.
+- **Gasto real** (lançado pelo dono, manual): `POST/GET /economics/media-spend`, `DELETE /economics/media-spend/:id`; campanha normalizada com o mesmo slug dos links (F5) e do custo de IA (F8). Tabela aditiva `campaign_ad_spend`.
+- **Resultado real** (`GET /economics/media-results?days=`): por campanha, gasto lançado × pedidos **pagos** da campanha (F1) → ROAS; **contribuição** de cada pedido (com o desconto real e o **frete subsidiado** da F7); **IA** da F8; **lucro** = contribuição − mídia − IA; **POAS** = lucro ÷ mídia. Sem gasto lançado ou sem custo da peça → ROAS/lucro/POAS ficam em branco (`null`), nunca R$ 0.
+- **"Custo por pedido pago" não é CAC de cliente novo**: o sistema não sabe se o comprador já tinha comprado antes — declarado na própria resposta. Só dono/administrador vê (dinheiro).
+- **Tela**: cartão "Mídia paga: quanto posso gastar?" na configuração da loja (calculadora + lançar gasto + tabela de resultado).
+- Teste `test:paid-media` (45 checks, contas conferidas à mão; 18 mutações pegas).
+- **Limites**: sem API da Meta (criar/otimizar anúncio = etapas 2–4 do PRD, dependem de Marketing API + revisão); ROAS/POAS dependem de o dono lançar o gasto e de a campanha ter o **mesmo nome** do link; pedido sem `attr_campaign` (cliente que chegou sem o link) não entra; nenhuma regra automática do tipo "CAC > X → pausar" (etapa 4); o lucro usa a contribuição (aluguel/folha fora); não vi a tela no navegador.

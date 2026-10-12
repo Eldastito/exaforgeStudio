@@ -12659,6 +12659,22 @@ const initDb = () => {
       );
     `);
   } catch(e){}
+  // ADR-207 F10 — mídia paga etapa 1: gasto REAL lançado pelo dono (a plataforma de anúncios é dele; sem API). Aditivo.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS campaign_ad_spend (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        campaign TEXT NOT NULL,
+        amount REAL NOT NULL,
+        spent_on TEXT NOT NULL,
+        note TEXT,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_campaign_ad_spend_org ON campaign_ad_spend (organization_id, campaign, spent_on);
+    `);
+  } catch(e){}
 };
 
 initDb();

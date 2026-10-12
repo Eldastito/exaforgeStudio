@@ -35,6 +35,7 @@
     "test:skillos-rollout": "tsx scripts/test-skillos-rollout.ts",
     "test:skillos-pilot-seed": "tsx scripts/test-skillos-pilot-seed.ts",
     "test:falatu-skill-map": "tsx scripts/test-falatu-skill-map.ts",
+    "test:storefront-attribution": "tsx scripts/test-storefront-attribution.ts",
     "test:playbook-library-ui": "tsx scripts/test-playbook-library-ui.ts",
     "test:skillos-pilot-promote": "tsx scripts/test-skillos-pilot-promote.ts",
     "test:reputation-provider": "tsx scripts/test-reputation-provider.ts",

@@ -12536,6 +12536,17 @@ const initDb = () => {
         ON strategic_policy_versions (organization_id, version);
     `);
   } catch(e){ console.error('[DB] Falha ao criar strategic_policy_versions (ADR-206 F5.8)', e); }
+  // ADR-207 F1 — Atribuição social → Loja Virtual: de onde veio a visita/o pedido (canal, campanha, conteúdo, fio). ADITIVO: sem os parâmetros, nada muda.
+  try { db.exec(`ALTER TABLE storefront_events ADD COLUMN attr_source TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_events ADD COLUMN attr_campaign TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_events ADD COLUMN attr_content TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE storefront_events ADD COLUMN attr_ref TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN attr_source TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN attr_campaign TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN attr_content TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN attr_ref TEXT`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_attr ON orders (organization_id, attr_source, attr_campaign)`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_storefront_events_attr ON storefront_events (organization_id, attr_source, attr_campaign)`); } catch(e){}
 };
 
 initDb();

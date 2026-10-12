@@ -24,6 +24,7 @@ import { ProductModal } from './ProductModal';
 import { CartDrawer } from './CartDrawer';
 import { ReservationWidget } from './ReservationWidget';
 import { FashionStudio } from './FashionStudio';
+import { resolveAttribution, type StoredAttribution } from './attribution';
 
 // Lê o slug do pathname (/loja/:slug), o deep-link de produto
 // (/loja/:slug/produto/:productSlug — ADR-028) e o token ?c=.
@@ -44,12 +45,17 @@ function readUrl(): { slug: string; productSlug: string | null; token: string | 
 const DEFAULT_ACCENT = '#6366f1';
 
 // Registra um evento da vitrine (visita / clique em produto). Fire-and-forget.
+// ADR-207 F1 — origem social do clique (zf_* na URL), guardada por 7 dias; null = vitrine igual à de antes.
+function currentAttribution(): StoredAttribution | null {
+  try { return resolveAttribution(window.location.search, window.localStorage, Date.now()); } catch { return null; }
+}
+
 function logStoreEvent(slug: string, type: 'view' | 'product_click', productId?: string) {
   try {
     fetch(`/api/public/store/${encodeURIComponent(slug)}/event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, productId }),
+      body: JSON.stringify({ type, productId, attribution: currentAttribution() ?? undefined }),
       keepalive: true,
     }).catch(() => {});
   } catch { /* noop */ }
@@ -299,6 +305,7 @@ export function Storefront() {
         coupon: extra.coupon,
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
         fashionLookId: fashionLookId ?? undefined,
+        attribution: currentAttribution() ?? undefined,
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
         method: 'POST',

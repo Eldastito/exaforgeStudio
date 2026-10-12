@@ -11,6 +11,7 @@ import { ProductEditHistoryService } from "../ProductEditHistoryService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 import { StorefrontLookService } from "../StorefrontLookService.js";
 import { StorefrontLookGenerationService } from "../StorefrontLookGenerationService.js";
+import { StorefrontAttributionService } from "../StorefrontAttributionService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -275,6 +276,12 @@ router.get("/analytics", (req: AuthRequest, res): any => {
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/storefront/attribution?days=30 -> funil por canal/campanha/conteúdo (ADR-207 F1). Dinheiro: só dono/administrador (§73).
+router.get("/attribution", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(StorefrontAttributionService.funnel(getOrgId(req), { days: Number(req.query.days) || 30 })); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)

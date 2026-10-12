@@ -20,7 +20,7 @@ import { ensureProductSlug } from "./productSlug.js";
 export type CommentIntent = "price" | "availability" | "buy" | "complaint" | "praise" | "spam" | "other";
 export const COMMERCIAL_INTENTS: CommentIntent[] = ["price", "availability", "buy"];
 
-const STATUSES = ["new", "dismissed"] as const;
+const STATUSES = ["new", "dismissed", "answered"] as const;
 const RETENTION_DAYS = 90;
 
 const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -158,16 +158,22 @@ export class InstagramCommentIntentService {
   static list(orgId: string, opts: { status?: string; intent?: string; limit?: number } = {}) {
     const lim = Math.min(Math.max(Math.trunc(Number(opts.limit) || 50), 1), 200);
     let sql = `SELECT i.id, i.comment_id AS commentId, i.media_id AS mediaId, i.from_username AS fromUsername, i.snippet, i.intent, i.product_id AS productId,
-                      p.name AS productName, i.product_via AS productVia, i.draft_reply AS draftReply, i.needs_human AS needsHuman, i.status, i.created_at AS createdAt
+                      p.name AS productName, i.product_via AS productVia, i.draft_reply AS draftReply, i.needs_human AS needsHuman, i.status, i.created_at AS createdAt,
+                      i.replied_public_at AS repliedPublicAt, i.replied_private_at AS repliedPrivateAt
                  FROM instagram_comment_intents i LEFT JOIN products_services p ON p.id = i.product_id AND p.organization_id = i.organization_id
                 WHERE i.organization_id = ?`;
     const params: any[] = [orgId];
     if (opts.status && (STATUSES as readonly string[]).includes(opts.status)) { sql += " AND i.status = ?"; params.push(opts.status); }
     if (opts.intent) { sql += " AND i.intent = ?"; params.push(opts.intent); }
     sql += " ORDER BY i.created_at DESC, i.rowid DESC LIMIT ?"; params.push(lim);
-    const rows = (db.prepare(sql).all(...params) as any[]).map((r) => ({ ...r, needsHuman: r.needsHuman === 1 }));
+    // Respostas já propostas (aguardando/aprovadas) por comentário — para a tela mostrar "aguardando aprovação" em vez de propor de novo.
+    const pend = new Map<string, Array<{ actionId: string; kind: string; status: string }>>();
+    for (const a of db.prepare("SELECT id, status, command_payload_json FROM decision_actions WHERE organization_id = ? AND action_type = 'instagram_comment_reply' AND status IN ('awaiting_approval','approved')").all(orgId) as any[]) {
+      try { const p = JSON.parse(a.command_payload_json || "{}"); if (p.intentId) (pend.get(p.intentId) || pend.set(p.intentId, []).get(p.intentId)!).push({ actionId: a.id, kind: p.kind, status: a.status }); } catch { /* noop */ }
+    }
+    const rows = (db.prepare(sql).all(...params) as any[]).map((r) => ({ ...r, needsHuman: r.needsHuman === 1, pendingReplies: pend.get(r.id) || [] }));
     const counts = db.prepare("SELECT intent, COUNT(*) n FROM instagram_comment_intents WHERE organization_id = ? AND status = 'new' GROUP BY intent").all(orgId) as any[];
-    return { comments: rows, openByIntent: Object.fromEntries(counts.map((c) => [c.intent, c.n])), note: "Intenção por palavras do comentário (hipótese, não confirmação). Nada é enviado nesta etapa." };
+    return { comments: rows, openByIntent: Object.fromEntries(counts.map((c) => [c.intent, c.n])), note: "Intenção por palavras do comentário (hipótese, não confirmação). O envio só acontece por resposta aprovada por uma pessoa." };
   }
 
   static dismiss(orgId: string, id: string): boolean {

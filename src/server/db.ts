@@ -12675,6 +12675,9 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_campaign_ad_spend_org ON campaign_ad_spend (organization_id, campaign, spent_on);
     `);
   } catch(e){}
+  // ADR-207 F9b — resposta a comentário do Instagram (governada): marca de que JÁ respondeu (idempotência durável).
+  try { db.exec(`ALTER TABLE instagram_comment_intents ADD COLUMN replied_public_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE instagram_comment_intents ADD COLUMN replied_private_at DATETIME`); } catch(e){}
 };
 
 initDb();

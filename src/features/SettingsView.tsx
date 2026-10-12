@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Settings as SettingsIcon, Save, Image as ImageIcon, Briefcase, Users, CreditCard, LayoutGrid, Rocket, Check, Sparkles, ShieldCheck, Lock, BrainCircuit, Crosshair, Home, AlertTriangle, Scale, Loader2, UserCheck, Download, History, Clock, BarChart3, Landmark, Package } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Button } from '@/src/components/ui/button';
@@ -10,6 +10,7 @@ import { UsersSettingsView } from './UsersSettingsView';
 import { FiscalProfilePanel } from './settings/FiscalProfilePanel';
 import { BspSettingsPanel } from './settings/BspSettingsPanel';
 import { AutonomyContractPanel } from './settings/AutonomyContractPanel';
+const PlaybookLibraryCard = lazy(() => import('./playbooklibrary/PlaybookLibraryCard').then((m) => ({ default: m.PlaybookLibraryCard })));
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState('empresa');
@@ -2461,6 +2462,8 @@ function GovernancePanel() {
 
       {/* ADR-204 F3.1d — o que a IA pode fazer sozinha (piso, nível por tipo, pausa e travas) */}
       <AutonomyContractPanel />
+      {/* ADR-206 F5.11 — biblioteca de playbooks (só leitura) */}
+      <Suspense fallback={null}><PlaybookLibraryCard /></Suspense>
 
       {/* Princípios */}
       <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">

@@ -31,7 +31,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F6 ✅ #1900** | **Economia por canal** (fachada read-only): margem de contribuição física × online, qualidade do dado (confiável/parcial/insuficiente), **desconto máximo seguro** sobre os cupons existentes; piso opcional | não (precisa o dono informar piso/impostos) |
 | **F7 ✅ #1901** | **Frete**: regras definidas pelo dono (retirada grátis, fixo, por faixa, grátis acima de X **e** acima do piso) aplicadas no checkout; cotação por transportadora em fatia posterior | cotação: Correios/Melhor Envio (contrato) |
 | **F8 (EM PR)** | Custo de IA por campanha (medidor atual + `campaign/content/correlation`) | não |
-| **F9a (EM PR)** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
+| **F9a ✅ #1903** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
 | **F10 (EM PR)** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | F11 | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | F12 | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
@@ -118,7 +118,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Sem tabela nova, sem coluna nova. Teste `test:campaign-ai-cost` (30 checks; serviço e rota reais; mutações pegas, incluindo a de "contar correlação que não é de campanha").
 - **Limites**: o custo é **estimado pela tabela de preço do ledger**, não é a fatura do provedor; vídeo (Veo) não grava custo no ledger hoje → não entra; só o Estúdio marca (atendimento por IA, Fala Tu etc. caem em "sem campanha" — o contato nem sempre tem campanha no 1º toque); o slug da campanha precisa ser o mesmo dos links da F5 (a tela não valida isso); não vi no navegador.
 
-## 12. F9a — EM PR (2026-10-12): comentário do Instagram → intenção comercial (entende e avisa; NÃO envia)
+## 12. F9a — MERGED #1903 (2026-10-12): comentário do Instagram → intenção comercial (entende e avisa; NÃO envia)
 
 - **Achado da auditoria (comportamento existente, não alterado com a flag desligada)**: o webhook do Instagram, num evento de comentário (`changes[].field = comments`), caía no ramo "alternativo" e tratava o comentário como se fosse uma DM do comentarista — o atendente de IA tentava "responder" a um comentário público como se fosse conversa. Com a flag ligada, o comentário passa a ser desviado para esta leitura de intenção (e **não** vira conversa).
 - **Opt-in por empresa** (`ig_comment_intent_enabled`, default 0). Desligada, empresa sem canal casado, ou evento que não é comentário: `ingestChange` devolve `false` e o webhook segue o caminho de sempre, byte a byte.

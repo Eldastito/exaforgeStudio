@@ -13,6 +13,7 @@ import { StorefrontLookService } from "../StorefrontLookService.js";
 import { StorefrontLookGenerationService } from "../StorefrontLookGenerationService.js";
 import { StorefrontAttributionService } from "../StorefrontAttributionService.js";
 import { StorefrontShortLinkService } from "../StorefrontShortLinkService.js";
+import { ChannelEconomicsService } from "../ChannelEconomicsService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -304,6 +305,40 @@ router.put("/short-links/:id/featured", requireRole("owner", "admin"), (req: Aut
   try {
     if (!StorefrontShortLinkService.setFeatured(getOrgId(req), req.params.id, !!req.body?.featured)) return res.status(404).json({ error: "Link não encontrado." });
     res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Economia por canal (ADR-207 F6) — SÓ dono/administrador: tudo aqui é custo e margem (§73). Read-only, exceto a configuração.
+router.get("/economics/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  res.json(ChannelEconomicsService.settings(getOrgId(req)));
+});
+router.put("/economics/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(ChannelEconomicsService.saveSettings(getOrgId(req), req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.get("/economics/quality", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(ChannelEconomicsService.dataQuality(getOrgId(req), req.query.storeId ? String(req.query.storeId) : null)); }
+  catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+router.get("/economics/product/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const r = ChannelEconomicsService.compare(getOrgId(req), req.params.id, req.query.storeId ? String(req.query.storeId) : null);
+    if (!r) return res.status(404).json({ error: "Produto não encontrado." });
+    res.json(r);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+router.get("/economics/safe-discount/:id", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const channel = req.query.channel === "physical" ? "physical" : "online";
+    const r = ChannelEconomicsService.safeDiscount(getOrgId(req), req.params.id, channel, req.query.storeId ? String(req.query.storeId) : null);
+    if (!r) return res.status(404).json({ error: "Produto não encontrado." });
+    res.json(r);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+router.post("/economics/coupon-check", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const type = req.body?.type === "fixed" ? "fixed" : "percent";
+    res.json(ChannelEconomicsService.couponCheck(getOrgId(req), { type, value: Number(req.body?.value) }, { productIds: Array.isArray(req.body?.productIds) ? req.body.productIds.map(String).slice(0, 1000) : undefined }));
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

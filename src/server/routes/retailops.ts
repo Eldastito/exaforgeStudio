@@ -155,6 +155,7 @@ import { RetailSellerDuplicateService } from "../RetailSellerDuplicateService.js
 import { NegativeStockDiagnosisService } from "../NegativeStockDiagnosisService.js";
 import { RetailReplenishmentStrategyService } from "../RetailReplenishmentStrategyService.js";
 import { BusinessArchetypeService } from "../BusinessArchetypeService.js";
+import { ArchetypeInterviewService } from "../ArchetypeInterviewService.js";
 import { RetailCommissionImportService } from "../RetailCommissionImportService.js";
 import { RetailCommissionPolicyService } from "../RetailCommissionPolicyService.js";
 import { SellerGoalStreakService } from "../SellerGoalStreakService.js";
@@ -2199,6 +2200,21 @@ router.put("/archetype", requireNetworkScope, (req: AuthRequest, res): any => {
   const out = BusinessArchetypeService.select(orgId, raw === null || raw === "" ? null : String(raw), req.user?.userId);
   if (!out.ok) return res.status(400).json({ error: out.error });
   res.json(BusinessArchetypeService.explain(orgId));
+});
+
+// ADR-206 F5.6 — onboarding conversacional: o dono descreve a operação em texto livre e recebe uma SUGESTÃO de modelo (nunca aplica);
+// confirmar é ato de pessoa e usa o mesmo escopo da escolha do arquétipo.
+router.post("/archetype/interview", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(ArchetypeInterviewService.interpret(orgId, req.body?.text));
+});
+router.post("/archetype/interview/confirm", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out = ArchetypeInterviewService.confirm(orgId, String(req.body?.archetype || ""), req.user?.userId, { answerText: req.body?.text });
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ ...out, ...BusinessArchetypeService.explain(orgId) });
 });
 
 router.get("/stock/by-store/:storeId", requireStoreAccess(inParam("storeId")), (req: AuthRequest, res): any => {

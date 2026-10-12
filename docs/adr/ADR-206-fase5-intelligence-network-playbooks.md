@@ -1,6 +1,6 @@
 # ADR-206 — ZapFlow Fase 5: Intelligence Network, Playbooks Verticais e Escala Multiempresa
 
-Status: **F5.0 FECHADA (doc-only, 2026-10-10).** Nenhuma fatia de código autorizada ainda — aguarda as decisões D1–D6 (seção 4).
+Status: **FASE 5 ENCERRADA em 2026-10-12 por decisão do dono, COM PENDÊNCIAS DECLARADAS (seção 18).** Código F5.1–F5.11 em produção; **nada foi validado por uso real, nenhum playbook está certificado e o piloto (F5.12) não rodou.** (Histórico: F5.0 FECHADA, doc-only, 2026-10-10.)
 Análise: `docs/prd/ANALISE-PRD-FASE5-vs-CODEBASE.md`.
 
 ## 1. Contexto
@@ -142,11 +142,53 @@ A auditoria (F5.0) achou o Planner do SkillOS sem ligação com o FalaTu. Ao com
 - Teste: `test:falatu-skill-map` (23; 6 mutações verificadas — corte de dinheiro, dependência, `notMapped`, clobber do estágio, `executes`, dependência no plano). Regressão verde: falatu-multi-action 51, skillos-planner, skillos-pilot-seed, skillos-execution-bridge.
 - **Limites**: o FalaTu **não chama** o Planner sozinho (só a rota de inspeção); o plano não muda o que o FalaTu faz hoje, é uma leitura de como a frase seria orquestrada. Sem casos de eval para as 3 skills (promover além de `shadow` exigiria). Sem **resolução de divergência entre competências**: o catálogo não guarda recomendação de skill que possa divergir, então não há o que comparar — não foi inventado. Só 3 de 6 ações de gravação; só API, sem tela; nada validado com uso real.
 
-## 17. Status F5.11 — EM PR (Biblioteca de playbooks em Empresa → Autonomia da IA, 2026-10-12)
+## 17. Status F5.11 — MERGED (#1893) (Biblioteca de playbooks em Empresa → Autonomia da IA, 2026-10-12)
 Primeira TELA da Fase 5. UI-only sobre `GET /api/runtime/playbook-registry` (F5.3), **sem mudança de servidor, sem menu novo, sem tabela** (RN-F5-12): o cartão `PlaybookLibraryCard` entra na aba que já existe (Empresa → Autonomia da IA), logo abaixo do contrato de autonomia, carregado sob demanda (`lazy`) e só aberto pelo dono/administrador.
 - **O que mostra, por playbook**: nome e resumo, estágio, risco, para qual ramo serve (e se cabe no da empresa, com a razão quando não cabe), até onde pode agir (teto de autonomia), o que precisa existir antes, como se mede que funcionou, **de onde vem o estágio** (texto do registro, honesto sobre o que não foi provado) e a situação NA empresa: ligado ou não (versão e nível) e a eficácia.
 - **Honestidade (testada)**: "validado" aparece como *"Validado por testes (sem piloto)"* e nenhum playbook real aparece como certificado; eficácia só com **n e banda de confiança juntos** (nunca um percentual solto — RN-F5-8) e, sem execução concluída, diz que não dá para afirmar (nunca 0%); usa a versão mais recente que tem dado; aviso quando a autonomia configurada passa do teto ou o estágio não permite o nível (a razão vem do servidor); os que cabem na empresa vêm primeiro e nenhum é escondido.
 - **Só leitura**: o cartão tem um único botão (abrir/fechar), nenhuma escrita, e diz isso na tela. Não liga, não desliga, não inicia e não recomenda playbook; mudar autonomia segue pelos fluxos governados.
 - Rótulos puros em `playbooklibrary/libraryLabels.ts` (sem regra de negócio na tela). `test:playbook-library-ui` (26; 10 mutações verificadas — texto do estágio, banda, 0% inventado, esconder os que não cabem, aviso do teto, versão mais recente, gate de papel, tratamento do 403, carga sob demanda, botão de escrita), contra o `PlaybookRegistryService` real. `tsc` e build do front verdes.
 - **Limites**: **não vista no navegador por mim** (só testes e build); a rota é do Execution Runtime, então empresa com o runtime desligado vê *"aparece quando o Execution Runtime está ligado"* em vez da biblioteca (mover o catálogo para fora desse gate seria mudança de servidor, não feita); o catálogo tem só os 3 playbooks que já existem — **criar/publicar playbook novo continua sendo deploy** (a "biblioteca" é de leitura, não um editor); as razões de "não cabe" vêm do servidor em texto técnico (ex.: `vertical "clinica" fora de moda/varejo`); nada validado com uso real.
+
+## 18. ENCERRAMENTO DA FASE 5 (2026-10-12) — entregue × pendente, sem maquiagem
+
+**Decisão do dono (2026-10-12):** encerrar a Fase 5 **com pendências declaradas**, no mesmo modelo das Fases 2, 3 e 4 (ADR-203 §7, ADR-204 §28). "Encerrada" aqui significa **código entregue e testado**, NÃO "validada na loja". A Fase 5 foi aberta sobre superfícies das fases anteriores que também nunca rodaram em piloto (ver #1 e #12).
+
+### 18.1 Entregue (em produção, mergeado)
+| Fatia | O que é | Teste (`npm run`) |
+| --- | --- | --- |
+| F5.1 (#1883) | Governança de conhecimento: validade, "expirado" derivado, conflito vira pergunta | `test:knowledge-governance` 52 |
+| F5.2 (#1884) | Arquétipo operacional (2 de moda) + precedência organização > arquétipo > vertical > plataforma | `test:business-archetype` 42 |
+| F5.3 (#1885) | Playbook Registry versionado (3 playbooks), `canRun`, eficácia por versão | `test:playbook-registry` 32 |
+| F5.4 (#1886) | Escada de autonomia + regressão automática só para baixo (opt-in) | `test:autonomy-regression` 31 |
+| F5.5 (#1887) | Backtest de playbook contra o contrato de sucesso/falha | `test:playbook-backtest` 24 |
+| F5.6 (#1888) | Entrevista de arquétipo (sugere; só uma pessoa confirma) | `test:archetype-interview` 39 |
+| F5.7 (#1889) | Aprendizado negativo estruturado ("por que não funcionou?") | `test:negative-learning` 37 |
+| F5.8 (#1890) | Política estratégica com pesos (±25% na ordem de prioridade) | `test:strategic-policy` 36 |
+| F5.9 (#1891) | Desempenho por cor/tamanho + Next Best Action (máx. 3) | `test:next-best-action` 31 |
+| F5.10 (#1892) | FalaTu → SkillOS Planner: 3 ações mapeadas a capacidades reais | `test:falatu-skill-map` 23 |
+| F5.11 (#1893) | Biblioteca de playbooks (tela, só leitura) em Empresa → Autonomia da IA | `test:playbook-library-ui` 26 |
+
+### 18.2 NÃO feito ou NÃO validado — e quem resolve
+| # | Pendência | Por quê | Dono |
+| --- | --- | --- | --- |
+| 1 | **Piloto / certificação (F5.12)** — nunca rodou; **nenhum playbook é `certified`** ("validado" = coberto por testes, sem piloto) | Depende de uso real na TOULON; 2º cliente não existe | **Dono/supervisor** |
+| 2 | **Só a F5.11 tem tela; F5.1 a F5.10 são só API.** Hoje o dono não tem tela para escolher arquétipo, definir pesos da política, responder "por que não funcionou?", ver as 3 ações do NBA ou o desempenho por cor/tamanho. **Nada foi visto no navegador** | Escopo de cada fatia; limite do ambiente | Nova fatia + piloto |
+| 3 | **Limiares sem calibração com dado real**: regressão de autonomia (janela 30 dias, ≥5 tentativas, piso de falha 15%, 2 reversões), amostra mínima do backtest (10), cobertura mínima (30%) e amostra por atributo (30), teto de ±25% da política, pistas do arquétipo | Escolhas minhas, sem base da TOULON | Piloto, depois de semanas de uso |
+| 4 | **Intelligence Network e benchmark entre empresas — BLOQUEADOS** (D1 = NÃO; D6 sem objeto). Exigem emenda do ADR-166 §79, contrato/LGPD e ≥N organizações reais (hoje 1) | Decisão registrada | Dono (D1) |
+| 5 | **Customer Intelligence (segmentos de cliente) NÃO feito**: dado pessoal e o PDV sem consentimento real (`outbound_consent_required` desligada — ADR-204 §28 #5). **Similaridade de produto também não** | Falta captura de consentimento / dado | Dono (consentimento) + nova fatia |
+| 6 | **F5.10 é uma ponte de inspeção, não orquestração**: o FalaTu NÃO chama o Planner sozinho; só 3 de 6 ações de gravação têm capacidade (venda, recebível e anotação não); as 3 skills não têm casos de eval (ficam em `shadow`); **não existe resolução de divergência entre competências** (o catálogo não guarda recomendação de skill para comparar) | Catálogo só tinha 3 capacidades, nenhuma do FalaTu | Nova fatia + decisão sobre quais ações viram capacidade |
+| 7 | **A política estratégica só reordena a priorização**: DecisionEngine, FalaTu e recomendações em texto não a leem; o mapa dos 5 objetivos → domínios é minha escolha, não validada com o dono; o "Confidence Budget" do PRD não foi feito | Desenho da F5.8 | Dono (validar mapa) + nova fatia |
+| 8 | **O motivo de falha (F5.7) não entra no pacote de evidência nem no `learningPrior`**; só cobre desfechos de padrões | Mudaria o que o DecisionEngine vê | Decisão do dono |
+| 9 | **Biblioteca de playbooks**: depende do Execution Runtime ligado na empresa (senão a tela diz isso); catálogo tem só os 3 playbooks existentes; **publicar playbook novo continua sendo deploy** (não há editor); os 3 playbooks de plataforma não definem contrato de sucesso, então o backtest devolve `no_contract` | Rota do runtime; catálogo é código | Nova fatia |
+| 10 | **Regressão automática de autonomia está desligada por padrão** (`autonomy_regression_enabled` = 0) e nenhuma empresa a ligou | Opt-in | Dono, por empresa |
+| 11 | **Produto por atributo / NBA**: cobertura de variantes (cor/tamanho) da TOULON desconhecida; sem sell-through; sem filtro por loja (o PDV usa o código da filial do ERP) | Sem acesso ao dado de produção | Piloto + cadastro |
+| 12 | **D6 do piloto (herdada):** a Fase 5 avançou sobre superfícies das Fases 2–4 que nunca rodaram em piloto. Risco assumido e cumulativo | Decisão de seguir sem piloto | Dono |
+| 13 | **Arquétipos: só 2, ambos de moda** (coleção × reposição contínua); sem arquétipo para outras verticais | Só os com política real por trás | Nova fatia |
+
+### 18.3 Decisões do dono — estado final
+D1 **NÃO** (sem aprendizado/benchmark entre clientes) · D2 abriu só F5.1–F5.5; o dono liberou depois, uma a uma, F5.6, F5.7, F5.8, F5.9, F5.10 (com o escopo redefinido para "mapear 3 ações do FalaTu", escolhidas por mim) e F5.11 · D3 "auto" = Nível 3 existente · D4 rebaixamento só para baixo · D5 sem políticas herdáveis de grupo · D6 sem objeto enquanto D1 = NÃO. **Fase 5 encerrada (2026-10-12) sem a F5.12.**
+
+### 18.4 Condição para uma nova fase
+Antes de abrir qualquer fatia nova sobre esta base: (a) rodar o piloto na TOULON e calibrar os limiares da #3; (b) decidir se as APIs sem tela (#2) ganham tela; (c) só então discutir D1, o consentimento (#5) e novas capacidades do FalaTu (#6).
 

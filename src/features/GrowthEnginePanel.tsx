@@ -15,6 +15,63 @@ const TABS: Array<{ id: Tab; label: string }> = [
 const brl = (v: number | null | undefined) => (v == null ? '—' : `R$ ${Number(v).toFixed(2)}`);
 const unavailable = (s: any) => s && s.available === false;
 
+
+// Conteúdo → WhatsApp / e-mail (ADR-207 F13a). Só PREPARA: WhatsApp vira RASCUNHO em Campanhas (você revisa e dispara lá); e-mail vira
+// texto pronto para copiar. Público = só quem tem consentimento de comunicação registrado e não pediu para sair.
+const SEGMENTS: Array<{ id: string; label: string; segment: any }> = [
+  { id: 'all', label: 'Todos com consentimento', segment: {} },
+  { id: 'inactive', label: 'Clientes que sumiram há 60 dias', segment: { inactiveDays: 60 } },
+  { id: 'top', label: 'Melhores clientes (top 50)', segment: { topBuyers: 50 } },
+];
+function BroadcastActions({ entryId }: { entryId: string }) {
+  const [open, setOpen] = useState(false);
+  const [channel, setChannel] = useState<'whatsapp' | 'email'>('whatsapp');
+  const [seg, setSeg] = useState('all');
+  const [res, setRes] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const call = async (dryRun: boolean) => {
+    setBusy(true);
+    try {
+      const r = await apiFetch('/api/social/content-broadcast', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entryId, channel, segment: SEGMENTS.find((x) => x.id === seg)!.segment, dryRun }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível preparar.'); return; }
+      setRes(d);
+      if (d.created) toast.success('Rascunho criado em Campanhas.');
+    } finally { setBusy(false); }
+  };
+  if (!open) return <button className="text-fuchsia-300 text-xs hover:underline" onClick={() => setOpen(true)}>Usar em WhatsApp / e-mail</button>;
+  return (
+    <div className="mt-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2 space-y-2 text-xs">
+      <div className="flex flex-wrap gap-2 items-center">
+        <select className="rounded bg-zinc-950 border border-zinc-800 px-2 py-1" value={channel} onChange={(e) => { setChannel(e.target.value as any); setRes(null); }}><option value="whatsapp">WhatsApp</option><option value="email">E-mail</option></select>
+        <select className="rounded bg-zinc-950 border border-zinc-800 px-2 py-1" value={seg} onChange={(e) => { setSeg(e.target.value); setRes(null); }}>{SEGMENTS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select>
+        <button className="px-2 py-1 rounded bg-zinc-700 text-white disabled:opacity-50" disabled={busy} onClick={() => call(channel === 'whatsapp')}>Ver prévia</button>
+        <button className="text-zinc-500" onClick={() => { setOpen(false); setRes(null); }}>Fechar</button>
+      </div>
+      {res && (
+        <div className="space-y-1.5">
+          {res.channel === 'email' ? (
+            <>
+              <p><b>Assunto:</b> {res.subject}</p>
+              <pre className="whitespace-pre-wrap text-zinc-300">{res.text}</pre>
+              <button className="text-fuchsia-300" onClick={() => { navigator.clipboard?.writeText(`${res.subject}\n\n${res.text}`); toast.success('Copiado.'); }}>Copiar texto</button>
+            </>
+          ) : (
+            <>
+              <pre className="whitespace-pre-wrap text-zinc-300">{res.message}</pre>
+              {!res.created && !res.existingCampaignId && res.audience?.included > 0 && <button className="px-2 py-1 rounded bg-fuchsia-600 text-white disabled:opacity-50" disabled={busy} onClick={() => call(false)}>Criar rascunho em Campanhas ({res.audience.included} contatos)</button>}
+              {res.existingCampaignId && <p className="text-amber-300">Já existe um rascunho/envio em andamento para este conteúdo (em Campanhas).</p>}
+              {res.created && <p className="text-emerald-300">Rascunho criado com {res.audience.included} contatos. Revise e dispare em Campanhas — nada foi enviado.</p>}
+            </>
+          )}
+          <p className="text-zinc-400">Público: {res.audience.included} contato(s) com consentimento{res.audience.withoutConsent > 0 ? ` · ${res.audience.withoutConsent} de fora por falta de consentimento` : ''}.</p>
+          {(res.caveats || []).map((c: string, i: number) => <p key={i} className="text-amber-300">{c}</p>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function GrowthEnginePanel({ onUseBriefing }: { onUseBriefing: (text: string) => void }) {
   const setViewMode = useStore((s: any) => s.setViewMode);
   const [data, setData] = useState<any>(null);
@@ -162,13 +219,14 @@ export default function GrowthEnginePanel({ onUseBriefing }: { onUseBriefing: (t
                       <button className="text-emerald-300 disabled:opacity-40" disabled={!when[d.id]} onClick={() => post(`/api/social/studio/calendar/${d.id}/approve`, { scheduledAt: new Date(when[d.id]).toISOString() }, 'Agendado.')}>Agendar</button>
                       <button className="text-zinc-400" onClick={async () => { const r = await apiFetch(`/api/social/studio/calendar/${d.id}`, { method: 'DELETE' }); if (r.ok) { toast.success('Cancelado.'); load(); } }}>Cancelar</button>
                     </div>
+                    <BroadcastActions entryId={d.id} />
                   </div>
                 ))}
               </>
             ))}
 
             {tab === 'programados' && (unavailable(data.scheduled) ? <Off s={data.scheduled} /> : data.scheduled.entries.length === 0 ? <Empty>Nada programado.</Empty> : (
-              <ul className="space-y-1">{data.scheduled.entries.map((e: any) => <li key={e.id} className="text-xs">{e.scheduledAt ? new Date(e.scheduledAt).toLocaleString('pt-BR') : 'sem data'} · {e.channel || 'canal'} — <span className="text-zinc-300">{e.caption || '(sem legenda)'}</span></li>)}</ul>
+              <ul className="space-y-1">{data.scheduled.entries.map((e: any) => <li key={e.id} className="text-xs">{e.scheduledAt ? new Date(e.scheduledAt).toLocaleString('pt-BR') : 'sem data'} · {e.channel || 'canal'} — <span className="text-zinc-300">{e.caption || '(sem legenda)'}</span><BroadcastActions entryId={e.id} /></li>)}</ul>
             ))}
 
             {tab === 'resultados' && (unavailable(data.results) ? <Off s={data.results} /> : (

@@ -21,6 +21,7 @@ import { GrowthOptimizationService } from "../GrowthOptimizationService.js";
 import { InstagramCommentIntentService } from "../InstagramCommentIntentService.js";
 import { GrowthEngineService } from "../GrowthEngineService.js";
 import { CampaignStockGuardService } from "../CampaignStockGuardService.js";
+import { ContentBroadcastService } from "../ContentBroadcastService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -554,6 +555,21 @@ router.get("/campaign-stock", requireRole("owner", "admin"), (req: AuthRequest, 
 router.post("/campaign-stock/scan", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(CampaignStockGuardService.scan(orgId));
+});
+
+// ── ADR-207 F13a: conteúdo → WhatsApp (rascunho de campanha) / e-mail (texto pronto). NUNCA envia. ──
+router.post("/content-broadcast", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  try {
+    const out = await ContentBroadcastService.draft(orgId, (req as any).user?.userId || null, {
+      entryId: String(b.entryId || ""), channel: b.channel, productId: b.productId ? String(b.productId) : null,
+      campaign: b.campaign ? String(b.campaign) : null, segment: b.segment && typeof b.segment === "object" ? b.segment : {},
+      dryRun: b.dryRun === true,
+    });
+    if ((out as any).created) logAuthEvent(orgId, (req as any).user?.userId || null, null, "CONTENT_BROADCAST_DRAFTED", { channel: out.channel, campaignId: (out as any).campaignId });
+    res.json(out);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 export default router;

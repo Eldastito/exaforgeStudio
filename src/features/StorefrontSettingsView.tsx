@@ -908,6 +908,9 @@ export function StorefrontSettingsView() {
         {/* Custo de IA por campanha (ADR-207 F8) */}
         <CampaignAiCostSection />
 
+        {/* Comentários do Instagram → intenção (ADR-207 F9) */}
+        <InstagramCommentsSection />
+
         {/* Frete (ADR-207 F7) */}
         <ShippingPolicySection products={products} />
 
@@ -1310,6 +1313,60 @@ function CampaignAiCostSection() {
         </div>
       )}
       <p className="text-xs text-zinc-500">IA sem campanha: {brl(rep.withoutCampaign?.aiCostCents)} · total do período: {brl(rep.totalAiCostCents)}</p>
+    </div>
+  );
+}
+
+// Comentários do Instagram (ADR-207 F9, parte A): entende e AVISA; não envia nada. A intenção é palavra-chave no
+// comentário (hipótese, não confirmação). O rascunho nunca repete o texto do comentário — copie, revise e responda no Instagram.
+const IG_INTENT_LABEL: Record<string, string> = { price: 'Pergunta preço', availability: 'Pergunta tamanho/disponibilidade', buy: 'Quer comprar', complaint: 'Reclamação', praise: 'Elogio', spam: 'Spam', other: 'Outro' };
+function InstagramCommentsSection() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [data, setData] = useState<any>(null);
+  const load = async () => {
+    try {
+      const st = await apiFetch('/api/social/instagram/comments/settings').then((r) => r.json());
+      setEnabled(!!st.enabled);
+      if (st.enabled) setData(await apiFetch('/api/social/instagram/comments?status=new').then((r) => r.json()));
+    } catch (e) { console.error(e); }
+  };
+  useEffect(() => { load(); }, []);
+  const toggle = async (on: boolean) => {
+    const res = await apiFetch('/api/social/instagram/comments/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) });
+    if (!res.ok) { toast.error('Não foi possível salvar.'); return; }
+    toast.success(on ? 'Leitura de comentários ligada.' : 'Desligada.'); load();
+  };
+  const dismiss = async (id: string) => { await apiFetch(`/api/social/instagram/comments/${id}/dismiss`, { method: 'POST' }); load(); };
+  if (enabled === null) return null;
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-100">Comentários do Instagram</h3>
+          <p className="text-xs text-zinc-500">Identifica quem comenta querendo comprar e prepara um rascunho de resposta. Não envia nada sozinho.</p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-zinc-300">
+          <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} /> Ligado
+        </label>
+      </div>
+      {enabled && (!data || data.comments.length === 0 ? (
+        <p className="text-sm text-zinc-500">Nenhum comentário novo.</p>
+      ) : (
+        <ul className="space-y-2">
+          {data.comments.map((c: any) => (
+            <li key={c.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs space-y-1">
+              <p className="text-zinc-400">@{c.fromUsername || '—'} · <span className="text-zinc-200">{IG_INTENT_LABEL[c.intent] || c.intent}</span>{c.productName ? <> · {c.productName}</> : null}</p>
+              <p className="text-zinc-300">“{c.snippet}”</p>
+              {c.needsHuman ? <p className="text-amber-300">Reclamação pública: responda você mesmo, sem resposta automática.</p> : null}
+              {c.draftReply ? <p className="text-zinc-400">Rascunho: <span className="text-zinc-200">{c.draftReply}</span></p> : null}
+              <div className="flex gap-3 pt-1">
+                {c.draftReply ? <button className="text-fuchsia-300 hover:underline" onClick={() => { navigator.clipboard?.writeText(c.draftReply); toast.success('Rascunho copiado.'); }}>Copiar rascunho</button> : null}
+                <button className="text-zinc-400 hover:underline" onClick={() => dismiss(c.id)}>Dispensar</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ))}
     </div>
   );
 }

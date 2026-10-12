@@ -12567,6 +12567,29 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status_by TEXT`); } catch(e){}
+  // ADR-207 F5 — LINK CURTO de campanha (/loja/:slug/go/:code → vitrine com a atribuição da F1). Tabela nova, aditiva.
+  // Nunca apagada (link já espalhado em bio/post): 'active=0' faz o código cair na vitrine sem atribuição.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS storefront_short_links (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        code TEXT NOT NULL,
+        source TEXT NOT NULL,
+        campaign TEXT,
+        content TEXT,
+        ref TEXT,
+        product_id TEXT,
+        label TEXT,
+        featured INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_by TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (organization_id, code)
+      );
+      CREATE INDEX IF NOT EXISTS idx_storefront_short_links_org ON storefront_short_links (organization_id, active, created_at);
+    `);
+  } catch(e){}
 };
 
 initDb();

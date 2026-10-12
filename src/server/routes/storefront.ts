@@ -12,6 +12,7 @@ import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
 import { StorefrontLookService } from "../StorefrontLookService.js";
 import { StorefrontLookGenerationService } from "../StorefrontLookGenerationService.js";
 import { StorefrontAttributionService } from "../StorefrontAttributionService.js";
+import { StorefrontShortLinkService } from "../StorefrontShortLinkService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -282,6 +283,28 @@ router.get("/analytics", (req: AuthRequest, res): any => {
 router.get("/attribution", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(StorefrontAttributionService.funnel(getOrgId(req), { days: Number(req.query.days) || 30 })); }
   catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Links curtos de campanha (ADR-207 F5) — dono/administrador (os números trazem receita, §73).
+router.get("/short-links", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const orgId = getOrgId(req);
+    res.json({ slug: ensureSettings(orgId).slug, links: StorefrontShortLinkService.list(orgId, { days: Number(req.query.days) || 30, includeArchived: req.query.archived === "1" }) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+router.post("/short-links", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.status(201).json(StorefrontShortLinkService.create(getOrgId(req), req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/short-links/:id/archive", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  if (!StorefrontShortLinkService.archive(getOrgId(req), req.params.id)) return res.status(404).json({ error: "Link não encontrado." });
+  res.json({ ok: true });
+});
+router.put("/short-links/:id/featured", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    if (!StorefrontShortLinkService.setFeatured(getOrgId(req), req.params.id, !!req.body?.featured)) return res.status(404).json({ error: "Link não encontrado." });
+    res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // GET /api/storefront/products  -> produtos com imagens + config de vitrine (p/ o dono)

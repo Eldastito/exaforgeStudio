@@ -899,6 +899,9 @@ export function StorefrontSettingsView() {
         {/* Relatório da vitrine */}
         <AnalyticsSection />
 
+        {/* Links de campanha (ADR-207 F5) */}
+        <ShortLinksSection products={products} />
+
         {/* Cupons de desconto */}
         <CouponsSection />
       </div>
@@ -1251,6 +1254,134 @@ function Metric({ label, value, accent, hint }: { label: string; value: string; 
       <p className={`text-xl font-bold mt-1 ${accent}`}>{value}</p>
       {hint && <p className="text-[10px] text-zinc-600 mt-0.5">{hint}</p>}
     </div>
+  );
+}
+
+type ShortLink = {
+  id: string; code: string; source: string; campaign: string | null; content: string | null; ref: string | null;
+  productId: string | null; productName?: string | null; label: string | null; featured: boolean; active: boolean;
+  results: { views: number; orders: number; paidOrders: number; revenuePaid: number; conversionPct: number | null } | null;
+};
+const LINK_SOURCES: Array<[string, string]> = [
+  ['instagram', 'Instagram'], ['whatsapp', 'WhatsApp'], ['facebook', 'Facebook'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'],
+  ['linkedin', 'LinkedIn'], ['email', 'E-mail'], ['google', 'Google'], ['qrcode', 'QR Code'], ['bio', 'Bio / perfil'], ['direct', 'Direct'], ['store', 'Na loja física'],
+];
+
+// Links curtos de campanha (ADR-207 F5): o dono gera `…/loja/<loja>/go/<codigo>`; quem clica cai na vitrine (ou no produto)
+// e a visita/pedido ficam atribuídos ao canal e à campanha. Os números vêm do funil da F1 (pago = fato).
+function ShortLinksSection({ products }: { products: Array<{ id: string; name: string }> }) {
+  const [links, setLinks] = useState<ShortLink[]>([]);
+  const [slug, setSlug] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ source: 'instagram', campaign: '', content: '', productId: '', label: '', featured: false });
+
+  const load = async () => {
+    try {
+      const d = await apiFetch('/api/storefront/short-links').then((r) => r.json());
+      setLinks(Array.isArray(d?.links) ? d.links : []); setSlug(d?.slug || '');
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const urlOf = (l: ShortLink) => `${getOrigin()}/loja/${slug}/go/${l.code}`;
+  const brl = (v: number) => `R$ ${Number(v || 0).toFixed(2)}`;
+  const canFeature = form.source === 'instagram' && !!form.productId;
+
+  const create = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/storefront/short-links', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: form.source, campaign: form.campaign || undefined, content: form.content || undefined, productId: form.productId || undefined, label: form.label || undefined, featured: canFeature && form.featured }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível criar o link.'); return; }
+      toast.success('Link criado.'); setShowForm(false); setForm({ source: 'instagram', campaign: '', content: '', productId: '', label: '', featured: false }); load();
+    } finally { setSaving(false); }
+  };
+  const copy = async (l: ShortLink) => { try { await navigator.clipboard.writeText(urlOf(l)); toast.success('Link copiado.'); } catch { toast.error('Não foi possível copiar.'); } };
+  const archive = async (l: ShortLink) => {
+    if (!(await confirmDialog('Arquivar este link? Quem já o tem vai cair na vitrine normal, sem registrar a campanha.', { danger: true, confirmText: 'Arquivar' }))) return;
+    const res = await apiFetch(`/api/storefront/short-links/${l.id}/archive`, { method: 'POST' });
+    if (res.ok) { toast.success('Link arquivado.'); load(); } else toast.error('Não foi possível arquivar.');
+  };
+  const toggleFeatured = async (l: ShortLink) => {
+    const res = await apiFetch(`/api/storefront/short-links/${l.id}/featured`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ featured: !l.featured }) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) load(); else toast.error(d.error || 'Não foi possível alterar.');
+  };
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><Tag className="w-5 h-5 text-pink-400" /> Links de campanha</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Um link curto para pôr na bio, no post ou no WhatsApp. Quem clicar cai na sua loja e você vê quanto cada campanha trouxe.</p>
+        </div>
+        <Button variant="ghost" onClick={() => setShowForm((v) => !v)}>{showForm ? <X className="w-4 h-4" /> : <><Plus className="w-4 h-4 mr-1" /> Novo link</>}</Button>
+      </div>
+
+      {showForm && (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Onde vai usar o link">
+            <select className={inputClass} value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value, featured: e.target.value === 'instagram' ? form.featured : false })}>
+              {LINK_SOURCES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+            </select>
+          </Field>
+          <Field label="Nome da campanha (opcional)"><input className={inputClass} value={form.campaign} onChange={(e) => setForm({ ...form, campaign: e.target.value })} placeholder="Ex.: Dia das Mães" /></Field>
+          <Field label="Qual post/peça (opcional)"><input className={inputClass} value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Ex.: Reels 1" /></Field>
+          <Field label="Levar direto a um produto (opcional)">
+            <select className={inputClass} value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value, featured: e.target.value ? form.featured : false })}>
+              <option value="">— a vitrine inteira —</option>
+              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Nome interno para você (opcional)"><input className={inputClass} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="Ex.: Link da bio" /></Field>
+          <label className={`flex items-center gap-2 text-sm self-end pb-2 ${canFeature ? 'text-zinc-200' : 'text-zinc-600'}`}>
+            <input type="checkbox" disabled={!canFeature} checked={canFeature && form.featured} onChange={(e) => setForm({ ...form, featured: e.target.checked })} />
+            Mostrar este produto em “Visto no Instagram” na loja
+          </label>
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowForm(false)}>Cancelar</Button>
+            <Button className="bg-pink-600 hover:bg-pink-700 text-white" onClick={create} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Gerar link'}</Button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-zinc-400 py-6 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</div>
+      ) : links.length === 0 ? (
+        <p className="text-sm text-zinc-500 mt-4">Nenhum link ainda. Crie um para saber de onde vêm suas visitas e vendas.</p>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {links.map((l) => (
+            <div key={l.id} className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+              <div className="flex items-start gap-2 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-zinc-100 font-medium truncate">{l.label || l.campaign || (LINK_SOURCES.find(([k]) => k === l.source)?.[1] ?? l.source)}
+                    <span className="ml-2 text-[11px] font-normal text-zinc-500">{LINK_SOURCES.find(([k]) => k === l.source)?.[1] ?? l.source}{l.campaign ? ` · ${l.campaign}` : ''}{l.content ? ` · ${l.content}` : ''}{l.productName ? ` · ${l.productName}` : ''}</span>
+                  </p>
+                  <p className="text-xs font-mono text-sky-300 truncate mt-0.5">{urlOf(l)}</p>
+                </div>
+                <Button variant="ghost" onClick={() => copy(l)} title="Copiar link"><Copy className="w-4 h-4" /></Button>
+                {l.source === 'instagram' && l.productId && (
+                  <button onClick={() => toggleFeatured(l)} className={`text-[11px] rounded-full border px-2 py-1 ${l.featured ? 'border-pink-500/50 text-pink-300 bg-pink-500/10' : 'border-zinc-700 text-zinc-400'}`}>{l.featured ? 'Em “Visto no Instagram”' : 'Mostrar em “Visto no Instagram”'}</button>
+                )}
+                <Button variant="ghost" onClick={() => archive(l)} title="Arquivar"><Trash2 className="w-4 h-4 text-red-400" /></Button>
+              </div>
+              <p className="text-xs text-zinc-400 mt-2">
+                {l.results
+                  ? <>Últimos 30 dias: <b className="text-zinc-200">{l.results.views}</b> visitas · <b className="text-zinc-200">{l.results.orders}</b> pedidos · <b className="text-emerald-300">{l.results.paidOrders}</b> pagos{l.results.paidOrders > 0 ? <> · {brl(l.results.revenuePaid)} pago</> : null}</>
+                  : 'Ainda sem acessos registrados.'}
+              </p>
+            </div>
+          ))}
+          <p className="text-[11px] text-zinc-600">Os números são atribuídos pelo link que o cliente clicou — é a origem informada, não prova de que foi a campanha que causou a compra.</p>
+        </div>
+      )}
+    </section>
   );
 }
 

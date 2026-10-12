@@ -11,6 +11,7 @@ import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { StorePickupService } from "../StorePickupService.js";
+import { StorefrontShortLinkService } from "../StorefrontShortLinkService.js";
 import { OrdersService } from "../OrdersService.js";
 import { StorefrontStockService } from "../StorefrontStockService.js";
 import { StorefrontCategoryService } from "../StorefrontCategoryService.js";
@@ -95,6 +96,10 @@ function productPayload(
     images,
     video: p.video_url || null,
   };
+}
+
+function instagramShelf(orgId: string): { id: string; title: string; productIds: string[] }[] {
+  try { const sh = StorefrontShortLinkService.shelf(orgId); return sh ? [sh] : []; } catch { return []; }
 }
 
 // Resolve as coleções configuradas da loja para listas de IDs de produto,
@@ -300,7 +305,8 @@ router.get("/store/:slug", (req, res): any => {
     categories: catList,
     categoryTree,
     hasUncategorized,
-    collections: isInitial ? resolveCollections(orgId) : [],
+    // "Visto no Instagram" (ADR-207 F5): prateleira como a 1ª coleção, só quando o dono marcou links do Instagram com produto.
+    collections: isInitial ? [...instagramShelf(orgId), ...resolveCollections(orgId)] : [],
     resources: isInitial ? ReservationService.listResources(orgId) : [],
   });
 });

@@ -119,6 +119,13 @@ export class Scheduler {
     // ficaram travados por reinício do processo — o caminho normal (setImmediate
     // no enqueue) já resolve o caso comum sem esperar este passe.
     try { JobQueueService.sweepStale(); } catch (e) { console.error('[Scheduler] varredura da fila de jobs falhou', e); }
+    // Retirada na loja (ADR-207 F3): pedido de retirada NÃO pago cuja reserva venceu é cancelado e a
+    // peça volta ao pool de reserva. Sensível a minutos → passe rápido. Barato (índice em orders);
+    // opt-in por natureza (só há linha se alguma empresa ligou a retirada).
+    try {
+      import("./StorePickupService.js").then((m) => m.StorePickupService.pass())
+        .catch((e) => console.error('[Scheduler] validade da reserva de retirada falhou', e));
+    } catch (e) { console.error('[Scheduler] pass de retirada na loja falhou', e); }
     // SLA de primeira resposta: sensível a minutos (uma meta de 30 min não pode
     // ser vigiada de hora em hora), então mora no passe rápido.
     try { this.ticketSlaPass(); } catch (e: any) { console.error('[Scheduler] SLA de tickets falhou', e.message); }

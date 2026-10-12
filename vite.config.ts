@@ -46,10 +46,12 @@ export default defineConfig(() => {
           // Limpa precaches de versões antigas do SW ao atualizar.
           cleanupOutdatedCaches: true,
           globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff,woff2}'],
-          // O bundle do painel é uma casca grande (~2,2 MB). Elevamos o teto de
-          // precache para 4 MiB para que o app shell inteiro fique disponível
-          // offline (o padrão de 2 MiB deixaria o chunk principal de fora).
-          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+          // O bundle do painel é uma casca grande (~4 MB). Elevamos o teto de
+          // precache para 5 MiB para que o app shell inteiro fique disponível
+          // offline (o padrão de 2 MiB deixaria o chunk principal de fora). O chunk
+          // principal já estava a ~2 KiB do teto antigo de 4 MiB — qualquer fatia de
+          // frontend quebrava o build; 5 MiB dá folga sem mudar o que é pré-cacheado.
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         },
         // Em dev não registramos o SW (evita interferir no HMR do AI Studio).
         devOptions: { enabled: false },

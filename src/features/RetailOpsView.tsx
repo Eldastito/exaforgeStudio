@@ -1536,6 +1536,56 @@ function PricingTab() {
 }
 
 // ---- Loja virtual → PDV: baixas pendentes (ADR-143 Fase 0) -------------------
+/**
+ * Retirada na loja (ADR-207 F3) — o dono liga por empresa e por loja. Só funciona com a reserva online ligada
+ * e só oferece a retirada das peças que ele reservou para a loja (a vitrine nunca promete peça sem reserva).
+ * Rota é de rede inteira: gerente restrito a loja leva 403 e o painel nem aparece.
+ */
+function PickupSettingsPanel({ reserveOn }: { reserveOn: boolean }) {
+  const [data, setData] = useState<any>(null);
+  const [minutes, setMinutes] = useState('120');
+  const load = async () => {
+    const res = await apiFetch('/api/retailops/pickup');
+    if (!res.ok) { setData(null); return; }
+    const d = await res.json().catch(() => null);
+    setData(d); setMinutes(String(d?.settings?.reserveMinutes ?? 120));
+  };
+  useEffect(() => { load(); }, [reserveOn]);
+  if (!data) return null;
+  const put = async (url: string, body: any, okMsg: string) => {
+    const res = await apiFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success(okMsg); load(); } else toast.error(d.error || 'Falha ao salvar.');
+  };
+  const on = !!data.settings?.enabled;
+  return (
+    <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">Retirada na loja</h3>
+        <button onClick={() => put('/api/retailops/pickup/settings', { enabled: !on }, on ? 'Retirada desligada.' : 'Retirada ligada.')} className={`ml-auto inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${on ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${on ? 'bg-emerald-400' : 'bg-zinc-600'}`} /> {on ? 'ligada' : 'desligada'}
+        </button>
+      </div>
+      <p className="mt-1 text-[12px] text-zinc-500">O cliente escolhe “Retirar na loja” no carrinho. Só aparece a loja que tem <b>todas</b> as peças reservadas abaixo; a reserva vale até o prazo e depois volta pra venda se ele não pagar.</p>
+      {on && !reserveOn && <p className="mt-2 text-[12px] text-amber-400">Ligue a reserva da loja virtual (botão “ligada/desligada” acima) — sem ela, a retirada não é oferecida.</p>}
+      <div className="mt-3 flex items-center gap-2 flex-wrap text-sm">
+        <label className="text-xs text-zinc-400">Prazo da reserva (minutos, de 15 a 1440):</label>
+        <input type="number" min={15} max={1440} value={minutes} onChange={e => setMinutes(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 w-24" />
+        <button onClick={() => put('/api/retailops/pickup/settings', { reserveMinutes: Number(minutes) }, 'Prazo salvo.')} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Salvar prazo</button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(data.stores || []).map((s: any) => (
+          <label key={s.id} className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer ${s.pickupEnabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-zinc-800 text-zinc-400'}`}>
+            <input type="checkbox" checked={!!s.pickupEnabled} onChange={e => put('/api/retailops/pickup/store', { storeId: s.id, enabled: e.target.checked }, e.target.checked ? `Retirada liberada em ${s.name}.` : `Retirada desligada em ${s.name}.`)} />
+            {s.name}{s.city ? ` · ${s.city}` : ''}
+          </label>
+        ))}
+        {(data.stores || []).length === 0 && <span className="text-[12px] text-zinc-600">Cadastre as lojas da rede para liberar a retirada.</span>}
+      </div>
+    </div>
+  );
+}
+
 function OnlineReserveTab() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [onlineStoreId, setOnlineStoreId] = useState<string>('');
@@ -1631,6 +1681,8 @@ function OnlineReserveTab() {
           {users.map((u) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
         </select>
       </div>
+
+      <PickupSettingsPanel reserveOn={!!enabled} />
 
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Baixas pendentes no PDV ({pending.length})</h3>
       {pending.length === 0 ? (

@@ -189,6 +189,7 @@ import { RetailReceivingService } from "../RetailReceivingService.js";
 import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
+import { StorePickupService } from "../StorePickupService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { RetailRadarService } from "../RetailRadarService.js";
 import { RetailForecastService } from "../RetailForecastService.js";
@@ -554,6 +555,34 @@ router.put("/online-reserve/flag", requireNetworkScope, (req: AuthRequest, res):
   // A filial da loja virtual pode ser definida junto (opcional).
   if (req.body?.onlineStoreId !== undefined) RetailOnlineReserveService.setOnlineStoreId(orgId, req.body.onlineStoreId || null);
   res.json({ ok: true, enabled, onlineStoreId: RetailOnlineReserveService.getOnlineStoreId(orgId) });
+});
+
+// --- Retirada na loja (ADR-207 F3) — o dono liga por empresa e por loja; só vale com a reserva online ligada ---
+router.get("/pickup", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ settings: StorePickupService.settings(orgId), stores: StorePickupService.adminStores(orgId) });
+});
+
+router.put("/pickup/settings", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const b = req.body || {};
+    res.json({ ok: true, settings: StorePickupService.setSettings(orgId, {
+      enabled: b.enabled === undefined ? undefined : !!b.enabled,
+      reserveMinutes: b.reserveMinutes === undefined ? undefined : Number(b.reserveMinutes),
+    }) });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.put("/pickup/store", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const b = req.body || {};
+  if (!b.storeId) return res.status(400).json({ error: "storeId é obrigatório." });
+  try { res.json({ ok: true, store: StorePickupService.setStore(orgId, String(b.storeId), !!b.enabled) }); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
 // Define a reserva e-commerce de um produto/variante numa loja.

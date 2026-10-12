@@ -12554,6 +12554,15 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_ref TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_first_touch ON contacts (organization_id, first_touch_channel)`); } catch(e){}
+  // ADR-207 F3 — RETIRADA NA LOJA com reserva atômica + validade. Tudo opt-in (flag default 0) e ADITIVO:
+  // pedido sem retirada continua com estas colunas NULL (= entrega/combinado, comportamento de sempre).
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pickup_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pickup_reserve_minutes INTEGER DEFAULT 120`); } catch(e){}
+  try { db.exec(`ALTER TABLE retail_stores ADD COLUMN pickup_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN fulfillment_method TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_store_id TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN reserve_expires_at DATETIME`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_pickup_expiry ON orders (fulfillment_method, status, reserve_expires_at)`); } catch(e){}
 };
 
 initDb();

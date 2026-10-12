@@ -111,6 +111,8 @@ export interface OrderResponse {
   payment?: OrderPayment;
   /** ADR-207 F3 — presente só em pedido de retirada na loja. */
   pickup?: { storeName: string | null; reserveExpiresAt: string | null };
+  /** ADR-207 F7 — presente só quando a loja tem política de frete e o pedido é de entrega. */
+  shipping?: { amount: number | null; free: boolean; toArrange: boolean };
   /** Motivo quando o servidor recusa a retirada (peça sem reserva etc.). */
   error?: string;
 }

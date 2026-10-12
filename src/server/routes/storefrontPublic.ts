@@ -12,6 +12,7 @@ import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { StorePickupService } from "../StorePickupService.js";
 import { StorefrontShortLinkService } from "../StorefrontShortLinkService.js";
+import { ShippingPolicyService, normalizeCep } from "../ShippingPolicyService.js";
 import { OrdersService } from "../OrdersService.js";
 import { StorefrontStockService } from "../StorefrontStockService.js";
 import { StorefrontCategoryService } from "../StorefrontCategoryService.js";
@@ -416,6 +417,80 @@ router.post("/store/:slug/event", (req, res): any => {
   res.status(204).end();
 });
 
+type ResolvedItem = { id: string; pid: string | null; name: string; price: number; qty: number; label: string | null; total: number };
+
+// Resolve os itens do carrinho (preço, modo de venda, opção escolhida) a partir do CATÁLOGO — nunca confia em preço do cliente.
+// Usada pelo pedido e pela cotação de frete (ADR-207 F7) para que os dois enxerguem exatamente o mesmo carrinho.
+function resolveCartItems(orgId: string, rawItems: any[]): ResolvedItem[] {
+  const resolved: ResolvedItem[] = [];
+  for (const it of rawItems) {
+    const p = db.prepare(
+      `SELECT * FROM products_services WHERE id = ? AND organization_id = ? AND active = 1`
+    ).get(it.productId, orgId) as any;
+    if (!p) continue;
+
+    const mode = p.sale_mode || "unit";
+    const qty = Math.max(1, Number(it.quantity) || 1);
+    const opt = it.option || null;
+    let unitPrice = p.price || 0;
+    let label: string | null = null;
+    let nameSnapshot = p.name;
+    let linkProduct = true;
+
+    if (mode === "weight" && opt?.grams) {
+      // price é por kg. Não vincula estoque (quantidade fracionada).
+      const grams = Math.max(1, Number(opt.grams) || 0);
+      unitPrice = (p.price || 0) * (grams / 1000);
+      label = grams >= 1000 ? `${(grams / 1000).toFixed(grams % 1000 === 0 ? 0 : 2)} kg` : `${grams} g`;
+      nameSnapshot = `${p.name} — ${label}`;
+      linkProduct = false;
+    } else if (mode === "volume" && opt?.ml) {
+      const ml = Math.max(1, Number(opt.ml) || 0);
+      unitPrice = (p.price || 0) * (ml / 1000);
+      label = ml >= 1000 ? `${(ml / 1000).toFixed(ml % 1000 === 0 ? 0 : 2)} L` : `${ml} ml`;
+      nameSnapshot = `${p.name} — ${label}`;
+      linkProduct = false;
+    } else if (mode === "size" && opt?.value) {
+      label = String(opt.value);
+      nameSnapshot = `${p.name} (${label})`;
+    }
+
+    resolved.push({
+      id: uuidv4(), pid: linkProduct ? p.id : null, name: nameSnapshot,
+      price: unitPrice, qty, label, total: unitPrice * qty,
+    });
+  }
+  return resolved;
+}
+
+// ADR-207 F7 — frete. GET: a vitrine só mostra o campo de CEP/frete quando o dono liga a política. POST /quote: valor do frete
+// para ESTE carrinho (recalculado no servidor). Resposta PÚBLICA: só valor, "grátis" e rótulo — nunca margem, custo ou o motivo.
+router.get("/store/:slug/shipping", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  try {
+    const st = ShippingPolicyService.settings(store.organization_id);
+    res.json({ enabled: st.enabled, needsCep: st.enabled && st.ranges.length > 0 });
+  } catch { res.json({ enabled: false, needsCep: false }); }
+});
+
+router.post("/store/:slug/shipping/quote", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  try {
+    const orgId = store.organization_id;
+    const resolved = resolveCartItems(orgId, Array.isArray(req.body?.items) ? req.body.items : []);
+    if (!resolved.length) return res.json({ enabled: false });
+    const subtotal = resolved.reduce((a, r) => a + r.total, 0);
+    let discount = 0;
+    if (req.body?.coupon) { const cr = evaluateCoupon(orgId, req.body.coupon, subtotal); if (cr.valid) discount = cr.discount; }
+    const q = ShippingPolicyService.quote(orgId, { items: resolved.map((r) => ({ productId: r.pid, qty: r.qty, unitPrice: r.price })), subtotal, discount, cep: req.body?.cep });
+    if (!q.enabled) return res.json({ enabled: false });
+    const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    res.json({ enabled: true, toArrange: q.amount == null, needsCep: q.needsCep, amount: q.amount, free: q.free, label: q.label, payable: Math.round((total + (q.amount ?? 0)) * 100) / 100 });
+  } catch { res.json({ enabled: false }); }
+});
+
 // ADR-207 F3 — retirada na loja. GET: a vitrine só mostra a opção quando a empresa liga a retirada
 // E há ao menos uma loja liberada. POST /check: quais lojas conseguem RESERVAR este carrinho agora.
 router.get("/store/:slug/pickup", (req, res): any => {
@@ -464,45 +539,7 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
 
   try {
     const orderId = uuidv4();
-    const resolved: { id: string; pid: string | null; name: string; price: number; qty: number; label: string | null; total: number }[] = [];
-
-    for (const it of rawItems) {
-      const p = db.prepare(
-        `SELECT * FROM products_services WHERE id = ? AND organization_id = ? AND active = 1`
-      ).get(it.productId, orgId) as any;
-      if (!p) continue;
-
-      const mode = p.sale_mode || "unit";
-      const qty = Math.max(1, Number(it.quantity) || 1);
-      const opt = it.option || null;
-      let unitPrice = p.price || 0;
-      let label: string | null = null;
-      let nameSnapshot = p.name;
-      let linkProduct = true;
-
-      if (mode === "weight" && opt?.grams) {
-        // price é por kg. Não vincula estoque (quantidade fracionada).
-        const grams = Math.max(1, Number(opt.grams) || 0);
-        unitPrice = (p.price || 0) * (grams / 1000);
-        label = grams >= 1000 ? `${(grams / 1000).toFixed(grams % 1000 === 0 ? 0 : 2)} kg` : `${grams} g`;
-        nameSnapshot = `${p.name} — ${label}`;
-        linkProduct = false;
-      } else if (mode === "volume" && opt?.ml) {
-        const ml = Math.max(1, Number(opt.ml) || 0);
-        unitPrice = (p.price || 0) * (ml / 1000);
-        label = ml >= 1000 ? `${(ml / 1000).toFixed(ml % 1000 === 0 ? 0 : 2)} L` : `${ml} ml`;
-        nameSnapshot = `${p.name} — ${label}`;
-        linkProduct = false;
-      } else if (mode === "size" && opt?.value) {
-        label = String(opt.value);
-        nameSnapshot = `${p.name} (${label})`;
-      }
-
-      resolved.push({
-        id: uuidv4(), pid: linkProduct ? p.id : null, name: nameSnapshot,
-        price: unitPrice, qty, label, total: unitPrice * qty,
-      });
-    }
+    const resolved = resolveCartItems(orgId, rawItems);
 
     if (resolved.length === 0) return res.status(400).json({ error: "Nenhum item válido." });
     const subtotal = resolved.reduce((s, r) => s + r.total, 0);
@@ -531,6 +568,15 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       if (cr.valid && cr.coupon) { discount = cr.discount; couponCode = cr.coupon.code; couponId = cr.coupon.id; }
     }
     const total = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+
+    // ADR-207 F7 — FRETE definido pelo dono (só entrega; retirada nunca paga frete). Recalculado AQUI no servidor a partir do
+    // catálogo e do cupom — o cliente não manda valor de frete. Política desligada → nada muda (flag-off = checkout de sempre).
+    const shipQuote = pickupStoreId ? null : ShippingPolicyService.quote(orgId, {
+      items: resolved.map((r) => ({ productId: r.pid, qty: r.qty, unitPrice: r.price })), subtotal, discount, cep: body.shippingCep,
+    });
+    const shippingOn = !!shipQuote?.enabled;
+    const shippingAmount: number | null = shippingOn ? shipQuote!.amount : null;   // null = a combinar (≠ 0 = grátis)
+    const finalTotal = shippingOn ? Math.round((total + (shippingAmount ?? 0)) * 100) / 100 : total;
 
     // Atribuição comercial pedido<->look (Fashion AI Studio FAS-4, RF-027):
     // valida que o look é DESTA organização antes de gravar — um id forjado
@@ -577,6 +623,10 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
         stmt.run(r.id, orderId, orgId, r.pid, r.name, r.price, r.qty, r.total, r.label);
       }
       if (couponId) db.prepare("UPDATE storefront_coupons SET used_count = used_count + 1 WHERE id = ?").run(couponId);
+      if (shippingOn) {
+        db.prepare("UPDATE orders SET shipping_amount = ?, shipping_absorbed = ?, shipping_cep = ?, shipping_rule = ? WHERE id = ? AND organization_id = ?")
+          .run(shippingAmount, shipQuote!.absorbed || 0, normalizeCep(body.shippingCep), shipQuote!.reason, orderId, orgId);
+      }
 
       // Reserva/baixa online: bloqueia se a reserva não cobrir (o throw desfaz o
       // pedido inteiro). Itens sem produto vinculado (peso/volume) não entram.
@@ -610,9 +660,10 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     const brl = (v: number) => `R$ ${Number(v).toFixed(2)}`;
     const lines = resolved.map(r => `• ${r.qty}× ${r.name} — ${brl(r.total)}`).join("\n");
     // Bloco de totais: mostra desconto quando há cupom.
+    const shipLine = !shippingOn ? "" : shippingAmount == null ? "\nFrete: a combinar" : shippingAmount === 0 ? "\nFrete: grátis" : `\nFrete: ${brl(shippingAmount)}`;
     const totalsBlock = discount > 0
-      ? `Subtotal: ${brl(subtotal)}\nDesconto (${couponCode}): -${brl(discount)}\nTotal: ${brl(total)}`
-      : `Total: ${brl(total)}`;
+      ? `Subtotal: ${brl(subtotal)}\nDesconto (${couponCode}): -${brl(discount)}${shipLine}\nTotal: ${brl(finalTotal)}`
+      : shipLine ? `Produtos: ${brl(total)}${shipLine}\nTotal: ${brl(finalTotal)}` : `Total: ${brl(total)}`;
 
     // O pedido CAI NO ATENDIMENTO: notifica a equipe (sino) e, se há contato
     // vinculado (via token), registra o pedido na conversa do Kanban ao vivo.
@@ -621,10 +672,10 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       const custName = body.customer?.name || (contactId
         ? (db.prepare("SELECT name FROM contacts WHERE id = ?").get(contactId) as any)?.name
         : null) || "Cliente da vitrine";
-      NotificationService.storeOrder(orgId, custName, total);
+      NotificationService.storeOrder(orgId, custName, finalTotal);
 
       const io = NotificationService.io;
-      if (io) io.to(`org:${orgId}`).emit("order_created", { orderId, status: "aguardando_pagamento", total, contactId });
+      if (io) io.to(`org:${orgId}`).emit("order_created", { orderId, status: "aguardando_pagamento", total: finalTotal, contactId });
 
       if (contactId) {
         // Acha (ou cria) um ticket aberto do contato e injeta a nota do pedido.
@@ -671,7 +722,7 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
         if (provider === "mercadopago") {
           const custName = body.customer?.name || "Cliente";
           const charge = await PaymentService.createMercadoPagoPix(orgId, {
-            orderId, amount: total, contactName: custName, contactId: contactId || undefined,
+            orderId, amount: finalTotal, contactName: custName, contactId: contactId || undefined,
           });
           if (charge) {
             payment = { method: "mercadopago", pix: { qrCode: charge.qrCode, qrCodeBase64: charge.qrCodeBase64, ticketUrl: charge.ticketUrl } };
@@ -685,7 +736,8 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     const pickup = pickupStoreId
       ? (() => { const o = db.prepare("SELECT reserve_expires_at FROM orders WHERE id = ? AND organization_id = ?").get(orderId, orgId) as any; return { storeName: pickupStoreName, reserveExpiresAt: o?.reserve_expires_at || null }; })()
       : undefined;
-    res.json({ ok: true, orderId, total, whatsappUrl, payment, ...(pickup ? { pickup } : {}) });
+    const shipping = shippingOn ? { amount: shippingAmount, free: shippingAmount === 0, toArrange: shippingAmount == null } : undefined;
+    res.json({ ok: true, orderId, total: finalTotal, whatsappUrl, payment, ...(pickup ? { pickup } : {}), ...(shipping ? { shipping } : {}) });
   } catch (e: any) {
     const msg = String(e?.message || "");
     if (msg.startsWith("ONLINE_OUT_OF_STOCK:")) {

@@ -1038,6 +1038,7 @@
     "test:archetype-interview": "tsx scripts/test-archetype-interview.ts",
     "test:negative-learning": "tsx scripts/test-negative-learning.ts",
     "test:strategic-policy": "tsx scripts/test-strategic-policy.ts",
+    "test:next-best-action": "tsx scripts/test-next-best-action.ts",
     "test:procurement-patterns": "tsx scripts/test-procurement-patterns.ts",
     "test:finance-people-patterns": "tsx scripts/test-finance-people-patterns.ts",
     "test:inventory-patterns": "tsx scripts/test-inventory-patterns.ts",

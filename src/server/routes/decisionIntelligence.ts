@@ -26,6 +26,8 @@ import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceRese
 import { CompetitiveIntelligenceService } from "../CompetitiveIntelligenceService.js";
 import { NegativeLearningService } from "../NegativeLearningService.js";
 import { StrategicPolicyService } from "../StrategicPolicyService.js";
+import { NextBestActionService } from "../NextBestActionService.js";
+import { ProductAttributeIntelligenceService } from "../ProductAttributeIntelligenceService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -234,6 +236,20 @@ router.post("/learning/negative/:outcomeId", (req: AuthRequest, res): any => {
   const out = NegativeLearningService.answer(orgId, req.params.outcomeId, { reasons: req.body?.reasons, note: req.body?.note }, req.user?.userId);
   if (!out.ok) return res.status(400).json({ error: out.error });
   res.json({ ...out, reasonsDetail: NegativeLearningService.reasonsFor(orgId, req.params.outcomeId) });
+});
+
+// ADR-206 F5.9 — Next Best Action (máx. 3 ações com porquê/evidência/aprovação/medição; read-only) e desempenho por atributo (cor/tamanho,
+// com cobertura e hipóteses). Dinheiro (R$) só para owner/admin (§73).
+router.get("/next-best-actions", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(NextBestActionService.top(orgId, { includeMoney: ["owner", "admin"].includes(req.user?.role) }));
+});
+router.get("/product-attributes", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const days = typeof req.query?.days === "string" ? parseInt(req.query.days, 10) : undefined;
+  res.json(ProductAttributeIntelligenceService.performance(orgId, { days: Number.isFinite(days as number) ? days : undefined, includeMoney: ["owner", "admin"].includes(req.user?.role) }));
 });
 
 // ADR-206 F5.8 — Strategic Policy: o dono diz o que importa mais (pesos por objetivo, 50 = normal) e a ordem do "o que atacar primeiro"

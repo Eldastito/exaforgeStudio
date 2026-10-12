@@ -12519,6 +12519,23 @@ const initDb = () => {
         ON pattern_negative_reasons (organization_id, pattern_id);
     `);
   } catch(e){ console.error('[DB] Falha ao criar pattern_negative_reasons (ADR-206 F5.7)', e); }
+  // ADR-206 F5.8 — Strategic Policy com pesos: versões APPEND-ONLY da política do dono (pesos por objetivo + validade). Sem política = neutro.
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS strategic_policy_versions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        weights_json TEXT NOT NULL,
+        valid_until TEXT,
+        note TEXT,
+        set_by TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_strategic_policy_versions_uniq
+        ON strategic_policy_versions (organization_id, version);
+    `);
+  } catch(e){ console.error('[DB] Falha ao criar strategic_policy_versions (ADR-206 F5.8)', e); }
 };
 
 initDb();

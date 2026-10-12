@@ -2,6 +2,7 @@ import db from "./db.js";
 import { ApprovalPolicyService } from "./ApprovalPolicyService.js";
 import { BusinessGoalService } from "./BusinessGoalService.js";
 import { presentSignal } from "./SignalLanguage.js";
+import { StrategicPolicyService } from "./StrategicPolicyService.js";
 
 /**
  * ImpactPrioritizationService (ADR-136, Epic 2 — C3).
@@ -188,7 +189,7 @@ export class ImpactPrioritizationService {
    * Calcula as prioridades a partir dos sinais ABERTOS. Retorna `{ global, byDomain }`.
    * `global` = até 3 no total; `byDomain` = até 3 por domínio.
    */
-  static prioritize(orgId: string, opts: { globalLimit?: number; perDomain?: number; skipGoals?: boolean } = {}): any {
+  static prioritize(orgId: string, opts: { globalLimit?: number; perDomain?: number; skipGoals?: boolean; policyWeights?: Record<string, number> } = {}): any {
     const globalLimit = Math.max(1, Number(opts.globalLimit) || 3);
     const perDomain = Math.max(1, Number(opts.perDomain) || 3);
 
@@ -209,10 +210,15 @@ export class ImpactPrioritizationService {
     // a partir de BusinessGoalService.progress — ler metas aqui fecharia um ciclo (recursão).
     const goalGaps = opts.skipGoals ? new Map<string, { metric: string; label: string; gap: number }>() : this.goalGapsByDomain(orgId, (opts as any).asOf);
 
+    // ADR-206 F5.8 — política estratégica do dono (pesos por objetivo). Sem política vigente → mapa vazio → fator 1 (identidade).
+    // `policyWeights` só vem do preview (pesos propostos, não salvos). Best-effort: falha ao ler a política NÃO derruba a priorização.
+    let policyFactors: Map<string, { factor: number; objective: string; weight: number }> | undefined;
+    try { policyFactors = StrategicPolicyService.factors(orgId, opts.policyWeights ?? null); } catch { policyFactors = undefined; }
+
     // Agrupa "consequência do mesmo evento": por (domínio, tipo) fica o de maior score.
     const byGroup = new Map<string, any>();
     for (const s of signals) {
-      const scored = this.scoreSignal(orgId, s, maxByUnit, goalGaps);
+      const scored = this.scoreSignal(orgId, s, maxByUnit, goalGaps, policyFactors);
       const key = `${s.domain}:${s.signal_type}`;
       const prev = byGroup.get(key);
       if (!prev) { byGroup.set(key, { ...scored, groupedCount: 1 }); }
@@ -258,7 +264,9 @@ export class ImpactPrioritizationService {
       if (amt > (maxByUnit[unit] || 0)) maxByUnit[unit] = amt;
     }
     const goalGaps = this.goalGapsByDomain(orgId, opts.asOf);
-    return this.scoreSignal(orgId, signal, maxByUnit, goalGaps);
+    let policyFactors: Map<string, { factor: number; objective: string; weight: number }> | undefined;
+    try { policyFactors = StrategicPolicyService.factors(orgId); } catch { policyFactors = undefined; }
+    return this.scoreSignal(orgId, signal, maxByUnit, goalGaps, policyFactors);
   }
 
   /** Score determinístico de um sinal + a saída obrigatória do §9.3. */
@@ -311,7 +319,7 @@ export class ImpactPrioritizationService {
     return REVERSIBILITY_HINT[hint] ?? 0;
   }
 
-  private static scoreSignal(orgId: string, s: any, maxByUnit: Record<string, number>, goalGaps?: Map<string, { metric: string; label: string; gap: number }>): any {
+  private static scoreSignal(orgId: string, s: any, maxByUnit: Record<string, number>, goalGaps?: Map<string, { metric: string; label: string; gap: number }>, policyFactors?: Map<string, { factor: number; objective: string; weight: number }>): any {
     const severity = String(s.severity || "info");
     const urgency = URGENCY[severity] ?? 0.15;
     const confidence = clamp01(s.confidence);
@@ -346,7 +354,10 @@ export class ImpactPrioritizationService {
     // sinal não os carrega → score idêntico ao pré-F7 (zero regressão).
     const slaPressure = ImpactPrioritizationService.slaPressure(s);
     const irreversibility = ImpactPrioritizationService.irreversibility(s);
-    const score = round4(baseScore * (1 + GOAL_BOOST * goalRelevance + SLA_BOOST * slaPressure + IRREVERSIBILITY_BOOST * irreversibility));
+    // F5.8 — política estratégica: fator multiplicativo limitado a ±25% (1 sem política; nunca mexe no override crítico de segurança/compliance).
+    const pol = override ? null : (policyFactors?.get(s.domain) || null);
+    const policyFactor = pol?.factor ?? 1;
+    const score = round4(baseScore * (1 + GOAL_BOOST * goalRelevance + SLA_BOOST * slaPressure + IRREVERSIBILITY_BOOST * irreversibility) * policyFactor);
 
     // Aprovação necessária p/ a ação recomendada (reusa a política da C2a).
     let approval: any = null;
@@ -379,6 +390,9 @@ export class ImpactPrioritizationService {
         // F7 (§38) — fatores situacionais (0 quando o sinal não os carrega).
         slaPressure: round4(slaPressure),
         irreversibility: round4(irreversibility),
+        // F5.8 — fator da política estratégica do dono (1 = sem efeito) e de qual objetivo veio.
+        policyFactor: round4(policyFactor),
+        policyObjective: pol?.objective || null,
       },
       // F5 — qual meta este sinal ameaça (null se nenhuma atrasada no domínio).
       affectedGoal: goal ? { metric: goal.metric, label: goal.label, gapPct: round2(goal.gap * 100) } : null,

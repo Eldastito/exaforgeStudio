@@ -25,6 +25,7 @@ import { UnifiedImpactLedgerService } from "../UnifiedImpactLedgerService.js";
 import { VerticalIntelligenceResearchService } from "../VerticalIntelligenceResearchService.js";
 import { CompetitiveIntelligenceService } from "../CompetitiveIntelligenceService.js";
 import { NegativeLearningService } from "../NegativeLearningService.js";
+import { StrategicPolicyService } from "../StrategicPolicyService.js";
 
 /**
  * Decision Intelligence — rotas de leitura (DI-1, aditivo sobre ADR-135/136).
@@ -233,6 +234,42 @@ router.post("/learning/negative/:outcomeId", (req: AuthRequest, res): any => {
   const out = NegativeLearningService.answer(orgId, req.params.outcomeId, { reasons: req.body?.reasons, note: req.body?.note }, req.user?.userId);
   if (!out.ok) return res.status(400).json({ error: out.error });
   res.json({ ...out, reasonsDetail: NegativeLearningService.reasonsFor(orgId, req.params.outcomeId) });
+});
+
+// ADR-206 F5.8 — Strategic Policy: o dono diz o que importa mais (pesos por objetivo, 50 = normal) e a ordem do "o que atacar primeiro"
+// se inclina em até 25%. Leitura/prévia livres para quem vê as prioridades; definir/voltar ao normal só owner/admin (pessoa), append-only.
+router.get("/strategic-policy", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(StrategicPolicyService.explain(orgId));
+});
+router.get("/strategic-policy/history", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ versions: StrategicPolicyService.history(orgId) });
+});
+router.post("/strategic-policy/preview", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const out: any = await StrategicPolicyService.preview(orgId, req.body?.weights);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json(out);
+});
+router.put("/strategic-policy", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Só o dono ou administrador define a política estratégica." });
+  const out = StrategicPolicyService.set(orgId, { weights: req.body?.weights, validUntil: req.body?.validUntil, note: req.body?.note }, req.user?.userId);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ version: out.version, ...StrategicPolicyService.explain(orgId) });
+});
+router.post("/strategic-policy/reset", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  if (!["owner", "admin"].includes(req.user?.role)) return res.status(403).json({ error: "Só o dono ou administrador volta a política ao normal." });
+  const out = StrategicPolicyService.reset(orgId, req.user?.userId, req.body?.note);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  res.json({ version: out.version, ...StrategicPolicyService.explain(orgId) });
 });
 
 // GET /api/decision-intelligence/impact-ledger — ledger de impacto UNIFICADO

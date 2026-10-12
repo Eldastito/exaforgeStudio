@@ -12547,6 +12547,13 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN attr_ref TEXT`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_attr ON orders (organization_id, attr_source, attr_campaign)`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_storefront_events_attr ON storefront_events (organization_id, attr_source, attr_campaign)`); } catch(e){}
+  // ADR-207 F2 — CRM: ORIGEM do contato (first touch IMUTÁVEL). Nulo = ainda não registrada (a leitura infere do canal da 1ª conversa, rotulado). ADITIVO.
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_channel TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_campaign TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_content TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_ref TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE contacts ADD COLUMN first_touch_at DATETIME`); } catch(e){}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_first_touch ON contacts (organization_id, first_touch_channel)`); } catch(e){}
 };
 
 initDb();

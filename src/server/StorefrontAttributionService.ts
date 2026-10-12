@@ -25,7 +25,7 @@ import { ContentRevenueAttributionService } from "./ContentRevenueAttributionSer
  *  - Atribuição declarada pelo link ≠ prova de causa: o funil diz "atribuído pelo link".
  */
 
-const KNOWN_SOURCES = new Set(["instagram", "facebook", "whatsapp", "tiktok", "youtube", "linkedin", "x", "email", "google", "qrcode", "bio", "direct"]);
+const KNOWN_SOURCES = new Set(["instagram", "facebook", "whatsapp", "tiktok", "youtube", "linkedin", "x", "email", "google", "qrcode", "bio", "direct", "store"]);
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const PAID_STATUSES = ["pago", "em_preparo", "entregue", "concluido"];
 

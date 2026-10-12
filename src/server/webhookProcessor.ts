@@ -1,3 +1,4 @@
+import { ContactOriginService } from "./ContactOriginService.js";
 import db from "./db.js";
 import { signChatMediaUrl } from "./mediaSigning.js";
 import { generateRagResponse } from "./geminiRAG.js";
@@ -319,6 +320,8 @@ export async function processIncomingMessage(
       INSERT INTO contacts (id, organization_id, channel_id, name, identifier, profile_pic_url)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(contactId, orgId, channel.id, payload.contactName || payload.senderId, payload.senderId, payload.contactAvatar || null);
+    // ADR-207 F2 — origem do contato (first touch, imutável): o canal por onde chegou. Best-effort: nunca atrapalha o recebimento.
+    ContactOriginService.recordFromNewContact(orgId, contactId, channel.provider);
     contact = db.prepare('SELECT * FROM contacts WHERE id = ?').get(contactId) as any;
   } else {
     // update avatar if provided

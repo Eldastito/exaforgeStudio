@@ -298,7 +298,7 @@ export function Storefront() {
   }, []);
 
   const submitOrder = useCallback(
-    async (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string }): Promise<OrderResponse | null> => {
+    async (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string; shippingCep?: string }): Promise<OrderResponse | null> => {
       const body = {
         token: token ?? undefined,
         customer: { name: extra.name, phone: extra.phone, email: extra.email, cpf: extra.cpf },
@@ -307,6 +307,7 @@ export function Storefront() {
         fashionLookId: fashionLookId ?? undefined,
         attribution: currentAttribution() ?? undefined,
         ...(extra.pickupStoreId ? { fulfillment: 'pickup', pickupStoreId: extra.pickupStoreId } : {}),
+        ...(extra.shippingCep ? { shippingCep: extra.shippingCep } : {}),
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
         method: 'POST',

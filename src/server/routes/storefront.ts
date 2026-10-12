@@ -14,6 +14,7 @@ import { StorefrontLookGenerationService } from "../StorefrontLookGenerationServ
 import { StorefrontAttributionService } from "../StorefrontAttributionService.js";
 import { StorefrontShortLinkService } from "../StorefrontShortLinkService.js";
 import { ChannelEconomicsService } from "../ChannelEconomicsService.js";
+import { ShippingPolicyService } from "../ShippingPolicyService.js";
 
 // ============================================================================
 // LOJA VIRTUAL — rotas do DONO (autenticadas, sob /api/storefront).
@@ -305,6 +306,29 @@ router.put("/short-links/:id/featured", requireRole("owner", "admin"), (req: Aut
   try {
     if (!StorefrontShortLinkService.setFeatured(getOrgId(req), req.params.id, !!req.body?.featured)) return res.status(404).json({ error: "Link não encontrado." });
     res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Política de frete (ADR-207 F7) — dono/admin. O simulador mostra o MOTIVO (interno) de o frete grátis valer ou não.
+router.get("/shipping-policy", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  res.json(ShippingPolicyService.settings(getOrgId(req)));
+});
+router.put("/shipping-policy", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try { res.json(ShippingPolicyService.save(getOrgId(req), req.body || {}, req.user?.userId)); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.post("/shipping-policy/simulate", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  try {
+    const orgId = getOrgId(req);
+    const raw: any[] = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
+    const items = raw.map((i) => {
+      const p = db.prepare("SELECT id, price FROM products_services WHERE id = ? AND organization_id = ? AND active = 1 AND type = 'product'").get(i?.productId, orgId) as any;
+      return p ? { productId: p.id as string, qty: Math.max(1, Math.trunc(Number(i.quantity) || 1)), unitPrice: Number(p.price) || 0 } : null;
+    }).filter(Boolean) as Array<{ productId: string; qty: number; unitPrice: number }>;
+    if (!items.length) return res.status(400).json({ error: "Escolha ao menos um produto." });
+    const subtotal = items.reduce((a, i) => a + i.unitPrice * i.qty, 0);
+    const discount = Math.min(subtotal, Math.max(0, Number(req.body?.discount) || 0));
+    res.json({ subtotal: Math.round(subtotal * 100) / 100, discount, ...ShippingPolicyService.quote(orgId, { items, subtotal, discount, cep: req.body?.cep }) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 

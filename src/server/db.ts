@@ -12607,6 +12607,27 @@ const initDb = () => {
       );
     `);
   } catch(e){}
+  // ADR-207 F7 — FRETE definido pelo dono. Flag desligada por padrão (checkout idêntico ao de sempre). O frete fica em colunas
+  // PRÓPRIAS do pedido: `total_amount` segue sendo o total dos PRODUTOS (relatórios/receita/margem não mudam); o cliente paga
+  // total_amount + shipping_amount. NULL = frete não calculado (a combinar), ≠ 0 (grátis).
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS shipping_policy (
+        organization_id TEXT PRIMARY KEY,
+        enabled INTEGER DEFAULT 0,
+        fixed_amount REAL,
+        ranges_json TEXT,
+        free_above REAL,
+        max_absorb REAL,
+        updated_by TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_amount REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_absorbed REAL`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_cep TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN shipping_rule TEXT`); } catch(e){}
 };
 
 initDb();

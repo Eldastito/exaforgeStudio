@@ -905,6 +905,9 @@ export function StorefrontSettingsView() {
         {/* Economia por canal + desconto seguro (ADR-207 F6) */}
         <ChannelEconomicsSection products={products} />
 
+        {/* Frete (ADR-207 F7) */}
+        <ShippingPolicySection products={products} />
+
         {/* Cupons de desconto */}
         <CouponsSection />
       </div>
@@ -1549,6 +1552,124 @@ function ChannelEconomicsSection({ products }: { products: Array<{ id: string; n
           </div>
         )}
         <p className="mt-3 text-[11px] text-zinc-600">Margem de contribuição = preço − custo da peça − custos variáveis do canal (imposto, taxas, comissão, embalagem). Aluguel e folha fixa não entram: para decidir um desconto vale o custo da própria venda.</p>
+      </div>
+    </section>
+  );
+}
+
+type ShipRange = { cepFrom: string; cepTo: string; amount: string; label: string };
+const SHIP_REASON: Record<string, string> = {
+  applied: 'Frete grátis aplicado.', no_threshold: 'Você não definiu um valor mínimo para frete grátis.', below_threshold: 'O pedido está abaixo do valor mínimo para frete grátis.',
+  above_max_absorb: 'O frete é maior que o teto que você aceita absorver.', floor_not_set: 'Defina sua margem mínima (cartão "Economia e desconto seguro") para liberar o frete grátis.',
+  economics_unconfirmed: 'Não consigo confirmar a margem: falta o custo de algum produto ou os custos do canal online.', would_break_floor: 'Absorver o frete deixaria a margem abaixo do seu mínimo.',
+  not_calculated: 'Não há valor cadastrado para este CEP — o frete fica "a combinar".',
+};
+
+// Frete definido pelo dono (ADR-207 F7): tabela por faixa de CEP, valor fixo e frete grátis com prova de margem. O cliente nunca
+// manda o valor — o servidor recalcula. Desligado por padrão (a loja segue como hoje).
+function ShippingPolicySection({ products }: { products: Array<{ id: string; name: string }> }) {
+  const [loaded, setLoaded] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [fixed, setFixed] = useState('');
+  const [freeAbove, setFreeAbove] = useState('');
+  const [maxAbsorb, setMaxAbsorb] = useState('');
+  const [ranges, setRanges] = useState<ShipRange[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [simPid, setSimPid] = useState('');
+  const [simQty, setSimQty] = useState('1');
+  const [simCep, setSimCep] = useState('');
+  const [sim, setSim] = useState<any>(null);
+
+  const f = (v: number | null | undefined) => (v == null ? '' : String(v));
+  const load = async () => {
+    try {
+      const d = await apiFetch('/api/storefront/shipping-policy').then((r) => r.json());
+      setEnabled(!!d.enabled); setFixed(f(d.fixedAmount)); setFreeAbove(f(d.freeAbove)); setMaxAbsorb(f(d.maxAbsorb));
+      setRanges((d.ranges || []).map((r: any) => ({ cepFrom: r.cepFrom, cepTo: r.cepTo, amount: String(r.amount), label: r.label || '' })));
+      setLoaded(true);
+    } catch (e) { console.error(e); }
+  };
+  useEffect(() => { load(); }, []);
+  const num = (v: string): number | null => (v.trim() === '' ? null : Number(v.replace(',', '.')));
+
+  const save = async (next?: { enabled?: boolean }) => {
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/storefront/shipping-policy', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: next?.enabled ?? enabled, fixedAmount: num(fixed), freeAbove: num(freeAbove), maxAbsorb: num(maxAbsorb),
+          ranges: ranges.filter((r) => r.cepFrom.trim() || r.cepTo.trim() || r.amount.trim()).map((r) => ({ cepFrom: r.cepFrom, cepTo: r.cepTo, amount: num(r.amount), label: r.label })),
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast.error(d.error || 'Não foi possível salvar.'); return; }
+      toast.success('Frete salvo.'); load();
+    } finally { setSaving(false); }
+  };
+  const simulate = async () => {
+    if (!simPid) { toast.error('Escolha um produto.'); return; }
+    const res = await apiFetch('/api/storefront/shipping-policy/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [{ productId: simPid, quantity: Number(simQty) || 1 }], cep: simCep }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { toast.error(d.error || 'Não foi possível simular.'); return; }
+    setSim(d);
+  };
+  const brl = (v: number | null | undefined) => (v == null ? '—' : `R$ ${Number(v).toFixed(2)}`);
+  if (!loaded) return null;
+
+  return (
+    <section className="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2"><ShoppingBag className="w-5 h-5 text-sky-400" /> Frete da loja virtual</h3>
+          <p className="text-xs text-zinc-500 mt-0.5">Você define quanto cobra por entrega; o cliente vê o valor no carrinho. Retirada na loja é sempre sem frete. Desligado, a loja segue como hoje.</p>
+        </div>
+        <button onClick={() => { setEnabled(!enabled); save({ enabled: !enabled }); }} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${enabled ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`} /> {enabled ? 'ligado' : 'desligado'}
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Field label="Frete fixo (R$) — vale quando o CEP não cai em nenhuma faixa"><input className={inputClass} inputMode="decimal" value={fixed} onChange={(e) => setFixed(e.target.value)} placeholder="opcional" /></Field>
+        <Field label="Frete grátis a partir de (R$)"><input className={inputClass} inputMode="decimal" value={freeAbove} onChange={(e) => setFreeAbove(e.target.value)} placeholder="opcional" /></Field>
+        <Field label="Máximo de frete que aceito pagar (R$)"><input className={inputClass} inputMode="decimal" value={maxAbsorb} onChange={(e) => setMaxAbsorb(e.target.value)} placeholder="opcional" /></Field>
+      </div>
+      {freeAbove.trim() !== '' && <p className="mt-2 text-[11px] text-amber-300">O frete grátis só vale se, depois de absorver o frete, o pedido ainda respeitar a sua margem mínima — o ZapFlow precisa conseguir comprovar isso (custo dos produtos + margem mínima + custos do canal online preenchidos). Sem comprovar, o cliente paga o frete.</p>}
+
+      <p className="mt-4 text-sm text-zinc-200 font-medium">Faixas de CEP</p>
+      <div className="mt-2 space-y-2">
+        {ranges.map((r, i) => (
+          <div key={i} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-center">
+            <input className={inputClass} inputMode="numeric" placeholder="CEP inicial" value={r.cepFrom} onChange={(e) => setRanges(ranges.map((x, k) => (k === i ? { ...x, cepFrom: e.target.value } : x)))} />
+            <input className={inputClass} inputMode="numeric" placeholder="CEP final" value={r.cepTo} onChange={(e) => setRanges(ranges.map((x, k) => (k === i ? { ...x, cepTo: e.target.value } : x)))} />
+            <input className={inputClass} inputMode="decimal" placeholder="Valor (R$)" value={r.amount} onChange={(e) => setRanges(ranges.map((x, k) => (k === i ? { ...x, amount: e.target.value } : x)))} />
+            <input className={inputClass} placeholder="Nome (ex.: Zona Sul)" value={r.label} onChange={(e) => setRanges(ranges.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)))} />
+            <Button variant="ghost" onClick={() => setRanges(ranges.filter((_, k) => k !== i))} title="Remover faixa"><Trash2 className="w-4 h-4 text-red-400" /></Button>
+          </div>
+        ))}
+        <Button variant="ghost" onClick={() => setRanges([...ranges, { cepFrom: '', cepTo: '', amount: '', label: '' }])}><Plus className="w-4 h-4 mr-1" /> Adicionar faixa</Button>
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={() => save()} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Salvar frete'}</Button>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+        <p className="text-sm text-zinc-200 font-medium">Testar um pedido</p>
+        <div className="mt-2 flex gap-2 flex-wrap items-end">
+          <select className={`${inputClass} !w-auto min-w-[200px]`} value={simPid} onChange={(e) => setSimPid(e.target.value)}>
+            <option value="">— produto —</option>
+            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <input className={`${inputClass} !w-20`} inputMode="numeric" value={simQty} onChange={(e) => setSimQty(e.target.value)} placeholder="Qtd" />
+          <input className={`${inputClass} !w-36`} inputMode="numeric" value={simCep} onChange={(e) => setSimCep(e.target.value)} placeholder="CEP" />
+          <Button variant="ghost" onClick={simulate}>Simular</Button>
+        </div>
+        {sim && (
+          <div className="mt-3 text-sm text-zinc-300 space-y-1">
+            <p>Pedido de {brl(sim.subtotal)} → frete: <b className="text-zinc-100">{!sim.enabled ? 'política desligada' : sim.amount == null ? 'a combinar' : sim.free ? 'grátis' : brl(sim.amount)}</b>{sim.absorbed > 0 ? <span className="text-zinc-400"> (você absorve {brl(sim.absorbed)})</span> : null}</p>
+            {sim.reason && <p className="text-xs text-zinc-500">{SHIP_REASON[sim.reason] || sim.reason}</p>}
+          </div>
+        )}
       </div>
     </section>
   );

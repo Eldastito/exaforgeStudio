@@ -239,6 +239,29 @@ export class ChannelEconomicsService {
   }
 
   /**
+   * Contribuição de um PEDIDO online inteiro (preços e desconto REAIS do checkout). Custos fixos por venda (embalagem, tarifa)
+   * contam UMA vez por pedido — não por peça. Só `reliable` quando TODA peça tem custo conhecido e o custo do canal está completo;
+   * item sem produto vinculado (peso/volume) ou sem custo → `insufficient` (não dá pra provar nada sobre a margem do pedido).
+   */
+  static orderContribution(orgId: string, items: Array<{ productId: string | null; qty: number; unitPrice: number }>, discountAmount = 0) {
+    const model = this.costModel(orgId, "online");
+    const gross = items.reduce((a, i) => a + i.unitPrice * i.qty, 0);
+    const net = gross - Math.max(0, discountAmount);
+    const missing: string[] = [];
+    let cost = 0;
+    for (const it of items) {
+      const c = it.productId ? this.unitCost(orgId, it.productId) : { value: null as number | null };
+      if (c.value == null) { if (!missing.includes("custo da peça")) missing.push("custo da peça"); continue; }
+      cost += c.value * it.qty;
+    }
+    missing.push(...model.missing);
+    const quality: Quality = !items.length || !(net > 0) || missing.includes("custo da peça") ? "insufficient" : (missing.length || model.notModeled.length ? "partial" : "reliable");
+    if (quality === "insufficient") return { quality, net: round2(net), contribution: null as number | null, percent: null as number | null, missing };
+    const contribution = net - cost - net * model.variablePercent / 100 - model.fixedPerSale;
+    return { quality, net: round2(net), contribution: round2(contribution), percent: Math.round((contribution / net) * 1000) / 10, missing };
+  }
+
+  /**
    * "Posso dar 20% no catálogo?" — classifica cada produto ativo para um desconto PERCENTUAL (ou valor fixo, convertido em % pelo preço
    * de cada produto) no canal online (cupons são da loja virtual). Read-only: não cria cupom.
    */

@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void;
   onChangeQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onSubmit: (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string }) => Promise<OrderResponse | null>;
+  onSubmit: (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string; shippingCep?: string }) => Promise<OrderResponse | null>;
   onClear: () => void;
 }
 
@@ -54,6 +54,11 @@ export function CartDrawer({
   const [pickupStores, setPickupStores] = useState<{ id: string; name: string; city: string | null; address: string | null; canFulfill: boolean }[]>([]);
   const [pickupStoreId, setPickupStoreId] = useState('');
   const [pickupMinutes, setPickupMinutes] = useState(0);
+  // ADR-207 F7 — frete definido pelo dono: só aparece quando a política está ligada. O valor vem SEMPRE do servidor.
+  const [shipOn, setShipOn] = useState(false);
+  const [shipNeedsCep, setShipNeedsCep] = useState(false);
+  const [cep, setCep] = useState('');
+  const [shipQuote, setShipQuote] = useState<{ toArrange: boolean; needsCep: boolean; amount: number | null; free: boolean; label: string | null; payable: number } | null>(null);
   const cartSig = useMemo(() => items.map((i) => `${i.productId}:${i.quantity}`).join('|'), [items]);
 
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
@@ -67,6 +72,16 @@ export function CartDrawer({
       .then((r) => (r.ok ? r.json() : { enabled: false }))
       .then((d) => { if (alive) setPickupOn(!!d.enabled); })
       .catch(() => { if (alive) setPickupOn(false); });
+    return () => { alive = false; };
+  }, [open, slug]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/shipping`)
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((d) => { if (alive) { setShipOn(!!d.enabled); setShipNeedsCep(!!d.needsCep); } })
+      .catch(() => { if (alive) setShipOn(false); });
     return () => { alive = false; };
   }, [open, slug]);
 
@@ -89,6 +104,23 @@ export function CartDrawer({
       .catch(() => { if (alive) { setPickupStores([]); setPickupStoreId(''); } });
     return () => { alive = false; };
   }, [open, pickupOn, receive, cartSig, slug]);
+
+  // Cotação do frete (entrega): refeita quando muda o carrinho, o CEP ou o cupom; o servidor recalcula tudo.
+  const deliveryShipping = shipOn && !(pickupOn && receive === 'pickup');
+  useEffect(() => {
+    if (!open || !deliveryShipping || items.length === 0) { setShipQuote(null); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      fetch(`/api/public/store/${encodeURIComponent(slug)}/shipping/quote`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })), coupon: applied?.code, cep: cep.replace(/\D/g, '') || undefined }),
+      })
+        .then((r) => (r.ok ? r.json() : { enabled: false }))
+        .then((d) => { if (alive) setShipQuote(d.enabled ? d : null); })
+        .catch(() => { if (alive) setShipQuote(null); });
+    }, 350);
+    return () => { alive = false; clearTimeout(t); };
+  }, [open, deliveryShipping, cartSig, cep, applied?.code, slug]);
 
   // Se o carrinho muda, o cupom aplicado deixa de valer (revalidar).
   useEffect(() => { setApplied(null); setCouponMsg(null); }, [total]);
@@ -134,7 +166,7 @@ export function CartDrawer({
     }
     setSubmitting(true);
     try {
-      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), cpf: cpf.trim(), coupon: applied?.code, ...(pickupOn && receive === 'pickup' ? { pickupStoreId } : {}) });
+      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), cpf: cpf.trim(), coupon: applied?.code, ...(pickupOn && receive === 'pickup' ? { pickupStoreId } : {}), ...(deliveryShipping && cep.replace(/\D/g, '').length === 8 ? { shippingCep: cep.replace(/\D/g, '') } : {}) });
       if (res && res.ok) {
         setResult(res);
         onClear();
@@ -211,6 +243,12 @@ export function CartDrawer({
                     <p className="mt-1 text-sm opacity-60">
                       Nº <span className="font-mono font-semibold">#{result.orderId.slice(0, 8)}</span> · Total {formatBRL(result.total)}
                     </p>
+
+                    {result.shipping && (
+                      <p className="mt-2 text-sm opacity-70">
+                        {result.shipping.toArrange ? 'Frete a combinar com a loja.' : result.shipping.free ? 'Frete grátis.' : `Frete: ${formatBRL(result.shipping.amount || 0)} (já incluído no total).`}
+                      </p>
+                    )}
 
                     {result.pickup && (
                       <p className="mt-3 rounded-xl border px-3 py-2 text-left text-sm" style={{ borderColor: hexToRgba(accent, 0.4) }}>
@@ -493,6 +531,29 @@ export function CartDrawer({
                     </div>
                   )}
 
+                  {/* Frete (ADR-207 F7): CEP + valor calculado no servidor. Retirada na loja não paga frete. */}
+                  {deliveryShipping && (
+                    <div className="space-y-1.5">
+                      <input
+                        value={cep}
+                        onChange={(e) => setCep(e.target.value.replace(/[^\d-]/g, '').slice(0, 9))}
+                        placeholder={shipNeedsCep ? 'CEP de entrega (para calcular o frete)' : 'CEP de entrega (opcional)'}
+                        inputMode="numeric"
+                        className={[
+                          'w-full rounded-xl border px-3 py-2.5 text-sm outline-none',
+                          night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
+                        ].join(' ')}
+                      />
+                      {shipQuote && (
+                        <p className="text-xs font-medium opacity-80">
+                          {shipQuote.toArrange
+                            ? (shipQuote.needsCep ? 'Informe o CEP para calcular o frete (ou combinamos com a loja).' : 'Frete a combinar com a loja.')
+                            : shipQuote.free ? 'Frete grátis 🎉' : `Frete: ${formatBRL(shipQuote.amount || 0)}${shipQuote.label ? ` · ${shipQuote.label}` : ''}`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* Cupom de desconto */}
                   <div>
                     <div className="flex gap-2">
@@ -538,7 +599,7 @@ export function CartDrawer({
                   <div className="flex items-center justify-between text-base">
                     <span className="opacity-60">Total</span>
                     <span className="text-xl font-extrabold" style={{ color: accent }}>
-                      {formatBRL(finalTotal)}
+                      {formatBRL(deliveryShipping && shipQuote && !shipQuote.toArrange ? shipQuote.payable : finalTotal)}
                     </span>
                   </div>
                   <button

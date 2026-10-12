@@ -4,6 +4,7 @@ import { InventoryService } from "./InventoryService.js";
 import { CustomerProfileService } from "./CustomerProfileService.js";
 import { GoogleAutomationService } from "./GoogleAutomationService.js";
 import { RetailOnlineReserveService } from "./RetailOnlineReserveService.js";
+import { StorePickupSignal } from "./StorePickupSignal.js";
 
 export type OrderStatus =
   | "aguardando_pagamento" | "pago" | "em_preparo" | "entregue"
@@ -193,6 +194,12 @@ export class OrdersService {
     });
 
     tx();
+    // Retirada na loja (ADR-207 F4): pagou → "separar agora" na loja; cancelou/estornou → o alerta não vale mais.
+    // Best-effort e só para pedido de retirada (os demais não passam por aqui).
+    if (order.fulfillment_method === 'pickup') {
+      if (newStatus === 'pago') StorePickupSignal.publishSeparate(orgId, orderId);
+      else if (REVERSING_STATUSES.includes(newStatus)) StorePickupSignal.resolve(orgId, orderId);
+    }
     // Recalcula o perfil de CRM (compra concretizada/estornada muda os agregados).
     if (order.contact_id) CustomerProfileService.recomputePurchaseStats(orgId, order.contact_id);
   }

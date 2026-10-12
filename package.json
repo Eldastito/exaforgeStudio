@@ -38,6 +38,7 @@
     "test:storefront-attribution": "tsx scripts/test-storefront-attribution.ts",
     "test:contact-origin": "tsx scripts/test-contact-origin.ts",
     "test:store-pickup": "tsx scripts/test-store-pickup.ts",
+    "test:store-pickup-queue": "tsx scripts/test-store-pickup-queue.ts",
     "test:playbook-library-ui": "tsx scripts/test-playbook-library-ui.ts",
     "test:skillos-pilot-promote": "tsx scripts/test-skillos-pilot-promote.ts",
     "test:reputation-provider": "tsx scripts/test-reputation-provider.ts",

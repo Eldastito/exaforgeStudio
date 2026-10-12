@@ -1,6 +1,6 @@
 # ADR-207 — Commerce Growth Loop: redes sociais → CRM → Loja Virtual ZapFlow → venda → resultado
 
-Status: **EM ANDAMENTO.** F1 MERGED (#1895); F2 MERGED (#1896); F3 em PR. Origem: conversa "ZapFlow — Atualizações de outubro (redes sociais)" + PRD Fase 6A (2026-10-12). Decisão do dono (2026-10-12): implementar as funcionalidades da conversa **desde que fiquem simples de usar, não quebrem o que já funciona e não possam tirar o ZapFlow do ar**. "Quadbase" = codebase e "Kit Hub" = GitHub (erro de digitação): não existe projeto externo a localizar; o gate da F0 do PRD sobre isso está dissolvido.
+Status: **EM ANDAMENTO.** F1 MERGED (#1895); F2 MERGED (#1896); F3 MERGED (#1897); F4 em PR. Origem: conversa "ZapFlow — Atualizações de outubro (redes sociais)" + PRD Fase 6A (2026-10-12). Decisão do dono (2026-10-12): implementar as funcionalidades da conversa **desde que fiquem simples de usar, não quebrem o que já funciona e não possam tirar o ZapFlow do ar**. "Quadbase" = codebase e "Kit Hub" = GitHub (erro de digitação): não existe projeto externo a localizar; o gate da F0 do PRD sobre isso está dissolvido.
 
 ## 1. O que a auditoria do código achou (verificado no `main`)
 | Peça | Estado |
@@ -25,8 +25,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | --- | --- | --- |
 | **F1 ✅ #1895** | **Atribuição social → loja**: `zf_source/zf_campaign/zf_content/zf_ref` no link da loja; visita e pedido gravam a origem; lead ligado ao conteúdo pelo token do link; funil derivado `GET /api/storefront/attribution` | não |
 | **F2 ✅ #1896** | CRM: **origem imutável** (first touch) + canal atual + canal de conversão + forma de recebimento; "Instagram → WhatsApp" não apaga o Instagram | não |
-| **F3 (EM PR)** | **Retirar na loja** no checkout: só lojas com estoque confiável, reserva atômica já na criação do pedido, reserva expira se não pagar; atrás de flag | Alterdata (qualidade do estoque) |
-| F4 | Fila **"separar agora"** para o pedido com retirada (sinal + estados separado/pronto/retirado); fecha o buraco "vendi a última peça na loja física" | não (write-back no PDV = Alterdata) |
+| **F3 ✅ #1897** | **Retirar na loja** no checkout: só lojas com estoque confiável, reserva atômica já na criação do pedido, reserva expira se não pagar; atrás de flag | Alterdata (qualidade do estoque) |
+| **F4 (EM PR)** | Fila **"separar agora"** para o pedido com retirada (sinal + estados separado/pronto/retirado); fecha o buraco "vendi a última peça na loja física" | não (write-back no PDV = Alterdata) |
 | F5 | Link curto `/loja/:slug/go/:codigo` + gerador de link de campanha + vitrine "visto no Instagram" | não |
 | F6 | **Economia por canal** (fachada read-only): margem de contribuição física × online, qualidade do dado (confiável/parcial/insuficiente), **desconto máximo seguro** sobre os cupons existentes; piso opcional | não (precisa o dono informar piso/impostos) |
 | F7 | **Frete**: regras definidas pelo dono (retirada grátis, fixo, por faixa, grátis acima de X **e** acima do piso) aplicadas no checkout; cotação por transportadora em fatia posterior | cotação: Correios/Melhor Envio (contrato) |
@@ -66,4 +66,15 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Também nesta fatia**: `vite.config.ts` — teto de precache do PWA 4→5 MiB. O chunk principal já estava a ~2 KiB do teto antigo; qualquer fatia de frontend quebrava o `vite build`.
 - **Limites**: a fila "separar agora" e os estados separado/pronto/retirado são a F4 (hoje a equipe só vê o pedido e a baixa pendente); sem retirada por variação (tamanho/cor) — a vitrine ainda não manda variante, igual à reserva de entrega; pedido pago DEPOIS da reserva vencer (webhook tardio) fica cancelado — a equipe vê o aviso de cancelamento, não reabrimos sozinhos; não vi no navegador.
 - **Achado fora do escopo (não corrigido)**: cancelar à mão um pedido da vitrine chama `InventoryService.release`, que abate `quantity_reserved` de `inventory_items` mesmo a vitrine nunca tendo reservado ali — pode zerar a reserva de outro pedido. Existe desde antes; fica registrado para decisão do dono.
+
+## 7. F4 — EM PR (2026-10-12): fila "separar agora" da retirada
+- **O buraco que fecha**: o cliente pagou a retirada, mas a peça ainda está na prateleira da loja física — se ninguém separar, ela é vendida no balcão. Estados que a LOJA controla, cada um um fato diferente: **PAGO ≠ SEPARADO ≠ PRONTO ≠ RETIRADO**.
+- **Fluxo**: pedido de retirada **pago** → entra na fila como "a separar" + nasce UM sinal `pickup_separate_now` em `business_signals` (convenção nº 12, sem tabela de alerta; `source_entity` = a loja, então o gerente daquela loja o enxerga no recorte dele; sem dinheiro) → loja marca **Separei → Está pronto → Cliente retirou**. Só avança (voltar é recusado, repetir é no-op, pular para frente é permitido). O sinal fecha ao separar, retirar ou cancelar.
+- **Pedido acompanha, estoque não duplica**: separado leva o pedido a `em_preparo`, retirado a `entregue` — via `OrdersService.updateStatus`; o estoque já foi baixado no pagamento e não é baixado de novo (teste 3.11).
+- **Pedido não pago** não entra na fila (a peça está só reservada): aparece à parte como "aguardando pagamento · reserva até HH:MM", e separar nele é recusado (409).
+- **Gancho no `OrdersService.updateStatus`**: só para `fulfillment_method='pickup'`; best-effort (o alerta nunca derruba a mudança de status). O sinal vive em `StorePickupSignal` (folha) para o `OrdersService` chamá-lo sem ciclo de import.
+- **Quem vê**: `GET /api/retailops/pickup/queue` (gerente restrito só vê a loja dele; outra loja → 403) e `POST /api/retailops/pickup/orders/:id/advance` (loja do pedido checada; pedido de outra empresa → 404). A fila **não traz dinheiro**. Cada avanço fica no audit (`STORE_PICKUP_STAGE`).
+- **Tela**: "Retiradas na loja" no topo da aba Loja virtual do Retail Ops (atualiza a cada 30 s): cliente, peças, etapa e o botão do próximo passo.
+- Colunas aditivas `orders.pickup_status/_at/_by`. Teste `test:store-pickup-queue` (37 checks; sobe vitrine + rotas reais com dono, gerente restrito e dono de outra empresa; 11 mutações pegas). Regressão verde: `store-pickup` 57, sinais, reserva online, atribuição, escopo de loja, vendedor.
+- **Limites**: não avisa o cliente que "está pronto para retirar" — é comunicação de saída (consentimento, horário silencioso) e fica para fatia própria; não há prazo máximo para o cliente retirar depois de pago; sem retirada por tamanho/cor; o write-back da baixa no PDV segue dependendo da Alterdata (a baixa pendente da F3 continua sendo lançada à mão); não vi no navegador.
 

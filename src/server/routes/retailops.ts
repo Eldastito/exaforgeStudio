@@ -190,6 +190,7 @@ import { RetailRevenueBridgeService } from "../RetailRevenueBridgeService.js";
 import { RetailPatternMemoryService } from "../RetailPatternMemoryService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
 import { StorePickupService } from "../StorePickupService.js";
+import { StorePickupQueueService } from "../StorePickupQueueService.js";
 import { RetailOpsSignalPublisher } from "../RetailOpsSignalPublisher.js";
 import { RetailRadarService } from "../RetailRadarService.js";
 import { RetailForecastService } from "../RetailForecastService.js";
@@ -583,6 +584,26 @@ router.put("/pickup/store", requireNetworkScope, (req: AuthRequest, res): any =>
   if (!b.storeId) return res.status(400).json({ error: "storeId é obrigatório." });
   try { res.json({ ok: true, store: StorePickupService.setStore(orgId, String(b.storeId), !!b.enabled) }); }
   catch (e: any) { res.status(404).json({ error: e.message }); }
+});
+
+// Fila "separar agora" (ADR-207 F4): quem está na loja vê o que separar. Sem dinheiro. Gerente restrito só vê as lojas dele.
+router.get("/pickup/queue", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const want = req.query.storeId ? String(req.query.storeId) : null;
+  if (want && !storeAllowed(req, want)) return res.status(403).json({ error: "Esta loja não está entre as suas lojas." });
+  const mine = restrictIds(req);
+  const storeIds = want ? [want] : mine;
+  res.json(StorePickupQueueService.queue(orgId, { storeIds, includeDone: req.query.includeDone === "1" }));
+});
+
+const ofPickupOrder = lookupStore(`SELECT pickup_store_id FROM orders WHERE organization_id = ? AND id = ?`, "pickup_store_id");
+router.post("/pickup/orders/:id/advance", requireStoreAccess(ofPickupOrder), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = StorePickupQueueService.advance(orgId, String(req.params.id), String(req.body?.to || ""), (req as any).userId || req.user?.userId);
+  if (r.ok === false) return res.status(r.error === "pedido_nao_encontrado" ? 404 : 409).json({ error: r.error });
+  res.json(r);
 });
 
 // Define a reserva e-commerce de um produto/variante numa loja.

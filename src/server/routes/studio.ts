@@ -10,6 +10,7 @@ import { HookIntelligenceService } from "../HookIntelligenceService.js";
 import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
 import { VideoPostProductionService } from "../VideoPostProductionService.js";
+import { PublishPackageService } from "../PublishPackageService.js";
 import { StudioVisualRecipeService, VisualRecipeError } from "../StudioVisualRecipeService.js";
 
 const router = Router();
@@ -220,6 +221,26 @@ router.post("/channel-adaptation", (req: AuthRequest, res): any => {
     hashtags: Array.isArray(req.body?.hashtags) ? req.body.hashtags.map((h: any) => String(h)) : [],
   };
   res.json(ChannelAdaptationService.adaptMany(base, channels));
+});
+
+// ── Publicação assistida (ADR-207 F13c) — pacote pronto pra colar em TikTok/LinkedIn/YouTube/X (sem API) ──
+
+// POST /api/studio/publish-package { caption, hook?, format?, hashtags?, channels:[...], topic?, objectiveId?, sourceDurationSec? }
+router.post("/publish-package", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(await PublishPackageService.build(orgId, {
+      caption: String(req.body?.caption || ""),
+      hook: req.body?.hook ? String(req.body.hook) : null,
+      format: req.body?.format ? String(req.body.format) : null,
+      hashtags: Array.isArray(req.body?.hashtags) ? req.body.hashtags.map((h: any) => String(h)) : [],
+      channels: Array.isArray(req.body?.channels) ? req.body.channels.map((c: any) => String(c)) : [],
+      topic: req.body?.topic ? String(req.body.topic) : null,
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      sourceDurationSec: req.body?.sourceDurationSec ?? null,
+    }));
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao montar o pacote." }); }
 });
 
 // ── Video Post-Production (ADR-207 F13b) — plano de edição vídeo bruto → pronto (não edita o arquivo) ──

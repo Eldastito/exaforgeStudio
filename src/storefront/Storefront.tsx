@@ -298,7 +298,7 @@ export function Storefront() {
   }, []);
 
   const submitOrder = useCallback(
-    async (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string }): Promise<OrderResponse | null> => {
+    async (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string }): Promise<OrderResponse | null> => {
       const body = {
         token: token ?? undefined,
         customer: { name: extra.name, phone: extra.phone, email: extra.email, cpf: extra.cpf },
@@ -306,13 +306,21 @@ export function Storefront() {
         items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })),
         fashionLookId: fashionLookId ?? undefined,
         attribution: currentAttribution() ?? undefined,
+        ...(extra.pickupStoreId ? { fulfillment: 'pickup', pickupStoreId: extra.pickupStoreId } : {}),
       };
       const res = await fetch(`/api/public/store/${encodeURIComponent(slug)}/order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // Retirada recusada (a peça deixou de caber na reserva): devolve o motivo pra tela mostrar.
+        if (extra.pickupStoreId && res.status === 409) {
+          const d = await res.json().catch(() => null);
+          if (d?.code === 'pickup_unavailable') return { ok: false, orderId: '', total: 0, whatsappUrl: null, error: d.error };
+        }
+        return null;
+      }
       setFashionLookId(null);
       return (await res.json()) as OrderResponse;
     },

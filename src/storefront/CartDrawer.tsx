@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle, Tag, Copy, Check, ExternalLink,
+  X, Minus, Plus, Trash2, ShoppingBag, CheckCircle2, Loader2, ImageOff, MessageCircle, Tag, Copy, Check, ExternalLink, Store,
 } from 'lucide-react';
 import type { CartItem, Customer, Mode, OrderResponse } from './types';
 import { formatBRL, hexToRgba } from './utils';
@@ -16,7 +16,7 @@ interface Props {
   onClose: () => void;
   onChangeQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onSubmit: (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string }) => Promise<OrderResponse | null>;
+  onSubmit: (extra: { name: string; phone: string; email?: string; cpf?: string; coupon?: string; pickupStoreId?: string }) => Promise<OrderResponse | null>;
   onClear: () => void;
 }
 
@@ -48,9 +48,47 @@ export function CartDrawer({
   const [couponMsg, setCouponMsg] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
 
+  // ADR-207 F3 — retirada na loja: só aparece se a empresa liga E há loja que consegue reservar o carrinho.
+  const [pickupOn, setPickupOn] = useState(false);
+  const [receive, setReceive] = useState<'delivery' | 'pickup'>('delivery');
+  const [pickupStores, setPickupStores] = useState<{ id: string; name: string; city: string | null; address: string | null; canFulfill: boolean }[]>([]);
+  const [pickupStoreId, setPickupStoreId] = useState('');
+  const [pickupMinutes, setPickupMinutes] = useState(0);
+  const cartSig = useMemo(() => items.map((i) => `${i.productId}:${i.quantity}`).join('|'), [items]);
+
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
   const discount = applied ? Math.min(applied.discount, total) : 0;
   const finalTotal = Math.max(0, total - discount);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/pickup`)
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((d) => { if (alive) setPickupOn(!!d.enabled); })
+      .catch(() => { if (alive) setPickupOn(false); });
+    return () => { alive = false; };
+  }, [open, slug]);
+
+  // Reconsulta quais lojas conseguem reservar ESTE carrinho (a peça pode ter acabado de sair do pool).
+  useEffect(() => {
+    if (!open || !pickupOn || receive !== 'pickup' || items.length === 0) return;
+    let alive = true;
+    fetch(`/api/public/store/${encodeURIComponent(slug)}/pickup/check`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.map((i) => ({ productId: i.productId, quantity: i.quantity, option: i.option })) }),
+    })
+      .then((r) => (r.ok ? r.json() : { stores: [] }))
+      .then((d) => {
+        if (!alive) return;
+        const list = Array.isArray(d.stores) ? d.stores : [];
+        setPickupStores(list);
+        setPickupMinutes(Number(d.reserveMinutes) || 0);
+        setPickupStoreId((cur) => (list.some((x: any) => x.id === cur && x.canFulfill) ? cur : (list.find((x: any) => x.canFulfill)?.id ?? '')));
+      })
+      .catch(() => { if (alive) { setPickupStores([]); setPickupStoreId(''); } });
+    return () => { alive = false; };
+  }, [open, pickupOn, receive, cartSig, slug]);
 
   // Se o carrinho muda, o cupom aplicado deixa de valer (revalidar).
   useEffect(() => { setApplied(null); setCouponMsg(null); }, [total]);
@@ -90,14 +128,18 @@ export function CartDrawer({
       setError('Informe seu nome.');
       return;
     }
+    if (pickupOn && receive === 'pickup' && !pickupStoreId) {
+      setError('Escolha uma loja para retirada (ou volte para "Receber / combinar").');
+      return;
+    }
     setSubmitting(true);
     try {
-      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), cpf: cpf.trim(), coupon: applied?.code });
+      const res = await onSubmit({ name: name.trim(), phone: phone.trim(), email: email.trim(), cpf: cpf.trim(), coupon: applied?.code, ...(pickupOn && receive === 'pickup' ? { pickupStoreId } : {}) });
       if (res && res.ok) {
         setResult(res);
         onClear();
       } else {
-        setError('Não foi possível finalizar o pedido. Tente novamente.');
+        setError(res?.error || 'Não foi possível finalizar o pedido. Tente novamente.');
       }
     } catch {
       setError('Erro ao enviar o pedido. Tente novamente.');
@@ -169,6 +211,17 @@ export function CartDrawer({
                     <p className="mt-1 text-sm opacity-60">
                       Nº <span className="font-mono font-semibold">#{result.orderId.slice(0, 8)}</span> · Total {formatBRL(result.total)}
                     </p>
+
+                    {result.pickup && (
+                      <p className="mt-3 rounded-xl border px-3 py-2 text-left text-sm" style={{ borderColor: hexToRgba(accent, 0.4) }}>
+                        <Store className="mr-1.5 inline h-4 w-4" style={{ color: accent }} />
+                        Retirada na loja <strong>{result.pickup.storeName}</strong>.
+                        {result.pickup.reserveExpiresAt && (() => {
+                          const t = new Date(result.pickup.reserveExpiresAt.replace(' ', 'T') + 'Z');
+                          return Number.isNaN(t.getTime()) ? null : <> Reservamos suas peças até <strong>{t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong> — pague até lá para garantir.</>;
+                        })()}
+                      </p>
+                    )}
 
                     {/* PIX dinâmico (Mercado Pago) — confirma sozinho */}
                     {hasPix && (
@@ -405,6 +458,40 @@ export function CartDrawer({
                       night ? 'border-white/15 bg-white/5 text-white placeholder:text-white/40' : 'border-slate-200 bg-white/70 text-slate-700 placeholder:text-slate-400',
                     ].join(' ')}
                   />
+
+                  {/* Como receber — "Retirar na loja" só aparece quando dá pra reservar a peça (ADR-207 F3) */}
+                  {pickupOn && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2 text-sm font-semibold">
+                        {([['delivery', 'Receber / combinar'], ['pickup', 'Retirar na loja']] as const).map(([k, label]) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => setReceive(k)}
+                            className="rounded-xl border px-3 py-2.5 transition"
+                            style={receive === k ? { borderColor: accent, backgroundColor: hexToRgba(accent, 0.15), color: accent } : { borderColor: hexToRgba(accent, 0.25) }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {receive === 'pickup' && (
+                        pickupStores.some((s) => s.canFulfill) ? (
+                          <div className="space-y-1.5">
+                            {pickupStores.filter((s) => s.canFulfill).map((s) => (
+                              <label key={s.id} className="flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: pickupStoreId === s.id ? accent : hexToRgba(accent, 0.2) }}>
+                                <input type="radio" name="pickup-store" checked={pickupStoreId === s.id} onChange={() => setPickupStoreId(s.id)} className="mt-1" />
+                                <span><strong>{s.name}</strong>{s.city ? ` · ${s.city}` : ''}{s.address ? <span className="block text-xs opacity-60">{s.address}</span> : null}</span>
+                              </label>
+                            ))}
+                            {pickupMinutes > 0 && <p className="text-xs opacity-60">Reservamos as peças por {pickupMinutes >= 60 ? `${Math.round(pickupMinutes / 60 * 10) / 10} h` : `${pickupMinutes} min`} — pague nesse prazo para garantir.</p>}
+                          </div>
+                        ) : (
+                          <p className="text-xs font-medium opacity-70">Nenhuma loja tem todas as peças deste carrinho para retirada agora. Use “Receber / combinar”.</p>
+                        )
+                      )}
+                    </div>
+                  )}
 
                   {/* Cupom de desconto */}
                   <div>

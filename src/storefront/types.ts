@@ -109,4 +109,8 @@ export interface OrderResponse {
   total: number;
   whatsappUrl: string | null;
   payment?: OrderPayment;
+  /** ADR-207 F3 — presente só em pedido de retirada na loja. */
+  pickup?: { storeName: string | null; reserveExpiresAt: string | null };
+  /** Motivo quando o servidor recusa a retirada (peça sem reserva etc.). */
+  error?: string;
 }

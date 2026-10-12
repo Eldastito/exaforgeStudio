@@ -10,6 +10,7 @@ import { ensureProductSlug } from "../productSlug.js";
 import { FashionStudioService } from "../FashionStudioService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { RetailOnlineReserveService } from "../RetailOnlineReserveService.js";
+import { StorePickupService } from "../StorePickupService.js";
 import { OrdersService } from "../OrdersService.js";
 import { StorefrontStockService } from "../StorefrontStockService.js";
 import { StorefrontCategoryService } from "../StorefrontCategoryService.js";
@@ -409,6 +410,29 @@ router.post("/store/:slug/event", (req, res): any => {
   res.status(204).end();
 });
 
+// ADR-207 F3 — retirada na loja. GET: a vitrine só mostra a opção quando a empresa liga a retirada
+// E há ao menos uma loja liberada. POST /check: quais lojas conseguem RESERVAR este carrinho agora.
+router.get("/store/:slug/pickup", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  try {
+    const st = StorePickupService.settings(store.organization_id);
+    res.json({ enabled: st.offerable, reserveMinutes: st.reserveMinutes });
+  } catch { res.json({ enabled: false, reserveMinutes: 0 }); }
+});
+
+router.post("/store/:slug/pickup/check", (req, res): any => {
+  const store = resolveStore(req.params.slug);
+  if (!store) return res.status(404).json({ error: "Loja não encontrada." });
+  try {
+    const orgId = store.organization_id;
+    const cart = StorePickupService.cartForPickup(orgId, req.body?.items);
+    if (cart.reason) return res.json({ enabled: true, reason: cart.reason, stores: [] });
+    const stores = StorePickupService.availability(orgId, cart.items);
+    res.json({ enabled: stores.length > 0, reason: null, stores, reserveMinutes: StorePickupService.settings(orgId).reserveMinutes });
+  } catch { res.json({ enabled: false, reason: "indisponivel", stores: [] }); }
+});
+
 // POST /api/public/store/:slug/order
 // Body: { token?, customer?: {name, phone}, items: [{ productId, quantity, option }] }
 //   option: { type:'size', value:'M' } | { type:'weight', grams:500 } | { type:'volume', ml:500 } | null
@@ -477,6 +501,21 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     if (resolved.length === 0) return res.status(400).json({ error: "Nenhum item válido." });
     const subtotal = resolved.reduce((s, r) => s + r.total, 0);
 
+    // ADR-207 F3 — retirada na loja: só segue se TODA peça puder ser reservada na loja escolhida.
+    // Item sem produto vinculado (peso/volume) não reserva → não há retirada (nunca prometer sem reservar).
+    let pickupStoreId: string | null = null;
+    let pickupStoreName: string | null = null;
+    let pickupItems: { productId: string; qty: number }[] = [];
+    if (body.fulfillment === "pickup") {
+      const agg = new Map<string, number>();
+      for (const r of resolved) { if (r.pid) agg.set(r.pid, (agg.get(r.pid) || 0) + r.qty); }
+      pickupItems = resolved.some((r) => !r.pid) ? [] : Array.from(agg, ([productId, qty]) => ({ productId, qty }));
+      const gate = StorePickupService.gate(orgId, String(body.pickupStoreId || ""), pickupItems);
+      if (gate.ok === false) return res.status(409).json({ error: gate.message, code: "pickup_unavailable", reason: gate.reason });
+      pickupStoreId = gate.store.id;
+      pickupStoreName = gate.store.name;
+    }
+
     // Cupom (opcional): revalida no servidor e aplica o desconto.
     let discount = 0;
     let couponCode: string | null = null;
@@ -499,6 +538,7 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
     const noteParts = [
       body.customer?.name ? `Cliente: ${body.customer.name}${body.customer.phone ? ` (${body.customer.phone})` : ""}` : null,
       cpfNota ? `CPF na nota: ${cpfNota}` : null,
+      pickupStoreName ? `RETIRADA NA LOJA: ${pickupStoreName}` : null,
     ].filter(Boolean);
     const orderNotes = noteParts.length ? noteParts.join(" · ") : null;
 
@@ -518,7 +558,7 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       db.prepare(
         `INSERT INTO orders (id, organization_id, contact_id, ticket_id, status, total_amount, discount_amount, coupon_code, created_by, notes, fashion_look_id, store_id, seller_user_id)
          VALUES (?, ?, ?, ?, 'aguardando_pagamento', ?, ?, ?, 'storefront', ?, ?, ?, ?)`
-      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId, onlineStoreId, sellerUserId);
+      ).run(orderId, orgId, contactId, ticketId, total, discount, couponCode, orderNotes, fashionLookId, pickupStoreId || onlineStoreId, sellerUserId);
       if (fashionLookId) {
         FashionStudioService.recordEvent(orgId, "FashionOrderPlaced", { orderId, total }, null, fashionLookId);
       }
@@ -534,7 +574,11 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
 
       // Reserva/baixa online: bloqueia se a reserva não cobrir (o throw desfaz o
       // pedido inteiro). Itens sem produto vinculado (peso/volume) não entram.
-      if (onlineStoreId) {
+      if (pickupStoreId) {
+        // Retirada: reserva na loja de retirada (lança PICKUP_UNAVAILABLE e desfaz o pedido se não reservar).
+        StorePickupService.reserveInTx(orgId, orderId, pickupStoreId, pickupItems);
+        StorePickupService.stampOrder(orgId, orderId, pickupStoreId);
+      } else if (onlineStoreId) {
         const r = RetailOnlineReserveService.recordSale(orgId, {
           orderId, storeId: onlineStoreId,
           items: resolved.filter((x) => x.pid).map((x) => ({ productId: x.pid as string, variantId: null, qty: x.qty })),
@@ -606,7 +650,8 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
 
     // Link de WhatsApp para o cliente finalizar (vira opção SECUNDÁRIA).
     const phone = (store.whatsapp_number || store.org_phone || "").replace(/\D/g, "");
-    const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\n${totalsBlock}\n(pedido #${orderId.slice(0, 8)})`;
+    const pickupLine = pickupStoreName ? `\nRetirada na loja: ${pickupStoreName}` : "";
+    const msg = `Olá! Quero finalizar meu pedido da loja:\n\n${lines}\n\n${totalsBlock}${pickupLine}\n(pedido #${orderId.slice(0, 8)})`;
     const whatsappUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : null;
 
     // PAGAMENTO NA PRÓPRIA LOJA: encurta a jornada — o cliente paga aqui, sem ir
@@ -631,11 +676,17 @@ router.post("/store/:slug/order", async (req, res): Promise<any> => {
       }
     } catch (e) { /* pagamento é best-effort; cai no WhatsApp se falhar */ }
 
-    res.json({ ok: true, orderId, total, whatsappUrl, payment });
+    const pickup = pickupStoreId
+      ? (() => { const o = db.prepare("SELECT reserve_expires_at FROM orders WHERE id = ? AND organization_id = ?").get(orderId, orgId) as any; return { storeName: pickupStoreName, reserveExpiresAt: o?.reserve_expires_at || null }; })()
+      : undefined;
+    res.json({ ok: true, orderId, total, whatsappUrl, payment, ...(pickup ? { pickup } : {}) });
   } catch (e: any) {
     const msg = String(e?.message || "");
     if (msg.startsWith("ONLINE_OUT_OF_STOCK:")) {
       return res.status(409).json({ error: `Sem estoque disponível na loja para: ${msg.slice("ONLINE_OUT_OF_STOCK:".length)}.`, code: "out_of_stock" });
+    }
+    if (msg.startsWith("PICKUP_UNAVAILABLE:")) {
+      return res.status(409).json({ error: "Alguma peça não está mais disponível para retirada nesta loja.", code: "pickup_unavailable", reason: msg.slice("PICKUP_UNAVAILABLE:".length) });
     }
     res.status(500).json({ error: e.message || "Falha ao criar pedido." });
   }

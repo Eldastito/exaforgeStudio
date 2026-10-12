@@ -1,3 +1,4 @@
+import { CampaignAiCostService } from "../CampaignAiCostService.js";
 import { Router } from "express";
 import db from "../db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -339,6 +340,10 @@ router.get("/economics/settings", requireRole("owner", "admin"), (req: AuthReque
 router.put("/economics/settings", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(ChannelEconomicsService.saveSettings(getOrgId(req), req.body || {}, req.user?.userId)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.get("/economics/ai-cost", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(CampaignAiCostService.report(orgId, { days: Number(req.query.days) || 30 }));
 });
 router.get("/economics/quality", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
   try { res.json(ChannelEconomicsService.dataQuality(getOrgId(req), req.query.storeId ? String(req.query.storeId) : null)); }

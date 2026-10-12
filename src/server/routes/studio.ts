@@ -1,3 +1,4 @@
+import { CampaignAiCostService } from "../CampaignAiCostService.js";
 import { Router } from "express";
 import { AuthRequest } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
@@ -397,7 +398,7 @@ router.post("/generate", async (req: AuthRequest, res): Promise<any> => {
   const format = (["post", "story", "banner"].includes(req.body?.format) ? req.body.format : "post");
   if (!briefing) return res.status(400).json({ error: "Descreva o que você quer criar." });
   try {
-    const out = await StudioService.generate(orgId, briefing, format);
+    const out = await CampaignAiCostService.withCampaign(req.body?.campaign, () => StudioService.generate(orgId, briefing, format));
     res.json(out);
   } catch (e: any) {
     res.status(500).json({ error: e.message || "Falha ao gerar a imagem." });
@@ -469,7 +470,7 @@ router.post("/instagram/caption", async (req: AuthRequest, res): Promise<any> =>
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const caption = await StudioService.suggestCaption(orgId, String(req.body?.prompt || "").trim(), req.body?.objective);
+    const caption = await CampaignAiCostService.withCampaign(req.body?.campaign, () => StudioService.suggestCaption(orgId, String(req.body?.prompt || "").trim(), req.body?.objective));
     res.json({ caption });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

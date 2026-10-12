@@ -905,6 +905,9 @@ export function StorefrontSettingsView() {
         {/* Economia por canal + desconto seguro (ADR-207 F6) */}
         <ChannelEconomicsSection products={products} />
 
+        {/* Custo de IA por campanha (ADR-207 F8) */}
+        <CampaignAiCostSection />
+
         {/* Frete (ADR-207 F7) */}
         <ShippingPolicySection products={products} />
 
@@ -1275,6 +1278,42 @@ const LINK_SOURCES: Array<[string, string]> = [
 
 // Links curtos de campanha (ADR-207 F5): o dono gera `…/loja/<loja>/go/<codigo>`; quem clica cai na vitrine (ou no produto)
 // e a visita/pedido ficam atribuídos ao canal e à campanha. Os números vêm do funil da F1 (pago = fato).
+// Custo de IA por campanha (ADR-207 F8): SÓ LEITURA. Mostra só o que o Estúdio marcou com a campanha; o resto vai em
+// "sem campanha" (nunca rateado). Sem dado = "—", nunca R$ 0. O custo é estimado pela tabela do ledger, não a fatura.
+function CampaignAiCostSection() {
+  const [rep, setRep] = useState<any>(null);
+  useEffect(() => { apiFetch('/api/storefront/economics/ai-cost').then((r) => r.json()).then(setRep).catch(() => {}); }, []);
+  const brl = (c: number | null | undefined) => (c == null ? '—' : `R$ ${(c / 100).toFixed(2)}`);
+  const rs = (v: number | null | undefined) => (v == null ? '—' : `R$ ${Number(v).toFixed(2)}`);
+  if (!rep || !Array.isArray(rep.campaigns)) return null;
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-100">Custo de IA por campanha</h3>
+        <p className="text-xs text-zinc-500">Últimos {rep.days} dias. Só conta o que o Estúdio marcou com a campanha. Estimado, não é a fatura.</p>
+      </div>
+      {rep.campaigns.length === 0 ? (
+        <p className="text-sm text-zinc-500">Nenhuma campanha com IA ou venda ainda. No Estúdio, preencha “Campanha” para marcar.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="text-zinc-500 text-left"><th className="py-1 pr-3">Campanha</th><th className="pr-3">IA</th><th className="pr-3">Pedidos pagos</th><th className="pr-3">Margem</th><th>Margem depois da IA</th></tr></thead>
+            <tbody>
+              {rep.campaigns.map((c: any) => (
+                <tr key={c.campaign} className="border-t border-zinc-800 text-zinc-200">
+                  <td className="py-1 pr-3 font-medium">{c.campaign}</td><td className="pr-3">{brl(c.aiCostCents)}</td><td className="pr-3">{c.paidOrders}</td>
+                  <td className="pr-3">{rs(c.marginPaid)}</td><td>{rs(c.marginAfterAi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-zinc-500">IA sem campanha: {brl(rep.withoutCampaign?.aiCostCents)} · total do período: {brl(rep.totalAiCostCents)}</p>
+    </div>
+  );
+}
+
 function ShortLinksSection({ products }: { products: Array<{ id: string; name: string }> }) {
   const [links, setLinks] = useState<ShortLink[]>([]);
   const [slug, setSlug] = useState('');

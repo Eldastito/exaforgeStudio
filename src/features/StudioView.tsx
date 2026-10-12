@@ -137,6 +137,7 @@ export function StudioView() {
   const [analyzing, setAnalyzing] = useState(false);
 
   const [briefing, setBriefing] = useState('');
+  const [campaignTag, setCampaignTag] = useState(''); // ADR-207 F8: marca o custo de IA na campanha (opcional)
   const [format, setFormat] = useState<'post' | 'story' | 'banner'>('post');
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -290,7 +291,7 @@ export function StudioView() {
     try {
       const res = await apiFetch('/api/studio/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: briefing, format }),
+        body: JSON.stringify({ prompt: briefing, format, campaign: campaignTag.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha ao gerar.');
@@ -482,7 +483,7 @@ export function StudioView() {
   const suggestCaption = async () => {
     setPubCapBusy(true);
     try {
-      const r = await apiFetch('/api/studio/instagram/caption', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pubPrompt, objective: pubObjective }) });
+      const r = await apiFetch('/api/studio/instagram/caption', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pubPrompt, objective: pubObjective, campaign: campaignTag.trim() || undefined }) });
       const d = await r.json();
       if (d.caption) setPubCaption(d.caption);
     } catch { } finally { setPubCapBusy(false); }
@@ -617,6 +618,9 @@ export function StudioView() {
           <textarea value={briefing} onChange={e => setBriefing(e.target.value)}
             placeholder="Ex.: Anúncio de campanha de vacinação para pets, com um cachorro feliz, tom acolhedor e CTA 'Agende agora'."
             className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm text-zinc-100 resize-none focus:border-fuchsia-500 outline-none" />
+          <input value={campaignTag} onChange={e => setCampaignTag(e.target.value)} maxLength={60}
+            placeholder="Campanha (opcional) — ex.: promo-verao — para ver quanto a IA custou nela"
+            className="mt-2 w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-xs text-zinc-100 focus:border-fuchsia-500 outline-none" />
 
           <Button onClick={generate} disabled={generating || !briefing.trim()} className="mt-3 bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
             {generating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}

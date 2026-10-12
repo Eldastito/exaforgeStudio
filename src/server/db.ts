@@ -12563,6 +12563,10 @@ const initDb = () => {
   try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_store_id TEXT`); } catch(e){}
   try { db.exec(`ALTER TABLE orders ADD COLUMN reserve_expires_at DATETIME`); } catch(e){}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_pickup_expiry ON orders (fulfillment_method, status, reserve_expires_at)`); } catch(e){}
+  // ADR-207 F4 — fila 'separar agora': etapa que a LOJA controla (NULL = ainda a separar; separado|pronto|retirado). ADITIVO.
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status TEXT`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status_at DATETIME`); } catch(e){}
+  try { db.exec(`ALTER TABLE orders ADD COLUMN pickup_status_by TEXT`); } catch(e){}
 };
 
 initDb();

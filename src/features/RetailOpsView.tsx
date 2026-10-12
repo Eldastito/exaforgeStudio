@@ -1537,6 +1537,74 @@ function PricingTab() {
 
 // ---- Loja virtual → PDV: baixas pendentes (ADR-143 Fase 0) -------------------
 /**
+ * Fila "separar agora" da retirada na loja (ADR-207 F4). A loja vê o que separar e marca separado → pronto → retirado.
+ * Sem dinheiro. O gerente de loja só enxerga as lojas dele (o servidor recorta). Atualiza sozinha a cada 30 s.
+ */
+function PickupQueuePanel() {
+  const [data, setData] = useState<{ queue: any[]; awaitingPayment: any[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const load = async () => {
+    const res = await apiFetch('/api/retailops/pickup/queue').catch(() => null);
+    if (!res || !res.ok) return;
+    const d = await res.json().catch(() => null);
+    if (d) setData({ queue: d.queue || [], awaitingPayment: d.awaitingPayment || [] });
+  };
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  if (!data || (data.queue.length === 0 && data.awaitingPayment.length === 0)) return null;
+  const NEXT: Record<string, { to: string; label: string }> = {
+    a_separar: { to: 'separado', label: 'Separei' },
+    separado: { to: 'pronto', label: 'Está pronto' },
+    pronto: { to: 'retirado', label: 'Cliente retirou' },
+  };
+  const STAGE: Record<string, string> = { a_separar: 'Separar agora', separado: 'Separado', pronto: 'Pronto p/ retirar' };
+  const advance = async (o: any, to: string) => {
+    setBusy(o.orderId);
+    try {
+      const res = await apiFetch(`/api/retailops/pickup/orders/${o.orderId}/advance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) toast.success('Atualizado.'); else toast.error(d.error === 'pedido_encerrado' ? 'Este pedido já foi encerrado.' : 'Não foi possível atualizar.');
+      load();
+    } finally { setBusy(null); }
+  };
+  const until = (iso: string | null) => {
+    if (!iso) return null;
+    const t = new Date(iso.replace(' ', 'T') + 'Z');
+    return Number.isNaN(t.getTime()) ? null : t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+  return (
+    <div className="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+      <h3 className="text-xs font-semibold text-amber-200 uppercase tracking-wide">Retiradas na loja ({data.queue.length})</h3>
+      <p className="mt-1 text-[12px] text-zinc-500">Pedido pago: separe a peça antes que ela seja vendida no balcão e marque cada etapa.</p>
+      <div className="mt-2 space-y-2">
+        {data.queue.map((o) => {
+          const nx = NEXT[o.stage];
+          return (
+            <div key={o.orderId} className="flex items-start gap-3 flex-wrap rounded-lg border border-zinc-800 bg-zinc-900/60 p-2.5">
+              <div className="min-w-[180px] flex-1">
+                <div className="text-sm text-zinc-100"><span className="font-mono text-[11px] text-zinc-500">#{o.orderShort}</span> · {o.storeName || 'Loja'} · <b>{o.customer?.name || 'Cliente'}</b>{o.customer?.phone ? <span className="text-zinc-400"> · {o.customer.phone}</span> : null}</div>
+                <ul className="mt-1 text-[12px] text-zinc-300">{o.items.map((i: any, k: number) => <li key={k}>{i.quantity}× {i.name}</li>)}</ul>
+              </div>
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] ${o.stage === 'a_separar' ? 'border-amber-500/40 text-amber-300' : 'border-emerald-500/40 text-emerald-300'}`}>{STAGE[o.stage] || o.stage}</span>
+              {nx && <button disabled={busy === o.orderId} onClick={() => advance(o, nx.to)} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{nx.label}</button>}
+            </div>
+          );
+        })}
+      </div>
+      {data.awaitingPayment.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Aguardando pagamento — peça só reservada ({data.awaitingPayment.length})</div>
+          <ul className="mt-1 space-y-0.5 text-[12px] text-zinc-400">
+            {data.awaitingPayment.map((o) => (
+              <li key={o.orderId}><span className="font-mono text-[11px] text-zinc-500">#{o.orderShort}</span> · {o.storeName || 'Loja'} · {o.customer?.name || 'Cliente'} · {o.items.map((i: any) => `${i.quantity}× ${i.name}`).join(', ')}{until(o.reserveExpiresAt) ? ` · reserva até ${until(o.reserveExpiresAt)}` : ''}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Retirada na loja (ADR-207 F3) — o dono liga por empresa e por loja. Só funciona com a reserva online ligada
  * e só oferece a retirada das peças que ele reservou para a loja (a vitrine nunca promete peça sem reserva).
  * Rota é de rede inteira: gerente restrito a loja leva 403 e o painel nem aparece.
@@ -1682,6 +1750,7 @@ function OnlineReserveTab() {
         </select>
       </div>
 
+      <PickupQueuePanel />
       <PickupSettingsPanel reserveOn={!!enabled} />
 
       <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Baixas pendentes no PDV ({pending.length})</h3>

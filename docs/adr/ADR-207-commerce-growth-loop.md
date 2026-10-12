@@ -35,7 +35,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
 | **F11 ✅ #1905** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | **F12 ✅ #1906** | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
-| **F9b (EM PR)** · F13b/c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
+| **F13b parcial (EM PR)** · F13c | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
 ## 4. F1 — EM PR (2026-10-12)
 - **Link**: `/loja/:slug?zf_source=instagram&zf_campaign=linen_out26&zf_content=reel_143&zf_ref=campaign:linen` (e o mesmo em `/produto/:p`). O slug nunca muda por campanha; link antigo segue igual.
@@ -183,3 +183,10 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Permissões**: exige `instagram_business_manage_comments` / `instagram_business_manage_messages`, que dependem do **App Review da Meta**. Sem elas a chamada falha como "Aguardando permissão da Meta (escopo)": nada é marcado como respondido e a mesma ação pode ser reenviada depois. **Não testado contra a Meta real** (transporte simulado nos testes).
 - Respondeu → comentário vira `answered`, aviso em `business_signals` é resolvido. Rotas `POST /api/social/instagram/comments/:id/reply` e `/comment-replies/:actionId/execute` (dono/admin, auditadas). Tela: botões na seção "Comentários do Instagram" (Aprovar e enviar).
 - Teste `test:instagram-comment-reply` (38 checks).
+
+
+## 18. F13b — EM PR (2026-10-12), PARCIAL: vídeo bruto → pronto, até onde dá
+
+- **Entrega**: `VideoPostProductionService.plan` monta o **plano de edição por canal** (enquadrar → gancho nos primeiros segundos → segmentos cronometrados → remover pausas → legenda queimada → título → CTA) sobre o roteiro existente (F4, que reusa gancho F3 e Brand DNA F1) e as normas de canal (F5). Termo proibido pela marca já vem saneado; duração nunca passa da do bruto informado; canal desconhecido vai para `skipped`. Sem tabela nova, sem LLM.
+- **NÃO entrega**: editar o arquivo de vídeo. `render.status` é sempre `awaiting_provider`. `capabilities()` DESCOBRE o ambiente (ffmpeg no servidor? `VIDEO_TRANSCRIBE_URL`?) e hoje o render segue desligado mesmo com ffmpeg — falta upload de vídeo grande, fila, transcrição e ffmpeg no Dockerfile (terceiro/infra), e não há como testar edição real neste ambiente.
+- Rotas `GET /api/studio/video-post/capabilities` e `POST /api/studio/video-post/plan`. Sem tela (como Hook/Roteiro da F3/F4). Teste `test:video-post-production` (20).

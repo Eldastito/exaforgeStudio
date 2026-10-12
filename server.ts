@@ -128,6 +128,7 @@ import storefrontRoutes from "./src/server/routes/storefront.js";
 import reservationsRoutes from "./src/server/routes/reservations.js";
 import subscriptionsRoutes from "./src/server/routes/subscriptions.js";
 import storefrontPublicRoutes from "./src/server/routes/storefrontPublic.js";
+import { storefrontGoHandler } from "./src/server/routes/storefrontGo.js";
 import comigoPublicRoutes from "./src/server/routes/comigoPublic.js";
 import subscriptionPublicRoutes from "./src/server/routes/subscriptionPublic.js";
 import fashionPublicRoutes from "./src/server/routes/fashionPublic.js";
@@ -558,6 +559,10 @@ async function startServer() {
   // Loja virtual PÚBLICA (vitrine sem login). Registrada ANTES do catch-all
   // autenticado para que /api/public/* nunca exija JWT.
   app.use("/api/public", storefrontPublicRoutes);
+
+  // Link curto de campanha da Loja Virtual (ADR-207 F5): /loja/:slug/go/:codigo → vitrine com a atribuição da F1.
+  // Antes dos handlers de SEO/SPA de /loja para o redirecionamento nunca cair na página.
+  app.get("/loja/:slug/go/:code", storefrontGoHandler);
 
   // Portal de assinatura PUBLICO (contato acessa via token HMAC).
   app.use("/api/public/subscription", subscriptionPublicRoutes);

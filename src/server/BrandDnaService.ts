@@ -128,6 +128,9 @@ export class BrandDnaService {
     return dna;
   }
 
+  /** Quantos campos compõem a identidade (denominador da completude). */
+  static identityFieldCount(): number { return IDENTITY_KEYS.length; }
+
   /** Fração de campos de identidade preenchidos (derivado — honesto sobre o que falta). */
   static completenessOf(dna: BrandDna): number {
     let filled = 0;

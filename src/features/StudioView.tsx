@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Wand2, Sparkles, Palette, Image as ImageIcon, Upload, Download, Loader2, Film, Instagram, CalendarClock, Trash2, Layers, Plus, X, Eye, TrendingUp, Store } from 'lucide-react';
 import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
+
+const GrowthEnginePanel = lazy(() => import('./GrowthEnginePanel'));
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
@@ -536,6 +538,11 @@ export function StudioView() {
         </h2>
         <p className="text-zinc-400 text-sm mt-1">A IA cria artes de campanha com a cara da sua marca.</p>
       </div>
+
+      {/* Motor de Crescimento (ADR-207 F11): o ciclo Radar→Criar→Aprovar→Resultados numa tela só (compõe o que já existe) */}
+      <Suspense fallback={null}>
+        <GrowthEnginePanel onUseBriefing={(t) => setBriefing(t)} />
+      </Suspense>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Identidade da marca */}

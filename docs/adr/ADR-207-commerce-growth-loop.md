@@ -32,8 +32,8 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 | **F7 ✅ #1901** | **Frete**: regras definidas pelo dono (retirada grátis, fixo, por faixa, grátis acima de X **e** acima do piso) aplicadas no checkout; cotação por transportadora em fatia posterior | cotação: Correios/Melhor Envio (contrato) |
 | **F8 (EM PR)** | Custo de IA por campanha (medidor atual + `campaign/content/correlation`) | não |
 | **F9a ✅ #1903** · F9b | Instagram: comentário → **intenção comercial** → resposta/Direct com o contexto do produto; respeita capabilities | App Review da Meta p/ permissões em produção |
-| **F10 (EM PR)** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
-| F11 | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
+| **F10 ✅ #1904** | Mídia paga etapa 1: calculadora CAC máximo / ROAS / POAS / break-even (sem API de anúncios) | não (criar/otimizar anúncio: Marketing API + review) |
+| **F11 (EM PR)** | **Motor de Crescimento**: tela única que compõe Radar→Criar→Aprovar→Publicar→Vender→Aprender + onboarding conversacional (Fala Tu → Brand DNA) | não |
 | F12 | Estoque ↔ campanha: não promover sem estoque; reduzir/parar quando cai | não |
 | F13 | Vídeo bruto→pronto, newsletter/repurposing, TikTok/YouTube/LinkedIn/X reais | provider de vídeo, APIs/aggregador (terceiro) |
 
@@ -130,7 +130,7 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - 2 tabelas aditivas (`instagram_comment_intents`, `instagram_media_products`) + 1 coluna (`ig_comment_intent_enabled`). Teste `test:instagram-comment-intent` (55 checks; mutações pegas, incluindo isolamento por empresa, dedupe e "nunca resposta automática à reclamação").
 - **Limites / F9b**: **nada é enviado** — responder o comentário ou mandar Direct ("resposta privada") será a F9b, como comando GOVERNADO (aprovação → executor → confirmação) e só com a permissão aprovada pela Meta (App Review). Não testei contra a Meta de verdade: o formato do evento `comments` segue a documentação; a primeira conexão real deve ser conferida no console de webhooks (`MetaWebhookLogService`). A intenção por palavra erra (ironia, gíria, outro idioma); "quero" em "quero saber o preço" cai em preço de propósito. Não vi a tela no navegador.
 
-## 13. F10 — EM PR (2026-10-12): mídia paga, etapa 1 (calculadora + resultado real, sem API de anúncios)
+## 13. F10 — MERGED #1904 (2026-10-12): mídia paga, etapa 1 (calculadora + resultado real, sem API de anúncios)
 
 - **Não cria, não altera e não pausa anúncio.** Você cria a campanha na plataforma; o ZapFlow faz a conta e mostra o resultado.
 - **Plano** (`POST /api/storefront/economics/media-plan`, dono/admin): a partir da margem de **contribuição online** do produto (a mesma conta da F6/F7) e do **lucro mínimo por venda que o dono exige**, calcula: **CAC máximo** (contribuição − lucro mínimo), ROAS mínimo no teto, ROAS de equilíbrio, POAS mínimo e, com orçamento, vendas para empatar e quantas vendas o orçamento compra no teto de CAC. Custo fixo da campanha (IA/produção/frete reservado) entra no equilíbrio. **Cenários só com CPC e conversão que o dono informar** (até 3) — nenhuma faixa conservador/base/otimista é inventada. É **estimativa**, dita como tal.
@@ -141,3 +141,14 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - **Tela**: cartão "Mídia paga: quanto posso gastar?" na configuração da loja (calculadora + lançar gasto + tabela de resultado).
 - Teste `test:paid-media` (45 checks, contas conferidas à mão; 18 mutações pegas).
 - **Limites**: sem API da Meta (criar/otimizar anúncio = etapas 2–4 do PRD, dependem de Marketing API + revisão); ROAS/POAS dependem de o dono lançar o gasto e de a campanha ter o **mesmo nome** do link; pedido sem `attr_campaign` (cliente que chegou sem o link) não entra; nenhuma regra automática do tipo "CAC > X → pausar" (etapa 4); o lucro usa a contribuição (aluguel/folha fora); não vi a tela no navegador.
+
+## 14. F11 — EM PR (2026-10-12): Motor de Crescimento (uma tela, sem motor novo)
+
+- **Achado da auditoria**: o Brand DNA 2.0 (ADR-168 F1) e o Contrato de Objetivo de Campanha (F2) existiam **só no servidor — nenhuma tela os usava**. Sem isso o dono não conseguia nem preencher a marca nem escolher o objetivo. A ativação guiada abaixo é, na prática, a primeira tela deles.
+- **Experiência, não motor** (PRD: "uma camada de composição e UX"): `GrowthEngineService.overview` só **lê** o que os serviços existentes já produzem — Radar (ideias de conteúdo e de produto + comentários com interesse de compra), Criar (briefings prontos para o Estúdio), Aprovar (publicações aguardando aprovação, aprovadas prontas para publicar e rascunhos do calendário), Programados, Resultados (publicações medidas, campanhas da loja, mídia paga que o dono lançou, metas) e Aprendizados (o que funcionou, campeãs). Nenhum Scheduler, Estúdio, tabela, flag ou regra novos.
+- **Ativação derivada** (sem flag): canal conectado (Instagram/Facebook reais ou provider do Hub) · marca com ≥ 3 campos da identidade · objetivo de campanha ativo · loja publicada (recomendada, **não bloqueia**). "Motor ativado" = os 3 obrigatórios. A tela mostra o próximo passo; marca e objetivo se respondem na própria tela (perguntas simples que gravam no Brand DNA / contrato existentes). Não é um chat de IA — é um passo a passo.
+- **Degradação por seção**: se uma fonte falhar, só aquela aba diz "indisponível (motivo)"; o resto segue.
+- **Read-only ao abrir**: nada é criado/aprovado/publicado. Aprovar/recusar/publicar/agendar chamam as rotas governadas que já existiam (`/api/actions/:id/approve|reject`, `/api/social/publish/:id/execute`, `/api/social/studio/calendar/:id/approve`).
+- **Onde fica**: no topo do Estúdio de Criação (painel recolhível, carregado sob demanda; aberto no primeiro acesso, fechado depois de ativado). **Sem menu novo.** Rota `GET /api/social/growth-engine` só dono/administrador (tem aprovação e dinheiro).
+- Teste `test:growth-engine` (29 checks; serviço e rota reais; mutações pegas).
+- **Limites**: vídeo bruto → vídeo final e conteúdo → e-mail/WhatsApp/newsletter (itens 4 e 5 do PRD) **não** estão aqui (F13); "Fala Tu → Brand DNA" é um formulário guiado, não conversa livre; o painel depende de o usuário ter o módulo Estúdio e ser dono/administrador (gerente restrito não vê); a lista de ideias vem de oportunidades já detectadas (não roda pesquisa); não vi a tela no navegador.

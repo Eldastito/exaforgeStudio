@@ -19,6 +19,7 @@ import { ProductOpportunityService } from "../ProductOpportunityService.js";
 import { GrowthAutopilotService } from "../GrowthAutopilotService.js";
 import { GrowthOptimizationService } from "../GrowthOptimizationService.js";
 import { InstagramCommentIntentService } from "../InstagramCommentIntentService.js";
+import { GrowthEngineService } from "../GrowthEngineService.js";
 import { logAuthEvent } from "../auditLog.js";
 
 /**
@@ -535,6 +536,13 @@ router.put("/instagram/media-product", requireRole("owner", "admin"), (req: Auth
   const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(InstagramCommentIntentService.linkMedia(orgId, String(req.body?.mediaId || ""), req.body?.productId ? String(req.body.productId) : null)); }
   catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── ADR-207 F11: Motor de Crescimento — uma tela que COMPÕE o ciclo (read-only; ações seguem nas rotas governadas) ──
+router.get("/growth-engine", requireRole("owner", "admin"), async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId; if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(await GrowthEngineService.overview(orgId)); }
+  catch (e: any) { res.status(500).json({ error: "Não foi possível montar o Motor de Crescimento agora." }); }
 });
 
 export default router;

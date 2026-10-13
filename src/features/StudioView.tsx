@@ -7,7 +7,8 @@ import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
 import { isVideoEditable } from './videoedit/videoEditLabels';
 
 const GrowthEnginePanel = lazy(() => import('./GrowthEnginePanel'));
-const VideoEditPanel = lazy(() => import('./VideoEditPanel'));   // Editar vídeo (ADR-207 F13b.9) — só carrega ao abrir
+const VideoEditPanel = lazy(() => import('./VideoEditPanel'));
+const ManualResultPanel = lazy(() => import('./ManualResultPanel'));   // Registrar resultado de post feito à mão (ADR-207 F13c) — só carrega ao abrir   // Editar vídeo (ADR-207 F13b.9) — só carrega ao abrir
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
@@ -172,6 +173,7 @@ export function StudioView() {
 
   const [creations, setCreations] = useState<Creation[]>([]);
   const [editVideo, setEditVideo] = useState<{ id: string; prompt: string } | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const creationsPage = useVisibleLimit(creations);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
@@ -1129,6 +1131,17 @@ export function StudioView() {
       {editVideo && (
         <Suspense fallback={null}>
           <VideoEditPanel creationId={editVideo.id} prompt={editVideo.prompt} onClose={() => setEditVideo(null)} onDone={() => loadCreations()} />
+        </Suspense>
+      )}
+
+      {/* Posts feitos à mão em outras redes (ADR-207 F13c) — link discreto; o painel só carrega ao abrir */}
+      <p className="mt-6 text-xs text-zinc-500">
+        Postou à mão no TikTok, LinkedIn, YouTube ou X?{' '}
+        <button className="text-fuchsia-400 hover:underline" onClick={() => setManualOpen(true)}>Registrar resultado</button>
+      </p>
+      {manualOpen && (
+        <Suspense fallback={null}>
+          <ManualResultPanel onClose={() => setManualOpen(false)} />
         </Suspense>
       )}
 

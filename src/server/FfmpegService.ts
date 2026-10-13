@@ -49,13 +49,16 @@ export interface RunResult { code: number | null; stdout: string; stderr: string
 export interface JobLog { jobId: string; organizationId: string | null; operation: string; inputBytes: number; outputBytes: number | null; elapsedMs: number; ok: boolean; errorCode?: string }
 
 // import() dinâmico (e não require/import.meta): o build do servidor é CJS via esbuild e o pacote é opcional.
-async function resolveBinary(): Promise<string | null> {
-  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+// Ordem ÚNICA de resolução: 1) FFMPEG_PATH explícito (vence mesmo se estiver errado — config do operador não é ignorada em silêncio;
+// o smoke avisa) · 2) pacote ffmpeg-static · 3) indisponível. FFMPEG_BINARIES_URL NÃO entra aqui: é só espelho de download do ffmpeg-static no `npm ci`.
+export type FfmpegSource = "env" | "static" | "none";
+async function resolveBinary(): Promise<{ bin: string | null; source: FfmpegSource }> {
+  if (process.env.FFMPEG_PATH) return { bin: process.env.FFMPEG_PATH, source: "env" };
   try {
     const m: any = await import("ffmpeg-static");
     const p = m?.default ?? m;
-    return typeof p === "string" && p ? p : null;
-  } catch { return null; }
+    return typeof p === "string" && p ? { bin: p, source: "static" } : { bin: null, source: "none" };
+  } catch { return { bin: null, source: "none" }; }
 }
 
 export class FfmpegService {
@@ -65,10 +68,16 @@ export class FfmpegService {
   private static avail: { available: boolean; reason?: string; version?: string } | null = null;
 
   private static bin: string | null | undefined;
+  private static binSource: FfmpegSource = "none";
   /** Resolve o binário de forma centralizada (null = indisponível). Cacheado. */
   static async binary(): Promise<string | null> {
-    if (this.bin === undefined) this.bin = await resolveBinary();
+    if (this.bin === undefined) { const r = await resolveBinary(); this.bin = r.bin; this.binSource = r.source; }
     return this.bin;
+  }
+  /** De onde veio o binário (diagnóstico do operador — o caminho NUNCA vai pra resposta de API de cliente). */
+  static async source(): Promise<{ source: FfmpegSource; path: string | null }> {
+    const path = await this.binary();
+    return { source: this.binSource, path };
   }
 
   /** Capability check: existe, executa e responde `-version` com sucesso. Cacheado. */

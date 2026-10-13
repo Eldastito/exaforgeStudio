@@ -51,6 +51,7 @@
     "test:pause-removal": "tsx scripts/test-pause-removal.ts",
     "test:video-overlays": "tsx scripts/test-video-overlays.ts",
     "test:video-render-jobs": "tsx scripts/test-video-render-jobs.ts",
+    "test:video-edit-ui": "tsx scripts/test-video-edit-ui.ts",
     "test:content-broadcast": "tsx scripts/test-content-broadcast.ts",
     "test:campaign-stock-guard": "tsx scripts/test-campaign-stock-guard.ts",
     "test:growth-engine": "tsx scripts/test-growth-engine.ts",

@@ -25,6 +25,7 @@ import db from "./db.js";
 import { FfmpegService, FfmpegError } from "./FfmpegService.js";
 import { getSpeechToTextProvider } from "./SpeechToTextProvider.js";
 import { VideoSubtitleService, buildCues, toAss, fontsDir } from "./VideoSubtitleService.js";
+import { PauseRemovalService, remapCues, type PauseResult } from "./PauseRemovalService.js";
 import { VideoTranscriptionService } from "./VideoTranscriptionService.js";
 import { ScriptIntelligenceService } from "./ScriptIntelligenceService.js";
 import { ChannelAdaptationService, SocialChannelName } from "./ChannelAdaptationService.js";
@@ -85,6 +86,8 @@ export interface VideoPostPlan {
 export interface VideoRenderResult {
   creationId: string; mediaUrl: string; channel: string; aspect: string; startSec: number; durationSec: number;
   applied: string[]; notApplied: string[]; outputBytes: number; note: string;
+  /** Só quando a remoção de pausas foi pedida: duração antes/depois e quanto foi cortado (0 = nenhuma pausa clara encontrada). */
+  pauses?: { removedCount: number; removedSec: number; durationBeforeSec: number; durationAfterSec: number };
 }
 
 const MEDIA_DIR = path.join(process.env.DATA_DIR || process.cwd(), "media");
@@ -164,7 +167,7 @@ export class VideoPostProductionService {
     return {
       topic, objectiveId: script.objectiveId, sourceDurationSec: source, plans, skipped,
       render: capabilities.renderImplemented
-        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar, enquadrar e legendar automaticamente; remoção de pausas, título e CTA na imagem seguem manuais (use o plano)." }
+        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar, enquadrar e legendar automaticamente; título e CTA na imagem seguem manuais (pausas: opcional, modo conservador) (use o plano)." }
         : { status: "unavailable", provider: this.provider.id, capabilities, reason: "O processamento de vídeo não está disponível neste servidor no momento; o plano é o roteiro de edição." },
       note: "Plano de edição, não vídeo pronto. Enquadramentos são recomendações editoriais (não limites oficiais). Publicar segue pelo fluxo governado.",
     };
@@ -174,7 +177,7 @@ export class VideoPostProductionService {
    * Corta e enquadra um vídeo do Estúdio da empresa conforme o plano do canal. Entrada: `creationId` (kind video, pronto).
    * A criação original é preservada; o resultado vira uma NOVA criação. Erros do ffmpeg viram mensagem de cliente.
    */
-  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean }): Promise<VideoRenderResult> {
+  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean; removePauses?: boolean }): Promise<VideoRenderResult> {
     const row = db.prepare("SELECT id, kind, media_url, status FROM studio_creations WHERE id = ? AND organization_id = ?").get(String(input?.creationId || ""), orgId) as any;
     if (!row || row.kind !== "video") throw new Error("Vídeo do Estúdio não encontrado.");
     if (row.status && row.status !== "done") throw new Error("Esse vídeo ainda não está pronto.");
@@ -188,6 +191,17 @@ export class VideoPostProductionService {
     const aspect = cp.aspect as "9:16" | "1:1" | "16:9";
     const outName = `studio_${randomUUID()}.mp4`;
 
+    // Pausas (opcional, modo conservador): detecta na janela do plano e monta os trechos mantidos (EDL).
+    let pauseRes: PauseResult | null = null;
+    if (input.removePauses) {
+      pauseRes = await PauseRemovalService.analyze(inputPath, cp.targetDurationSec).catch((e: any) => {
+        if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);
+        throw e;
+      });
+      if (!pauseRes.removedCount) pauseRes = null;     // nada a cortar → render normal (dito no resultado)
+    }
+    const finalDuration = pauseRes ? pauseRes.keptSec : cp.targetDurationSec;
+
     // Legenda (opcional): exige transcrição JÁ feita (não gasta IA escondido) e a capacidade de queimar (libass + fonte).
     let assPath: string | null = null; let subtitleNote = "";
     if (input.subtitles) {
@@ -195,7 +209,8 @@ export class VideoPostProductionService {
       if (!tr) throw new Error("Transcreva o vídeo antes de pedir a legenda.");
       if (!tr.speechDetected || !tr.effectiveSegments.length) throw new Error("Não detectei fala nesse vídeo para legendar.");
       if (!(await VideoSubtitleService.available())) throw new Error("A legenda na imagem não está disponível neste servidor no momento.");
-      const cues = buildCues(tr.effectiveSegments, { aspect, windowStartMs: 0, windowEndMs: cp.targetDurationSec * 1000 });
+      let cues = buildCues(tr.effectiveSegments, { aspect, windowStartMs: 0, windowEndMs: cp.targetDurationSec * 1000 });
+      if (pauseRes) cues = remapCues(cues, pauseRes.keep);     // legenda segue o vídeo já cortado
       if (!cues.length) throw new Error("A legenda ficou vazia na parte do vídeo que será usada.");
       const flagged = await VideoSubtitleService.flagged(orgId, cues);
       if (flagged.length) subtitleNote = ` Atenção: a fala contém termo(s) que a marca não usa (${flagged.join(", ")}); a legenda reproduz a fala sem alterá-la.`;
@@ -203,15 +218,17 @@ export class VideoPostProductionService {
       fs.writeFileSync(assPath, toAss(cues, { aspect }), "utf8");
     }
     try {
-      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined });
+      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined, keep: pauseRes ? pauseRes.keep : undefined });
+      const applied = ["corte", "enquadramento", ...(assPath ? ["legenda"] : []), ...(pauseRes ? ["remoção de pausas"] : [])];
+      const notApplied = [...(assPath ? [] : ["legenda"]), ...(pauseRes ? [] : ["remoção de pausas"]), "título", "CTA na imagem"];
       const mediaUrl = `/media/${outName}`;
       const id = randomUUID();
-      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento)`, mediaUrl);
+      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento${pauseRes ? " + pausas" : ""})`, mediaUrl);
       return {
-        creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: cp.targetDurationSec,
-        applied: assPath ? ["corte", "enquadramento", "legenda"] : ["corte", "enquadramento"],
-        notApplied: assPath ? ["remoção de pausas", "título", "CTA na imagem"] : ["legenda", "remoção de pausas", "título", "CTA na imagem"], outputBytes: r.outputBytes,
-        note: `Cortei do início até a duração do plano, enquadrei no formato do canal${assPath ? " e queimei a legenda" : ""}. O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
+        creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: finalDuration,
+        applied, notApplied, outputBytes: r.outputBytes,
+        pauses: input.removePauses ? { removedCount: pauseRes?.removedCount ?? 0, removedSec: pauseRes?.removedSec ?? 0, durationBeforeSec: pauseRes ? Math.round((pauseRes.keptSec + pauseRes.removedSec) * 10) / 10 : cp.targetDurationSec, durationAfterSec: finalDuration } : undefined,
+        note: `Cortei do início até a duração do plano, enquadrei no formato do canal${assPath ? ", queimei a legenda" : ""}${pauseRes ? ` e removi ${pauseRes.removedCount} pausa(s) (${pauseRes.removedSec.toFixed(1)} s), mantendo um respiro junto das falas` : ""}. ${input.removePauses && !pauseRes ? "Não encontrei pausas claras para cortar (música ou ruído de fundo também impedem). " : ""}O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
       };
     } catch (e: any) {
       if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);

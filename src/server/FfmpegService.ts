@@ -190,14 +190,48 @@ export class FfmpegService {
   static extractAudio(orgId: string | null, inputPath: string, finalOutPath: string) {
     return this.process({ orgId, operation: "extract_audio", inputPath, finalOutPath, outExt: "wav", buildArgs: (i, o) => ["-y", "-i", i, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", o] });
   }
-  /** Corta [startSec, startSec+durationSec] e enquadra (crop central) na proporção `aspect` (ex.: "9:16"); H.264/AAC. */
-  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9"; subtitles?: { assPath: string; fontsDir: string } }) {
+  /**
+   * Detecta silêncios do áudio na janela [0, windowSec] (filtro `silencedetect`). Só leitura: não gera arquivo.
+   * Mesmas travas de entrada do `process` (existência, tamanho, concorrência, timeout).
+   */
+  static async detectSilence(inputPath: string, p: { noiseDb: number; minSilenceSec: number; windowSec: number }): Promise<{ startSec: number; endSec: number }[]> {
+    const av = await this.available();
+    if (!av.available) throw new FfmpegError("ffmpeg_unavailable");
+    let st: fs.Stats;
+    try { st = fs.statSync(inputPath); if (!st.isFile()) throw new Error("x"); } catch { throw new FfmpegError("input_not_found"); }
+    if (st.size > this.limits.maxInputBytes) throw new FfmpegError("input_too_large");
+    if (this.active >= this.limits.maxConcurrentJobs) throw new FfmpegError("busy");
+    const { parseSilences } = await import("./PauseRemovalService.js");
+    this.active++;
+    try {
+      const noise = Math.min(-10, Math.max(-80, Number(p.noiseDb) || -35)), dur = Math.min(10, Math.max(0.1, Number(p.minSilenceSec) || 0.6));
+      const win = Math.max(0.1, Number(p.windowSec) || 0.1);
+      const r = await this.run(["-hide_banner", "-nostats", "-t", String(win), "-i", inputPath, "-vn", "-af", `silencedetect=noise=${noise}dB:d=${dur}`, "-f", "null", "-"]);
+      if (r.timedOut) throw new FfmpegError("timeout");
+      if (r.code !== 0) throw new FfmpegError("ffmpeg_failed");
+      return parseSilences(r.stderr, win);
+    } finally { this.active--; }
+  }
+  /**
+   * Corta e enquadra (crop central) na proporção `aspect`; H.264/AAC. Sem `keep`: trecho [startSec, startSec+durationSec].
+   * Com `keep` (remoção de pausas): concatena SÓ os trechos mantidos (tempos absolutos do original) e depois enquadra/legenda.
+   */
+  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9"; subtitles?: { assPath: string; fontsDir: string }; keep?: { startSec: number; endSec: number }[] }) {
     const [w, h] = p.aspect.split(":").map(Number);
     // crop central pela proporção pedida (dimensões pares), sem esticar. Legenda DEPOIS do enquadramento (queimada no quadro final).
     let vf = `crop='min(iw,ih*${w}/${h})':'min(ih,iw*${h}/${w})',scale=trunc(iw/2)*2:trunc(ih/2)*2`;
     if (p.subtitles) vf += `,ass=filename=sub.ass:fontsdir=fonts`;
     const workFiles = p.subtitles ? { "sub.ass": p.subtitles.assPath, fonts: p.subtitles.fontsDir } : undefined;
-    return this.process({ orgId, operation: p.subtitles ? "trim_reframe_subtitles" : "trim_reframe", inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-movflags", "+faststart", o] });
+    const operation = (p.keep ? "cut_pauses_" : "") + (p.subtitles ? "trim_reframe_subtitles" : "trim_reframe");
+    const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-movflags", "+faststart"];
+    if (p.keep && p.keep.length) {
+      const n = (x: number) => (Math.round(Math.max(0, Number(x)) * 1000) / 1000).toFixed(3);   // só números entram no grafo de filtros
+      const parts = p.keep.map((k, i) => `[0:v]trim=start=${n(k.startSec)}:end=${n(k.endSec)},setpts=PTS-STARTPTS[v${i}];[0:a]atrim=start=${n(k.startSec)}:end=${n(k.endSec)},asetpts=PTS-STARTPTS[a${i}]`);
+      const join = p.keep.map((_, i) => `[v${i}][a${i}]`).join("");
+      const graph = `${parts.join(";")};${join}concat=n=${p.keep.length}:v=1:a=1[cv][ca];[cv]${vf}[vout]`;
+      return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-i", i, "-filter_complex", graph, "-map", "[vout]", "-map", "[ca]", ...enc, o] });
+    }
+    return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, ...enc, o] });
   }
 }
 

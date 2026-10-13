@@ -4,8 +4,10 @@ import { Button } from '@/src/components/ui/button';
 import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 import { useVisibleLimit, ShowMore } from '@/src/components/ShowMore';
+import { isVideoEditable } from './videoedit/videoEditLabels';
 
 const GrowthEnginePanel = lazy(() => import('./GrowthEnginePanel'));
+const VideoEditPanel = lazy(() => import('./VideoEditPanel'));   // Editar vídeo (ADR-207 F13b.9) — só carrega ao abrir
 
 type Brand = { palette: string[]; tone: string; style: string; summary: string };
 type Creation = { id: string; kind?: string; status?: string; prompt: string; media_url: string; created_at: string };
@@ -169,6 +171,8 @@ export function StudioView() {
   const [storeBusy, setStoreBusy] = useState(false);
 
   const [creations, setCreations] = useState<Creation[]>([]);
+  const [editVideo, setEditVideo] = useState<{ id: string; prompt: string } | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const creationsPage = useVisibleLimit(creations);
   const [limits, setLimits] = useState<{ images: { used: number; limit: number }; videos: { used: number; limit: number } } | null>(null);
   const [ig, setIg] = useState<{ connected: boolean; username?: string }>({ connected: false });
@@ -335,6 +339,21 @@ export function StudioView() {
   // Baixa a mídia como ARQUIVO (força o download). O atributo <a download> só
   // funciona same-origin e frequentemente ABRE o vídeo inline em vez de salvar;
   // baixar via blob resolve pra imagem e vídeo. Fallback: abre em nova aba.
+  // Envia um vídeo próprio (não consome a cota de geração por IA) e já abre o editor nele.
+  const uploadOwnVideo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    setUploadingVideo(true);
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const r = await apiFetch('/api/studio/video-post/upload', { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast.error(d.error || 'Não foi possível enviar o vídeo.'); return; }
+      await loadCreations();
+      setEditVideo({ id: d.creationId, prompt: d.label || 'vídeo enviado' });
+    } finally { setUploadingVideo(false); }
+  };
+
   const downloadMedia = async (url: string, filename?: string) => {
     if (!url) return;
     try {
@@ -1063,11 +1082,16 @@ export function StudioView() {
         )}
       </div>
 
-      {/* Galeria */}
-      {creations.length > 0 && (
-        <div className="mt-6">
-          <h3 className="text-sm font-medium text-zinc-300 mb-3">Minhas criações</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* Galeria (sempre visível: o envio de vídeo próprio mora aqui, mesmo sem criações ainda) */}
+      <div className="mt-6">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-medium text-zinc-300">Minhas criações</h3>
+            <label className={`inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 cursor-pointer ${uploadingVideo ? 'opacity-50 pointer-events-none' : ''}`}>
+              <Upload className="w-3.5 h-3.5" /> {uploadingVideo ? 'Enviando…' : 'Enviar meu vídeo para editar'}
+              <input type="file" accept="video/mp4,video/quicktime,video/webm" className="hidden" onChange={uploadOwnVideo} />
+            </label>
+          </div>
+          {creations.length > 0 && <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             {creationsPage.visible.map(c => {
               const isVideo = c.kind === 'video' || (c.media_url || '').endsWith('.mp4');
               if (c.status === 'processing' || !c.media_url) {
@@ -1087,6 +1111,7 @@ export function StudioView() {
                   <p className="mt-1 text-[10px] text-zinc-500 line-clamp-2">{c.prompt}</p>
                   <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                     <button onClick={() => downloadMedia(c.media_url)} className="inline-flex items-center gap-1 text-[10px] text-fuchsia-400 hover:text-fuchsia-300"><Download className="w-3 h-3" /> Baixar</button>
+                    {isVideoEditable(c) && <button onClick={() => setEditVideo({ id: c.id, prompt: c.prompt })} className="inline-flex items-center gap-1 text-[10px] text-emerald-400 hover:text-emerald-300"><Film className="w-3 h-3" /> Editar vídeo</button>}
                     <button onClick={() => openStore(c.id, c.prompt, isVideo)} className="inline-flex items-center gap-1 text-[10px] text-sky-400 hover:text-sky-300"><Store className="w-3 h-3" /> Loja</button>
                     {ig.connected && (
                       postedIds.has(c.id)
@@ -1098,8 +1123,13 @@ export function StudioView() {
               );
             })}
             <ShowMore page={creationsPage} noun="criações" className="col-span-full" />
-          </div>
-        </div>
+          </div>}
+      </div>
+
+      {editVideo && (
+        <Suspense fallback={null}>
+          <VideoEditPanel creationId={editVideo.id} prompt={editVideo.prompt} onClose={() => setEditVideo(null)} onDone={() => loadCreations()} />
+        </Suspense>
       )}
 
       {/* Agenda de posts */}

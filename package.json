@@ -45,6 +45,7 @@
     "test:video-post-production": "tsx scripts/test-video-post-production.ts",
     "test:assisted-channels": "tsx scripts/test-assisted-channels.ts",
     "test:manual-post-result": "tsx scripts/test-manual-post-result.ts",
+    "test:manual-result-ui": "tsx scripts/test-manual-result-ui.ts",
     "test:ffmpeg-service": "tsx scripts/test-ffmpeg-service.ts",
     "test:video-upload": "tsx scripts/test-video-upload.ts",
     "test:video-transcription": "tsx scripts/test-video-transcription.ts",

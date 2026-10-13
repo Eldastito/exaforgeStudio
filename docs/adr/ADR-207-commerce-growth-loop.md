@@ -209,6 +209,13 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Rotas `POST /api/studio/manual-result` + `GET /api/studio/manual-results`. Teste `test:manual-post-result` (34).
 - **Continua em aberto (terceiro)**: publicação REAL nos 4 canais — agregador (Zernio/Outstand: falta escolha + conta de teste + chave) ou APIs diretas (app aprovado/auditoria de cada plataforma).
 
+### F13c.3 — EM PR (2026-10-13): tela "Registrar resultado"
+
+- **Onde fica**: DENTRO do Estúdio, sem item de menu novo — uma linha discreta ("Postou à mão no TikTok, LinkedIn, YouTube ou X? Registrar resultado") que abre um painel (`ManualResultPanel`, lazy: só carrega ao abrir). Decisão do dono: não poluir o ZapFlow com mais uma tela.
+- **O que faz**: escolher a rede, colar o link, data/hora (opcional), números (todos opcionais — em branco não vira zero), e — só se houver teste A/B em andamento — a versão do teste. Depois de salvar mostra o que entrou, os avisos do servidor e que o número é digitado. Lista os já registrados com "Completar" (mesmo link atualiza o mesmo post sem apagar o que já estava).
+- **UI-only** sobre as rotas da 2ª etapa (`/api/studio/manual-result(s)`) e `/api/social/experiments`; nada é calculado na tela (regras puras em `manualresult/manualResultLabels.ts`). Só dono/administrador (o servidor recusa o resto, a tela explica).
+- **Limites**: NÃO vista em navegador/celular real; o seletor de teste A/B depende de experimento em andamento e das rotas de experimento (owner/admin); sem upload de print. `test:manual-result-ui` (29).
+
 ## 20. F13b (2ª etapa) — EM PR (2026-10-12): corte e enquadramento reais com ffmpeg empacotado
 
 - **Decisão**: em vez de provider de vídeo externo (conta/chave de terceiro), usar o binário empacotado `ffmpeg-static`, que funciona sem instalar nada no sistema. Declarado como `optionalDependencies`: se o download do binário falhar no build/deploy, a instalação NÃO falha — o app sobe e o processamento de vídeo fica "indisponível" (mensagem de cliente, resto do sistema intacto). `FFMPEG_PATH` sobrepõe com um binário do sistema.

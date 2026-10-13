@@ -101,7 +101,11 @@ const RENDER_MESSAGES: Record<string, string> = {
   ffmpeg_failed: "Não consegui editar esse vídeo. Tente outro arquivo.",
   output_too_large: "O vídeo editado ficou grande demais.",
   busy: "Há edições demais em andamento. Tente de novo em instantes.",
+  cancelled: "Edição cancelada.",
 };
+
+/** Erro de cliente que carrega o código do ffmpeg (a fila de jobs distingue `busy` — espera — de `cancelled`). */
+export function renderError(e: FfmpegError): Error { return Object.assign(new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed), { code: e.code }); }
 
 function clip(s: string, max: number): string { return s.length <= max ? s : s.slice(0, Math.max(0, max - 1)).trimEnd() + "…"; }
 function cap(s: string): string { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
@@ -179,7 +183,7 @@ export class VideoPostProductionService {
    * Corta e enquadra um vídeo do Estúdio da empresa conforme o plano do canal. Entrada: `creationId` (kind video, pronto).
    * A criação original é preservada; o resultado vira uma NOVA criação. Erros do ffmpeg viram mensagem de cliente.
    */
-  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean; removePauses?: boolean; title?: boolean | string; cta?: boolean | string }): Promise<VideoRenderResult> {
+  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean; removePauses?: boolean; title?: boolean | string; cta?: boolean | string }, opts: { signal?: AbortSignal } = {}): Promise<VideoRenderResult> {
     const row = db.prepare("SELECT id, kind, media_url, status FROM studio_creations WHERE id = ? AND organization_id = ?").get(String(input?.creationId || ""), orgId) as any;
     if (!row || row.kind !== "video") throw new Error("Vídeo do Estúdio não encontrado.");
     if (row.status && row.status !== "done") throw new Error("Esse vídeo ainda não está pronto.");
@@ -196,8 +200,8 @@ export class VideoPostProductionService {
     // Pausas (opcional, modo conservador): detecta na janela do plano e monta os trechos mantidos (EDL).
     let pauseRes: PauseResult | null = null;
     if (input.removePauses) {
-      pauseRes = await PauseRemovalService.analyze(inputPath, cp.targetDurationSec).catch((e: any) => {
-        if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);
+      pauseRes = await PauseRemovalService.analyze(inputPath, cp.targetDurationSec, undefined, opts.signal).catch((e: any) => {
+        if (e instanceof FfmpegError) throw renderError(e);
         throw e;
       });
       if (!pauseRes.removedCount) pauseRes = null;     // nada a cortar → render normal (dito no resultado)
@@ -216,8 +220,8 @@ export class VideoPostProductionService {
       if (!(await VideoSubtitleService.available())) throw new Error("Título e CTA na imagem não estão disponíveis neste servidor no momento.");
       // Duração real do que vai pro ar: nunca marca o CTA depois do fim (fonte mais curta que o plano).
       let realMs = finalDuration * 1000;
-      try { const info = await FfmpegService.probe(inputPath); if (info.durationMs > 0) realMs = Math.min(realMs, info.durationMs); }
-      catch (e: any) { if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed); throw e; }
+      try { const info = await FfmpegService.probe(inputPath, opts.signal); if (info.durationMs > 0) realMs = Math.min(realMs, info.durationMs); }
+      catch (e: any) { if (e instanceof FfmpegError) throw renderError(e); throw e; }
       const built = buildOverlays({ aspect, durationMs: realMs, title: wantTitle ? titleText : null, cta: wantCta ? ctaText : null });
       overlayEvents = built.events;
       overlayInfo = { title: built.events.some((e) => e.kind === "title") ? titleText : null, cta: built.events.some((e) => e.kind === "cta") ? ctaText : null, omitted: built.omitted };
@@ -243,11 +247,13 @@ export class VideoPostProductionService {
       fs.writeFileSync(assPath, toAss(subCues, { aspect, overlays: overlayEvents }), "utf8");
     }
     try {
-      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined, keep: pauseRes ? pauseRes.keep : undefined });
+      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined, keep: pauseRes ? pauseRes.keep : undefined, signal: opts.signal });
       const hasTitle = !!overlayInfo?.title, hasCta = !!overlayInfo?.cta;
       const applied = ["corte", "enquadramento", ...(input.subtitles ? ["legenda"] : []), ...(pauseRes ? ["remoção de pausas"] : []), ...(hasTitle ? ["título"] : []), ...(hasCta ? ["CTA na imagem"] : [])];
       const notApplied = [...(input.subtitles ? [] : ["legenda"]), ...(pauseRes ? [] : ["remoção de pausas"]), ...(hasTitle ? [] : ["título"]), ...(hasCta ? [] : ["CTA na imagem"])];
       const mediaUrl = `/media/${outName}`;
+      // Cancelamento que chegou depois do ffmpeg: descarta o arquivo e NÃO cria a criação (sem await entre a checagem e o INSERT).
+      if (opts.signal?.aborted) { try { fs.rmSync(path.join(MEDIA_DIR, outName), { force: true }); } catch { /* noop */ } throw renderError(new FfmpegError("cancelled")); }
       const id = randomUUID();
       db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento${pauseRes ? " + pausas" : ""}${overlayInfo?.title || overlayInfo?.cta ? " + título/CTA" : ""})`, mediaUrl);
       return {
@@ -258,7 +264,7 @@ export class VideoPostProductionService {
         note: `Cortei do início até a duração do plano, enquadrei no formato do canal${input.subtitles ? ", queimei a legenda" : ""}${hasTitle || hasCta ? `, coloquei ${[hasTitle && "o título", hasCta && "o CTA"].filter(Boolean).join(" e ")}` : ""}${pauseRes ? ` e removi ${pauseRes.removedCount} pausa(s) (${pauseRes.removedSec.toFixed(1)} s), mantendo um respiro junto das falas` : ""}. ${input.removePauses && !pauseRes ? "Não encontrei pausas claras para cortar (música ou ruído de fundo também impedem). " : ""}${overlayInfo?.omitted.length ? `Não coube (vídeo curto): ${overlayInfo.omitted.join(", ")}. ` : ""}O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
       };
     } catch (e: any) {
-      if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);
+      if (e instanceof FfmpegError) throw renderError(e);
       throw e;
     } finally {
       if (assPath) { try { fs.rmSync(assPath, { force: true }); } catch { /* noop */ } }

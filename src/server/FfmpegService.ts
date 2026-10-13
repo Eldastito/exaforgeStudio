@@ -8,7 +8,7 @@
  * com kill do processo; limites de tamanho de entrada/saída e de jobs simultâneos (semáforo — um processo só, sem 2ª fila);
  * trabalho em pasta temporária por job, SEMPRE removida; entrada nunca é alterada; saída só é entregue se existir e couber
  * no limite. Erros viram códigos controlados (`ffmpeg_unavailable`, `input_not_found`, `input_too_large`, `timeout`,
- * `ffmpeg_failed`, `output_too_large`, `busy`) — o chamador traduz para linguagem de cliente. Log sem conteúdo do arquivo.
+ * `ffmpeg_failed`, `output_too_large`, `busy`, `cancelled`) — o chamador traduz para linguagem de cliente. Log sem conteúdo do arquivo.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-export type FfmpegErrorCode = "invalid_media" | "ffmpeg_unavailable" | "input_not_found" | "input_too_large" | "timeout" | "ffmpeg_failed" | "output_too_large" | "busy";
+export type FfmpegErrorCode = "invalid_media" | "ffmpeg_unavailable" | "input_not_found" | "input_too_large" | "timeout" | "ffmpeg_failed" | "output_too_large" | "busy" | "cancelled";
 export class FfmpegError extends Error {
   constructor(public code: FfmpegErrorCode, message?: string) { super(message || code); this.name = "FfmpegError"; }
 }
@@ -45,7 +45,7 @@ export function parseMediaInfo(stderr: string): MediaInfo {
   };
 }
 
-export interface RunResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
+export interface RunResult { code: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean }
 export interface JobLog { jobId: string; organizationId: string | null; operation: string; inputBytes: number; outputBytes: number | null; elapsedMs: number; ok: boolean; errorCode?: string }
 
 // import() dinâmico (e não require/import.meta): o build do servidor é CJS via esbuild e o pacote é opcional.
@@ -97,21 +97,26 @@ export class FfmpegService {
   static resetCache(): void { this.avail = null; this.bin = undefined; this.filters = null; }
 
   /** Executa o ffmpeg com argumentos em array (sem shell) e timeout. Não lança em exit ≠ 0 — devolve o resultado. */
-  static async run(args: string[], opts: { timeoutMs?: number; cwd?: string } = {}): Promise<RunResult> {
+  static async run(args: string[], opts: { timeoutMs?: number; cwd?: string; signal?: AbortSignal } = {}): Promise<RunResult> {
     const bin = await this.binary();
     if (!bin) throw new FfmpegError("ffmpeg_unavailable");
+    if (opts.signal?.aborted) throw new FfmpegError("cancelled");
     const timeoutMs = opts.timeoutMs ?? this.limits.timeoutMs;
     return new Promise((resolve, reject) => {
       let child;
       try { child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], shell: false, cwd: opts.cwd }); }
       catch { return reject(new FfmpegError("ffmpeg_unavailable")); }
-      let stdout = "", stderr = "", timedOut = false, done = false;
+      let stdout = "", stderr = "", timedOut = false, done = false, cancelled = false;
       const cap = (s: string, chunk: Buffer) => (s.length > 64 * 1024 ? s : s + chunk.toString());
       child.stdout.on("data", (c: Buffer) => { stdout = cap(stdout, c); });
       child.stderr.on("data", (c: Buffer) => { stderr = cap(stderr, c); });
       const timer = setTimeout(() => { timedOut = true; try { child.kill("SIGKILL"); } catch { /* noop */ } }, timeoutMs);
-      child.on("error", () => { if (done) return; done = true; clearTimeout(timer); reject(new FfmpegError("ffmpeg_unavailable")); });
-      child.on("close", (code) => { if (done) return; done = true; clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
+      // Cancelamento (F13b.8): mata o processo na hora; quem chamou recebe `cancelled`, nunca um "falhou" enganoso.
+      const onAbort = () => { cancelled = true; try { child.kill("SIGKILL"); } catch { /* noop */ } };
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+      const cleanup = () => { clearTimeout(timer); opts.signal?.removeEventListener("abort", onAbort); };
+      child.on("error", () => { if (done) return; done = true; cleanup(); reject(new FfmpegError("ffmpeg_unavailable")); });
+      child.on("close", (code) => { if (done) return; done = true; cleanup(); resolve({ code, stdout, stderr, timedOut, cancelled }); });
     });
   }
 
@@ -119,7 +124,7 @@ export class FfmpegService {
    * Job de mídia: copia a entrada para tmp/<job>/input, roda o ffmpeg com `buildArgs(input, output)`, valida a saída e
    * ENTREGA o arquivo em `finalOutPath`. A pasta temporária é sempre removida. Lança `FfmpegError` com código controlado.
    */
-  static async process(opts: { orgId?: string | null; operation: string; inputPath: string; finalOutPath: string; outExt: string; buildArgs: (input: string, output: string) => string[]; workFiles?: Record<string, string> }): Promise<{ outputBytes: number; elapsedMs: number }> {
+  static async process(opts: { orgId?: string | null; operation: string; inputPath: string; finalOutPath: string; outExt: string; buildArgs: (input: string, output: string) => string[]; workFiles?: Record<string, string>; signal?: AbortSignal }): Promise<{ outputBytes: number; elapsedMs: number }> {
     const jobId = randomUUID();
     const t0 = Date.now();
     let inputBytes = 0, outputBytes: number | null = null;
@@ -127,6 +132,7 @@ export class FfmpegService {
     let tmp: string | null = null;
     let slot = false;
     try {
+      if (opts.signal?.aborted) throw new FfmpegError("cancelled");
       const av = await this.available();
       if (!av.available) throw new FfmpegError("ffmpeg_unavailable");
       let st: fs.Stats;
@@ -147,7 +153,8 @@ export class FfmpegService {
         const dst = path.join(tmp, name);
         if (fs.statSync(srcPath).isDirectory()) fs.cpSync(srcPath, dst, { recursive: true }); else fs.copyFileSync(srcPath, dst);
       }
-      const r = await this.run(opts.buildArgs(input, output), { cwd: tmp });
+      const r = await this.run(opts.buildArgs(input, output), { cwd: tmp, signal: opts.signal });
+      if (r.cancelled) throw new FfmpegError("cancelled");
       if (r.timedOut) throw new FfmpegError("timeout");
       if (r.code !== 0) throw new FfmpegError("ffmpeg_failed");
       let os_: fs.Stats;
@@ -155,6 +162,7 @@ export class FfmpegService {
       outputBytes = os_.size;
       if (outputBytes <= 0) throw new FfmpegError("ffmpeg_failed");
       if (outputBytes > this.limits.maxOutputBytes) throw new FfmpegError("output_too_large");
+      if (opts.signal?.aborted) throw new FfmpegError("cancelled");
       fs.mkdirSync(path.dirname(opts.finalOutPath), { recursive: true });
       fs.copyFileSync(output, opts.finalOutPath);
       log(true);
@@ -170,12 +178,13 @@ export class FfmpegService {
   }
 
   /** Metadados REAIS do arquivo (não confia em extensão/MIME). Arquivo ilegível → `invalid_media`. */
-  static async probe(inputPath: string): Promise<MediaInfo> {
+  static async probe(inputPath: string, signal?: AbortSignal): Promise<MediaInfo> {
     const av = await this.available();
     if (!av.available) throw new FfmpegError("ffmpeg_unavailable");
     let st: fs.Stats;
     try { st = fs.statSync(inputPath); if (!st.isFile()) throw new Error("x"); } catch { throw new FfmpegError("input_not_found"); }
-    const r = await this.run(["-hide_banner", "-i", inputPath], { timeoutMs: 15_000 });
+    const r = await this.run(["-hide_banner", "-i", inputPath], { timeoutMs: 15_000, signal });
+    if (r.cancelled) throw new FfmpegError("cancelled");
     if (r.timedOut) throw new FfmpegError("timeout");
     const info = parseMediaInfo(r.stderr);
     if (!info.hasVideo && !info.hasAudio) throw new FfmpegError("invalid_media");
@@ -194,7 +203,7 @@ export class FfmpegService {
    * Detecta silêncios do áudio na janela [0, windowSec] (filtro `silencedetect`). Só leitura: não gera arquivo.
    * Mesmas travas de entrada do `process` (existência, tamanho, concorrência, timeout).
    */
-  static async detectSilence(inputPath: string, p: { noiseDb: number; minSilenceSec: number; windowSec: number }): Promise<{ startSec: number; endSec: number }[]> {
+  static async detectSilence(inputPath: string, p: { noiseDb: number; minSilenceSec: number; windowSec: number; signal?: AbortSignal }): Promise<{ startSec: number; endSec: number }[]> {
     const av = await this.available();
     if (!av.available) throw new FfmpegError("ffmpeg_unavailable");
     let st: fs.Stats;
@@ -206,7 +215,8 @@ export class FfmpegService {
     try {
       const noise = Math.min(-10, Math.max(-80, Number(p.noiseDb) || -35)), dur = Math.min(10, Math.max(0.1, Number(p.minSilenceSec) || 0.6));
       const win = Math.max(0.1, Number(p.windowSec) || 0.1);
-      const r = await this.run(["-hide_banner", "-nostats", "-t", String(win), "-i", inputPath, "-vn", "-af", `silencedetect=noise=${noise}dB:d=${dur}`, "-f", "null", "-"]);
+      const r = await this.run(["-hide_banner", "-nostats", "-t", String(win), "-i", inputPath, "-vn", "-af", `silencedetect=noise=${noise}dB:d=${dur}`, "-f", "null", "-"], { signal: p.signal });
+      if (r.cancelled) throw new FfmpegError("cancelled");
       if (r.timedOut) throw new FfmpegError("timeout");
       if (r.code !== 0) throw new FfmpegError("ffmpeg_failed");
       return parseSilences(r.stderr, win);
@@ -216,7 +226,7 @@ export class FfmpegService {
    * Corta e enquadra (crop central) na proporção `aspect`; H.264/AAC. Sem `keep`: trecho [startSec, startSec+durationSec].
    * Com `keep` (remoção de pausas): concatena SÓ os trechos mantidos (tempos absolutos do original) e depois enquadra/legenda.
    */
-  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9"; subtitles?: { assPath: string; fontsDir: string }; keep?: { startSec: number; endSec: number }[] }) {
+  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9"; subtitles?: { assPath: string; fontsDir: string }; keep?: { startSec: number; endSec: number }[]; signal?: AbortSignal }) {
     const [w, h] = p.aspect.split(":").map(Number);
     // crop central pela proporção pedida (dimensões pares), sem esticar. Legenda DEPOIS do enquadramento (queimada no quadro final).
     let vf = `crop='min(iw,ih*${w}/${h})':'min(ih,iw*${h}/${w})',scale=trunc(iw/2)*2:trunc(ih/2)*2`;
@@ -229,9 +239,9 @@ export class FfmpegService {
       const parts = p.keep.map((k, i) => `[0:v]trim=start=${n(k.startSec)}:end=${n(k.endSec)},setpts=PTS-STARTPTS[v${i}];[0:a]atrim=start=${n(k.startSec)}:end=${n(k.endSec)},asetpts=PTS-STARTPTS[a${i}]`);
       const join = p.keep.map((_, i) => `[v${i}][a${i}]`).join("");
       const graph = `${parts.join(";")};${join}concat=n=${p.keep.length}:v=1:a=1[cv][ca];[cv]${vf}[vout]`;
-      return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-i", i, "-filter_complex", graph, "-map", "[vout]", "-map", "[ca]", ...enc, o] });
+      return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, signal: p.signal, buildArgs: (i, o) => ["-y", "-i", i, "-filter_complex", graph, "-map", "[vout]", "-map", "[ca]", ...enc, o] });
     }
-    return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, ...enc, o] });
+    return this.process({ orgId, operation, inputPath, finalOutPath, outExt: "mp4", workFiles, signal: p.signal, buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, ...enc, o] });
   }
 }
 

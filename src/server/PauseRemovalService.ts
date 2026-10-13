@@ -86,11 +86,11 @@ export function remapCues(cues: SubtitleCue[], keep: KeepSegment[]): SubtitleCue
 
 export class PauseRemovalService {
   /** Detecta as pausas do áudio da janela [0, windowSec] e devolve os trechos mantidos. Sem áudio → erro claro. */
-  static async analyze(inputPath: string, windowSec: number, opts: PauseOptions = CONSERVATIVE): Promise<PauseResult> {
-    const info = await FfmpegService.probe(inputPath);
+  static async analyze(inputPath: string, windowSec: number, opts: PauseOptions = CONSERVATIVE, signal?: AbortSignal): Promise<PauseResult> {
+    const info = await FfmpegService.probe(inputPath, signal);
     if (!info.hasAudio) throw new Error("Esse vídeo não tem áudio — não há pausas para remover.");
     const total = Math.min(windowSec, info.durationMs > 0 ? info.durationMs / 1000 : windowSec);
-    const silences = await FfmpegService.detectSilence(inputPath, { noiseDb: opts.noiseDb, minSilenceSec: opts.minSilenceSec, windowSec: total });
+    const silences = await FfmpegService.detectSilence(inputPath, { noiseDb: opts.noiseDb, minSilenceSec: opts.minSilenceSec, windowSec: total, signal });
     return buildKeepSegments(silences.map((s) => ({ startSec: s.startSec, endSec: Math.min(s.endSec, total) })), total, opts);
   }
 }

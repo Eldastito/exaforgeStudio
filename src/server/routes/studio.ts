@@ -10,6 +10,8 @@ import { HookIntelligenceService } from "../HookIntelligenceService.js";
 import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
 import { VideoPostProductionService } from "../VideoPostProductionService.js";
+// Import ESTÁTICO de propósito: registrar o handler `video_render` no JobQueue já no boot (o sweep pós-reinício precisa dele).
+import { VideoRenderJobService } from "../VideoRenderJobService.js";
 import { PublishPackageService } from "../PublishPackageService.js";
 import { VideoTranscriptionService, TranscriptionError } from "../VideoTranscriptionService.js";
 import { VideoUploadService, VideoUploadError, VIDEO_MIME_EXT, MAX_UPLOAD_BYTES } from "../VideoUploadService.js";
@@ -310,6 +312,47 @@ router.put("/video-post/:creationId/transcript", (req: AuthRequest, res): any =>
 router.get("/video-post/capabilities", async (req: AuthRequest, res): Promise<any> => {
   if (!req.organizationId) return res.status(401).json({ error: "Unauthorized" });
   res.json(await VideoPostProductionService.capabilities());
+});
+
+// ── Edição em segundo plano (F13b.8): mesmo render, fila existente (JobQueueService), status e cancelamento ──
+// POST /api/studio/video-post/render-async — mesmo corpo do /render; responde 202 com o job
+router.post("/video-post/render-async", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const job = VideoRenderJobService.enqueue(orgId, req.user?.userId || null, {
+      creationId: String(req.body?.creationId || ""),
+      channel: String(req.body?.channel || ""),
+      topic: String(req.body?.topic || ""),
+      objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      subtitles: req.body?.subtitles === true,
+      removePauses: req.body?.removePauses === true,
+      title: typeof req.body?.title === "string" ? req.body.title : req.body?.title === true,
+      cta: typeof req.body?.cta === "string" ? req.body.cta : req.body?.cta === true,
+    });
+    res.status(job.deduplicated ? 200 : 202).json(job);
+  } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao pedir a edição." }); }
+});
+// GET /api/studio/video-post/jobs — edições recentes da empresa
+router.get("/video-post/jobs", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ jobs: VideoRenderJobService.list(orgId, Number(req.query.limit) || 20) });
+});
+// GET /api/studio/video-post/jobs/:id — status (e resultado quando pronto)
+router.get("/video-post/jobs/:id", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const job = VideoRenderJobService.get(orgId, String(req.params.id));
+  if (!job) return res.status(404).json({ error: "Edição não encontrada." });
+  res.json(job);
+});
+// POST /api/studio/video-post/jobs/:id/cancel
+router.post("/video-post/jobs/:id/cancel", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const r = VideoRenderJobService.cancel(orgId, String(req.params.id));
+  res.status(r.ok ? 200 : r.status === null ? 404 : 409).json(r);
 });
 
 // POST /api/studio/video-post/render { creationId, channel, topic, objectiveId? } — corta e enquadra um vídeo do Estúdio

@@ -12701,6 +12701,25 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_video_transcripts_org ON video_transcripts (organization_id, created_at);
   `); } catch(e){}
+  // ADR-207 F13b.8 — edição de vídeo em segundo plano. Visão do PRODUTO (status do cliente, cancelado, resultado); a execução é do
+  // JobQueueService existente (background_jobs). Sem fila nova.
+  try { db.exec(`
+    CREATE TABLE IF NOT EXISTS video_render_jobs (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      creation_id TEXT NOT NULL,
+      channel TEXT,
+      params_json TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      result_json TEXT,
+      error_message TEXT,
+      requested_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      finished_at DATETIME
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_render_jobs_org ON video_render_jobs (organization_id, created_at);
+  `); } catch(e){}
 };
 
 initDb();

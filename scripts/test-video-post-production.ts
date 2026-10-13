@@ -48,18 +48,18 @@ async function main() {
   const other = await V.plan(orgB, { topic: "camisa de linho", channels: ["instagram"] });
   check("4.2 isolamento: a marca de outra empresa não vaza", other.plans[0].caveats.every((c) => !/saneado/.test(c)));
 
-  check("5.1 render: com ffmpeg empacotado, 'partial_available' (corte+enquadramento), nunca 'tudo pronto'", p.render.status === "partial_available" && p.render.capabilities.renderImplemented === true && p.render.capabilities.canRenderCaptions === false && /seguem manuais/.test(p.render.reason));
+  check("5.1 render: com ffmpeg empacotado, 'partial_available' (corte+enquadramento+legenda), nunca 'tudo pronto'", p.render.status === "partial_available" && p.render.capabilities.renderImplemented === true && p.render.capabilities.canRenderCaptions === true && /seguem manuais/.test(p.render.reason) && /legendar/.test(p.render.reason));
   const { FfmpegService } = await import("../src/server/FfmpegService.js");
   process.env.FFMPEG_PATH = "/nonexistent/ffmpeg"; FfmpegService.resetCache();
   const c0 = await new StubVideoPostProvider().capabilities();
-  check("5.2 sem ffmpeg: nada disponível, mensagem de cliente (sem erro técnico)", !c0.ffmpeg && !c0.canRenderTrimReframe && !c0.renderImplemented && c0.notes.some((n) => /não está disponível neste servidor/.test(n)));
+  check("5.2 sem ffmpeg: nada disponível, mensagem de cliente (sem erro técnico)", !c0.ffmpeg && !c0.canRenderCaptions && !c0.canRenderTrimReframe && !c0.renderImplemented && c0.notes.some((n) => /não está disponível neste servidor/.test(n)));
   const pNo = await V.plan(orgA, { topic: "x", channels: ["instagram"] });
   check("5.3 sem ffmpeg o PLANO segue funcionando (status 'unavailable')", pNo.plans.length === 1 && pNo.render.status === "unavailable");
   delete process.env.FFMPEG_PATH; FfmpegService.resetCache();
   const savedKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = "sk-test"; FfmpegService.resetCache();
   const c1 = await new StubVideoPostProvider().capabilities();
-  check("5.5 transcrição descoberta (ffmpeg + provider de fala), mas legenda ainda não é renderizada", c1.transcription && !c1.canRenderCaptions);
+  check("5.5 transcrição descoberta (ffmpeg + provider de fala); legenda descoberta pelo filtro + fonte empacotada", c1.transcription && c1.canRenderCaptions);
   delete process.env.OPENAI_API_KEY;
   const c2 = await new StubVideoPostProvider().capabilities();
   check("5.5b sem provider de fala a transcrição fica indisponível", c2.ffmpeg && !c2.transcription);

@@ -9,19 +9,23 @@
  *  - `capabilities`: o que o SERVIDOR realmente consegue fazer, DESCOBERTO (`FfmpegService.available()` roda `-version`;
  *    serviço de transcrição configurado?) — nunca presumido (RN-SI-06).
  *  - `render` (parcial): com ffmpeg disponível, CORTA e ENQUADRA (crop central) um vídeo do Estúdio conforme o plano do canal
- *    e salva como NOVA criação (a original nunca é alterada). NÃO aplica legenda (exige transcrição), remoção de pausas,
- *    título nem CTA na imagem — a resposta diz o que foi aplicado e o que não foi. Todo ffmpeg passa por `FfmpegService`.
+ *    e salva como NOVA criação (a original nunca é alterada). Com `subtitles` queima a LEGENDA (F13b.5) a partir da transcrição
+ *    (já com as correções do dono). NÃO aplica remoção de pausas, título nem CTA na imagem — a resposta diz o que foi aplicado
+ *    e o que não foi. Todo ffmpeg passa por `FfmpegService`.
  *
  * Guardrails: RN-CG-09 (grounded — só o que foi informado; canal desconhecido rejeitado; duração-fonte desconhecida não
  * é inventada), RN-CG-04 (termo proibido pela marca já saneado pelo roteiro/gancho), PUBLISHED≠RESULTADO (plano ≠ vídeo
  * pronto: nada é publicado, nada é marcado como editado), publicar segue sendo `social_publish` governado (F11 PRD 10).
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { FfmpegService, FfmpegError } from "./FfmpegService.js";
 import { getSpeechToTextProvider } from "./SpeechToTextProvider.js";
+import { VideoSubtitleService, buildCues, toAss, fontsDir } from "./VideoSubtitleService.js";
+import { VideoTranscriptionService } from "./VideoTranscriptionService.js";
 import { ScriptIntelligenceService } from "./ScriptIntelligenceService.js";
 import { ChannelAdaptationService, SocialChannelName } from "./ChannelAdaptationService.js";
 
@@ -48,9 +52,11 @@ export class StubVideoPostProvider implements VideoPostProvider {
     const transcription = ffmpeg && getSpeechToTextProvider().available();
     const notes: string[] = [];
     if (!ffmpeg) notes.push("O processamento de vídeo não está disponível neste servidor no momento (ffmpeg).");
-    else notes.push("Disponível: corte e enquadramento. Legenda automática, remoção de pausas, título e CTA na imagem ainda não são aplicados.");
+    else notes.push("Disponível: corte, enquadramento e legenda (com a transcrição). Remoção de pausas, título e CTA na imagem ainda não são aplicados.");
     if (!transcription) notes.push("A transcrição não está disponível neste servidor no momento.");
-    return { ffmpeg, transcription, canRenderTrimReframe: ffmpeg, canRenderCaptions: false, renderImplemented: ffmpeg, notes };
+    const captions = ffmpeg && (await VideoSubtitleService.available());
+    if (ffmpeg && !captions) notes.push("Legenda na imagem indisponível neste servidor (precisa do filtro de legenda do ffmpeg e da fonte empacotada).");
+    return { ffmpeg, transcription, canRenderTrimReframe: ffmpeg, canRenderCaptions: captions, renderImplemented: ffmpeg, notes };
   }
 }
 
@@ -158,7 +164,7 @@ export class VideoPostProductionService {
     return {
       topic, objectiveId: script.objectiveId, sourceDurationSec: source, plans, skipped,
       render: capabilities.renderImplemented
-        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar e enquadrar automaticamente; legenda, remoção de pausas, título e CTA na imagem seguem manuais (use o plano)." }
+        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar, enquadrar e legendar automaticamente; remoção de pausas, título e CTA na imagem seguem manuais (use o plano)." }
         : { status: "unavailable", provider: this.provider.id, capabilities, reason: "O processamento de vídeo não está disponível neste servidor no momento; o plano é o roteiro de edição." },
       note: "Plano de edição, não vídeo pronto. Enquadramentos são recomendações editoriais (não limites oficiais). Publicar segue pelo fluxo governado.",
     };
@@ -168,7 +174,7 @@ export class VideoPostProductionService {
    * Corta e enquadra um vídeo do Estúdio da empresa conforme o plano do canal. Entrada: `creationId` (kind video, pronto).
    * A criação original é preservada; o resultado vira uma NOVA criação. Erros do ffmpeg viram mensagem de cliente.
    */
-  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null }): Promise<VideoRenderResult> {
+  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean }): Promise<VideoRenderResult> {
     const row = db.prepare("SELECT id, kind, media_url, status FROM studio_creations WHERE id = ? AND organization_id = ?").get(String(input?.creationId || ""), orgId) as any;
     if (!row || row.kind !== "video") throw new Error("Vídeo do Estúdio não encontrado.");
     if (row.status && row.status !== "done") throw new Error("Esse vídeo ainda não está pronto.");
@@ -181,19 +187,37 @@ export class VideoPostProductionService {
     if (!cp) throw new Error("Canal não suportado para edição.");
     const aspect = cp.aspect as "9:16" | "1:1" | "16:9";
     const outName = `studio_${randomUUID()}.mp4`;
+
+    // Legenda (opcional): exige transcrição JÁ feita (não gasta IA escondido) e a capacidade de queimar (libass + fonte).
+    let assPath: string | null = null; let subtitleNote = "";
+    if (input.subtitles) {
+      const tr = VideoTranscriptionService.get(orgId, row.id);
+      if (!tr) throw new Error("Transcreva o vídeo antes de pedir a legenda.");
+      if (!tr.speechDetected || !tr.effectiveSegments.length) throw new Error("Não detectei fala nesse vídeo para legendar.");
+      if (!(await VideoSubtitleService.available())) throw new Error("A legenda na imagem não está disponível neste servidor no momento.");
+      const cues = buildCues(tr.effectiveSegments, { aspect, windowStartMs: 0, windowEndMs: cp.targetDurationSec * 1000 });
+      if (!cues.length) throw new Error("A legenda ficou vazia na parte do vídeo que será usada.");
+      const flagged = await VideoSubtitleService.flagged(orgId, cues);
+      if (flagged.length) subtitleNote = ` Atenção: a fala contém termo(s) que a marca não usa (${flagged.join(", ")}); a legenda reproduz a fala sem alterá-la.`;
+      assPath = path.join(os.tmpdir(), `zf-sub-${randomUUID()}.ass`);
+      fs.writeFileSync(assPath, toAss(cues, { aspect }), "utf8");
+    }
     try {
-      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect });
+      const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined });
       const mediaUrl = `/media/${outName}`;
       const id = randomUUID();
       db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento)`, mediaUrl);
       return {
         creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: cp.targetDurationSec,
-        applied: ["corte", "enquadramento"], notApplied: ["legenda", "remoção de pausas", "título", "CTA na imagem"], outputBytes: r.outputBytes,
-        note: "Cortei do início até a duração do plano e enquadrei no formato do canal. O vídeo original não foi alterado. O restante do plano segue manual.",
+        applied: assPath ? ["corte", "enquadramento", "legenda"] : ["corte", "enquadramento"],
+        notApplied: assPath ? ["remoção de pausas", "título", "CTA na imagem"] : ["legenda", "remoção de pausas", "título", "CTA na imagem"], outputBytes: r.outputBytes,
+        note: `Cortei do início até a duração do plano, enquadrei no formato do canal${assPath ? " e queimei a legenda" : ""}. O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
       };
     } catch (e: any) {
       if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);
       throw e;
+    } finally {
+      if (assPath) { try { fs.rmSync(assPath, { force: true }); } catch { /* noop */ } }
     }
   }
 }

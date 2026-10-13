@@ -88,6 +88,48 @@ export function buildCues(segments: TranscriptSegment[], opts: { aspect: Subtitl
   return out;
 }
 
+// Título e CTA na imagem (F13b.7): mesmo arquivo ASS e mesma fonte empacotada da legenda (sem dependência nova).
+// Título no TOPO (abaixo da barra do app) e CTA no MEIO — a base fica livre pra legenda e pros botões da plataforma.
+const OVERLAY_LAYOUT: Record<SubtitleAspect, { title: { fontSize: number; maxChars: number; marginV: number; maxLines: number }; cta: { fontSize: number; maxChars: number; maxLines: number } }> = {
+  "9:16": { title: { fontSize: 84, maxChars: 20, marginV: 260, maxLines: 3 }, cta: { fontSize: 72, maxChars: 22, maxLines: 3 } },
+  "1:1": { title: { fontSize: 64, maxChars: 26, marginV: 70, maxLines: 2 }, cta: { fontSize: 58, maxChars: 28, maxLines: 2 } },
+  "16:9": { title: { fontSize: 58, maxChars: 40, marginV: 60, maxLines: 2 }, cta: { fontSize: 52, maxChars: 40, maxLines: 2 } },
+};
+export interface OverlayEvent { startMs: number; endMs: number; kind: "title" | "cta"; lines: string[] }
+const TITLE_MAX_MS = 3000, CTA_MAX_MS = 3000, OVERLAY_GAP_MS = 300, CTA_MIN_MS = 1000;
+
+/** Quebra em linhas e, se passar do máximo, corta com reticências (nunca estoura a tela). */
+function fitLines(text: string, maxChars: number, maxLines: number): string[] {
+  const lines = wrapLines(text, maxChars);
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines); const last = kept[maxLines - 1];
+  kept[maxLines - 1] = (last.length >= maxChars ? last.slice(0, Math.max(1, maxChars - 1)).trimEnd() : last) + "…";
+  return kept;
+}
+
+/**
+ * Título nos primeiros segundos e CTA nos últimos, sem se sobreporem. Vídeo curto: o título ocupa no máx. 45% do vídeo;
+ * se o CTA não couber (menos de 1 s depois do título + respiro), ele é OMITIDO e dito em `omitted` — nunca atropela o título.
+ */
+export function buildOverlays(opts: { aspect: SubtitleAspect; durationMs: number; title?: string | null; cta?: string | null }): { events: OverlayEvent[]; omitted: string[] } {
+  const lay = OVERLAY_LAYOUT[opts.aspect] || OVERLAY_LAYOUT["9:16"];
+  const D = Math.max(0, Math.round(opts.durationMs));
+  const events: OverlayEvent[] = []; const omitted: string[] = [];
+  const titleLines = opts.title ? fitLines(opts.title, lay.title.maxChars, lay.title.maxLines) : [];
+  const ctaLines = opts.cta ? fitLines(opts.cta, lay.cta.maxChars, lay.cta.maxLines) : [];
+  let titleEnd = 0;
+  if (titleLines.length) {
+    titleEnd = Math.min(TITLE_MAX_MS, Math.floor(D * 0.45));
+    if (titleEnd < 700) { omitted.push("título"); titleEnd = 0; } else events.push({ startMs: 0, endMs: titleEnd, kind: "title", lines: titleLines });
+  }
+  if (ctaLines.length) {
+    const floor = titleEnd ? titleEnd + OVERLAY_GAP_MS : 0;
+    const start = Math.max(D - CTA_MAX_MS, floor);
+    if (D - start < CTA_MIN_MS) omitted.push("CTA na imagem"); else events.push({ startMs: start, endMs: D, kind: "cta", lines: ctaLines });
+  }
+  return { events, omitted };
+}
+
 function assTime(ms: number): string {
   const cs = Math.max(0, Math.round(ms / 10));
   const h = Math.floor(cs / 360000), m = Math.floor((cs % 360000) / 6000), s = Math.floor((cs % 6000) / 100), c = cs % 100;
@@ -99,17 +141,22 @@ export function escapeAss(line: string): string {
 }
 
 /** Cues → arquivo ASS (UTF-8). Estilo: fonte empacotada em negrito, branco com contorno preto, centralizada embaixo (área segura). */
-export function toAss(cues: SubtitleCue[], opts: { aspect: SubtitleAspect }): string {
-  const res = PLAY_RES[opts.aspect] || PLAY_RES["9:16"], lay = LAYOUT[opts.aspect] || LAYOUT["9:16"];
+export function toAss(cues: SubtitleCue[], opts: { aspect: SubtitleAspect; overlays?: OverlayEvent[] }): string {
+  const res = PLAY_RES[opts.aspect] || PLAY_RES["9:16"], lay = LAYOUT[opts.aspect] || LAYOUT["9:16"], ov = OVERLAY_LAYOUT[opts.aspect] || OVERLAY_LAYOUT["9:16"];
   const header = [
     "[Script Info]", "ScriptType: v4.00+", `PlayResX: ${res.w}`, `PlayResY: ${res.h}`, "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     `Style: Default,DejaVu Sans,${lay.fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,0,2,${lay.marginLR},${lay.marginLR},${lay.marginV},1`,
+    // Título: topo, branco com contorno. CTA: meio da tela em caixa escura opaca (BorderStyle 3) — destaca sem cobrir a base.
+    `Style: Title,DejaVu Sans,${ov.title.fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,0,8,${lay.marginLR},${lay.marginLR},${ov.title.marginV},1`,
+    `Style: Cta,DejaVu Sans,${ov.cta.fontSize},&H00FFFFFF,&H00FFFFFF,&H00202020,&H00202020,-1,0,0,0,100,100,0,0,3,22,0,5,${lay.marginLR},${lay.marginLR},0,1`,
     "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ];
   const events = cues.map((c) => `Dialogue: 0,${assTime(c.startMs)},${assTime(c.endMs)},Default,,0,0,0,,${c.lines.map(escapeAss).join("\\N")}`);
-  return [...header, ...events, ""].join("\n");
+  // fad = entrada/saída suaves; a tag é nossa (o texto vem ANTES escapado, sem chaves).
+  const overlayEvents = (opts.overlays || []).map((o) => `Dialogue: 1,${assTime(o.startMs)},${assTime(o.endMs)},${o.kind === "title" ? "Title" : "Cta"},,0,0,0,,{\\fad(250,250)}${o.lines.map(escapeAss).join("\\N")}`);
+  return [...header, ...events, ...overlayEvents, ""].join("\n");
 }
 
 export class VideoSubtitleService {
@@ -120,11 +167,15 @@ export class VideoSubtitleService {
 
   /** Termos que a marca não usa e aparecem na fala — só AVISO (a fala não é alterada). */
   static async flagged(orgId: string, cues: SubtitleCue[]): Promise<string[]> {
+    return this.forbiddenIn(orgId, cues.map((c) => c.lines.join(" ")).join(" "));
+  }
+  /** Termos proibidos pela marca dentro de um texto qualquer (título/CTA são texto NOSSO ou do dono → quem chama recusa). */
+  static async forbiddenIn(orgId: string, text: string): Promise<string[]> {
     try {
       const { BrandDnaService } = await import("./BrandDnaService.js");
       const dna = await BrandDnaService.get(orgId);
-      const text = cues.map((c) => c.lines.join(" ")).join(" ").toLowerCase();
-      return (dna.forbidden || []).filter((f) => f && text.includes(f.toLowerCase()));
+      const low = String(text || "").toLowerCase();
+      return (dna.forbidden || []).filter((f) => f && low.includes(f.toLowerCase()));
     } catch { return []; }
   }
 }

@@ -82,16 +82,28 @@ export class FfmpegService {
       return (this.avail = { available: true, version: (r.stdout.split("\n")[0] || "").slice(0, 80) });
     } catch { return (this.avail = { available: false, reason: "ffmpeg_unavailable" }); }
   }
-  static resetCache(): void { this.avail = null; this.bin = undefined; }
+  private static filters: Set<string> | null = null;
+  /** O binário tem este filtro (ex.: `ass`, que exige libass)? Descoberto via `-filters`, cacheado. Binário indisponível → false. */
+  static async hasFilter(name: string): Promise<boolean> {
+    if (!(await this.available()).available) return false;
+    if (!this.filters) {
+      try {
+        const r = await this.run(["-hide_banner", "-filters"], { timeoutMs: 10_000 });
+        this.filters = new Set(r.stdout.split("\n").map((l) => (/^\s*[A-Z.]{3}\s+(\S+)\s/.exec(l) || [])[1]).filter(Boolean) as string[]);
+      } catch { this.filters = new Set(); }
+    }
+    return this.filters.has(name);
+  }
+  static resetCache(): void { this.avail = null; this.bin = undefined; this.filters = null; }
 
   /** Executa o ffmpeg com argumentos em array (sem shell) e timeout. Não lança em exit ≠ 0 — devolve o resultado. */
-  static async run(args: string[], opts: { timeoutMs?: number } = {}): Promise<RunResult> {
+  static async run(args: string[], opts: { timeoutMs?: number; cwd?: string } = {}): Promise<RunResult> {
     const bin = await this.binary();
     if (!bin) throw new FfmpegError("ffmpeg_unavailable");
     const timeoutMs = opts.timeoutMs ?? this.limits.timeoutMs;
     return new Promise((resolve, reject) => {
       let child;
-      try { child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], shell: false }); }
+      try { child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], shell: false, cwd: opts.cwd }); }
       catch { return reject(new FfmpegError("ffmpeg_unavailable")); }
       let stdout = "", stderr = "", timedOut = false, done = false;
       const cap = (s: string, chunk: Buffer) => (s.length > 64 * 1024 ? s : s + chunk.toString());
@@ -107,7 +119,7 @@ export class FfmpegService {
    * Job de mídia: copia a entrada para tmp/<job>/input, roda o ffmpeg com `buildArgs(input, output)`, valida a saída e
    * ENTREGA o arquivo em `finalOutPath`. A pasta temporária é sempre removida. Lança `FfmpegError` com código controlado.
    */
-  static async process(opts: { orgId?: string | null; operation: string; inputPath: string; finalOutPath: string; outExt: string; buildArgs: (input: string, output: string) => string[] }): Promise<{ outputBytes: number; elapsedMs: number }> {
+  static async process(opts: { orgId?: string | null; operation: string; inputPath: string; finalOutPath: string; outExt: string; buildArgs: (input: string, output: string) => string[]; workFiles?: Record<string, string> }): Promise<{ outputBytes: number; elapsedMs: number }> {
     const jobId = randomUUID();
     const t0 = Date.now();
     let inputBytes = 0, outputBytes: number | null = null;
@@ -128,7 +140,14 @@ export class FfmpegService {
       const input = path.join(tmp, "input");
       const output = path.join(tmp, `output.${opts.outExt}`);
       fs.copyFileSync(opts.inputPath, input);
-      const r = await this.run(opts.buildArgs(input, output));
+      // Arquivos auxiliares (ex.: legenda .ass, pasta de fontes) são copiados p/ a pasta do job e o ffmpeg roda NELA:
+      // o filtro usa só nomes relativos simples (sem escapar caminhos do servidor/usuário dentro da expressão do filtro).
+      for (const [name, srcPath] of Object.entries(opts.workFiles || {})) {
+        if (!/^[a-z0-9_.-]+$/i.test(name)) throw new FfmpegError("ffmpeg_failed");
+        const dst = path.join(tmp, name);
+        if (fs.statSync(srcPath).isDirectory()) fs.cpSync(srcPath, dst, { recursive: true }); else fs.copyFileSync(srcPath, dst);
+      }
+      const r = await this.run(opts.buildArgs(input, output), { cwd: tmp });
       if (r.timedOut) throw new FfmpegError("timeout");
       if (r.code !== 0) throw new FfmpegError("ffmpeg_failed");
       let os_: fs.Stats;
@@ -172,11 +191,13 @@ export class FfmpegService {
     return this.process({ orgId, operation: "extract_audio", inputPath, finalOutPath, outExt: "wav", buildArgs: (i, o) => ["-y", "-i", i, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", o] });
   }
   /** Corta [startSec, startSec+durationSec] e enquadra (crop central) na proporção `aspect` (ex.: "9:16"); H.264/AAC. */
-  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9" }) {
+  static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9"; subtitles?: { assPath: string; fontsDir: string } }) {
     const [w, h] = p.aspect.split(":").map(Number);
-    // crop central pela proporção pedida (dimensões pares), sem esticar.
-    const vf = `crop='min(iw,ih*${w}/${h})':'min(ih,iw*${h}/${w})',scale=trunc(iw/2)*2:trunc(ih/2)*2`;
-    return this.process({ orgId, operation: "trim_reframe", inputPath, finalOutPath, outExt: "mp4", buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-movflags", "+faststart", o] });
+    // crop central pela proporção pedida (dimensões pares), sem esticar. Legenda DEPOIS do enquadramento (queimada no quadro final).
+    let vf = `crop='min(iw,ih*${w}/${h})':'min(ih,iw*${h}/${w})',scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+    if (p.subtitles) vf += `,ass=filename=sub.ass:fontsdir=fonts`;
+    const workFiles = p.subtitles ? { "sub.ass": p.subtitles.assPath, fonts: p.subtitles.fontsDir } : undefined;
+    return this.process({ orgId, operation: p.subtitles ? "trim_reframe_subtitles" : "trim_reframe", inputPath, finalOutPath, outExt: "mp4", workFiles, buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, p.startSec)), "-i", i, "-t", String(Math.max(1, p.durationSec)), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-c:a", "aac", "-movflags", "+faststart", o] });
   }
 }
 

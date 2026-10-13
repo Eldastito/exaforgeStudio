@@ -322,6 +322,7 @@ router.post("/video-post/render", async (req: AuthRequest, res): Promise<any> =>
       channel: String(req.body?.channel || ""),
       topic: String(req.body?.topic || ""),
       objectiveId: req.body?.objectiveId ? String(req.body.objectiveId) : null,
+      subtitles: req.body?.subtitles === true,
     }));
   } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao editar o vídeo." }); }
 });

@@ -6,7 +6,7 @@
  * NÃO prova: o download do ffmpeg-static no build real, a imagem final, nem o Whisper real (ver docs/runbook/video-operacao.md).
  * Uso: npm run test:video-production-readiness
  */
-import os from "os"; import path from "path"; import fs from "fs"; import { execFileSync, spawnSync } from "child_process"; import { fileURLToPath } from "url"; import { randomUUID } from "crypto";
+import os from "os"; import path from "path"; import fs from "fs"; import { spawnSync } from "child_process"; import { createRequire } from "module"; import { fileURLToPath } from "url"; import { randomUUID } from "crypto";
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "zf-vprod-"));
 process.env.DATA_DIR = tmpDir; process.env.NODE_ENV = "production"; process.env.JWT_SECRET = "test-secret-vprod-1234567890";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -83,12 +83,23 @@ async function main() {
   check("4.1 o `npm run build` empacota o smoke (dist/video-smoke.cjs) com as mesmas flags dos outros entrypoints (CJS, packages external)", !!seg && /--platform=node/.test(seg) && /--format=cjs/.test(seg) && /--packages=external/.test(seg) && /--outfile=dist\/video-smoke\.cjs/.test(seg), String(seg));
   const outCjs = path.join(repoRoot, "dist", `video-smoke-test-${randomUUID().slice(0, 6)}.cjs`);
   fs.mkdirSync(path.join(repoRoot, "dist"), { recursive: true });
+  // esbuild via API (não via node_modules/.bin): no CI o `.bin/esbuild` de topo pode não existir; o tsx — que roda este teste — sempre
+  // traz o dele. Tenta o de topo e, se faltar, o do próprio tsx. Se nenhum resolver, FALHA com mensagem (não pula em silêncio).
+  const reqRoot = createRequire(path.join(repoRoot, "package.json"));
+  let esb: any = null; let esbFrom = "";
+  try { esb = reqRoot("esbuild"); esbFrom = "topo"; } catch {
+    try { esb = createRequire(reqRoot.resolve("tsx/package.json"))("esbuild"); esbFrom = "tsx"; } catch { /* sem esbuild */ }
+  }
+  check("4.1b esbuild utilizável para empacotar (de topo ou o que o tsx traz)", !!esb, "nenhum esbuild resolvível");
   try {
-    const args = (seg || "").replace(/^esbuild\s+/, "").replace(/--outfile=\S+/, `--outfile=${outCjs}`).split(/\s+/);
-    execFileSync(path.join(repoRoot, "node_modules", ".bin", "esbuild"), args, { cwd: repoRoot, stdio: "pipe" });
+    if (!esb) throw new Error("sem esbuild");
+    // mesmas opções do trecho do `npm run build` verificado em 4.1 (plataforma/formato/packages)
+    await esb.build({ entryPoints: [path.join(repoRoot, "scripts/video-smoke.cli.ts")], bundle: true, platform: "node", format: "cjs", packages: "external", outfile: outCjs, logLevel: "silent" });
     const prod = smoke({ FFMPEG_PATH: undefined }, "node", path.relative(repoRoot, outCjs));
     check("4.2 o bundle CJS roda com `node` puro (sem tsx), acha o ffmpeg-static por import() dinâmico e passa tudo", prod.status === 0 && prod.out?.steps.every((s: any) => s.ok), (prod.stderr || "").slice(-300) + JSON.stringify(prod.out?.steps?.filter((s: any) => !s.ok)));
     check("4.3 e o bundle respeita as mesmas falhas (FFMPEG_PATH errado → 1)", smoke({ FFMPEG_PATH: path.join(tmpDir, "nao-existe") }, "node", path.relative(repoRoot, outCjs)).status === 1);
+  } catch (e: any) {
+    check("4.2 o bundle CJS roda com `node` puro", false, "falha ao empacotar/rodar: " + String(e?.message || e).slice(0, 200) + ` (esbuild de ${esbFrom || "?"})`);
   } finally { try { fs.rmSync(outCjs, { force: true }); } catch { /* noop */ } }
 
   // ── 5. fiação do deploy ──

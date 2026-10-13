@@ -49,6 +49,7 @@
     "test:video-transcription": "tsx scripts/test-video-transcription.ts",
     "test:video-subtitles": "tsx scripts/test-video-subtitles.ts",
     "test:pause-removal": "tsx scripts/test-pause-removal.ts",
+    "test:video-overlays": "tsx scripts/test-video-overlays.ts",
     "test:content-broadcast": "tsx scripts/test-content-broadcast.ts",
     "test:campaign-stock-guard": "tsx scripts/test-campaign-stock-guard.ts",
     "test:growth-engine": "tsx scripts/test-growth-engine.ts",

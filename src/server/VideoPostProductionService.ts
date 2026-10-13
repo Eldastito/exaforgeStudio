@@ -24,7 +24,7 @@ import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { FfmpegService, FfmpegError } from "./FfmpegService.js";
 import { getSpeechToTextProvider } from "./SpeechToTextProvider.js";
-import { VideoSubtitleService, buildCues, toAss, fontsDir } from "./VideoSubtitleService.js";
+import { VideoSubtitleService, buildCues, buildOverlays, toAss, fontsDir, type OverlayEvent } from "./VideoSubtitleService.js";
 import { PauseRemovalService, remapCues, type PauseResult } from "./PauseRemovalService.js";
 import { VideoTranscriptionService } from "./VideoTranscriptionService.js";
 import { ScriptIntelligenceService } from "./ScriptIntelligenceService.js";
@@ -87,6 +87,8 @@ export interface VideoRenderResult {
   creationId: string; mediaUrl: string; channel: string; aspect: string; startSec: number; durationSec: number;
   applied: string[]; notApplied: string[]; outputBytes: number; note: string;
   /** Só quando a remoção de pausas foi pedida: duração antes/depois e quanto foi cortado (0 = nenhuma pausa clara encontrada). */
+  /** Só quando título/CTA foram pedidos: o que entrou na imagem e o que foi omitido por falta de espaço. */
+  overlays?: { title: string | null; cta: string | null; omitted: string[] };
   pauses?: { removedCount: number; removedSec: number; durationBeforeSec: number; durationAfterSec: number };
 }
 
@@ -167,7 +169,7 @@ export class VideoPostProductionService {
     return {
       topic, objectiveId: script.objectiveId, sourceDurationSec: source, plans, skipped,
       render: capabilities.renderImplemented
-        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar, enquadrar e legendar automaticamente; título e CTA na imagem seguem manuais (pausas: opcional, modo conservador) (use o plano)." }
+        ? { status: "partial_available", provider: this.provider.id, capabilities, reason: "Dá para cortar, enquadrar, legendar, tirar pausas e pôr título/CTA automaticamente; trilha, cortes criativos e a publicação seguem manuais (use o plano)." }
         : { status: "unavailable", provider: this.provider.id, capabilities, reason: "O processamento de vídeo não está disponível neste servidor no momento; o plano é o roteiro de edição." },
       note: "Plano de edição, não vídeo pronto. Enquadramentos são recomendações editoriais (não limites oficiais). Publicar segue pelo fluxo governado.",
     };
@@ -177,7 +179,7 @@ export class VideoPostProductionService {
    * Corta e enquadra um vídeo do Estúdio da empresa conforme o plano do canal. Entrada: `creationId` (kind video, pronto).
    * A criação original é preservada; o resultado vira uma NOVA criação. Erros do ffmpeg viram mensagem de cliente.
    */
-  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean; removePauses?: boolean }): Promise<VideoRenderResult> {
+  static async render(orgId: string, input: { creationId: string; channel: string; topic: string; objectiveId?: string | null; subtitles?: boolean; removePauses?: boolean; title?: boolean | string; cta?: boolean | string }): Promise<VideoRenderResult> {
     const row = db.prepare("SELECT id, kind, media_url, status FROM studio_creations WHERE id = ? AND organization_id = ?").get(String(input?.creationId || ""), orgId) as any;
     if (!row || row.kind !== "video") throw new Error("Vídeo do Estúdio não encontrado.");
     if (row.status && row.status !== "done") throw new Error("Esse vídeo ainda não está pronto.");
@@ -202,8 +204,28 @@ export class VideoPostProductionService {
     }
     const finalDuration = pauseRes ? pauseRes.keptSec : cp.targetDurationSec;
 
+    // Título/CTA na imagem (opcional): texto do plano (ou o do dono), na tela só nos primeiros/últimos segundos.
+    const wantTitle = !!input.title, wantCta = !!input.cta;
+    let overlayEvents: OverlayEvent[] = []; let overlayInfo: VideoRenderResult["overlays"];
+    if (wantTitle || wantCta) {
+      const titleText = typeof input.title === "string" ? input.title.trim().slice(0, 140) : cp.title;
+      const ctaText = typeof input.cta === "string" ? input.cta.trim().slice(0, 140) : cp.ctaText;
+      if ((wantTitle && !titleText) || (wantCta && !ctaText)) throw new Error("O texto do título/CTA está vazio.");
+      const bad = await VideoSubtitleService.forbiddenIn(orgId, `${wantTitle ? titleText : ""} ${wantCta ? ctaText : ""}`);
+      if (bad.length) throw new Error(`O título/CTA contém termo(s) que a marca não usa (${bad.join(", ")}). Ajuste o texto.`);
+      if (!(await VideoSubtitleService.available())) throw new Error("Título e CTA na imagem não estão disponíveis neste servidor no momento.");
+      // Duração real do que vai pro ar: nunca marca o CTA depois do fim (fonte mais curta que o plano).
+      let realMs = finalDuration * 1000;
+      try { const info = await FfmpegService.probe(inputPath); if (info.durationMs > 0) realMs = Math.min(realMs, info.durationMs); }
+      catch (e: any) { if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed); throw e; }
+      const built = buildOverlays({ aspect, durationMs: realMs, title: wantTitle ? titleText : null, cta: wantCta ? ctaText : null });
+      overlayEvents = built.events;
+      overlayInfo = { title: built.events.some((e) => e.kind === "title") ? titleText : null, cta: built.events.some((e) => e.kind === "cta") ? ctaText : null, omitted: built.omitted };
+    }
+
     // Legenda (opcional): exige transcrição JÁ feita (não gasta IA escondido) e a capacidade de queimar (libass + fonte).
     let assPath: string | null = null; let subtitleNote = "";
+    let subCues: ReturnType<typeof buildCues> = [];
     if (input.subtitles) {
       const tr = VideoTranscriptionService.get(orgId, row.id);
       if (!tr) throw new Error("Transcreva o vídeo antes de pedir a legenda.");
@@ -214,21 +236,26 @@ export class VideoPostProductionService {
       if (!cues.length) throw new Error("A legenda ficou vazia na parte do vídeo que será usada.");
       const flagged = await VideoSubtitleService.flagged(orgId, cues);
       if (flagged.length) subtitleNote = ` Atenção: a fala contém termo(s) que a marca não usa (${flagged.join(", ")}); a legenda reproduz a fala sem alterá-la.`;
+      subCues = cues;
+    }
+    if (input.subtitles || overlayEvents.length) {
       assPath = path.join(os.tmpdir(), `zf-sub-${randomUUID()}.ass`);
-      fs.writeFileSync(assPath, toAss(cues, { aspect }), "utf8");
+      fs.writeFileSync(assPath, toAss(subCues, { aspect, overlays: overlayEvents }), "utf8");
     }
     try {
       const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect, subtitles: assPath ? { assPath, fontsDir: fontsDir() } : undefined, keep: pauseRes ? pauseRes.keep : undefined });
-      const applied = ["corte", "enquadramento", ...(assPath ? ["legenda"] : []), ...(pauseRes ? ["remoção de pausas"] : [])];
-      const notApplied = [...(assPath ? [] : ["legenda"]), ...(pauseRes ? [] : ["remoção de pausas"]), "título", "CTA na imagem"];
+      const hasTitle = !!overlayInfo?.title, hasCta = !!overlayInfo?.cta;
+      const applied = ["corte", "enquadramento", ...(input.subtitles ? ["legenda"] : []), ...(pauseRes ? ["remoção de pausas"] : []), ...(hasTitle ? ["título"] : []), ...(hasCta ? ["CTA na imagem"] : [])];
+      const notApplied = [...(input.subtitles ? [] : ["legenda"]), ...(pauseRes ? [] : ["remoção de pausas"]), ...(hasTitle ? [] : ["título"]), ...(hasCta ? [] : ["CTA na imagem"])];
       const mediaUrl = `/media/${outName}`;
       const id = randomUUID();
-      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento${pauseRes ? " + pausas" : ""})`, mediaUrl);
+      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento${pauseRes ? " + pausas" : ""}${overlayInfo?.title || overlayInfo?.cta ? " + título/CTA" : ""})`, mediaUrl);
       return {
         creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: finalDuration,
         applied, notApplied, outputBytes: r.outputBytes,
+        overlays: overlayInfo,
         pauses: input.removePauses ? { removedCount: pauseRes?.removedCount ?? 0, removedSec: pauseRes?.removedSec ?? 0, durationBeforeSec: pauseRes ? Math.round((pauseRes.keptSec + pauseRes.removedSec) * 10) / 10 : cp.targetDurationSec, durationAfterSec: finalDuration } : undefined,
-        note: `Cortei do início até a duração do plano, enquadrei no formato do canal${assPath ? ", queimei a legenda" : ""}${pauseRes ? ` e removi ${pauseRes.removedCount} pausa(s) (${pauseRes.removedSec.toFixed(1)} s), mantendo um respiro junto das falas` : ""}. ${input.removePauses && !pauseRes ? "Não encontrei pausas claras para cortar (música ou ruído de fundo também impedem). " : ""}O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
+        note: `Cortei do início até a duração do plano, enquadrei no formato do canal${input.subtitles ? ", queimei a legenda" : ""}${hasTitle || hasCta ? `, coloquei ${[hasTitle && "o título", hasCta && "o CTA"].filter(Boolean).join(" e ")}` : ""}${pauseRes ? ` e removi ${pauseRes.removedCount} pausa(s) (${pauseRes.removedSec.toFixed(1)} s), mantendo um respiro junto das falas` : ""}. ${input.removePauses && !pauseRes ? "Não encontrei pausas claras para cortar (música ou ruído de fundo também impedem). " : ""}${overlayInfo?.omitted.length ? `Não coube (vídeo curto): ${overlayInfo.omitted.join(", ")}. ` : ""}O vídeo original não foi alterado. O restante do plano segue manual.${subtitleNote}`,
       };
     } catch (e: any) {
       if (e instanceof FfmpegError) throw new Error(RENDER_MESSAGES[e.code] || RENDER_MESSAGES.ffmpeg_failed);

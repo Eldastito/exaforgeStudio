@@ -46,6 +46,7 @@
     "test:assisted-channels": "tsx scripts/test-assisted-channels.ts",
     "test:ffmpeg-service": "tsx scripts/test-ffmpeg-service.ts",
     "test:video-upload": "tsx scripts/test-video-upload.ts",
+    "test:video-transcription": "tsx scripts/test-video-transcription.ts",
     "test:content-broadcast": "tsx scripts/test-content-broadcast.ts",
     "test:campaign-stock-guard": "tsx scripts/test-campaign-stock-guard.ts",
     "test:growth-engine": "tsx scripts/test-growth-engine.ts",

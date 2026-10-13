@@ -12681,6 +12681,26 @@ const initDb = () => {
   // ADR-207 F13b.3 — origem da criação do Estúdio: gerada por IA (default, consome a cota mensal) × enviada pelo usuário × editada (ffmpeg).
   try { db.exec(`ALTER TABLE studio_creations ADD COLUMN source TEXT`); } catch(e){}
   try { db.exec(`UPDATE studio_creations SET source = 'edited' WHERE source IS NULL AND kind = 'video' AND prompt LIKE 'edição para %'`); } catch(e){}
+  // ADR-207 F13b.4 — transcrição de vídeo do Estúdio (texto + tempos). Edição de texto guardada À PARTE (original nunca perdido).
+  try { db.exec(`
+    CREATE TABLE IF NOT EXISTS video_transcripts (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      creation_id TEXT NOT NULL,
+      provider TEXT,
+      language TEXT,
+      text TEXT,
+      segments_json TEXT,
+      words_json TEXT,
+      edited_segments_json TEXT,
+      speech_detected INTEGER DEFAULT 1,
+      audio_seconds REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (organization_id, creation_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_video_transcripts_org ON video_transcripts (organization_id, created_at);
+  `); } catch(e){}
 };
 
 initDb();

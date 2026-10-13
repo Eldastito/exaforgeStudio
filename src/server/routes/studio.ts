@@ -11,6 +11,7 @@ import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
 import { VideoPostProductionService } from "../VideoPostProductionService.js";
 import { PublishPackageService } from "../PublishPackageService.js";
+import { VideoTranscriptionService, TranscriptionError } from "../VideoTranscriptionService.js";
 import { VideoUploadService, VideoUploadError, VIDEO_MIME_EXT, MAX_UPLOAD_BYTES } from "../VideoUploadService.js";
 import multer from "multer";
 import fs from "node:fs";
@@ -271,6 +272,36 @@ router.post("/video-post/upload", (req: AuthRequest, res): any => {
       res.json(await VideoUploadService.ingest(orgId, { tmpPath: f.path, originalName: f.originalname, mime: f.mimetype, size: f.size }));
     } catch (e: any) { res.status(400).json({ error: e instanceof VideoUploadError ? e.message : "Falha ao processar o vídeo." }); }
   });
+});
+
+// ── Transcrição de vídeo (ADR-207 F13b.4) — texto + tempos, separados do vídeo ──
+const trErr = (e: any) => e instanceof TranscriptionError ? e.message : "Falha ao transcrever o vídeo.";
+
+// POST /api/studio/video-post/:creationId/transcribe { language?, force? }
+router.post("/video-post/:creationId/transcribe", async (req: AuthRequest, res): Promise<any> => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(await VideoTranscriptionService.transcribe(orgId, (req as any).user?.userId || null, String(req.params.creationId),
+      { force: req.body?.force === true, language: req.body?.language ? String(req.body.language).slice(0, 8) : undefined }));
+  } catch (e: any) { res.status(400).json({ error: trErr(e) }); }
+});
+
+// GET /api/studio/video-post/:creationId/transcript
+router.get("/video-post/:creationId/transcript", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const t = VideoTranscriptionService.get(orgId, String(req.params.creationId));
+  if (!t) return res.status(404).json({ error: new TranscriptionError("no_transcript").message });
+  res.json(t);
+});
+
+// PUT /api/studio/video-post/:creationId/transcript { edits:[{index,text}] } — corrige texto; tempos e original preservados
+router.put("/video-post/:creationId/transcript", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(VideoTranscriptionService.editText(orgId, String(req.params.creationId), req.body?.edits)); }
+  catch (e: any) { res.status(e instanceof TranscriptionError && e.message === new TranscriptionError("no_transcript").message ? 404 : 400).json({ error: trErr(e) }); }
 });
 
 // ── Video Post-Production (ADR-207 F13b) — plano de edição vídeo bruto → pronto (não edita o arquivo) ──

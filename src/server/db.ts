@@ -12678,6 +12678,9 @@ const initDb = () => {
   // ADR-207 F9b — resposta a comentário do Instagram (governada): marca de que JÁ respondeu (idempotência durável).
   try { db.exec(`ALTER TABLE instagram_comment_intents ADD COLUMN replied_public_at DATETIME`); } catch(e){}
   try { db.exec(`ALTER TABLE instagram_comment_intents ADD COLUMN replied_private_at DATETIME`); } catch(e){}
+  // ADR-207 F13b.3 — origem da criação do Estúdio: gerada por IA (default, consome a cota mensal) × enviada pelo usuário × editada (ffmpeg).
+  try { db.exec(`ALTER TABLE studio_creations ADD COLUMN source TEXT`); } catch(e){}
+  try { db.exec(`UPDATE studio_creations SET source = 'edited' WHERE source IS NULL AND kind = 'video' AND prompt LIKE 'edição para %'`); } catch(e){}
 };
 
 initDb();

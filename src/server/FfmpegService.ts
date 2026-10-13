@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-export type FfmpegErrorCode = "ffmpeg_unavailable" | "input_not_found" | "input_too_large" | "timeout" | "ffmpeg_failed" | "output_too_large" | "busy";
+export type FfmpegErrorCode = "invalid_media" | "ffmpeg_unavailable" | "input_not_found" | "input_too_large" | "timeout" | "ffmpeg_failed" | "output_too_large" | "busy";
 export class FfmpegError extends Error {
   constructor(public code: FfmpegErrorCode, message?: string) { super(message || code); this.name = "FfmpegError"; }
 }
@@ -28,6 +28,22 @@ const DEFAULT_LIMITS: FfmpegLimits = {
   timeoutMs: Number(process.env.FFMPEG_TIMEOUT_MS) || 120_000,
   maxConcurrentJobs: Number(process.env.FFMPEG_MAX_CONCURRENT) || 2,
 };
+
+export interface MediaInfo { durationMs: number; width: number | null; height: number | null; videoCodec: string | null; audioCodec: string | null; hasVideo: boolean; hasAudio: boolean; fps: number | null }
+
+/** Lê a saída de `ffmpeg -i` (stderr). Pura — testável sem ffmpeg. Sem stream de vídeo → hasVideo=false (nunca inventa). */
+export function parseMediaInfo(stderr: string): MediaInfo {
+  const d = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr);
+  const durationMs = d ? Math.round(((+d[1]) * 3600 + (+d[2]) * 60 + parseFloat(d[3])) * 1000) : 0;
+  const v = /Stream #\d+:\d+[^\n]*?: Video: ([a-z0-9_]+)[^\n]*/i.exec(stderr);
+  const a = /Stream #\d+:\d+[^\n]*?: Audio: ([a-z0-9_]+)/i.exec(stderr);
+  const dim = v ? /,\s*(\d{2,5})x(\d{2,5})/.exec(v[0]) : null;
+  const fps = v ? /(\d+(?:\.\d+)?)\s*fps/.exec(v[0]) : null;
+  return {
+    durationMs, hasVideo: !!v, hasAudio: !!a, videoCodec: v ? v[1].toLowerCase() : null, audioCodec: a ? a[1].toLowerCase() : null,
+    width: dim ? +dim[1] : null, height: dim ? +dim[2] : null, fps: fps ? parseFloat(fps[1]) : null,
+  };
+}
 
 export interface RunResult { code: number | null; stdout: string; stderr: string; timedOut: boolean }
 export interface JobLog { jobId: string; organizationId: string | null; operation: string; inputBytes: number; outputBytes: number | null; elapsedMs: number; ok: boolean; errorCode?: string }
@@ -132,6 +148,19 @@ export class FfmpegService {
       if (slot) this.active--;
       if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ } }
     }
+  }
+
+  /** Metadados REAIS do arquivo (não confia em extensão/MIME). Arquivo ilegível → `invalid_media`. */
+  static async probe(inputPath: string): Promise<MediaInfo> {
+    const av = await this.available();
+    if (!av.available) throw new FfmpegError("ffmpeg_unavailable");
+    let st: fs.Stats;
+    try { st = fs.statSync(inputPath); if (!st.isFile()) throw new Error("x"); } catch { throw new FfmpegError("input_not_found"); }
+    const r = await this.run(["-hide_banner", "-i", inputPath], { timeoutMs: 15_000 });
+    if (r.timedOut) throw new FfmpegError("timeout");
+    const info = parseMediaInfo(r.stderr);
+    if (!info.hasVideo && !info.hasAudio) throw new FfmpegError("invalid_media");
+    return info;
   }
 
   // ── Operações (argumentos centralizados) ──

@@ -11,6 +11,10 @@ import { ScriptIntelligenceService } from "../ScriptIntelligenceService.js";
 import { ChannelAdaptationService } from "../ChannelAdaptationService.js";
 import { VideoPostProductionService } from "../VideoPostProductionService.js";
 import { PublishPackageService } from "../PublishPackageService.js";
+import { VideoUploadService, VideoUploadError, VIDEO_MIME_EXT, MAX_UPLOAD_BYTES } from "../VideoUploadService.js";
+import multer from "multer";
+import fs from "node:fs";
+import os from "node:os";
 import { StudioVisualRecipeService, VisualRecipeError } from "../StudioVisualRecipeService.js";
 
 const router = Router();
@@ -241,6 +245,32 @@ router.post("/publish-package", async (req: AuthRequest, res): Promise<any> => {
       sourceDurationSec: req.body?.sourceDurationSec ?? null,
     }));
   } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao montar o pacote." }); }
+});
+
+// ── Upload de vídeo próprio (ADR-207 F13b.3) — entra no mesmo pipeline do Estúdio ──
+// Disco (não memória): vídeos são grandes. Pasta temporária do SO; o serviço apaga o arquivo ao final.
+const videoUpload = multer({
+  storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, os.tmpdir()), filename: (_req, _file, cb) => cb(null, `zf-upload-${Date.now()}-${Math.random().toString(36).slice(2)}`) }),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+  fileFilter: (_req, file, cb) => { if (VIDEO_MIME_EXT[String(file.mimetype).toLowerCase()]) cb(null, true); else cb(new VideoUploadError("bad_type")); },
+});
+
+// POST /api/studio/video-post/upload (multipart, campo "file") -> { creationId, mediaUrl, metadata }
+router.post("/video-post/upload", (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  videoUpload.single("file")(req, res, async (err: any) => {
+    const f = (req as any).file;
+    if (err) {
+      if (f?.path) { try { fs.rmSync(f.path, { force: true }); } catch { /* noop */ } }
+      const msg = err instanceof VideoUploadError ? err.message : err?.code === "LIMIT_FILE_SIZE" ? new VideoUploadError("too_large").message : "Falha no envio do vídeo.";
+      return res.status(400).json({ error: msg });
+    }
+    if (!f) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    try {
+      res.json(await VideoUploadService.ingest(orgId, { tmpPath: f.path, originalName: f.originalname, mime: f.mimetype, size: f.size }));
+    } catch (e: any) { res.status(400).json({ error: e instanceof VideoUploadError ? e.message : "Falha ao processar o vídeo." }); }
+  });
 });
 
 // ── Video Post-Production (ADR-207 F13b) — plano de edição vídeo bruto → pronto (não edita o arquivo) ──

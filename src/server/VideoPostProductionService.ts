@@ -184,7 +184,7 @@ export class VideoPostProductionService {
       const r = await FfmpegService.trimReframe(orgId, inputPath, path.join(MEDIA_DIR, outName), { startSec: 0, durationSec: cp.targetDurationSec, aspect });
       const mediaUrl = `/media/${outName}`;
       const id = randomUUID();
-      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status) VALUES (?, ?, 'video', ?, ?, 'done')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento)`, mediaUrl);
+      db.prepare("INSERT INTO studio_creations (id, organization_id, kind, prompt, media_url, status, source) VALUES (?, ?, 'video', ?, ?, 'done', 'edited')").run(id, orgId, `edição para ${cp.label} (corte + enquadramento)`, mediaUrl);
       return {
         creationId: id, mediaUrl, channel: cp.channel, aspect, startSec: 0, durationSec: cp.targetDurationSec,
         applied: ["corte", "enquadramento"], notApplied: ["legenda", "remoção de pausas", "título", "CTA na imagem"], outputBytes: r.outputBytes,

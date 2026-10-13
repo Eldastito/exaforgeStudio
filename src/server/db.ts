@@ -12720,6 +12720,10 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_video_render_jobs_org ON video_render_jobs (organization_id, created_at);
   `); } catch(e){}
+
+  // ADR-207 F13c (2ª etapa) — registro MANUAL de resultado de publicação assistida. `source` distingue o que o provider
+  // mediu (NULL, legado) do que a pessoa digitou ('manual'); aditiva, sem backfill.
+  try { db.exec(`ALTER TABLE social_post_metrics ADD COLUMN source TEXT`); } catch(e){}
 };
 
 initDb();

@@ -1,6 +1,6 @@
 import { CampaignAiCostService } from "../CampaignAiCostService.js";
 import { Router } from "express";
-import { AuthRequest } from "../middleware/auth.js";
+import { AuthRequest, requireRole } from "../middleware/auth.js";
 import { MASTER_ADMIN_EMAIL } from "../config/secret.js";
 import { StudioService, CAMPAIGN_OBJECTIVES } from "../StudioService.js";
 import { InstagramService } from "../InstagramService.js";
@@ -13,6 +13,7 @@ import { VideoPostProductionService } from "../VideoPostProductionService.js";
 // Import ESTÁTICO de propósito: registrar o handler `video_render` no JobQueue já no boot (o sweep pós-reinício precisa dele).
 import { VideoRenderJobService } from "../VideoRenderJobService.js";
 import { PublishPackageService } from "../PublishPackageService.js";
+import { ManualPostResultService, ManualResultError } from "../ManualPostResultService.js";
 import { VideoTranscriptionService, TranscriptionError } from "../VideoTranscriptionService.js";
 import { VideoUploadService, VideoUploadError, VIDEO_MIME_EXT, MAX_UPLOAD_BYTES } from "../VideoUploadService.js";
 import multer from "multer";
@@ -248,6 +249,31 @@ router.post("/publish-package", async (req: AuthRequest, res): Promise<any> => {
       sourceDurationSec: req.body?.sourceDurationSec ?? null,
     }));
   } catch (e: any) { res.status(400).json({ error: e.message || "Falha ao montar o pacote." }); }
+});
+
+// POST /api/studio/manual-result { channel, link, caption?, kind?, publishedAt?, variantKey?, metrics?:{impressions,reach,likes,comments,shares,saves,clicks} }
+// Resultado de post feito À MÃO em canal assistido (ADR-207 F13c): números digitados, marcados source='manual'.
+router.post("/manual-result", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    res.json(ManualPostResultService.record(orgId, {
+      channel: String(req.body?.channel || ""), link: String(req.body?.link || ""),
+      caption: req.body?.caption ?? null, kind: req.body?.kind ?? null, publishedAt: req.body?.publishedAt ?? null,
+      variantKey: req.body?.variantKey ?? null, metrics: req.body?.metrics && typeof req.body.metrics === "object" ? req.body.metrics : {},
+    }));
+  } catch (e: any) {
+    if (e instanceof ManualResultError) return res.status(400).json({ error: e.message, code: e.code });
+    res.status(500).json({ error: "Não foi possível registrar o resultado." });
+  }
+});
+
+// GET /api/studio/manual-results?channel=&limit=
+router.get("/manual-results", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json({ results: ManualPostResultService.list(orgId, { channel: req.query.channel ? String(req.query.channel) : undefined, limit: Number(req.query.limit) || undefined }) }); }
+  catch { res.status(500).json({ error: "Não foi possível listar." }); }
 });
 
 // ── Upload de vídeo próprio (ADR-207 F13b.3) — entra no mesmo pipeline do Estúdio ──

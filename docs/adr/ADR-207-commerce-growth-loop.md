@@ -200,6 +200,15 @@ Sem motor/CRM/Studio/Scheduler/atribuição/cupom/estoque paralelo; aditivo e re
 - Rota `POST /api/studio/publish-package`. Sem tela. Teste `test:assisted-channels` (23).
 
 
+### F13c (2ª etapa) — EM PR (2026-10-13): resultado de publicação manual
+
+- **Escolha do dono**: dos 3 caminhos que sobravam (agregador, APIs diretas, registro manual) foi o registro manual — o único sem conta/chave/aprovação de terceiro.
+- **Entrega**: `ManualPostResultService` — depois de postar à mão num canal assistido, o dono cola o **link** e, se quiser, as **métricas** (impressões, alcance, curtidas, comentários, compartilhamentos, salvamentos, cliques). Grava em `social_post_metrics` (mesma tabela do Instagram/Facebook) com `source='manual'` (coluna aditiva). Com `variantKey` o post passa a contar no experimento criativo da variante (F6/F9) — sem 2º motor de medição.
+- **Regras**: só canais assistidos (instagram/facebook recusam e apontam a sincronização); link https do domínio do canal, normalizado (mesmo post = mesmo id; reenviar atualiza, campo omitido preserva); métrica em branco = NULL, nunca 0, e a análise só liga com ao menos um número; data exige hora (senão distorce o "melhor horário"); variante validada contra os experimentos da própria empresa; número muito acima das visualizações vira aviso. Owner/admin.
+- **Limites honestos**: número DIGITADO, não medido — e o experimento decide em cima dele; NÃO cria decision_action/confirmação, então não entra na garantia de resultado (PRD 8) nem no aprendizado automático (isso segue exigindo publicação governada por canal conectado); não é possível apagar uma métrica já informada (só substituir); sem tela (só API).
+- Rotas `POST /api/studio/manual-result` + `GET /api/studio/manual-results`. Teste `test:manual-post-result` (34).
+- **Continua em aberto (terceiro)**: publicação REAL nos 4 canais — agregador (Zernio/Outstand: falta escolha + conta de teste + chave) ou APIs diretas (app aprovado/auditoria de cada plataforma).
+
 ## 20. F13b (2ª etapa) — EM PR (2026-10-12): corte e enquadramento reais com ffmpeg empacotado
 
 - **Decisão**: em vez de provider de vídeo externo (conta/chave de terceiro), usar o binário empacotado `ffmpeg-static`, que funciona sem instalar nada no sistema. Declarado como `optionalDependencies`: se o download do binário falhar no build/deploy, a instalação NÃO falha — o app sobe e o processamento de vídeo fica "indisponível" (mensagem de cliente, resto do sistema intacto). `FFMPEG_PATH` sobrepõe com um binário do sistema.

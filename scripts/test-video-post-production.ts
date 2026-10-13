@@ -56,10 +56,14 @@ async function main() {
   const pNo = await V.plan(orgA, { topic: "x", channels: ["instagram"] });
   check("5.3 sem ffmpeg o PLANO segue funcionando (status 'unavailable')", pNo.plans.length === 1 && pNo.render.status === "unavailable");
   delete process.env.FFMPEG_PATH; FfmpegService.resetCache();
-  process.env.VIDEO_TRANSCRIBE_URL = "https://x.test/t";
+  const savedKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "sk-test"; FfmpegService.resetCache();
   const c1 = await new StubVideoPostProvider().capabilities();
-  check("5.5 transcrição configurada não liga legenda (não implementada)", c1.transcription && !c1.canRenderCaptions);
-  delete process.env.VIDEO_TRANSCRIBE_URL;
+  check("5.5 transcrição descoberta (ffmpeg + provider de fala), mas legenda ainda não é renderizada", c1.transcription && !c1.canRenderCaptions);
+  delete process.env.OPENAI_API_KEY;
+  const c2 = await new StubVideoPostProvider().capabilities();
+  check("5.5b sem provider de fala a transcrição fica indisponível", c2.ffmpeg && !c2.transcription);
+  if (savedKey !== undefined) process.env.OPENAI_API_KEY = savedKey;
 
   // render real
   const mediaDir = path.join(tmpDir, "media"); fs.mkdirSync(mediaDir, { recursive: true });

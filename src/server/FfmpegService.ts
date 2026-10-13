@@ -167,6 +167,10 @@ export class FfmpegService {
   static thumbnail(orgId: string | null, inputPath: string, finalOutPath: string, atSec = 1) {
     return this.process({ orgId, operation: "thumbnail", inputPath, finalOutPath, outExt: "jpg", buildArgs: (i, o) => ["-y", "-ss", String(Math.max(0, atSec)), "-i", i, "-frames:v", "1", "-q:v", "3", o] });
   }
+  /** Extrai o áudio em WAV mono 16 kHz (entrada padrão de speech-to-text). Vídeo sem áudio → `ffmpeg_failed` (use `probe` antes). */
+  static extractAudio(orgId: string | null, inputPath: string, finalOutPath: string) {
+    return this.process({ orgId, operation: "extract_audio", inputPath, finalOutPath, outExt: "wav", buildArgs: (i, o) => ["-y", "-i", i, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", o] });
+  }
   /** Corta [startSec, startSec+durationSec] e enquadra (crop central) na proporção `aspect` (ex.: "9:16"); H.264/AAC. */
   static trimReframe(orgId: string | null, inputPath: string, finalOutPath: string, p: { startSec: number; durationSec: number; aspect: "9:16" | "1:1" | "16:9" }) {
     const [w, h] = p.aspect.split(":").map(Number);

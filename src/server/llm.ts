@@ -410,6 +410,43 @@ export async function transcribeAudio(
   return res.text || "";
 }
 
+/** Custo (USD) da transcrição: o Whisper cobra por MINUTO de áudio (a `transcribeAudio` simples usa estimativa fixa por chamada). */
+export function whisperCostUsd(durationSec: number): number {
+  const sec = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0;
+  return (sec / 60) * WHISPER_COST_USD;
+}
+
+/** Modelo da transcrição COM tempos: `verbose_json` + timestamps só existem no whisper-1 (não nos modelos gpt-4o-*). */
+export const TRANSCRIBE_TIMED_MODEL = process.env.OPENAI_TRANSCRIBE_TIMED_MODEL || "whisper-1";
+
+/**
+ * Transcreve um áudio e devolve texto + segmentos + palavras COM TEMPO (ms). O custo entra no ledger `ai_usage_log`
+ * (atribuído pelo contexto de uso: org/módulo/correlação) proporcional à duração. `opts.client` existe só p/ teste.
+ */
+export async function transcribeAudioTimed(
+  buffer: Buffer,
+  filename: string,
+  mimetype: string,
+  opts: { language?: string; durationSec?: number; client?: any } = {},
+): Promise<{ text: string; language: string | null; durationSec: number | null; segments: Array<{ startMs: number; endMs: number; text: string }>; words: Array<{ startMs: number; endMs: number; text: string }> }> {
+  const file = await toFile(buffer, filename, { type: mimetype });
+  const t0 = Date.now();
+  const client = opts.client || getClient();
+  const res: any = await client.audio.transcriptions.create({
+    file,
+    model: TRANSCRIBE_TIMED_MODEL,
+    language: opts.language || process.env.OPENAI_TRANSCRIBE_LANG || "pt",
+    response_format: "verbose_json",
+    timestamp_granularities: ["segment", "word"],
+  });
+  const dur = Number.isFinite(Number(res?.duration)) ? Number(res.duration) : (opts.durationSec ?? null);
+  recordUsage(TRANSCRIBE_TIMED_MODEL, "audio", 0, 0, whisperCostUsd(dur ?? opts.durationSec ?? 0), Date.now() - t0);
+  const ms = (v: any) => Math.max(0, Math.round(Number(v) * 1000) || 0);
+  const segments = (Array.isArray(res?.segments) ? res.segments : []).map((x: any) => ({ startMs: ms(x.start), endMs: ms(x.end), text: String(x.text || "").trim() })).filter((x: any) => x.text);
+  const words = (Array.isArray(res?.words) ? res.words : []).map((x: any) => ({ startMs: ms(x.start), endMs: ms(x.end), text: String(x.word ?? x.text ?? "").trim() })).filter((x: any) => x.text);
+  return { text: String(res?.text || "").trim(), language: res?.language ? String(res.language) : null, durationSec: dur, segments, words };
+}
+
 /** Descreve/extrai texto (OCR) de uma imagem usando o modelo multimodal (GPT-4o). */
 export async function describeImage(
   base64: string,

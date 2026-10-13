@@ -21,6 +21,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import db from "./db.js";
 import { FfmpegService, FfmpegError } from "./FfmpegService.js";
+import { getSpeechToTextProvider } from "./SpeechToTextProvider.js";
 import { ScriptIntelligenceService } from "./ScriptIntelligenceService.js";
 import { ChannelAdaptationService, SocialChannelName } from "./ChannelAdaptationService.js";
 
@@ -44,11 +45,11 @@ export class StubVideoPostProvider implements VideoPostProvider {
   async capabilities(): Promise<VideoPostCapabilities> {
     const av = await FfmpegService.available();
     const ffmpeg = av.available;
-    const transcription = !!process.env.VIDEO_TRANSCRIBE_URL;
+    const transcription = ffmpeg && getSpeechToTextProvider().available();
     const notes: string[] = [];
     if (!ffmpeg) notes.push("O processamento de vídeo não está disponível neste servidor no momento (ffmpeg).");
     else notes.push("Disponível: corte e enquadramento. Legenda automática, remoção de pausas, título e CTA na imagem ainda não são aplicados.");
-    if (!transcription) notes.push("Sem serviço de transcrição configurado — legenda automática indisponível.");
+    if (!transcription) notes.push("A transcrição não está disponível neste servidor no momento.");
     return { ffmpeg, transcription, canRenderTrimReframe: ffmpeg, canRenderCaptions: false, renderImplemented: ffmpeg, notes };
   }
 }

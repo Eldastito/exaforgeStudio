@@ -33,11 +33,11 @@ jobs:
     steps:
       # fetch-depth: 0 — a Action resolve o diff base (PR) e o grafo incremental
       # a partir do histórico; sem o histórico completo o blast radius fica cego.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (fixado por SHA — ver docs/runbook/seguranca-atualizacao-2026-10.md)
         with:
           fetch-depth: 0
 
-      - uses: tirth8205/code-review-graph@v2.3.7
+      - uses: tirth8205/code-review-graph@6a1ee1c7063cc35cfa5ff12b8198c29360f3e4ad # v2.3.7 (fixado por SHA; tag é móvel)
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment: 'true'

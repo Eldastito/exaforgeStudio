@@ -99,6 +99,7 @@ Origem: PRD "ZapFlow Decision Intelligence Fabric 2.0". A Fase 0 (análise compa
 10. **Feature flags opt-in** — `organization_settings.{modulo}_{feature}_enabled INTEGER DEFAULT 0`.
 11. **Import dinâmico** pra quebrar ciclos entre services: `import("./X.js").then(m => m.X.method(...))`.
 12. **BusinessSignal** (ADR-136) — quando um detector precisa alertar a operação, publica em `business_signals` com `dedupe_key` — nunca cria tabela própria de "alertas".
+13. **IP do cliente** — sempre `clientIp(req)` de `src/server/clientIp.ts`; NUNCA ler `X-Forwarded-For`/`req.ip` direto (o cabeçalho é do cliente e burla rate-limit/lockout). Proxies de confiança: `TRUSTED_PROXY_HOPS` (padrão 1). Guardado por `test:security-update-oct2026`; contexto em `docs/runbook/seguranca-atualizacao-2026-10.md`.
 
 ## Fluxo padrão de uma fatia
 

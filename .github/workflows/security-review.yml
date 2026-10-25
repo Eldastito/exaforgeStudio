@@ -22,14 +22,14 @@ jobs:
     # só roda quando o secret existe (evita falha barulhenta antes da configuração)
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (fixado por SHA — ver docs/runbook/seguranca-atualizacao-2026-10.md)
         with:
           fetch-depth: 0
       - name: Claude Code Security Review
         if: ${{ env.CLAUDE_API_KEY != '' }}
         env:
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
-        uses: anthropics/claude-code-security-review@main
+        uses: anthropics/claude-code-security-review@0c6a49f1fa56a1d472575da86a94dbc1edb78eda # main em 2026-02-11 (fixado por SHA; branch é móvel e este passo recebe CLAUDE_API_KEY)
         with:
           claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
           comment-pr: true

@@ -7,6 +7,7 @@ import { FashionAvatarService } from "../FashionAvatarService.js";
 import { FashionLookService } from "../FashionLookService.js";
 import { FashionTryOnService } from "../FashionTryOnService.js";
 import { FashionPresetAvatarService } from "../FashionPresetAvatarService.js";
+import { clientIp } from "../clientIp.js";
 
 // ============================================================================
 // PROVADOR VIRTUAL — rotas públicas do cliente final (FAS-1, ADR-035).
@@ -35,7 +36,7 @@ function rateLimited(key: string, max: number, windowMs: number): boolean {
   buckets.set(key, b);
   return b.count > max;
 }
-const ipOf = (req: Request) => String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+const ipOf = (req: Request) => clientIp(req);
 
 // Resolve a loja pelo slug e exige o módulo LIGADO (mesma resposta 404 do
 // FAS-0 quando desligado — não revela que o recurso existe).

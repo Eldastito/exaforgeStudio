@@ -27,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (fixado por SHA — ver docs/runbook/seguranca-atualizacao-2026-10.md)
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 (fixado por SHA)
         with:
           node-version: '22'
           cache: 'npm'
@@ -72,10 +72,10 @@ jobs:
       JWT_SECRET: 'ci-secret-not-used-in-prod-1234567890abcdef'
       NODE_ENV: 'production'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (fixado por SHA — ver docs/runbook/seguranca-atualizacao-2026-10.md)
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 (fixado por SHA)
         with:
           node-version: '22'
           cache: 'npm'

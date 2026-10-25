@@ -200,6 +200,8 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { transcribeAudio, describeImage, analyzeImageForChat, analyzePdfForChat } from "./src/server/llm.js";
 import { JWT_SECRET } from "./src/server/config/secret.js";
+import { clientIp } from "./src/server/clientIp.js";
+import { NodeRuntimeSecurityService } from "./src/server/NodeRuntimeSecurityService.js";
 import fs from "fs";
 
 // Diretório onde as mídias (imagens) recebidas são salvas (volume persistente /data).
@@ -340,7 +342,7 @@ async function startServer() {
         if (p.startsWith('/api/webhooks') || p.startsWith('/api/connector-in') || p.startsWith('/media') || p.startsWith('/assets') || !p.startsWith('/api')) {
            return next();
         }
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const ip = clientIp(req);
         const now = Date.now();
         const limitConfig = { max: parseInt(process.env.RATE_LIMIT_MAX || '3000', 10), windowMs: 15 * 60 * 1000 };
         const ipKey = String(ip);
@@ -890,7 +892,7 @@ async function startServer() {
         if (instForHealth) ChannelWebhookCredentialService.recordHit(instForHealth, okSecret, okSecret ? 'recebido' : 'segredo_incorreto');
       } catch { /* noop */ }
       if (!okSecret) return;
-      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown');
+      const ip = clientIp(req);
       if (!rateLimit(`wh:${ip}`, 120, 60 * 1000)) {
         return res.status(429).json({ error: "Too many webhook requests" });
       }
@@ -1118,7 +1120,7 @@ async function startServer() {
     // precisa mostrar até tentativa rejeitada (para o lojista ver a Meta batendo).
     const hitId = MetaWebhookLogService.record({
       method: "GET",
-      sourceIp: (req.ip || req.socket?.remoteAddress || "").toString(),
+      sourceIp: clientIp(req),
       userAgent: req.get("user-agent") || null,
       object: "verify",
       payload: { mode, token: token ? "<presente>" : "<vazio>", challenge: challenge ? "<presente>" : "<vazio>" },
@@ -1263,7 +1265,7 @@ async function startServer() {
     // Instagram DM confirma esse blind spot.
     const hitId = MetaWebhookLogService.record({
       method: "POST",
-      sourceIp: (req.ip || req.socket?.remoteAddress || "").toString(),
+      sourceIp: clientIp(req),
       userAgent: req.get("user-agent") || null,
       object: req.body?.object || null,
       payload: req.body,
@@ -1582,6 +1584,8 @@ async function startServer() {
   // janela de ~10s do Docker/Coolify) se isso passar de poucos segundos.
   const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Segurança do runtime: avisa alto se o Node é anterior ao release de 21/10/2026 (não aparece em npm audit).
+    NodeRuntimeSecurityService.logAtBoot();
     // Diagnóstico de sessão (Provador Virtual): confirma de ONDE vem o segredo
     // de JWT e QUANTAS instâncias/bancos existem. Se aparecerem DUAS linhas
     // [BOOT] com instanceId diferentes, há múltiplas réplicas com bancos SQLite

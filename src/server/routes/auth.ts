@@ -15,6 +15,7 @@ import { PLAN_BUNDLES } from "../plansGrade.js";
 import { logAuthEvent } from "../auditLog.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
 import { requireAuth, AuthRequest, normalizeUserRole } from "../middleware/auth.js";
+import { clientIp } from "../clientIp.js";
 
 const router = Router();
 
@@ -34,8 +35,7 @@ const emailLoginLimiter = new DistributedLoginLimiter({ maxAttempts: 5, lockMs: 
 const LOGIN_BY_IP = /^(1|true|yes|on)$/i.test(String(process.env.LOGIN_RATELIMIT_BY_IP || ""));
 const ipLoginLimiter = new DistributedLoginLimiter({ maxAttempts: 20, lockMs: LOGIN_LOCK_MS, prefix: "loginrl:ip" });
 // Mesmo padrão de IP que o resto do app (rate-limit global, radar/fashion public).
-const loginClientIp = (req: Request): string =>
-  String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+const loginClientIp = (req: Request): string => clientIp(req);   // não lê X-Forwarded-For cru (spoofável) — ver clientIp.ts
 
 // Política mínima de senha (cadastro e troca de senha).
 function passwordPolicyError(pw: string): string | null {

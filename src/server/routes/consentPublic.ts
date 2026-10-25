@@ -5,6 +5,7 @@
  */
 import { Router, Request, Response } from "express";
 import { PdvConsentLinkService } from "../PdvConsentLinkService.js";
+import { clientIp } from "../clientIp.js";
 
 const router = Router();
 const buckets = new Map<string, { n: number; reset: number }>();
@@ -12,7 +13,7 @@ export const CONSENT_PUBLIC_MAX = 40, CONSENT_PUBLIC_WINDOW_MS = 10 * 60 * 1000;
 export function resetConsentPublicLimiter() { buckets.clear(); }
 
 function limited(req: Request): boolean {
-  const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+  const ip = clientIp(req);
   const now = Date.now();
   let b = buckets.get(ip);
   if (!b || now > b.reset) b = { n: 0, reset: now + CONSENT_PUBLIC_WINDOW_MS };

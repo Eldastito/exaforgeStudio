@@ -141,6 +141,7 @@ import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
 import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
+import { RetailFilialRemapService } from "../RetailFilialRemapService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
@@ -1534,6 +1535,30 @@ router.get("/stores/filial-codes/audit", requireNetworkScope, (req: AuthRequest,
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailFilialCodeAuditService.report(orgId, { into: req.query.into ? String(req.query.into) : null }));
+});
+// Troca de código de filial no histórico (loja que mudou de código): prévia (leitura) → aplicar (confirmação digitada) → desfazer. owner/admin da rede.
+router.get("/stores/filial-remap/plan", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailFilialRemapService.plan(orgId, String(req.query.from || ""), String(req.query.into || ""))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+router.get("/stores/filial-remap/history", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ remaps: RetailFilialRemapService.history(orgId) });
+});
+router.post("/stores/filial-remap/apply", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailFilialRemapService.apply(orgId, { from: String(req.body?.from || ""), into: String(req.body?.into || ""), confirm: String(req.body?.confirm || ""), expectedMove: req.body?.expectedMove || {} }, req.user?.userId)); }
+  catch (e: any) { res.status(/plan_changed|confirm_mismatch/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+router.post("/stores/filial-remap/undo/:remapId", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailFilialRemapService.undo(orgId, req.params.remapId, req.user?.userId)); }
+  catch (e: any) { res.status(/already_undone/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });
 // "É alguém já cadastrado?" — seletor da rede inteira + vínculo do código novo à pessoa existente (alias reversível). owner/admin da rede.
 router.get("/sellers/identity/directory", requireNetworkScope, (req: AuthRequest, res): any => {

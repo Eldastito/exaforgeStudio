@@ -12744,6 +12744,29 @@ const initDb = () => {
     );
     CREATE INDEX IF NOT EXISTS idx_pickup_ready_notices_status ON pickup_ready_notices (organization_id, status);
   `); } catch(e){ console.error('[DB] Falha ao criar pickup_ready_notices (ADR-207 F14)', e); }
+
+  // Troca de código de filial (loja que mudou de código: ex. 1006 → 1084). Cada troca guarda o id de CADA linha movida,
+  // para DESFAZER sem restaurar backup. Nada é apagado; colisões ficam no lugar.
+  try { db.exec(`
+    CREATE TABLE IF NOT EXISTS retail_filial_remaps (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      from_filial TEXT NOT NULL,
+      into_filial TEXT NOT NULL,
+      counts_json TEXT,
+      actor_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      undone_at DATETIME,
+      undone_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_retail_filial_remaps_org ON retail_filial_remaps (organization_id, created_at);
+    CREATE TABLE IF NOT EXISTS retail_filial_remap_rows (
+      remap_id TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      row_id TEXT NOT NULL,
+      PRIMARY KEY (remap_id, table_name, row_id)
+    );
+  `); } catch(e){ console.error('[DB] Falha ao criar retail_filial_remaps', e); }
 };
 
 initDb();

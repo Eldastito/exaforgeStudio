@@ -7645,6 +7645,12 @@ function UnidentifiedSellersCard() {
   const [items, setItems] = useState<any[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [audit, setAudit] = useState<any | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const runAudit = async () => {
+    setAuditing(true);
+    try { const r = await apiFetch('/api/retailops/sellers/identity/audit'); setAudit(r.ok ? await r.json() : { error: true }); } catch { setAudit({ error: true }); } finally { setAuditing(false); }
+  };
   const load = useCallback(() => {
     apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
   }, []);
@@ -7671,6 +7677,25 @@ function UnidentifiedSellersCard() {
             <button disabled={busy === u.matricula || !(names[u.matricula] || '').trim()} onClick={() => save(u.matricula)} className="px-2 py-1 rounded-md bg-amber-600/80 hover:bg-amber-600 text-white text-[12px] disabled:opacity-40">Confirmar</button>
           </div>
         ))}
+      </div>
+      <div className="mt-2">
+        <button onClick={runAudit} disabled={auditing} className="text-[11px] text-amber-300 hover:underline disabled:opacity-50">{auditing ? 'Analisando…' : 'Conferir códigos parados e possíveis duplicados (só leitura)'}</button>
+        {audit?.error && <p className="mt-1 text-[11px] text-rose-300">Não foi possível analisar agora.</p>}
+        {audit && !audit.error && (
+          <div className="mt-2 text-[11px] text-zinc-300 space-y-1">
+            <p>{audit.summary.pendingActive} vendendo nos últimos {audit.inactiveDays} dias · {audit.summary.pendingStopped} parados · {audit.summary.withSuccessor} com possível código sucessor</p>
+            {audit.pending.map((r: any) => (
+              <div key={r.matricula} className="rounded-md bg-zinc-900/60 border border-zinc-800 px-2 py-1">
+                <span className="text-zinc-100">{r.matricula}</span> · {r.status === 'parado' ? `parado há ${r.daysSinceLast} dias` : 'vendendo'} · {r.sales} vendas · {r.stores.map((x: any) => x.storeName || x.filial).join(', ')}
+                {r.erpNames.length > 0 && <span className="text-zinc-400"> · ERP: {r.erpNames.join(' / ')}</span>}
+                {r.flags.sharedBoxSuspect && <span className="text-amber-300"> · volume alto por dia (pode ser caixa compartilhado)</span>}
+                {r.flags.testPattern && <span className="text-amber-300"> · parece código de teste</span>}
+                {r.successors.map((x: any) => <div key={x.matricula} className="text-zinc-400">↳ {x.evidence === 'forte' ? 'provável' : 'possível'} sucessor: {x.name || x.matricula} ({x.matricula}) — {x.why}</div>)}
+              </div>
+            ))}
+            {audit.notes.map((n: string) => <p key={n} className="text-zinc-500">{n}</p>)}
+          </div>
+        )}
       </div>
     </div>
   );

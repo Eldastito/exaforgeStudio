@@ -1,3 +1,4 @@
+import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
@@ -7887,6 +7888,15 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
   const [store, setStore] = useState(storeId || '');
   const [lotar, setLotar] = useState(!!storeId);
   const [saving, setSaving] = useState(false);
+  // Cadastro: "é alguém já cadastrado?" — escolher a pessoa em vez de criar outra com nome diferente.
+  const [people, setPeople] = useState<DirectoryPerson[]>([]);
+  const [pick, setPick] = useState('');
+  const picked = people.find(p => dirLabel(p) === pick) || null;
+  const similar = allowCodeEdit && !picked ? similarPeople(name, people) : [];
+  useEffect(() => {
+    if (!allowCodeEdit) return;
+    apiFetch('/api/retailops/sellers/identity/directory').then(r => (r.ok ? r.json() : null)).then(d => setPeople(Array.isArray(d?.sellers) ? d.sellers : [])).catch(() => setPeople([]));
+  }, [allowCodeEdit]);
   const storeList = stores || [];
   const lotStore = allowCodeEdit ? store : storeId;
   const lotStoreName = allowCodeEdit ? (storeList.find((s: any) => s.id === store)?.name || 'loja escolhida') : (storeName || 'loja atual');
@@ -7906,7 +7916,26 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowCodeEdit, store, matTouched]);
 
+  const choosePerson = (label: string) => {
+    setPick(label);
+    // matrícula sugerida pela rede não serve aqui: é o código REAL que a pessoa usa no PDV.
+    if (!matTouched && people.some(p => dirLabel(p) === label)) { setMat(''); setMatTouched(true); }
+  };
+  const saveLink = async () => {
+    const matricula = mat.trim();
+    if (!picked) return;
+    if (!matricula) { toast.error('Informe a matrícula (código do vendedor no PDV).'); return; }
+    if (matricula === picked.matricula) { toast.error('Essa já é a matrícula dessa pessoa.'); return; }
+    setSaving(true);
+    try {
+      const r = await apiFetch(`/api/retailops/sellers/${picked.id}/aliases`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: matricula, kind: 'matricula' }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Não foi possível vincular.');
+      toast.success(`Matrícula ${matricula} agora é de ${picked.name}.`); onSaved();
+    } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
+  };
   const save = async () => {
+    if (picked) return saveLink();
     const matricula = mat.trim();
     if (!matricula) { toast.error('Informe a matrícula (código do vendedor no PDV).'); return; }
     if (!name.trim()) { toast.error('Informe o nome do vendedor.'); return; }
@@ -7939,17 +7968,30 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
           <input value={mat} onChange={e => { setMat(e.target.value); setMatTouched(true); }} disabled={!allowCodeEdit} placeholder="Ex.: 1024" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 disabled:opacity-60 font-mono" />
           {allowCodeEdit && <span className="mt-1 block text-[10px] text-zinc-500">{suggesting ? 'Sugerindo no padrão da rede…' : 'Sugerida automaticamente no padrão da rede — pode editar.'}</span>}
         </label>
-        <label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
+        {allowCodeEdit && people.length > 0 && (
+          <label className="block text-[12px] text-zinc-400 mb-2">Já cadastrado? Busque a pessoa
+            <input list="seller-people" value={pick} onChange={e => choosePerson(e.target.value)} placeholder="Nome — matrícula · loja" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+            <datalist id="seller-people">{people.map(p => <option key={p.id} value={dirLabel(p)} />)}</datalist>
+            {picked && <span className="mt-1 block text-[10px] text-sky-300">A matrícula abaixo vira apelido de <strong>{picked.name}</strong>; nenhum vendedor novo é criado e a lotação dela não muda (para transferir, use "Lojas do vendedor").</span>}
+          </label>
+        )}
+        {!picked && (<label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
           <input value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="Ex.: Maria Souza" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" onKeyDown={e => { if (e.key === 'Enter') save(); }} />
-        </label>
-        {lotStore && (
+        </label>)}
+        {similar.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-[11px] text-amber-200">
+            Já existe alguém com nome parecido — é a mesma pessoa?
+            {similar.map(p => <button key={p.id} type="button" onClick={() => choosePerson(dirLabel(p))} className="mt-1 block w-full text-left rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">{dirLabel(p)} — <span className="text-sky-300">é esta pessoa</span></button>)}
+          </div>
+        )}
+        {lotStore && !picked && (
           <label className="mb-3 flex items-center gap-2 text-[12px] text-zinc-300">
             <input type="checkbox" checked={lotar} onChange={e => setLotar(e.target.checked)} /> Lotar em <strong>{lotStoreName}</strong>
           </label>
         )}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">Cancelar</button>
-          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : 'Salvar'}</button>
+          <button onClick={save} disabled={saving} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{saving ? 'Salvando…' : picked ? 'Vincular matrícula' : 'Salvar'}</button>
         </div>
       </div>
     </div>

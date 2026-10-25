@@ -14,6 +14,9 @@ import { ConsentPage } from './clinic-public/ConsentPage.tsx';
 import { PatientPortalPage } from './clinic-public/PatientPortalPage.tsx';
 import { ComigoMesaPage } from './comigo-public/ComigoMesaPage.tsx';
 import { FalatuApp } from './falatu-app/FalatuApp.tsx';
+import { installStaleChunkGuard } from './lib/staleChunk.ts';
+
+installStaleChunkGuard();
 
 // ADR-154 F7.1 — app FalaTu STANDALONE por subdomínio dedicado. Quando o
 // host começa com `falatu.` (ex.: falatu.tesseractauto.com.br), servimos um

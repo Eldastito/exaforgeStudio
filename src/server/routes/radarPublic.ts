@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { RadarPublicService } from "../RadarPublicService.js";
 import { RadarRespondentService } from "../RadarRespondentService.js";
+import { clientIp as clientIpOf } from "../clientIp.js";
 
 // Rotas PÚBLICAS do diagnóstico rápido do Radar — sem login, sem
 // organização. Montadas em server.ts ANTES do bloco `protectedApi`, mesmo
@@ -32,7 +33,7 @@ function rateLimit(key: string, max: number, windowMs: number): boolean {
   return b.count <= max;
 }
 function clientIp(req: any): string {
-  return String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  return clientIpOf(req);
 }
 
 // Teto genérico por IP em TODA a rota pública (ADR-026): os limites

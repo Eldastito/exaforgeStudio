@@ -17,7 +17,12 @@
 #    tirando o código-fonte) exige validar os caminhos de asset num build real.
 
 # ── Estágio 1: builder (tem toolchain + devDeps; é descartado) ──────────────
-FROM node:22-bookworm-slim AS builder
+# Node FIXADO na versão que corrige o release de segurança de 21/10/2026 (Brotli out-of-bounds write CVE-2026-111497,
+# DNS/TLS/HTTP — nodejs.org/en/blog/vulnerability/october-2026-security-releases). Antes era `node:22-bookworm-slim`
+# (tag flutuante): um rebuild com cache de camada reaproveitava o Node ANTIGO sem avisar. Ao subir de versão, troque aqui
+# (ou passe --build-arg NODE_IMAGE=...) e confira em src/server/NodeRuntimeSecurityService.ts (tabela de mínimos).
+ARG NODE_IMAGE=node:22.23.4-bookworm-slim
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 
 # Ferramentas p/ compilar módulos nativos (better-sqlite3, bcrypt). Só no builder.
@@ -42,7 +47,7 @@ RUN npm run build && npm run build:vision-cloud && npm run build:supervisor
 RUN npm prune --omit=dev
 
 # ── Estágio 2: runtime (sem toolchain, sem devDeps) ─────────────────────────
-FROM node:22-bookworm-slim
+FROM ${NODE_IMAGE}
 WORKDIR /app
 
 # `tini` é o init de facto para containers Docker — é literalmente o binário

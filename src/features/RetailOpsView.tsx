@@ -7645,6 +7645,19 @@ function UnidentifiedSellersCard() {
   const [items, setItems] = useState<any[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [people, setPeople] = useState<Array<{ id: string; name: string; matricula: string; stores: string[] }>>([]);
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const personLabel = (p: { name: string; matricula: string; stores: string[] }) => `${p.name} — ${p.matricula}${p.stores.length ? ` · ${p.stores.join(', ')}` : ''}`;
+  const linkTo = async (m: string) => {
+    const person = people.find(p => personLabel(p) === (picks[m] || ''));
+    if (!person) { toast.error('Escolha uma pessoa da lista.'); return; }
+    setBusy(m);
+    try {
+      const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: m, sellerId: person.id }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`Código ${m} agora é de ${person.name}.`); setPicks(x => ({ ...x, [m]: '' })); load(); } else toast.error(d.error || 'Não foi possível vincular.');
+    } finally { setBusy(null); }
+  };
   const [audit, setAudit] = useState<any | null>(null);
   const [auditing, setAuditing] = useState(false);
   const runAudit = async () => {
@@ -7655,6 +7668,9 @@ function UnidentifiedSellersCard() {
     apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    apiFetch('/api/retailops/sellers/identity/directory').then(r => (r.ok ? r.json() : null)).then(d => setPeople(Array.isArray(d?.sellers) ? d.sellers : [])).catch(() => setPeople([]));
+  }, []);
   if (!items.length) return null;
   const save = async (m: string) => {
     const name = (names[m] || '').trim();
@@ -7675,6 +7691,12 @@ function UnidentifiedSellersCard() {
             <span className="text-zinc-500">{u.sales} venda{u.sales === 1 ? '' : 's'}{u.lastSale ? ` · última ${String(u.lastSale).slice(0, 10)}` : ''}</span>
             <input value={names[u.matricula] || ''} onChange={e => setNames(n => ({ ...n, [u.matricula]: e.target.value }))} placeholder="Nome da pessoa" className="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-100 text-[12px] w-44" />
             <button disabled={busy === u.matricula || !(names[u.matricula] || '').trim()} onClick={() => save(u.matricula)} className="px-2 py-1 rounded-md bg-amber-600/80 hover:bg-amber-600 text-white text-[12px] disabled:opacity-40">Confirmar</button>
+            {people.length > 0 && (<>
+              <span className="text-zinc-600">ou</span>
+              <input list={`people-${u.matricula}`} value={picks[u.matricula] || ''} onChange={e => setPicks(x => ({ ...x, [u.matricula]: e.target.value }))} placeholder="Já cadastrado? busque o nome" className="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-100 text-[12px] w-56" />
+              <datalist id={`people-${u.matricula}`}>{people.map(p => <option key={p.id} value={personLabel(p)} />)}</datalist>
+              <button disabled={busy === u.matricula || !(picks[u.matricula] || '').trim()} onClick={() => linkTo(u.matricula)} className="px-2 py-1 rounded-md bg-sky-700/80 hover:bg-sky-600 text-white text-[12px] disabled:opacity-40">É esta pessoa</button>
+            </>)}
           </div>
         ))}
       </div>

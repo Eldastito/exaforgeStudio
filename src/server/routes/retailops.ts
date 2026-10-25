@@ -1528,6 +1528,18 @@ router.get("/sellers/identity/audit", requireNetworkScope, (req: AuthRequest, re
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailSellerCodeAuditService.audit(orgId, { inactiveDays: Number(req.query.inactiveDays) || undefined }));
 });
+// "É alguém já cadastrado?" — seletor da rede inteira + vínculo do código novo à pessoa existente (alias reversível). owner/admin da rede.
+router.get("/sellers/identity/directory", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json({ sellers: RetailSellerIdentityService.directory(orgId) });
+});
+router.post("/sellers/identity/link-matricula", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerIdentityService.linkMatricula(orgId, String(req.body?.matricula || ""), String(req.body?.sellerId || ""), req.user?.userId)); }
+  catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
 // F1.1c — "são a mesma pessoa?": sugestões por nome + resposta de um toque. owner/admin.
 router.get("/sellers/identity/suggestions", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;

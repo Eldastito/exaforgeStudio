@@ -283,6 +283,47 @@ export class RetailSellerIdentityService {
     return out;
   }
 
+  /**
+   * Pessoas já cadastradas (nomeadas, ativas, não fundidas) com as lojas — alimenta o seletor
+   * "é alguém já cadastrado?" para o código novo virar apelido da pessoa em vez de duplicá-la.
+   * Rede inteira: quem transfere de loja precisa aparecer em qualquer lista.
+   */
+  static directory(orgId: string): Array<{ id: string; name: string; matricula: string; stores: string[] }> {
+    const rows = db.prepare(
+      `SELECT id, name, matricula FROM retail_sellers
+        WHERE organization_id = ? AND active = 1 AND merged_into_seller_id IS NULL AND name IS NOT NULL AND TRIM(name) <> ''
+        ORDER BY name`
+    ).all(orgId) as any[];
+    const st = db.prepare(
+      `SELECT a.seller_id, s.name FROM retail_seller_store_assignments a
+         JOIN retail_stores s ON s.organization_id = a.organization_id AND s.id = a.store_id
+        WHERE a.organization_id = ? AND a.active = 1 ORDER BY s.name`
+    ).all(orgId) as any[];
+    const bySeller = new Map<string, string[]>();
+    for (const r of st) { if (!bySeller.has(r.seller_id)) bySeller.set(r.seller_id, []); bySeller.get(r.seller_id)!.push(r.name); }
+    return rows.map((r) => ({ id: r.id, name: r.name, matricula: String(r.matricula), stores: bySeller.get(r.id) || [] }));
+  }
+
+  /**
+   * Gesto HUMANO: "o código `matricula` é a pessoa `sellerId`". Só aceita código que de fato aparece nas
+   * vendas (não inventa código) e vira alias de matrícula — reversível (removeAlias) e sem criar vendedor.
+   * Conflito (código já é de outra pessoa) → erro, nunca "rouba" em silêncio.
+   */
+  static linkMatricula(orgId: string, matricula: string, sellerId: string, actorId?: string | null): { matricula: string; sellerId: string; name: string | null } {
+    const m = String(matricula ?? "").trim();
+    if (!m) throw new Error("Informe o código do vendedor.");
+    const seen = db.prepare(
+      `SELECT 1 FROM retail_pdv_sales WHERE organization_id = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor) = ? LIMIT 1`
+    ).get(orgId, m);
+    const seenErp = seen || db.prepare(`SELECT 1 FROM retail_erp_seller_sales WHERE organization_id = ? AND matricula = ? LIMIT 1`).get(orgId, m);
+    if (!seenErp) throw new Error("Esse código não aparece nas vendas desta empresa.");
+    const target = this.seller(orgId, sellerId);
+    if (!target) throw new Error("Vendedor não encontrado.");
+    this.addAlias(orgId, sellerId, { alias: m, kind: "matricula" }, actorId);
+    try { logAuthEvent(orgId, actorId || "system", sellerId, "RETAIL_SELLER_MATRICULA_LINKED", { matricula: m }); } catch { /* noop */ }
+    return { matricula: m, sellerId, name: target.name || null };
+  }
+
   // ── fusão governada ───────────────────────────────────────────────────────
   /**
    * Funde `fromId` em `intoId`. NÃO apaga nada: `from` é desativada e marcada `merged_into`;

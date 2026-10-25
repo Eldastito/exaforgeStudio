@@ -12,7 +12,6 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 let failures = 0; const results: { name: string; ok: boolean; detail?: string }[] = [];
 function check(name: string, ok: boolean, detail = "") { results.push({ name, ok, detail }); if (!ok) failures++; }
 const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), "utf8");
-const ver = (rel: string) => JSON.parse(read(rel)).version as string;
 const cmp = (a: string, b: string) => { const x = a.split(".").map((n) => parseInt(n, 10) || 0), y = b.split(".").map((n) => parseInt(n, 10) || 0); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 const walk = (dir: string, out: string[] = []): string[] => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p, out); else if (p.endsWith(".ts")) out.push(p); } return out; };
 
@@ -75,14 +74,18 @@ async function main() {
   check("5.6 aviso roda no boot do servidor (e não derruba nada: try/catch no log)", /NodeRuntimeSecurityService\.logAtBoot\(\)/.test(srv) && /log nunca derruba o boot/.test(read("src/server/NodeRuntimeSecurityService.ts")));
 
   // ── 6. piso das dependências ──
+  // Versões lidas do LOCKFILE (o que `npm ci` instala), não de node_modules: no CI o job roda com NODE_ENV=production e as
+  // dependências só de build (ex.: fast-uri) nem ficam instaladas — ler node_modules dava falso "0.0.0".
+  const lockPk = JSON.parse(read("package-lock.json")).packages as Record<string, { version?: string }>;
+  const lockVer = (key: string) => lockPk[key]?.version || "0.0.0";
   const floors: [string, string, string][] = [
-    ["multer", "node_modules/multer/package.json", "2.5.0"], ["sharp", "node_modules/sharp/package.json", "0.35.5"],
-    ["@xmldom/xmldom", "node_modules/@xmldom/xmldom/package.json", "0.9.12"], ["xml-crypto→@xmldom/xmldom (0.8.x)", "node_modules/xml-crypto/node_modules/@xmldom/xmldom/package.json", "0.8.15"],
-    ["express", "node_modules/express/package.json", "4.22.3"], ["proxy-addr", "node_modules/proxy-addr/package.json", "2.0.8"],
-    ["body-parser", "node_modules/body-parser/package.json", "1.20.9"], ["qs", "node_modules/qs/package.json", "6.16.0"],
-    ["engine.io", "node_modules/engine.io/package.json", "6.6.10"], ["vite", "node_modules/vite/package.json", "6.4.5"], ["fast-uri", "node_modules/fast-uri/package.json", "3.1.9"],
+    ["multer", "node_modules/multer", "2.5.0"], ["sharp", "node_modules/sharp", "0.35.5"],
+    ["@xmldom/xmldom", "node_modules/@xmldom/xmldom", "0.9.12"], ["xml-crypto→@xmldom/xmldom (0.8.x)", "node_modules/xml-crypto/node_modules/@xmldom/xmldom", "0.8.15"],
+    ["express", "node_modules/express", "4.22.3"], ["proxy-addr", "node_modules/proxy-addr", "2.0.8"],
+    ["body-parser", "node_modules/body-parser", "1.20.9"], ["qs", "node_modules/qs", "6.16.0"],
+    ["engine.io", "node_modules/engine.io", "6.6.10"], ["vite", "node_modules/vite", "6.4.5"], ["fast-uri", "node_modules/fast-uri", "3.1.9"],
   ];
-  for (const [name, rel, min] of floors) { const v = fs.existsSync(path.join(repoRoot, rel)) ? ver(rel) : "0.0.0"; check(`6.${name}: instalado ${v} ≥ ${min}`, cmp(v, min) >= 0); }
+  for (const [name, key, min] of floors) { const v = lockVer(key); check(`6.${name}: lockfile ${v} ≥ ${min}`, cmp(v, min) >= 0); }
   const pkg = JSON.parse(read("package.json"));
   const declared = (n: string) => String((pkg.dependencies?.[n] ?? pkg.devDependencies?.[n]) || "").replace(/^[\^~]/, "");
   check("6.12 package.json declara o piso (um `npm install` limpo não volta pra versão vulnerável)", cmp(declared("multer"), "2.5.0") >= 0 && cmp(declared("sharp"), "0.35.5") >= 0 && cmp(declared("@xmldom/xmldom"), "0.9.12") >= 0 && cmp(declared("express"), "4.22.3") >= 0 && cmp(declared("vite"), "6.4.5") >= 0);
@@ -90,7 +93,7 @@ async function main() {
   check("6.14 whatsapp-web.js (sem nenhum uso no código, trazia puppeteer + 10 avisos) saiu; nada a importa", !pkg.dependencies?.["whatsapp-web.js"] && ![path.join(repoRoot, "server.ts"), ...walk(path.join(repoRoot, "src"))].some((f) => /whatsapp-web\.js|puppeteer/.test(fs.readFileSync(f, "utf8"))));
   const lock = read("package-lock.json");
   check("6.15 nenhum pacote dos worms noticiados (keyv/cacheable/@subql/common/tensorlake) no lockfile — retrato de 25/10/2026", !/"node_modules\/(keyv|cacheable|@subql\/common|tensorlake)"/.test(lock));
-  check("6.16 npm ci continua determinístico: lockfile e package.json concordam (multer no lock = declarado)", new RegExp(`"node_modules/multer": \\{\\s*"version": "${ver("node_modules/multer/package.json").replace(/\./g, "\\.")}"`).test(lock));
+  check("6.16 npm ci determinístico: o lockfile resolve o multer dentro da faixa declarada (≥ piso) e a raiz do lock concorda com package.json", cmp(lockVer("node_modules/multer"), declared("multer")) >= 0 && JSON.stringify((JSON.parse(lock) as any).packages[""].dependencies?.multer) === JSON.stringify(pkg.dependencies.multer));
 
   // ── 7. CI: ações de terceiros fixadas por SHA (tag/branch são móveis; um deles recebe a CLAUDE_API_KEY) ──
   const wfDir = path.join(repoRoot, ".github/workflows");

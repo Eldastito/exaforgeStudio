@@ -126,6 +126,11 @@ export class Scheduler {
       import("./StorePickupService.js").then((m) => m.StorePickupService.pass())
         .catch((e) => console.error('[Scheduler] validade da reserva de retirada falhou', e));
     } catch (e) { console.error('[Scheduler] pass de retirada na loja falhou', e); }
+    // Aviso "pronto para retirar" (ADR-207 F14): re-tenta o que foi bloqueado por horário/limite e cura a transição perdida. Opt-in por empresa.
+    try {
+      import("./PickupReadyNoticeService.js").then((m) => m.PickupReadyNoticeService.pass())
+        .catch((e) => console.error('[Scheduler] aviso de retirada pronta falhou', e));
+    } catch (e) { console.error('[Scheduler] pass do aviso de retirada falhou', e); }
     // SLA de primeira resposta: sensível a minutos (uma meta de 30 min não pode
     // ser vigiada de hora em hora), então mora no passe rápido.
     try { this.ticketSlaPass(); } catch (e: any) { console.error('[Scheduler] SLA de tickets falhou', e.message); }

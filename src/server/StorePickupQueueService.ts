@@ -27,19 +27,37 @@ const PAID_OPEN = ["pago", "em_preparo"];
 const stageOf = (row: any): PickupStage => (ORDER.includes(row?.pickup_status) ? row.pickup_status : "a_separar");
 
 export class StorePickupQueueService {
-  private static items(orderId: string) {
+  /** Ganchos "dispara e esquece" em andamento (o aviso ao cliente). Só o teste espera por eles; produção nunca aguarda. */
+  private static hooks = new Set<Promise<unknown>>();
+  static async settleHooks(): Promise<void> { while (this.hooks.size) await Promise.allSettled([...this.hooks]); }
+
+  static items(orderId: string) {
     return (db.prepare("SELECT name_snapshot AS name, quantity FROM order_items WHERE order_id = ? ORDER BY rowid").all(orderId) as any[])
       .map((i) => ({ name: i.name, quantity: i.quantity }));
   }
 
-  private static customer(orgId: string, row: any): { name: string | null; phone: string | null } {
+  static customer(orgId: string, row: any): { name: string | null; phone: string | null } {
     if (row.contact_id) {
       const c = db.prepare("SELECT name, phone FROM contacts WHERE id = ? AND organization_id = ?").get(row.contact_id, orgId) as any;
       if (c) return { name: c.name || null, phone: c.phone || null };
     }
     // Cliente anônimo da vitrine: nome/telefone ficam só na observação do pedido ("Cliente: X (tel)").
-    const m = /Cliente: ([^(·]+?)(?: \(([^)]*)\))?(?: ·|$)/.exec(String(row.notes || ""));
+    // O telefone pode vir com parênteses — "(11) 98888-7777" — por isso o grupo do telefone vai até o ")" que fecha antes de " ·" ou do fim.
+    const m = /Cliente: ([^(·]+?)(?: \((.*?)\))?(?: ·|$)/.exec(String(row.notes || ""));
     return { name: m?.[1]?.trim() || null, phone: m?.[2]?.trim() || null };
+  }
+
+  private static noticeEnabled(orgId: string): boolean {
+    try { return Number((db.prepare("SELECT pickup_ready_notice_enabled AS v FROM organization_settings WHERE organization_id = ?").get(orgId) as any)?.v || 0) === 1; } catch { return false; }
+  }
+
+  /** Estado do aviso "pronto para retirar" do pedido (só faz sentido depois de "pronto"; sem registro = null). */
+  private static noticeOf(orgId: string, row: any): { status: string; at: string | null } | null {
+    if (row.pickup_status !== "pronto" && row.pickup_status !== "retirado") return null;
+    try {
+      const n = db.prepare("SELECT status, COALESCE(sent_at, updated_at) AS at FROM pickup_ready_notices WHERE organization_id = ? AND order_id = ?").get(orgId, row.id) as any;
+      return n ? { status: n.status, at: n.at || null } : null;
+    } catch { return null; }
   }
 
   /**
@@ -48,7 +66,7 @@ export class StorePickupQueueService {
    */
   static queue(orgId: string, opts: { storeIds?: string[] | null; includeDone?: boolean } = {}) {
     const scope = opts.storeIds;
-    if (Array.isArray(scope) && scope.length === 0) return { queue: [], awaitingPayment: [] };
+    if (Array.isArray(scope) && scope.length === 0) return { queue: [], awaitingPayment: [], noticeEnabled: false };
     const inScope = Array.isArray(scope) ? ` AND o.pickup_store_id IN (${scope.map(() => "?").join(",")})` : "";
     const args = Array.isArray(scope) ? scope : [];
     const base = `SELECT o.id, o.status, o.pickup_store_id, o.pickup_status, o.pickup_status_at, o.reserve_expires_at, o.contact_id, o.notes, o.created_at, s.name AS store_name
@@ -62,10 +80,11 @@ export class StorePickupQueueService {
       stage: r.status === "aguardando_pagamento" ? null : stageOf(r), stageAt: r.pickup_status_at || null,
       reserveExpiresAt: r.reserve_expires_at || null, createdAt: r.created_at,
       customer: this.customer(orgId, r), items: this.items(r.id),
+      notice: this.noticeOf(orgId, r),
     });
     // Retirado sai da fila ativa (só aparece com includeDone).
     const queue = paid.map(shape).filter((q) => opts.includeDone || q.stage !== "retirado");
-    return { queue, awaitingPayment: waiting.map(shape) };
+    return { queue, awaitingPayment: waiting.map(shape), noticeEnabled: this.noticeEnabled(orgId) };
   }
 
   /**
@@ -92,6 +111,13 @@ export class StorePickupQueueService {
     // O alerta de "separar agora" cumpriu o papel assim que alguém separou (ou além).
     StorePickupSignal.resolve(orgId, orderId);
     try { logAuthEvent(orgId, actorId || "system", orderId, "STORE_PICKUP_STAGE", { from: cur, to }); } catch { /* noop */ }
+    // Aviso ao cliente (ADR-207 F14): só na transição para "pronto", opt-in por empresa, dispara e esquece — nunca atrasa nem derruba o avanço.
+    if (to === "pronto") {
+      try {
+        const hook = import("./PickupReadyNoticeService.js").then((m) => m.PickupReadyNoticeService.fireOnReady(orgId, orderId)).catch(() => {});
+        this.hooks.add(hook); hook.finally(() => this.hooks.delete(hook));
+      } catch { /* noop */ }
+    }
     return { ok: true, stage: to as PickupStage, changed: true };
   }
 }

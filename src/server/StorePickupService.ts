@@ -34,21 +34,26 @@ const DEFAULT_MINUTES = 120;
 
 export class StorePickupService {
   // ── Configuração (dono/admin) ────────────────────────────────────────────────
-  static settings(orgId: string): { enabled: boolean; reserveEnabled: boolean; offerable: boolean; reserveMinutes: number } {
-    let enabled = false; let minutes = DEFAULT_MINUTES;
+  static settings(orgId: string): { enabled: boolean; reserveEnabled: boolean; offerable: boolean; reserveMinutes: number; readyNotice: boolean } {
+    let enabled = false; let minutes = DEFAULT_MINUTES; let readyNotice = false;
     try {
-      const r = db.prepare("SELECT pickup_enabled, pickup_reserve_minutes FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
+      const r = db.prepare("SELECT pickup_enabled, pickup_reserve_minutes, pickup_ready_notice_enabled FROM organization_settings WHERE organization_id = ?").get(orgId) as any;
       enabled = !!Number(r?.pickup_enabled);
+      readyNotice = !!Number(r?.pickup_ready_notice_enabled);
       const m = trunc(r?.pickup_reserve_minutes);
       if (m >= MIN_MINUTES && m <= MAX_MINUTES) minutes = m;
     } catch { /* coluna ausente → desligado */ }
     const reserveEnabled = RetailOnlineReserveService.isEnabled(orgId);
-    return { enabled, reserveEnabled, offerable: enabled && reserveEnabled, reserveMinutes: minutes };
+    return { enabled, reserveEnabled, offerable: enabled && reserveEnabled, reserveMinutes: minutes, readyNotice };
   }
 
-  static setSettings(orgId: string, patch: { enabled?: boolean; reserveMinutes?: number }): ReturnType<typeof StorePickupService.settings> {
+  static setSettings(orgId: string, patch: { enabled?: boolean; reserveMinutes?: number; readyNotice?: boolean }): ReturnType<typeof StorePickupService.settings> {
     if (patch.enabled !== undefined) {
       db.prepare("UPDATE organization_settings SET pickup_enabled = ? WHERE organization_id = ?").run(patch.enabled ? 1 : 0, orgId);
+    }
+    if (patch.readyNotice !== undefined) {
+      db.prepare("UPDATE organization_settings SET pickup_ready_notice_enabled = ?, pickup_ready_notice_enabled_at = CASE WHEN ? = 1 AND COALESCE(pickup_ready_notice_enabled, 0) = 0 THEN CURRENT_TIMESTAMP ELSE pickup_ready_notice_enabled_at END WHERE organization_id = ?").run(patch.readyNotice ? 1 : 0, patch.readyNotice ? 1 : 0, orgId);
+      try { logAuthEvent(orgId, "system", orgId, patch.readyNotice ? "PICKUP_READY_NOTICE_ENABLED" : "PICKUP_READY_NOTICE_DISABLED", {}); } catch { /* noop */ }
     }
     if (patch.reserveMinutes !== undefined) {
       const m = trunc(patch.reserveMinutes);

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
 import { apiFetch } from '@/src/lib/api';
+import { noticeBadge, NOTICE_SETTING_HELP, TONE_CLASS } from './pickup/noticeLabels';
 import { useStore } from '@/src/store/useStore';
 import { RETAIL_TAB_GROUPS, groupOfTab } from '@/src/lib/retailOpsGroups';
 import { trackAction } from '@/src/lib/uxTelemetry';
@@ -1541,13 +1542,13 @@ function PricingTab() {
  * Sem dinheiro. O gerente de loja só enxerga as lojas dele (o servidor recorta). Atualiza sozinha a cada 30 s.
  */
 function PickupQueuePanel() {
-  const [data, setData] = useState<{ queue: any[]; awaitingPayment: any[] } | null>(null);
+  const [data, setData] = useState<{ queue: any[]; awaitingPayment: any[]; noticeEnabled: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = async () => {
     const res = await apiFetch('/api/retailops/pickup/queue').catch(() => null);
     if (!res || !res.ok) return;
     const d = await res.json().catch(() => null);
-    if (d) setData({ queue: d.queue || [], awaitingPayment: d.awaitingPayment || [] });
+    if (d) setData({ queue: d.queue || [], awaitingPayment: d.awaitingPayment || [], noticeEnabled: !!d.noticeEnabled });
   };
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
   if (!data || (data.queue.length === 0 && data.awaitingPayment.length === 0)) return null;
@@ -1585,6 +1586,7 @@ function PickupQueuePanel() {
                 <ul className="mt-1 text-[12px] text-zinc-300">{o.items.map((i: any, k: number) => <li key={k}>{i.quantity}× {i.name}</li>)}</ul>
               </div>
               <span className={`rounded-full border px-2 py-0.5 text-[11px] ${o.stage === 'a_separar' ? 'border-amber-500/40 text-amber-300' : 'border-emerald-500/40 text-emerald-300'}`}>{STAGE[o.stage] || o.stage}</span>
+              {(() => { const nb = noticeBadge(o.notice, o.stage, data.noticeEnabled); return nb ? <span className={`rounded-full border px-2 py-0.5 text-[11px] ${TONE_CLASS[nb.tone]}`}>{nb.text}</span> : null; })()}
               {nx && <button disabled={busy === o.orderId} onClick={() => advance(o, nx.to)} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{nx.label}</button>}
             </div>
           );
@@ -1640,6 +1642,13 @@ function PickupSettingsPanel({ reserveOn }: { reserveOn: boolean }) {
         <label className="text-xs text-zinc-400">Prazo da reserva (minutos, de 15 a 1440):</label>
         <input type="number" min={15} max={1440} value={minutes} onChange={e => setMinutes(e.target.value)} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100 w-24" />
         <button onClick={() => put('/api/retailops/pickup/settings', { reserveMinutes: Number(minutes) }, 'Prazo salvo.')} className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800">Salvar prazo</button>
+      </div>
+      <div className="mt-3">
+        <label className="inline-flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={!!data.settings?.readyNotice} onChange={e => put('/api/retailops/pickup/settings', { readyNotice: e.target.checked }, e.target.checked ? 'Aviso “pronto para retirar” ligado.' : 'Aviso “pronto para retirar” desligado.')} />
+          Avisar o cliente no WhatsApp quando o pedido estiver pronto
+        </label>
+        <p className="mt-1 text-[12px] text-zinc-500">{NOTICE_SETTING_HELP}</p>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         {(data.stores || []).map((s: any) => (

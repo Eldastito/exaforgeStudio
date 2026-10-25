@@ -12724,6 +12724,26 @@ const initDb = () => {
   // ADR-207 F13c (2ª etapa) — registro MANUAL de resultado de publicação assistida. `source` distingue o que o provider
   // mediu (NULL, legado) do que a pessoa digitou ('manual'); aditiva, sem backfill.
   try { db.exec(`ALTER TABLE social_post_metrics ADD COLUMN source TEXT`); } catch(e){}
+
+  // ADR-207 F14 — aviso "pronto para retirar" ao cliente (retirada na loja). Opt-in por empresa (default DESLIGADO) e um
+  // registro por pedido (UNIQUE) = nunca avisa duas vezes. O telefone NÃO é guardado aqui (minimização LGPD): só o status.
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pickup_ready_notice_enabled INTEGER DEFAULT 0`); } catch(e){}
+  try { db.exec(`ALTER TABLE organization_settings ADD COLUMN pickup_ready_notice_enabled_at DATETIME`); } catch(e){}   // quando foi ligado: nada retroativo
+  try { db.exec(`
+    CREATE TABLE IF NOT EXISTS pickup_ready_notices (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      order_id TEXT NOT NULL,
+      status TEXT NOT NULL,          -- sent | blocked_consent | opted_out | no_phone | no_channel | blocked_quiet_hours | blocked_frequency_cap | failed | expired | obsolete
+      attempts INTEGER NOT NULL DEFAULT 0,
+      detail TEXT,
+      sent_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(organization_id, order_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pickup_ready_notices_status ON pickup_ready_notices (organization_id, status);
+  `); } catch(e){ console.error('[DB] Falha ao criar pickup_ready_notices (ADR-207 F14)', e); }
 };
 
 initDb();

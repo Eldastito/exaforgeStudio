@@ -573,6 +573,7 @@ router.put("/pickup/settings", requireNetworkScope, (req: AuthRequest, res): any
     res.json({ ok: true, settings: StorePickupService.setSettings(orgId, {
       enabled: b.enabled === undefined ? undefined : !!b.enabled,
       reserveMinutes: b.reserveMinutes === undefined ? undefined : Number(b.reserveMinutes),
+      readyNotice: b.readyNotice === undefined ? undefined : !!b.readyNotice,
     }) });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

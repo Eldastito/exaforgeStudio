@@ -140,6 +140,7 @@ import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
+import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
@@ -1527,6 +1528,12 @@ router.get("/sellers/identity/audit", requireNetworkScope, (req: AuthRequest, re
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailSellerCodeAuditService.audit(orgId, { inactiveDays: Number(req.query.inactiveDays) || undefined }));
+});
+// Prévia SOMENTE LEITURA das vendas guardadas sob códigos de filial sem loja ativa (loja que mudou de código). owner/admin da rede.
+router.get("/stores/filial-codes/audit", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailFilialCodeAuditService.report(orgId, { into: req.query.into ? String(req.query.into) : null }));
 });
 // "É alguém já cadastrado?" — seletor da rede inteira + vínculo do código novo à pessoa existente (alias reversível). owner/admin da rede.
 router.get("/sellers/identity/directory", requireNetworkScope, (req: AuthRequest, res): any => {

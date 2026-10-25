@@ -1,3 +1,4 @@
+import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
@@ -2778,6 +2779,7 @@ function ClosingsTab() {
       <DailyInformeCard date={date} />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 
+      {isNetwork && <FilialCodeAuditCard />}
       {stores.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center">
           <p className="text-sm text-zinc-500">Nenhuma loja cadastrada na rede ainda.</p>

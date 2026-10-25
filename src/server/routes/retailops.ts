@@ -139,6 +139,7 @@ import { RetailBoletaService } from "../RetailBoletaService.js";
 import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
+import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
 import { RetailPdvCatalogResolver } from "../RetailPdvCatalogResolver.js";
 import { RetailAnalyticsCache } from "../RetailAnalyticsCache.js";
@@ -1520,6 +1521,12 @@ router.get("/sellers/identity/unidentified", requireNetworkScope, (req: AuthRequ
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ unidentified: RetailSellerIdentityService.unidentified(orgId) });
+});
+// Auditoria SOMENTE LEITURA dos códigos a identificar (parado há >45d? sucessor na mesma loja? mesmo nome?). owner/admin da rede.
+router.get("/sellers/identity/audit", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailSellerCodeAuditService.audit(orgId, { inactiveDays: Number(req.query.inactiveDays) || undefined }));
 });
 // F1.1c — "são a mesma pessoa?": sugestões por nome + resposta de um toque. owner/admin.
 router.get("/sellers/identity/suggestions", requireNetworkScope, (req: AuthRequest, res): any => {

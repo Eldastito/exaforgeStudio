@@ -47,6 +47,8 @@
     "test:manual-post-result": "tsx scripts/test-manual-post-result.ts",
     "test:manual-result-ui": "tsx scripts/test-manual-result-ui.ts",
     "test:security-update-oct2026": "tsx scripts/test-security-update-oct2026.ts",
+    "test:retail-seller-code-audit": "tsx scripts/test-retail-seller-code-audit.ts",
+    "test:stale-chunk": "tsx scripts/test-stale-chunk.ts",
     "test:pickup-ready-notice": "tsx scripts/test-pickup-ready-notice.ts",
     "test:ffmpeg-service": "tsx scripts/test-ffmpeg-service.ts",
     "test:video-upload": "tsx scripts/test-video-upload.ts",

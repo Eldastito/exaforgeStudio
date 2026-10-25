@@ -2,6 +2,7 @@
 // conseguem tipar a base Component (props/setState). O componente é simples e
 // correto em runtime; o build (vite/esbuild) o compila normalmente.
 import React, { Component } from "react";
+import { isStaleChunkError, reloadIfStale, hardReload } from "../lib/staleChunk";
 
 /**
  * Captura erros de render de uma view e mostra uma mensagem em vez de derrubar
@@ -22,6 +23,7 @@ export class ErrorBoundary extends Component<any, State> {
 
   componentDidCatch(error: Error, info: any) {
     console.error("[ErrorBoundary] Erro ao renderizar a tela:", error, info);
+    reloadIfStale(error);
   }
 
   componentDidUpdate(prev: any) {
@@ -44,7 +46,7 @@ export class ErrorBoundary extends Component<any, State> {
               {String(this.state.error?.message || this.state.error)}
             </pre>
             <button
-              onClick={() => this.setState({ error: null })}
+              onClick={() => (isStaleChunkError(this.state.error) ? hardReload() : this.setState({ error: null }))}
               className="mt-4 text-xs px-3 py-1.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 hover:bg-zinc-700"
             >Tentar de novo</button>
           </div>

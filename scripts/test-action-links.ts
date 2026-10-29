@@ -1,0 +1,34 @@
+/**
+ * TESTE — links de "acerto" (aviso → lugar e campo certos). Piloto: margem bruta da loja.
+ * Uso: npm run test:action-links
+ */
+import fs from "fs";
+import { pickStoreForFix, storeFieldId } from "../src/lib/actionLinks.ts";
+let failures = 0;
+const check = (n: string, ok: boolean) => { console.log(`${ok ? "PASS" : "FAIL"} ${n}`); if (!ok) failures++; };
+
+const stores = [
+  { id: "a", name: "Av. brasil", active: 1, gross_margin_percent: 55 },
+  { id: "b", name: "BANGU", active: 1, gross_margin_percent: null },
+  { id: "c", name: "Carioca", active: 1, gross_margin_percent: 0 },
+  { id: "d", name: "FR MADUREIRA", active: 0, gross_margin_percent: null },
+  { id: "e", name: "Grande Rio", active: true, gross_margin_percent: "" },
+];
+check("sem loja pedida: a primeira ATIVA sem margem", pickStoreForFix(stores, null, "margin")?.id === "b");
+check("margem 0 e vazia contam como sem margem", pickStoreForFix(stores.filter((s) => s.id !== "b"), null, "margin")?.id === "c");
+check("loja inativa nunca é escolhida", pickStoreForFix(stores.filter((s) => ["d"].includes(s.id)), null, "margin") === null);
+check("loja pedida existe: abre ela (mesmo já tendo margem)", pickStoreForFix(stores, "a", "margin")?.id === "a");
+check("loja pedida inexistente ou inativa: null (não abre outra)", pickStoreForFix(stores, "zzz", "margin") === null && pickStoreForFix(stores, "d", "margin") === null);
+check("todas com margem: null", pickStoreForFix([stores[0]], null, "margin") === null);
+check("lista vazia: null", pickStoreForFix([], null, "margin") === null);
+check("id do campo", storeFieldId("margin") === "store-field-margin");
+
+const v = fs.readFileSync("src/features/RetailOpsView.tsx", "utf8");
+const st = fs.readFileSync("src/store/useStore.ts", "utf8");
+check("o input da margem tem o id que o link procura", /<input id=\{storeFieldId\('margin'\)\}/.test(v));
+check("aviso: 'Editar loja' e cada loja sem margem são links", /<ActionLink onClick=\{\(\) => fixMargin\(null\)\}[^>]*>Editar loja<\/ActionLink>/.test(v) && /fixMargin\(s\.storeId\)/.test(v));
+check("link troca para a aba Fechamento e guarda o destino", /setPendingStoreFix\(\{ storeId, field: 'margin' \}\); setPendingRetailTab\('fechamento'\)/.test(v));
+check("destino: só dono/admin da rede abre; consome o pedido", /if \(!isNetwork\) \{ toast\.error\('Só o dono ou administrador da rede edita a loja\.'\)/.test(v) && /setPendingStoreFix\(null\);\s*\n\s*if \(!isNetwork\)/.test(v));
+check("o modal recebe o campo e foca", /focusField=\{storeModal\.focusField\}/.test(v) && /scrollIntoView/.test(v));
+check("store: pedido pendente declarado e iniciado nulo", /pendingStoreFix: \{ storeId: string \| null; field: 'margin' \} \| null;/.test(st) && /pendingStoreFix: null,/.test(st));
+process.exit(failures ? 1 : 0);

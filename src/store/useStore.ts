@@ -149,6 +149,8 @@ type AppState = {
   setPendingAsk: (q: string | null) => void;
   pendingRetailTab: string | null;             // atalho da barra: abre a Operação da Rede já numa aba (ex.: comissao)
   setPendingRetailTab: (t: string | null) => void;
+  pendingStoreFix: { storeId: string | null; field: 'margin' } | null;   // link de "acerto": abre a loja certa já no campo que falta
+  setPendingStoreFix: (f: { storeId: string | null; field: 'margin' } | null) => void;
   loadPermissions: () => Promise<void>;
   canAccessModule: (moduleKey: string) => boolean;
   contacts: Record<string, Contact>;
@@ -363,6 +365,8 @@ export const useStore = create<AppState>((set, get) => ({
   setPendingAsk: (q) => set({ pendingAsk: q }),
   pendingRetailTab: null,
   setPendingRetailTab: (t) => set({ pendingRetailTab: t }),
+  pendingStoreFix: null,
+  setPendingStoreFix: (f) => set({ pendingStoreFix: f }),
   loadPermissions: async () => {
     // Delegado — /api/entitlements/me já traz `meta.permissions` + hasProfile
     // + isMasterAdmin + falatuEnabled em uma única chamada. Mantido pra não

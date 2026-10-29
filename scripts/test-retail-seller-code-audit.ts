@@ -46,6 +46,32 @@ async function main() {
   check("não mistura organizações", !r.pending.some((x) => x.matricula === "OTHER") && S.audit(B, { asOf: ASOF }).pending.length === 1);
   check("identificado sai da pendência mas segue como candidato a sucessor", (() => { db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name) VALUES (?, ?, 'NEW1', 'Maria Souza')`).run(randomUUID(), A); const z = S.audit(A, { asOf: ASOF }); return !z.pending.some((x) => x.matricula === "NEW1") && z.pending.find((x) => x.matricula === "OLD1")!.successors[0]?.matricula === "NEW1"; })());
   check("resumo coerente", r.summary.pending === r.pending.length && r.summary.pendingActive + r.summary.pendingStopped === r.summary.pending);
+
+  // ── pessoa provável pelo lançamento manual diário (BANGU: PDV 10830005 vs manual do Marcus) ──
+  db.prepare(`INSERT INTO retail_stores (id, organization_id, name, code) VALUES (?, ?, 'BANGU', '1083')`).run(randomUUID(), A);
+  const mk = (code: string, date: string, v: number) => db.prepare(`INSERT INTO retail_pdv_sales (id, organization_id, filial, boleta, sale_date, vendedor_codigo, valor) VALUES (?, ?, '1083', ?, ?, ?, ?)`).run(randomUUID(), A, `p${b++}`, date, code, v);
+  const man = (name: string, date: string, v: number, mat: string | null = null) => db.prepare(`INSERT INTO retail_seller_sales (id, organization_id, sale_date, seller_name, matricula, valor) VALUES (?, ?, ?, ?, ?, ?)`).run(randomUUID(), A, date, name, mat, v);
+  const days = ["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"];
+  const marcusV = [900, 1200, 800, 1500, 700, 1000, 1100], outroV = [300, 2000, 100, 50, 3000, 20, 40];
+  days.forEach((d, i) => { mk("10830005", d, marcusV[i] * 1.04); man("MARCUS VINICIUS", d, marcusV[i]); man("OUTRO VENDEDOR", d, outroV[i]); });
+  mk("10830001", "2026-10-02", 100); mk("10830001", "2026-10-03", 50); // poucos dias: não aponta ninguém
+  const sellerMarcus = randomUUID(); db.prepare(`INSERT INTO retail_sellers (id, organization_id, matricula, name) VALUES (?, ?, 'MV1', 'Marcus Vinicius')`).run(sellerMarcus, A);
+  const lp = S.audit(A, { asOf: ASOF }).pending;
+  const p5 = lp.find((x) => x.matricula === "10830005")!;
+  check("aponta MARCUS pelo padrão diário (±10%)", p5.likelyPerson?.name === "MARCUS VINICIUS" && p5.likelyPerson.matchDays === 7 && p5.likelyPerson.pdvDays === 7);
+  check("liga ao cadastro quando há UMA pessoa com esse nome", p5.likelyPerson?.sellerId === sellerMarcus);
+  check("poucos dias de venda: não aponta ninguém", lp.find((x) => x.matricula === "10830001")!.likelyPerson === null);
+  check("código sem lançamento manual parecido: não aponta", lp.find((x) => x.matricula === "OLD1")!.likelyPerson === null);
+  man("MARCUS DUPLICADO", "2026-10-01", 936); days.forEach((d, i) => man("MARCUS DUPLICADO", d, marcusV[i] * 1.02));
+  check("empate entre duas pessoas: não aponta ninguém", S.audit(A, { asOf: ASOF }).pending.find((x) => x.matricula === "10830005")!.likelyPerson === null);
+  // limiares: 10 dias de PDV com só 5 batendo (50%) e 5 dias de PDV com só 3 batendo (60%, mas < 5 dias)
+  const d10 = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"];
+  d10.forEach((d, i) => { mk("CODE50", d, 1000); man("PESSOA CINQUENTA", d, i < 5 ? 1000 : 5000); });
+  const d5 = ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"];
+  d5.forEach((d, i) => { mk("CODE3", d, 700); man("PESSOA TRES", d, i < 3 ? 700 : 4000); });
+  const lq = S.audit(A, { asOf: ASOF }).pending;
+  check("50% dos dias batendo não aponta", lq.find((x) => x.matricula === "CODE50")!.likelyPerson === null);
+  check("menos de 5 dias batendo não aponta (mesmo com 60%)", lq.find((x) => x.matricula === "CODE3")!.likelyPerson === null);
   const src = fs.readFileSync("src/server/RetailSellerCodeAuditService.ts", "utf8");
   check("serviço não escreve no banco", !/\b(INSERT|UPDATE|DELETE)\b/i.test(src.replace(/\/\*[\s\S]*?\*\//g, "")));
   fs.rmSync(tmpDir, { recursive: true, force: true });

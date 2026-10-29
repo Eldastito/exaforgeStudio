@@ -7715,6 +7715,11 @@ function UnidentifiedSellersCard() {
                 {r.erpNames.length > 0 && <span className="text-zinc-400"> · ERP: {r.erpNames.join(' / ')}</span>}
                 {r.flags.sharedBoxSuspect && <span className="text-amber-300"> · volume alto por dia (pode ser caixa compartilhado)</span>}
                 {r.flags.testPattern && <span className="text-amber-300"> · parece código de teste</span>}
+                {r.likelyPerson && (
+                  <div className="text-sky-300">↳ parece ser <strong>{r.likelyPerson.name}</strong> — {r.likelyPerson.why}
+                    {r.likelyPerson.sellerId && !r.identified && <button disabled={busy === r.matricula} onClick={async () => { setBusy(r.matricula); try { const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: r.matricula, sellerId: r.likelyPerson.sellerId }) }); const d = await res.json().catch(() => ({})); if (res.ok) { toast.success(`Código ${r.matricula} agora é de ${r.likelyPerson.name}.`); load(); runAudit(); } else toast.error(d.error || 'Não foi possível vincular.'); } finally { setBusy(null); } }} className="ml-2 px-2 py-0.5 rounded bg-sky-700/80 hover:bg-sky-600 text-white disabled:opacity-40">É esta pessoa</button>}
+                  </div>
+                )}
                 {r.successors.map((x: any) => <div key={x.matricula} className="text-zinc-400">↳ {x.evidence === 'forte' ? 'provável' : 'possível'} sucessor: {x.name || x.matricula} ({x.matricula}) — {x.why}</div>)}
               </div>
             ))}

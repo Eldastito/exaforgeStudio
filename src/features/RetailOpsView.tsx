@@ -1,4 +1,6 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
+import { ActionLink } from '@/src/components/ui/ActionLink';
+import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
@@ -853,6 +855,10 @@ function StoreResultTab() {
   const totals = data?.totals || { faturamento: 0, custosFixos: 0, custosVariaveis: 0, resultado: 0 };
   const semMargem = perStore.filter(s => !s.hasMargin).length;
   const warnings = perStore.filter(s => s.variableCostsWarning).length;
+  const setPendingRetailTab = useStore(s => s.setPendingRetailTab);
+  const setPendingStoreFix = useStore(s => s.setPendingStoreFix);
+  // Link de acerto: vai para o Fechamento, abre a loja e foca a margem (storeId null = a primeira sem margem).
+  const fixMargin = (storeId: string | null) => { setPendingStoreFix({ storeId, field: 'margin' }); setPendingRetailTab('fechamento'); };
 
   return (
     <div>
@@ -880,7 +886,8 @@ function StoreResultTab() {
         <>
           {semMargem > 0 && (
             <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
-              {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em “Editar loja”.
+              {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em <ActionLink onClick={() => fixMargin(null)} title="Abre a primeira loja sem margem, já no campo da margem">Editar loja</ActionLink>.
+              <span className="mt-1 block text-amber-300/80">Sem margem: {perStore.filter(s => !s.hasMargin).map((s, i) => <span key={s.storeId}>{i > 0 ? ' · ' : ''}<ActionLink onClick={() => fixMargin(s.storeId)} title={`Abrir ${s.storeName} no campo da margem`}>{s.storeName}</ActionLink></span>)}</span>
             </p>
           )}
           {warnings > 0 && (
@@ -2557,7 +2564,9 @@ function ClosingsTab() {
   const [closings, setClosings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [informing, setInforming] = useState<any | null>(null);
-  const [storeModal, setStoreModal] = useState<null | { store: any | null }>(null);
+  const [storeModal, setStoreModal] = useState<null | { store: any | null; focusField?: 'margin' }>(null);
+  const pendingStoreFix = useStore(s => s.pendingStoreFix);
+  const setPendingStoreFix = useStore(s => s.setPendingStoreFix);
   const [bridge, setBridge] = useState<boolean | null>(null);
   const [moneyAudit, setMoneyAudit] = useState<any | null>(null);
   const [auditing, setAuditing] = useState(false);
@@ -2565,6 +2574,15 @@ function ClosingsTab() {
   // (o servidor continua sendo a trava; aqui só evita oferecer botão que vai dar erro).
   const [scopeInfo, setScopeInfo] = useState<{ unrestricted?: boolean } | null>(null);
   const isNetwork = isOwnerAdmin && scopeInfo?.unrestricted !== false;
+  // Link de acerto vindo de outra aba: abre a loja certa já no campo que falta (só dono/admin da rede edita loja).
+  useEffect(() => {
+    if (!pendingStoreFix || loading) return;
+    setPendingStoreFix(null);
+    if (!isNetwork) { toast.error('Só o dono ou administrador da rede edita a loja.'); return; }
+    const target = pickStoreForFix(stores, pendingStoreFix.storeId, pendingStoreFix.field);
+    if (!target) { toast.info('Todas as lojas ativas já têm esse dado.'); return; }
+    setStoreModal({ store: target, focusField: pendingStoreFix.field });
+  }, [pendingStoreFix, loading, stores, isNetwork]);
   // Política do dono: o gerente só aprova fechamento se o dono liberar (padrão: não).
   const [mgrApprove, setMgrApprove] = useState<boolean | null>(null);
   const canApprove = isOwnerAdmin && (isNetwork || mgrApprove === true);
@@ -2868,7 +2886,7 @@ function ClosingsTab() {
       )}
 
       {informing && <InformModal closing={informing} onClose={() => setInforming(null)} onSaved={() => { setInforming(null); load(); }} />}
-      {storeModal && <StoreFormModal store={storeModal.store} onClose={() => setStoreModal(null)} onSaved={() => { setStoreModal(null); load(); }} />}
+      {storeModal && <StoreFormModal store={storeModal.store} focusField={storeModal.focusField} onClose={() => setStoreModal(null)} onSaved={() => { setStoreModal(null); load(); }} />}
     </div>
   );
 }
@@ -2897,8 +2915,14 @@ const STORE_VARIABLE_COST_CATEGORIES: { key: string; label: string; hint: string
 ];
 
 // ---- Cadastro/edição de loja (reutilizável nas abas) ------------------------
-function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClose: () => void; onSaved: () => void }) {
+function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | null; focusField?: 'margin'; onClose: () => void; onSaved: () => void }) {
   const editing = !!store;
+  // Link de acerto: rola até o campo pedido e foca (o formulário é longo).
+  useEffect(() => {
+    if (!focusField) return;
+    const t = setTimeout(() => { const el = document.getElementById(storeFieldId(focusField)); if (el) { el.scrollIntoView({ block: 'center' }); (el as HTMLInputElement).focus(); } }, 150);
+    return () => clearTimeout(t);
+  }, [focusField]);
   const [name, setName] = useState(store?.name || '');
   const [code, setCode] = useState(store?.code || '');
   const [wa, setWa] = useState(store?.whatsapp_identifier || '');
@@ -3079,7 +3103,7 @@ function StoreFormModal({ store, onClose, onSaved }: { store: any | null; onClos
               <span className="font-medium text-zinc-300">{brl(costsTotal)}</span>
             </div>
             <label className="mt-3 block text-xs text-zinc-400">Margem bruta média da loja (%)
-              <input inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)} placeholder="Ex.: 55" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+              <input id={storeFieldId('margin')} inputMode="decimal" value={margin} onChange={e => setMargin(e.target.value)} placeholder="Ex.: 55" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
               <span className="mt-1 block text-[11px] text-zinc-500">Quanto sobra de cada R$ 100 vendidos DEPOIS de pagar o custo da mercadoria (sem contar os custos fixos acima). É uma estimativa — sem ela, o app mostra faturamento e custos mas <strong>não calcula o lucro</strong> (não dá pra descontar a mercadoria).</span>
             </label>
           </div>

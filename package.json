@@ -47,6 +47,7 @@
     "test:manual-post-result": "tsx scripts/test-manual-post-result.ts",
     "test:manual-result-ui": "tsx scripts/test-manual-result-ui.ts",
     "test:security-update-oct2026": "tsx scripts/test-security-update-oct2026.ts",
+    "test:action-links": "tsx scripts/test-action-links.ts",
     "test:retail-filial-remap": "tsx scripts/test-retail-filial-remap.ts",
     "test:retail-filial-code-audit": "tsx scripts/test-retail-filial-code-audit.ts",
     "test:seller-name-match": "tsx scripts/test-seller-name-match.ts",

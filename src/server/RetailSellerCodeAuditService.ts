@@ -42,6 +42,8 @@ export type CodeAuditRow = {
   salesPerActiveDay: number;
   flags: { sharedBoxSuspect: boolean; testPattern: boolean };
   successors: Array<{ matricula: string; name: string | null; filial: string; gapDays: number; evidence: "forte" | "possivel"; why: string }>;
+  /** Pessoa cujo lançamento MANUAL diário bate com as vendas deste código no PDV (hipótese; quem decide é o dono). */
+  likelyPerson: null | { name: string; sellerId: string | null; matchDays: number; pdvDays: number; why: string };
 };
 
 export class RetailSellerCodeAuditService {
@@ -80,7 +82,7 @@ export class RetailSellerCodeAuditService {
           matricula: m, identified, name: identified ? res.seller!.name : null,
           erpNames: [...(erpNames.get(m) || [])], sales: 0, activeDays: 0,
           firstSale: l.first_sale, lastSale: l.last_sale, daysSinceLast: 0, status: "ativo",
-          stores: [], salesPerActiveDay: 0, flags: { sharedBoxSuspect: false, testPattern: TEST_CODE.test(m) }, successors: [],
+          stores: [], salesPerActiveDay: 0, flags: { sharedBoxSuspect: false, testPattern: TEST_CODE.test(m) }, successors: [], likelyPerson: null,
         };
         byCode.set(m, row);
       }
@@ -133,6 +135,8 @@ export class RetailSellerCodeAuditService {
     const sameNameGroups = [...byName.entries()].filter(([, s]) => s.size > 1).map(([name, s]) => ({ name, matriculas: [...s] }));
 
     const pending = all.filter((r) => !r.identified).sort((x, y) => y.sales - x.sales);
+    this.fillLikelyPerson(orgId, pending, asOf);
+
     return {
       asOf, inactiveDays, readOnly: true,
       summary: {
@@ -153,5 +157,58 @@ export class RetailSellerCodeAuditService {
         "Nada foi alterado: confirmar nome ou unir continua sendo decisão sua nos cartões existentes.",
       ],
     };
+  }
+
+  /**
+   * Quem lança a mão (fechamento do dia) vende o MESMO valor que o PDV registra no código dele. Se, nos dias em que o código
+   * vendeu, o lançamento manual de UMA pessoa tem valor parecido (±10% ou R$ 5) na maioria dos dias, é forte indício de que o
+   * código é dela. Só sugere com >= 5 dias batendo, >= 60% dos dias do código e sem empate com outra pessoa. Nunca vincula sozinho.
+   */
+  private static fillLikelyPerson(orgId: string, pending: CodeAuditRow[], asOf: string) {
+    if (!pending.length) return;
+    const since = new Date(dayNum(asOf) * 86400000 - 180 * 86400000).toISOString().slice(0, 10);
+    const manual = db.prepare(
+      `SELECT LOWER(TRIM(COALESCE(rs.name, ss.seller_name))) AS k, COALESCE(rs.name, ss.seller_name) AS name, ss.sale_date AS d, SUM(ss.valor) AS v
+         FROM retail_seller_sales ss
+         LEFT JOIN retail_sellers rs ON rs.organization_id = ss.organization_id AND rs.matricula = ss.matricula AND ss.matricula IS NOT NULL AND ss.matricula <> ''
+        WHERE ss.organization_id = ? AND ss.sale_date BETWEEN ? AND ? GROUP BY k, ss.sale_date`
+    ).all(orgId, since, asOf) as any[];
+    if (!manual.length) return;
+    const byPerson = new Map<string, { name: string; days: Map<string, number> }>();
+    for (const r of manual) {
+      if (!r.k) continue;
+      if (!byPerson.has(r.k)) byPerson.set(r.k, { name: String(r.name), days: new Map() });
+      byPerson.get(r.k)!.days.set(String(r.d), Number(r.v) || 0);
+    }
+    const named = db.prepare(`SELECT id, name FROM retail_sellers WHERE organization_id = ? AND active = 1 AND merged_into_seller_id IS NULL AND name IS NOT NULL AND TRIM(name) <> ''`).all(orgId) as any[];
+    const idByName = new Map<string, string | null>();
+    for (const n of named) { const k = normalizeAlias(n.name); idByName.set(k, idByName.has(k) ? null : n.id); }
+    const pdvStmt = db.prepare(
+      `SELECT sale_date AS d, SUM(valor) AS v FROM retail_pdv_sales
+        WHERE organization_id = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor) = ? AND COALESCE(status, 'N') <> 'C' AND sale_date BETWEEN ? AND ? GROUP BY sale_date`
+    );
+    for (const row of pending) {
+      const pdv = (pdvStmt.all(orgId, row.matricula, since, asOf) as any[]).filter((x) => Number(x.v) > 0);
+      if (pdv.length < 5) continue;
+      const scored: Array<{ key: string; name: string; match: number }> = [];
+      for (const [key, p] of byPerson) {
+        let match = 0;
+        for (const x of pdv) {
+          const m = p.days.get(String(x.d));
+          if (m == null) continue;
+          const v = Number(x.v);
+          if (Math.abs(v - m) <= Math.max(5, 0.1 * Math.max(v, m))) match++;
+        }
+        if (match > 0) scored.push({ key, name: p.name, match });
+      }
+      scored.sort((a, b) => b.match - a.match);
+      const best = scored[0], second = scored[1];
+      if (!best || best.match < 5 || best.match / pdv.length < 0.6) continue;
+      if (second && second.match >= 0.7 * best.match) continue; // empate: não aponta ninguém
+      row.likelyPerson = {
+        name: best.name, sellerId: idByName.get(normalizeAlias(best.name)) ?? null, matchDays: best.match, pdvDays: pdv.length,
+        why: `Em ${best.match} de ${pdv.length} dias em que este código vendeu no PDV, o lançamento manual de ${best.name} tem valor parecido (±10%).`,
+      };
+    }
   }
 }

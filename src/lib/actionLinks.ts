@@ -1,7 +1,7 @@
 // Links de "acerto": quando a tela avisa "informe X em Y", o Y vira link que leva ao lugar e ao campo certos.
 // Puro (sem React) para rodar em CI. Quem consome: o link guarda o destino em `pendingStoreFix` (useStore) e a tela
 // de destino abre a loja e foca o campo.
-export type StoreFixField = 'margin';
+export type StoreFixField = 'margin' | 'sellerSource' | 'new';
 export type StoreLike = { id: string; name?: string; active?: boolean | number; gross_margin_percent?: number | string | null };
 
 /** Id do campo na tela de destino — o mesmo id usado no input do formulário da loja. */
@@ -16,6 +16,6 @@ const hasMargin = (s: StoreLike) => s.gross_margin_percent != null && Number(s.g
 export function pickStoreForFix(stores: StoreLike[], storeId: string | null, field: StoreFixField): StoreLike | null {
   const active = stores.filter((s) => s.active === true || s.active === 1);
   if (storeId) return active.find((s) => s.id === storeId) || null;
-  if (field === 'margin') return active.find((s) => !hasMargin(s)) || null;
-  return null;
+  if (field === 'margin') return active.find((s) => !hasMargin(s)) || null; // só a margem tem "a primeira que falta"
+  return null;                                                            // fonte dos vendedores: nunca adivinha a loja; 'new' não abre loja existente
 }

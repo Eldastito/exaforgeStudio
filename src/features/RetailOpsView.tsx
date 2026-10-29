@@ -1,5 +1,5 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
-import { ActionLink } from '@/src/components/ui/ActionLink';
+import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
@@ -886,7 +886,7 @@ function StoreResultTab() {
         <>
           {semMargem > 0 && (
             <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
-              {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em <ActionLink onClick={() => fixMargin(null)} title="Abre a primeira loja sem margem, já no campo da margem">Editar loja</ActionLink>.
+              {semMargem === 1 ? '1 loja está' : `${semMargem} lojas estão`} sem a <strong>margem bruta média</strong> informada — pra elas o lucro e o ponto de equilíbrio não são calculados (só faturamento e custos). Informe em <ActionLink tone="amber" onClick={() => fixMargin(null)} title="Abre a primeira loja sem margem, já no campo da margem">Editar loja</ActionLink>.
               <span className="mt-1 block text-amber-300/80">Sem margem: {perStore.filter(s => !s.hasMargin).map((s, i) => <span key={s.storeId}>{i > 0 ? ' · ' : ''}<ActionLink onClick={() => fixMargin(s.storeId)} title={`Abrir ${s.storeName} no campo da margem`}>{s.storeName}</ActionLink></span>)}</span>
             </p>
           )}
@@ -929,7 +929,7 @@ function StoreResultTab() {
                     <td className="px-3 py-2 text-right text-zinc-300">{brl(s.faturamento)}</td>
                     <td className="px-3 py-2 text-right text-zinc-300">
                       {s.margemBruta == null ? (
-                        <span className="text-amber-300/80" title="Informe a margem bruta em Editar loja">falta</span>
+                        <StoreFixLink field="margin" storeId={s.storeId} tone="amber" title="Abrir a loja já no campo da margem">falta</StoreFixLink>
                       ) : (
                         <span className="inline-flex items-center gap-1.5 justify-end" title={s.cmvWarning || (s.cmvBreakdown?.source === 'real' ? 'CMV via custo das notas de compra (100%)' : s.cmvBreakdown?.source === 'blended' ? `CMV misto: ${Math.round((s.cmvBreakdown.coverage || 0) * 100)}% pelas notas + resto pela margem estimada` : 'CMV via margem estimada (informada em Editar loja)')}>
                           {brl(s.margemBruta)}
@@ -1666,7 +1666,7 @@ function PickupSettingsPanel({ reserveOn }: { reserveOn: boolean }) {
             {s.name}{s.city ? ` · ${s.city}` : ''}
           </label>
         ))}
-        {(data.stores || []).length === 0 && <span className="text-[12px] text-zinc-600">Cadastre as lojas da rede para liberar a retirada.</span>}
+        {(data.stores || []).length === 0 && <span className="text-[12px] text-zinc-600"><StoreFixLink field="new" tone="sky" title="Abrir o cadastro de loja nova">Cadastre as lojas da rede</StoreFixLink> para liberar a retirada.</span>}
       </div>
     </div>
   );
@@ -2564,7 +2564,7 @@ function ClosingsTab() {
   const [closings, setClosings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [informing, setInforming] = useState<any | null>(null);
-  const [storeModal, setStoreModal] = useState<null | { store: any | null; focusField?: 'margin' }>(null);
+  const [storeModal, setStoreModal] = useState<null | { store: any | null; focusField?: 'margin' | 'sellerSource' }>(null);
   const pendingStoreFix = useStore(s => s.pendingStoreFix);
   const setPendingStoreFix = useStore(s => s.setPendingStoreFix);
   const [bridge, setBridge] = useState<boolean | null>(null);
@@ -2579,8 +2579,9 @@ function ClosingsTab() {
     if (!pendingStoreFix || loading) return;
     setPendingStoreFix(null);
     if (!isNetwork) { toast.error('Só o dono ou administrador da rede edita a loja.'); return; }
+    if (pendingStoreFix.field === 'new') { setStoreModal({ store: null }); return; }
     const target = pickStoreForFix(stores, pendingStoreFix.storeId, pendingStoreFix.field);
-    if (!target) { toast.info('Todas as lojas ativas já têm esse dado.'); return; }
+    if (!target) { toast.info(pendingStoreFix.field === 'margin' ? 'Todas as lojas ativas já têm esse dado.' : 'Não achei essa loja entre as ativas.'); return; }
     setStoreModal({ store: target, focusField: pendingStoreFix.field });
   }, [pendingStoreFix, loading, stores, isNetwork]);
   // Política do dono: o gerente só aprova fechamento se o dono liberar (padrão: não).
@@ -2915,7 +2916,7 @@ const STORE_VARIABLE_COST_CATEGORIES: { key: string; label: string; hint: string
 ];
 
 // ---- Cadastro/edição de loja (reutilizável nas abas) ------------------------
-function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | null; focusField?: 'margin'; onClose: () => void; onSaved: () => void }) {
+function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | null; focusField?: 'margin' | 'sellerSource'; onClose: () => void; onSaved: () => void }) {
   const editing = !!store;
   // Link de acerto: rola até o campo pedido e foca (o formulário é longo).
   useEffect(() => {
@@ -3076,7 +3077,7 @@ function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | 
             <span className="mt-1 block text-[11px] text-zinc-500">Horário (Brasília) em que o gestor recebe o fechamento <strong>desta loja</strong> — use uns 30 min depois que a loja fecha (ex.: loja que fecha às 19h → 19:30). Vazio = padrão da rede (22:30). Só vale se o resumo da noite estiver ligado.</span>
           </label>
           <label className="block text-xs text-zinc-400">Comissão por vendedor vem de
-            <select value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
+            <select id={storeFieldId('sellerSource')} value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
               <option value="pdv">PDV/ERP (padrão)</option>
               <option value="manual">Lançamento manual da equipe (feito no fechamento de caixa)</option>
             </select>
@@ -5499,7 +5500,7 @@ function RaceSection({ stores, manager }: { stores: any[]; manager?: boolean }) 
           <div className="mt-1 space-y-0.5 text-red-100/90">
             {race.doubleSourced.map((st: any) => (
               <div key={st.storeId || st.storeName}>
-                <span className="text-red-300">{st.storeName}:</span>{' '}
+                <span className="text-red-300">{st.storeId && !manager ? <StoreFixLink field="sellerSource" storeId={st.storeId} tone="red" title="Abrir a loja já no campo da fonte dos vendedores">{st.storeName}</StoreFixLink> : st.storeName}:</span>{' '}
                 {st.sellers.map((s: any, i: number) => (
                   <span key={i}>{i > 0 ? ' · ' : ''}{s.sellerName}{s.matricula ? ` (${s.matricula})` : ''}: <strong>{brl(s.sales)}</strong> = {Object.entries(s.salesBySource || {}).filter(([, v]: any) => v > 0).map(([src, v]: any) => `${src} ${brl(v)}`).join(' + ')}</span>
                 ))}
@@ -5801,7 +5802,7 @@ function OffPatternPanel({ storeId, sellers, keyOf, onApplied }: { storeId: stri
       ) : sellers.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">
           Sem vendedores cadastrados nessa loja ainda — o template precisa saber quem folga.<br />
-          Cadastre a equipe em <strong>Comissão › Vendas por vendedor (PDV)</strong> ou no módulo <strong>Atendimento de Loja</strong>, depois volte aqui.
+          Cadastre a equipe em <TabLink tab="comissao" tone="sky" title="Abrir a aba Comissão"><strong>Comissão › Vendas por vendedor (PDV)</strong></TabLink> ou no módulo <strong>Atendimento de Loja</strong>, depois volte aqui.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-800/70">
@@ -6116,7 +6117,7 @@ function ScheduleTab() {
   // Quantos escalados 'work' por dia — o denominador do "cota ÷ escalados".
   const workCount = (date: string) => Object.values(grid[date] || {}).filter(s => s === 'work').length;
 
-  if (!stores.length) return <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Cadastre as lojas na aba <strong>Fechamento diário</strong> (botão “Nova loja”) pra montar a escala.</p>;
+  if (!stores.length) return <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Cadastre as lojas na aba <StoreFixLink field="new" tone="sky" title="Abrir o cadastro de loja nova"><strong>Fechamento diário</strong> (botão “Nova loja”)</StoreFixLink> pra montar a escala.</p>;
 
   return (
     <div>
@@ -6146,8 +6147,8 @@ function ScheduleTab() {
       {sellers.length === 0 ? (
         <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
           {orgUsesAssignments
-            ? <>Nenhum vendedor <strong>lotado nesta loja</strong>. Defina a lotação em <strong>Vendedores da loja</strong>, ou use <strong>“+ de outra loja”</strong> acima para escalar alguém temporariamente.</>
-            : <>Nenhum vendedor cadastrado. Associe as matrículas em <strong>Vendedores da loja</strong> (dar nome às matrículas) ou cadastre a equipe no módulo Atendimento de Loja.</>}
+            ? <>Nenhum vendedor <strong>lotado nesta loja</strong>. Defina a lotação em <TabLink tab="vendedores" tone="sky" title="Abrir Vendedores da loja"><strong>Vendedores da loja</strong></TabLink>, ou use <strong>“+ de outra loja”</strong> acima para escalar alguém temporariamente.</>
+            : <>Nenhum vendedor cadastrado. Associe as matrículas em <TabLink tab="vendedores" tone="sky" title="Abrir Vendedores da loja"><strong>Vendedores da loja</strong></TabLink> (dar nome às matrículas) ou cadastre a equipe no módulo Atendimento de Loja.</>}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
@@ -6732,7 +6733,7 @@ function CommissionTab() {
             {report.pendingIdentityCount > 0 && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-200">
                 <AlertTriangle className="inline w-3.5 h-3.5 mr-1" />
-                {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Vendedor não identificado — matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <strong>Vendedores da loja</strong> antes de aprovar a apuração.
+                {report.pendingIdentityCount === 1 ? '1 vendedor aparece' : `${report.pendingIdentityCount} vendedores aparecem`} como <strong>“Vendedor não identificado — matrícula X”</strong> (sem nome) — a comissão deles é <strong>pendência</strong>, não resultado final. Dê o nome em <TabLink tab="vendedores" tone="amber" title="Abrir Vendedores da loja"><strong>Vendedores da loja</strong></TabLink> antes de aprovar a apuração.
               </p>
             )}
             <ReportBlock title={report.mode === 'race' ? 'Por vendedor e gerente' : 'Por vendedor'} empty={report.mode === 'race' ? 'Nenhum vendedor com venda ou comissão na corrida deste mês.' : (report.sellerCommissionSource ? 'Nenhuma venda com vendedor no período. As vendas do PDV entram pela sincronização da Alterdata (CAI_USUARIO); ou lance a folha em “Lançar vendas por vendedor”.' : 'Sem regra de comissão ativa. Crie uma regra por vendedor ou por loja em “Nova regra”.')} rows={noRuleReport ? (report.bySeller || []).map((r: any) => ({ ...r, commission: null })) : report.bySeller} cols={[['sellerName', report.mode === 'race' ? 'Nome' : 'Vendedor'], ['source', report.mode === 'race' ? 'Papel' : 'Fonte'], ['sales', 'Vendas', true], ['pecas', 'Peças'], ['orders', 'Nº vendas'], ['commission', 'Comissão', true], ...(report.hasErpSellerSales ? [['erpCommission', 'Comissão ERP', true]] : [])] as [string, string, boolean?][]} />
@@ -7616,7 +7617,7 @@ function SellerScoreboardTab() {
 
       {showData && data && (
         data.sellers.length === 0 ? (
-          <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum vendedor com venda ou cota nesta loja. Cadastre a cota em <strong>Escala &amp; cotas</strong> ou lance o ranking no <strong>Fechamento diário</strong>.</p>
+          <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">Nenhum vendedor com venda ou cota nesta loja. Cadastre a cota em <TabLink tab="escala" tone="sky" title="Abrir Escala & cotas"><strong>Escala &amp; cotas</strong></TabLink> ou lance o ranking no <TabLink tab="fechamento" tone="sky" title="Abrir o Fechamento diário"><strong>Fechamento diário</strong></TabLink>.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-zinc-800">
             <table className="w-full text-sm">
@@ -7634,7 +7635,7 @@ function SellerScoreboardTab() {
                 {data.sellers.map((s: any) => (
                   <tr key={s.sellerKey} className="border-t border-zinc-800/70">
                     <td className="px-3 py-2 text-[13px] text-zinc-200">
-                      <div>{s.sellerName || `Vendedor não identificado — matrícula ${s.matricula}`}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80">sem cota cadastrada</span>}</div>
+                      <div>{s.sellerName || <TabLink tab="vendedores" tone="sky" title="Abrir Vendedores da loja para dar nome a esta matrícula">{`Vendedor não identificado — matrícula ${s.matricula}`}</TabLink>}{s.quotaSource === 'none' && <span className="ml-1 text-[10px] text-amber-300/80"><TabLink tab="escala" tone="amber" title="Abrir Escala & cotas para cadastrar a cota">sem cota cadastrada</TabLink></span>}</div>
                       {(() => {
                         const src = s.month?.sources || {};
                         const keys = Object.keys(src);

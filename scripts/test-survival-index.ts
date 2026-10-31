@@ -76,7 +76,7 @@ async function main() {
 
   // ===== 5. Snapshot + tendência =====
   // grava um snapshot do mês passado para medir a tendência.
-  const lastPeriod = (() => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const lastPeriod = (() => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
   db.prepare(`INSERT INTO survival_index_snapshots (id, organization_id, period, score, faixa, confidence) VALUES (?, ?, ?, ?, 'risco', 'media')`).run(randomUUID(), ok, lastPeriod, so.score - 10);
   const so2 = S.score(ok);
   check("tendência SUBINDO vs snapshot anterior menor", so2.trend === "subindo");

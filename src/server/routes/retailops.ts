@@ -140,6 +140,7 @@ import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
+import { RetailSellerLinkageAuditService } from "../RetailSellerLinkageAuditService.js";
 import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
 import { RetailFilialRemapService } from "../RetailFilialRemapService.js";
 import { RetailPosFeeService } from "../RetailPosFeeService.js";
@@ -1529,6 +1530,12 @@ router.get("/sellers/identity/audit", requireNetworkScope, (req: AuthRequest, re
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json(RetailSellerCodeAuditService.audit(orgId, { inactiveDays: Number(req.query.inactiveDays) || undefined }));
+});
+// Diagnóstico SOMENTE LEITURA das ligações de cada código (PDV/ERP/ranking/cadastro/loja/meta/comissão) + matrículas fantasma. owner/admin da rede.
+router.get("/sellers/identity/linkage", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailSellerLinkageAuditService.report(orgId));
 });
 // Prévia SOMENTE LEITURA das vendas guardadas sob códigos de filial sem loja ativa (loja que mudou de código). owner/admin da rede.
 router.get("/stores/filial-codes/audit", requireNetworkScope, (req: AuthRequest, res): any => {

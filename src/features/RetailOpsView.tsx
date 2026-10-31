@@ -7692,6 +7692,12 @@ function UnidentifiedSellersCard() {
     setAuditing(true);
     try { const r = await apiFetch('/api/retailops/sellers/identity/audit'); setAudit(r.ok ? await r.json() : { error: true }); } catch { setAudit({ error: true }); } finally { setAuditing(false); }
   };
+  const [linkage, setLinkage] = useState<any | null>(null);
+  const [linking, setLinking] = useState(false);
+  const runLinkage = async () => {
+    setLinking(true);
+    try { const r = await apiFetch('/api/retailops/sellers/identity/linkage'); setLinkage(r.ok ? await r.json() : { error: true }); } catch { setLinkage({ error: true }); } finally { setLinking(false); }
+  };
   const load = useCallback(() => {
     apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
   }, []);
@@ -7749,6 +7755,32 @@ function UnidentifiedSellersCard() {
               </div>
             ))}
             {audit.notes.map((n: string) => <p key={n} className="text-zinc-500">{n}</p>)}
+          </div>
+        )}
+      </div>
+      <div className="mt-2">
+        <button onClick={runLinkage} disabled={linking} className="text-[11px] text-amber-300 hover:underline disabled:opacity-50">{linking ? 'Analisando…' : 'Conferir ligações dos códigos e matrículas sem venda no PDV (só leitura)'}</button>
+        {linkage?.error && <p className="mt-1 text-[11px] text-rose-300">Não foi possível analisar agora.</p>}
+        {linkage && !linkage.error && (
+          <div className="mt-2 text-[11px] text-zinc-300 space-y-1">
+            <p>Vendendo nos últimos {linkage.recentDays} dias: {linkage.summary.namedActive} códigos com nome · {linkage.summary.unnamedActive} sem nome.</p>
+            {linkage.baseline.map((x: any) => {
+              const u = linkage.groups.unnamed.pct[x.key];
+              return <p key={x.key} className="text-zinc-400">• {x.label}: com nome {x.namedPct}% · sem nome {u === null ? '—' : `${u}%`}</p>;
+            })}
+            {linkage.unnamed.filter((r: any) => r.lacks.length > 0).slice(0, 20).map((r: any) => (
+              <div key={r.matricula} className="rounded-md bg-zinc-900/60 border border-zinc-800 px-2 py-1">
+                <span className="text-zinc-100">{r.matricula}</span> · {r.pdvSales} vendas no PDV · falta: {r.lacks.map((k: string) => ({ pdv: 'PDV', erp: 'ERP', manual: 'ranking manual', loja: 'loja', meta: 'meta', comissao: 'comissão' } as Record<string, string>)[k] || k).join(', ')}
+              </div>
+            ))}
+            <p className="pt-1 text-zinc-200">Matrículas cadastradas que nunca venderam no PDV/ERP: {linkage.summary.ghosts}{linkage.summary.ghostsWithProbableCode > 0 ? ` (${linkage.summary.ghostsWithProbableCode} com código provável)` : ''}</p>
+            {linkage.ghosts.slice(0, 20).map((g: any) => (
+              <div key={g.sellerId} className="rounded-md bg-zinc-900/60 border border-zinc-800 px-2 py-1">
+                <span className="text-zinc-100">{g.name}</span> · matrícula {g.matricula}{g.placeholder ? ' (criada pelo sistema)' : ''} · {g.manualRows} lançamentos manuais
+                {g.probableCodes.map((c: any) => <div key={c.matricula} className="text-sky-300">↳ código provável no PDV: {c.matricula} ({c.matchDays} de {c.pdvDays} dias batem)</div>)}
+              </div>
+            ))}
+            {linkage.notes.map((n: string) => <p key={n} className="text-zinc-500">{n}</p>)}
           </div>
         )}
       </div>

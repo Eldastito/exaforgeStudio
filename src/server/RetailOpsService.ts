@@ -8,6 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
+import { RetailClosingTeamService } from "./RetailClosingTeamService.js";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
 import { RetailBoletaService } from "./RetailBoletaService.js";
@@ -567,7 +568,7 @@ export class RetailClosingService {
    *   credito: { [bandeira]: valor }, debito: { [bandeira]: valor },
    *   voucher?, troca?, outros?,
    *   despesas: [{ descricao, valor }],
-   *   ranking: [{ sellerName, valor, atendimentos, pecas }],
+   *   ranking: [{ sellerName, matricula?, valor, atendimentos, pecas }],   // matricula = pessoa ESCOLHIDA da equipe (P4)
    *   cadastros?, boletaInicial?, boletaFinal?, malote?, premioDia?, obs?,
    *   pos?: { creditoValor, creditoQtd, debitoValor, debitoQtd }   // resumo do POS (Clover etc.)
    * }
@@ -593,8 +594,14 @@ export class RetailClosingService {
     const despesas = (Array.isArray(details?.despesas) ? details.despesas : [])
       .map((d: any) => ({ descricao: String(d?.descricao || "").trim(), valor: num(d?.valor) }))
       .filter((d: any) => d.descricao && d.valor > 0);
+    // P4: vendedor ESCOLHIDO da equipe chega com a matrícula — vale o nome CADASTRADO (uma grafia só por pessoa).
+    // Matrícula que não é de pessoa ativa da org é descartada (o cliente não inventa vínculo); o nome digitado fica.
     const ranking = (Array.isArray(details?.ranking) ? details.ranking : [])
-      .map((r: any) => ({ sellerName: String(r?.sellerName || "").trim(), valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0, produtos: Number(r?.produtos || 0) || 0 }))
+      .map((r: any) => {
+        const picked = RetailClosingTeamService.validMatricula(orgId, r?.matricula);
+        const typed = String(r?.sellerName || "").trim();
+        return { sellerName: picked?.name || typed, matricula: picked?.matricula || null, valor: num(r?.valor), atendimentos: Number(r?.atendimentos || 0) || 0, pecas: Number(r?.pecas || 0) || 0, produtos: Number(r?.produtos || 0) || 0 };
+      })
       // A linha "LOJA"/"TOTAL" da folha não é vendedor: entrar aqui dobrava o
       // rankingTotal e o rankingGap acusava divergência falsa (o sync p/ vendas
       // já filtrava; o derived não — caso Av. Brasil 19/09).
@@ -631,6 +638,12 @@ export class RetailClosingService {
         maloteGap: (() => { const t = parseMoneyText(details?.malote); return t == null ? null : num(t - (dinheiro - totalDespesas)); })(),
         // A linha LOJA da folha: soma do ranking deve bater com o total do dia.
         rankingGap: ranking.length ? num(informedTotal - rankingTotal) : null,
+        // P4: nomes do ranking que NÃO são ninguém da rede (nem escolhidos, nem casados pelo nome) — viram "pessoa"
+        // à parte na comissão/metas. Não bloqueia (D4); fica registrado para a conferência.
+        unmatchedSellers: (() => {
+          const people = db.prepare(`SELECT matricula, name FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[];
+          return ranking.filter((r: any) => !r.matricula && !resolveMatriculaByName(people, r.sellerName)).map((r: any) => r.sellerName);
+        })(),
         // Comprovante do POS grampeado: cartões informados × cartões do POS.
         posGapCredito: pos ? num(totalCredito - pos.creditoValor) : null,
         posGapDebito: pos ? num(totalDebito - pos.debitoValor) : null,
@@ -681,7 +694,8 @@ export class RetailClosingService {
    * de aprovar (aprovar não pode ser pré-requisito pra o número aparecer).
    * Idempotente: substitui só as linhas source='closing' daquela (loja, dia) —
    * ranking vazio limpa as linhas; lançamentos manuais/foto não são tocados.
-   * Matrícula resolvida pelo nome quando bate com UM único vendedor cadastrado.
+   * Matrícula: a pessoa ESCOLHIDA da equipe no fechamento (P4); sem escolha, resolvida pelo nome quando bate com
+   * UM único vendedor cadastrado.
    */
   static syncRankingToSellerSales(orgId: string, closingId: string, actorId?: string): number {
     const c = this.get(orgId, closingId);
@@ -706,7 +720,8 @@ export class RetailClosingService {
         // OCR já manda ignorá-la, mas o lançamento MANUAL/edição não filtrava e
         // o total entrava como vendedor → dupla contagem em Metas/Comissão.
         if (isRankingTotalLine(r.sellerName)) { skippedTotal++; continue; }
-        const mat = resolveMatriculaByName(sellers, r.sellerName);
+        // P4: a pessoa ESCOLHIDA no fechamento vale (validada de novo); sem escolha, o casamento pelo nome de sempre.
+        const mat = RetailClosingTeamService.validMatricula(orgId, r.matricula)?.matricula || resolveMatriculaByName(sellers, r.sellerName);
         ins.run(randomUUID(), orgId, c.store_id, c.closing_date, r.sellerName, mat, Number(r.valor) || 0, Number(r.pecas) || 0, Number(r.atendimentos) || 0, actorId || null);
         inserted++;
       }

@@ -67,9 +67,14 @@ router.post("/sellers", (req: AuthRequest, res) => {
   try {
     RetailFloorService.assertAnyManager(req.organizationId!, req.user);
     res.json(RetailFloorService.createSeller(req.organizationId!, {
-      name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl,
+      name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl, allowSameName: req.body?.allowSameName === true,
     }, actor(req)));
-  } catch (e: any) { fail(res, e); }
+  } catch (e: any) {
+    // Nome igual ao de alguém da rede → 409 com a pessoa, para a tela perguntar "é a mesma pessoa?".
+    const m = /^same_name_exists:([^:]+):(.*)$/.exec(String(e?.message || ""));
+    if (m) return res.status(409).json({ error: m[2], code: "same_name_exists", existingId: m[1] });
+    fail(res, e);
+  }
 });
 
 router.put("/sellers/:id", (req: AuthRequest, res) => {

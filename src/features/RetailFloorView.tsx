@@ -14,6 +14,7 @@ import { toast } from '@/src/lib/toast';
 
 import { formatBRL } from '@/src/lib/metric';
 import { candidateLabel, floorCodeLabel, proposalLabel } from './retailops/sellerCodeLabels';
+import { similarPeople } from './sellers/sellerNameMatch';
 const brl = (n: any) => formatBRL(n); // null/undefined → '—' (nunca 'R$ 0,00'); zero real segue 'R$ 0,00'
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const POLL_MS = 8000;
@@ -998,17 +999,31 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
 
   const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const createSeller = async () => {
+  // "Já trabalha na rede?": nome parecido com alguém já cadastrado → sugere marcar essa pessoa na equipe em vez de criar outra.
+  const similar = adding ? similarPeople(name, allSellers.filter((s: any) => s.name).map((s: any) => ({ id: s.id, name: s.name, matricula: String(s.matricula), stores: [] }))) : [];
+  const markExisting = (id: string, label: string) => {
+    setSelected((prev) => new Set(prev).add(id));
+    setName(''); setMatricula(''); setPhotoUrl(null); setAdding(false);
+    toast.success(`${label} marcada nesta loja — salve a equipe.`);
+  };
+  const createSeller = async (allowSameName = false) => {
     if (!name.trim()) return toast.error('Informe o nome do vendedor.');
     setSaving(true);
     try {
-      const created = await api('/sellers', { name: name.trim(), matricula: matricula.trim() || undefined, photoUrl: photoUrl || undefined });
+      const created = await api('/sellers', { name: name.trim(), matricula: matricula.trim() || undefined, photoUrl: photoUrl || undefined, ...(allowSameName ? { allowSameName: true } : {}) });
       if (created?.id) setSelected((prev) => new Set(prev).add(created.id)); // já entra na equipe desta loja
       toast.success(`${name.trim()} cadastrado.`);
       setName(''); setMatricula(''); setPhotoUrl(null); setAdding(false);
       loadCodes();
       onChanged(); // recarrega o roster da org (allSellers)
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: any) {
+      // Nome igual ao de alguém da rede: o servidor recusa. Só cria de propósito (homônimo) com confirmação.
+      if (!allowSameName && /^Já existe .* na rede/.test(String(e.message || ''))) {
+        if (window.confirm(`${e.message}\n\nÉ OUTRA pessoa com o mesmo nome? OK = cadastrar mesmo assim.`)) { setSaving(false); return createSeller(true); }
+        return;
+      }
+      toast.error(e.message);
+    }
     finally { setSaving(false); }
   };
 
@@ -1064,8 +1079,20 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
       {adding ? (
         <div className="mt-4 space-y-3 rounded-xl border border-[var(--color-flow)]/30 bg-[var(--color-flow)]/5 p-4">
           <PhotoInput value={photoUrl} onChange={setPhotoUrl} name={name} />
+          <p className="text-xs text-[var(--color-text-muted)]">Já trabalha na rede (veio de outra loja)? Não cadastre de novo: marque a pessoa na lista acima.</p>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome do vendedor" autoFocus
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+          {similar.length > 0 && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+              Já existe alguém com nome parecido na rede — é a mesma pessoa?
+              {similar.map((p) => (
+                <button key={p.id} type="button" onClick={() => markExisting(p.id, p.name)}
+                  className="mt-1.5 block w-full rounded-lg border border-amber-400/40 px-3 py-2 text-left text-[var(--color-text-strong)] hover:bg-amber-500/15">
+                  {p.name} — <span className="text-amber-300">é esta pessoa: marcar nesta loja</span>
+                </button>
+              ))}
+            </div>
+          )}
           {/* Código do caixa: escolhe entre os códigos SEM NOME que venderam nesta loja. Sem escolha, fica "sem código" e o
               ZapFlow propõe o código real quando ele começar a vender e bater com o dia da pessoa. */}
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
@@ -1087,7 +1114,7 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
             <p className="mt-2 text-xs text-[var(--color-text-strong)]">{matricula ? `Código escolhido: ${matricula}` : 'Sem código do caixa por enquanto'}</p>
           </div>
           <div className="flex gap-2">
-            <button disabled={saving} onClick={createSeller}
+            <button disabled={saving} onClick={() => createSeller()}
               className="flex-1 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">
               {saving ? <Loader2 className="mr-1.5 inline h-4 w-4 animate-spin" /> : <Check className="mr-1.5 inline h-4 w-4" />}Cadastrar
             </button>

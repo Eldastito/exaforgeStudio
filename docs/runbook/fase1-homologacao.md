@@ -31,7 +31,7 @@ nomeia pessoas ou mostra dinheiro é **owner/admin**.
 - **Reverter:** `POST /sellers/:sellerId/unmerge` (nada foi apagado).
 
 ### Passo 2 — Fonte da venda e cota
-1. Confirmar `retail_official_sale_source = 'folha'` na TOULON (venda oficial = folha do fechamento; o caixa é só parcial).
+1. Confirmar `retail_official_sale_source = 'folha'` na TOULON (venda oficial = folha do fechamento; o caixa é só parcial). Na tela: **Fechamentos → Conferência do mês → "O total do mês segue: Folha do gerente"** (só dono/admin da rede). Em `'folha'` o dia sem folha lançada fica FORA do total (não vira caixa) e aparece na conferência como "folha não lançada".
 2. Conferir que as **cotas diárias por loja** estão cadastradas (`retail_store_quotas`). Sem cota o bloco da manhã não aparece
    e o acumulado da semana/mês sai **parcial**.
 

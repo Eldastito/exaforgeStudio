@@ -176,6 +176,7 @@ import { ManagerSolutionService } from "../ManagerSolutionService.js";
 import { ManagerSolutionRetrievalService } from "../ManagerSolutionRetrievalService.js";
 import { RetailSellerSalesService } from "../RetailSellerSalesService.js";
 import { RetailDashboardService } from "../RetailDashboardService.js";
+import { RetailMonthCheckService } from "../RetailMonthCheckService.js";
 import { RetailCashDepositService } from "../RetailCashDepositService.js";
 import { RetailActivationService } from "../RetailActivationService.js";
 import { RetailImpactService } from "../RetailImpactService.js";
@@ -2015,6 +2016,16 @@ router.get("/closings/week", (req: AuthRequest, res): any => {
   const anyDate = String(req.query.date || today(req));
   const week = RetailClosingService.listWeek(orgId, anyDate);
   res.json(restrictIds(req) ? { ...week, stores: keepMine(req, week.stores || [], (st: any) => st.store_id) } : week);
+});
+
+// Conferência do MÊS (folha × caixa, dia a dia): de onde vem a diferença entre o total do mês e a soma das folhas.
+// Somente leitura; registrada ANTES de "/closings/:id" (senão "month-check" casaria como id). Gerente vê só as lojas dele.
+router.get("/closings/month-check", requireRole("owner", "admin"), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : todaySP().slice(0, 7);
+  try { res.json(RetailMonthCheckService.month(orgId, month, restrictIds(req))); }
+  catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.get("/closings/:id", requireStoreAccess(ofClosing), (req: AuthRequest, res): any => {

@@ -57,6 +57,7 @@
     "test:retail-seller-code-birth": "tsx scripts/test-retail-seller-code-birth.ts",
     "test:retail-seller-code-proposal": "tsx scripts/test-retail-seller-code-proposal.ts",
     "test:retail-closing-seller-pick": "tsx scripts/test-retail-closing-seller-pick.ts",
+    "test:retail-store-seller-source": "tsx scripts/test-retail-store-seller-source.ts",
     "test:stale-chunk": "tsx scripts/test-stale-chunk.ts",
     "test:pickup-ready-notice": "tsx scripts/test-pickup-ready-notice.ts",
     "test:ffmpeg-service": "tsx scripts/test-ffmpeg-service.ts",

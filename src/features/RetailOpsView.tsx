@@ -1,6 +1,6 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
 import { MonthCheckCard } from './retailops/MonthCheckCard';
-import { STOPPED_AFTER_DAYS, candidateLabel, isStoppedCode, sameNameQuestion } from './retailops/sellerCodeLabels';
+import { STOPPED_AFTER_DAYS, candidateLabel, isStoppedCode, proposalLabel, sameNameQuestion } from './retailops/sellerCodeLabels';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
@@ -7702,10 +7702,23 @@ function UnidentifiedSellersCard() {
     setLinking(true);
     try { const r = await apiFetch('/api/retailops/sellers/identity/linkage'); setLinkage(r.ok ? await r.json() : { error: true }); } catch { setLinkage({ error: true }); } finally { setLinking(false); }
   };
+  // P3 — pessoas cadastradas SEM código do caixa (LV- do Atendimento de Loja ou matrícula que nunca vendeu) e o
+  // código novo que bate com o dia de cada uma. Só sugere; o "Confirmar" liga o código como apelido (reversível).
+  const [codeless, setCodeless] = useState<any[]>([]);
   const load = useCallback(() => {
     apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
+    apiFetch('/api/retailops/sellers/identity/codeless').then(r => (r.ok ? r.json() : null)).then(d => setCodeless(Array.isArray(d?.people) ? d.people : [])).catch(() => setCodeless([]));
   }, []);
   useEffect(() => { load(); }, [load]);
+  const confirmProposal = async (p: any) => {
+    if (!window.confirm(`Confirmar que o código ${p.code} do caixa é de ${p.name}? Dá para desfazer depois.`)) return;
+    setBusy(p.code);
+    try {
+      const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: p.code, sellerId: p.sellerId }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(`Código ${p.code} agora é de ${p.name}.`); load(); } else toast.error(d.error || 'Não foi possível confirmar.');
+    } finally { setBusy(null); }
+  };
   useEffect(() => {
     apiFetch('/api/retailops/sellers/identity/directory').then(r => (r.ok ? r.json() : null)).then(d => setPeople(Array.isArray(d?.sellers) ? d.sellers : [])).catch(() => setPeople([]));
   }, []);
@@ -7750,6 +7763,24 @@ function UnidentifiedSellersCard() {
           </div>
         ))}
       </div>
+      {codeless.length > 0 && (
+        <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2">
+          <div className="text-[12px] font-medium text-zinc-200">Cadastrados sem código do caixa <span className="font-normal text-zinc-500">— {codeless.length} pessoa{codeless.length === 1 ? '' : 's'}</span></div>
+          <div className="mt-1 space-y-1">
+            {codeless.map((p: any) => (
+              <div key={p.sellerId} className="text-[11px] text-zinc-300">
+                <span className="text-zinc-100">{p.name}</span>
+                <span className="text-zinc-500"> · {p.placeholder ? 'cadastrado sem código (Atendimento de Loja)' : `matrícula ${p.matricula} nunca vendeu no caixa`}{p.storeNames.length ? ` · ${p.storeNames.join(', ')}` : ''}</span>
+                {p.proposal ? (
+                  <div className="text-sky-300">↳ {proposalLabel(p.proposal)} — {p.proposal.why}
+                    <button disabled={busy === p.proposal.code} onClick={() => confirmProposal(p.proposal)} className="ml-2 px-2 py-0.5 rounded bg-sky-700/80 hover:bg-sky-600 text-white disabled:opacity-40">Confirmar</button>
+                  </div>
+                ) : <div className="text-zinc-500">↳ nenhum código sem nome bate com o dia dessa pessoa ainda</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="mt-2">
         <button onClick={runAudit} disabled={auditing} className="text-[11px] text-amber-300 hover:underline disabled:opacity-50">{auditing ? 'Analisando…' : 'Conferir códigos parados e possíveis duplicados (só leitura)'}</button>
         {audit?.error && <p className="mt-1 text-[11px] text-rose-300">Não foi possível analisar agora.</p>}

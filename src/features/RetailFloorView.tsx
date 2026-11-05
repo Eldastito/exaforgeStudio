@@ -13,6 +13,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 import { formatBRL } from '@/src/lib/metric';
+import { candidateLabel, floorCodeLabel, proposalLabel } from './retailops/sellerCodeLabels';
 const brl = (n: any) => formatBRL(n); // null/undefined → '—' (nunca 'R$ 0,00'); zero real segue 'R$ 0,00'
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const POLL_MS = 8000;
@@ -979,6 +980,21 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingTeam, setSavingTeam] = useState(false);
+  // Códigos do caixa desta loja: os SEM NOME que venderam aqui (para o cadastro escolher o real em vez de ficar
+  // "sem código"), as propostas "parece ser o código X" para quem está sem código e os códigos já ligados.
+  const [codes, setCodes] = useState<{ candidates: any[]; proposals: any[]; linked: Record<string, string[]> } | null>(null);
+  const [linking, setLinking] = useState<string | null>(null);
+  const loadCodes = useCallback(() => {
+    api(`/stores/${storeId}/seller-codes`).then(setCodes).catch(() => setCodes(null));
+  }, [storeId]);
+  useEffect(() => { loadCodes(); }, [loadCodes]);
+  const proposalFor = (sellerId: string) => (codes?.proposals || []).find((p: any) => p.sellerId === sellerId) || null;
+  const confirmCode = async (sellerId: string, code: string, name: string) => {
+    if (!window.confirm(`Confirmar que o código ${code} do caixa é de ${name}? Dá para desfazer depois.`)) return;
+    setLinking(sellerId);
+    try { await api(`/stores/${storeId}/sellers/${sellerId}/link-code`, { code }); toast.success(`Código ${code} agora é de ${name}.`); loadCodes(); onChanged(); }
+    catch (e: any) { toast.error(e.message); } finally { setLinking(null); }
+  };
 
   const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -990,6 +1006,7 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
       if (created?.id) setSelected((prev) => new Set(prev).add(created.id)); // já entra na equipe desta loja
       toast.success(`${name.trim()} cadastrado.`);
       setName(''); setMatricula(''); setPhotoUrl(null); setAdding(false);
+      loadCodes();
       onChanged(); // recarrega o roster da org (allSellers)
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
@@ -1029,7 +1046,14 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
                 <TeamPhotoCell seller={s} onPhoto={(url) => setPhoto(s.id, url)} />
                 <button type="button" onClick={() => toggle(s.id)} className="min-w-0 flex-1 text-left">
                   <p className="truncate text-sm font-semibold text-[var(--color-text-strong)]">{s.name || s.matricula}</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">{String(s.matricula).startsWith('LV-') ? 'Sem código do PDV' : `Matrícula ${s.matricula}`}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{floorCodeLabel(s.matricula, codes?.linked?.[s.id])}</p>
+                  {(() => { const p = proposalFor(s.id); return p ? (
+                    <span className="mt-1 block text-xs text-amber-300">
+                      {proposalLabel(p)}{' '}
+                      <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); if (linking !== s.id) confirmCode(s.id, p.code, s.name || s.matricula); }}
+                        className="ml-1 rounded-md border border-amber-400/50 px-1.5 py-0.5 font-semibold text-amber-200 hover:bg-amber-500/15">{linking === s.id ? 'Confirmando…' : 'Confirmar'}</span>
+                    </span>
+                  ) : null; })()}
                 </button>
               </div>
             );
@@ -1042,8 +1066,26 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
           <PhotoInput value={photoUrl} onChange={setPhotoUrl} name={name} />
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome do vendedor" autoFocus
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
-          <input value={matricula} onChange={(e) => setMatricula(e.target.value)} placeholder="Matrícula no PDV (opcional)"
-            className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm text-[var(--color-text-strong)] placeholder:text-zinc-600 focus:border-[var(--color-flow)] focus:outline-none" />
+          {/* Código do caixa: escolhe entre os códigos SEM NOME que venderam nesta loja. Sem escolha, fica "sem código" e o
+              ZapFlow propõe o código real quando ele começar a vender e bater com o dia da pessoa. */}
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
+            <p className="mb-2 text-xs text-[var(--color-text-muted)]">Código do vendedor no caixa — toque no código dele. Se ainda não vendeu, deixe sem: o ZapFlow avisa quando o código dele aparecer.</p>
+            {codes === null ? <p className="text-xs text-[var(--color-text-muted)]">Carregando códigos…</p>
+              : codes.candidates.length === 0 ? <p className="text-xs text-[var(--color-text-muted)]">Nenhum código sem nome vendeu nesta loja.</p>
+              : (
+                <div className="max-h-40 space-y-1.5 overflow-y-auto">
+                  {codes.candidates.map((c: any) => (
+                    <button key={c.matricula} type="button" onClick={() => setMatricula(matricula === c.matricula ? '' : c.matricula)}
+                      className={`block w-full rounded-lg border px-3 py-2 text-left text-xs ${matricula === c.matricula ? 'border-[var(--color-flow)] bg-[var(--color-flow)]/10 text-[var(--color-text-strong)]' : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]'}`}>
+                      <span className="font-mono">{candidateLabel(c)}</span>
+                      {c.status === 'parado' && <span> · parado</span>}
+                      {c.likelyPerson && <span className="block text-amber-300">parece ser {c.likelyPerson.name}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            <p className="mt-2 text-xs text-[var(--color-text-strong)]">{matricula ? `Código escolhido: ${matricula}` : 'Sem código do caixa por enquanto'}</p>
+          </div>
           <div className="flex gap-2">
             <button disabled={saving} onClick={createSeller}
               className="flex-1 rounded-xl bg-[var(--color-flow)] px-4 py-3 text-sm font-semibold text-zinc-950 transition-all hover:brightness-110 disabled:opacity-50">

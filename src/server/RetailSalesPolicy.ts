@@ -6,7 +6,15 @@
  * comissão dos demais clientes vinha do caixa (system_total). Para não mudar o
  * cálculo de ninguém em silêncio, a fonte é uma configuração POR ORG:
  *   - 'system' (padrão legado): COALESCE(NULLIF(system_total,0), informed_total)
- *   - 'folha' (Toulon): COALESCE(NULLIF(informed_total,0), system_total)
+ *   - 'folha' (Toulon): SÓ a folha — COALESCE(informed_total, 0)
+ *
+ * 05/11/2026 (fechamento de outubro da TOULON): em 'folha' o caixa NÃO entra
+ * mais no lugar da folha que falta. Antes era "folha; caixa se a folha estiver
+ * zerada": o dia sem folha lançada entrava no mês com o valor do caixa, sem
+ * aviso, e o total do mês deixava de ser a soma das folhas (a soma que o
+ * gerente e a Conferência da semana mostram). Decisão do dono: o total do mês
+ * segue a folha do gerente; o dia sem folha aparece à parte na Conferência do
+ * mês (RetailMonthCheckService), nunca somado em silêncio.
  *
  * Escopo: SÓ meta e comissão (o que a rede confirmou). Faturamento/DRE e as
  * pontes de receita continuam como estão — é uma decisão à parte, não
@@ -32,6 +40,6 @@ export function officialSaleSourceOf(orgId: string): OfficialSaleSource {
 export function officialSaleSql(source: OfficialSaleSource, col = ""): string {
   const p = col ? `${col}.` : "";
   return source === "folha"
-    ? `COALESCE(NULLIF(${p}informed_total,0), ${p}system_total)`   // folha manda; caixa só se não há folha
+    ? `COALESCE(${p}informed_total, 0)`                             // só a folha; dia sem folha = 0 (aparece à parte, não vira caixa)
     : `COALESCE(NULLIF(${p}system_total,0), ${p}informed_total)`;  // legado: caixa manda; folha fallback
 }

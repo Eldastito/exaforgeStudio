@@ -1,4 +1,5 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
+import { MonthCheckCard } from './retailops/MonthCheckCard';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
@@ -2795,6 +2796,7 @@ function ClosingsTab() {
 
       <WhoIsOffCard className="mb-3" />
       <WeeklyClosingsCard />
+      {isOwnerAdmin && <MonthCheckCard isNetwork={isNetwork} />}
       <DailyInformeCard date={date} />
       <BoletaPanel stores={stores.filter((s: any) => s.active)} />
 

@@ -142,6 +142,7 @@ import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
 import { RetailSellerCodeBirthService } from "../RetailSellerCodeBirthService.js";
 import { RetailSellerCodeProposalService } from "../RetailSellerCodeProposalService.js";
+import { RetailClosingTeamService } from "../RetailClosingTeamService.js";
 import { RetailSellerLinkageAuditService } from "../RetailSellerLinkageAuditService.js";
 import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
 import { RetailFilialRemapService } from "../RetailFilialRemapService.js";
@@ -1477,6 +1478,8 @@ router.put("/sellers/:matricula", requireNetworkScope, (req: AuthRequest, res): 
   // linha duplicaria a pessoa (código e lançamento manual somariam separados). Devolve 409 com a
   // pessoa existente; a tela pergunta "é a mesma pessoa?" (liga o código) ou reenvia com allowSameName.
   const current = db.prepare(`SELECT name FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
+  // Nunca cria pessoa SEM nome (nem apaga o nome de quem tem): código sem nome é assunto de "Vendedores a identificar".
+  if (!name && (!current || String(current.name || "").trim())) return res.status(400).json({ error: "Informe o nome do vendedor." });
   if (name && !String(current?.name || "").trim() && req.body?.allowSameName !== true) {
     const existing = RetailSellerCodeBirthService.sameNameSeller(orgId, name, matricula);
     if (existing) return res.status(409).json({ error: `Já existe ${existing.name} (matrícula ${existing.matricula}). Se é a mesma pessoa, ligue este código a ela em vez de criar outra.`, code: "same_name_exists", existing });
@@ -1730,6 +1733,15 @@ router.get("/stores/:id/pos-fees/expected", requireNetworkScope, (req: AuthReque
 
 // SELL-003/005/006 — cobertura de vendedores da loja: lotados + pendências de
 // nome + suspeitos de código compartilhado (diagnóstico, nunca cria vendedor).
+// P4 — equipe da loja para o fechamento escolher o vendedor (em vez de digitar o nome): lotação vigente na data
+// (inclui cobertura) + as demais pessoas da rede (quem veio cobrir sem lotação). Só nome e matrícula, sem dinheiro.
+// Gerente: só a(s) loja(s) dele.
+router.get("/stores/:storeId/team", requireStoreAccess(inParam("storeId")), (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailClosingTeamService.team(orgId, req.params.storeId, String(req.query.date || ""))); }
+  catch (e: any) { res.status(404).json({ error: e.message }); }
+});
 router.get("/seller-coverage", requireStoreAccess(inQuery()), (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
@@ -1808,7 +1820,13 @@ router.post("/seller-sales", requireNetworkScope, (req: AuthRequest, res): any =
   if (!Array.isArray(entries) || entries.length === 0) return res.status(400).json({ error: "Informe ao menos um vendedor." });
   if (storeId && !RetailStoreService.get(orgId, String(storeId))) return res.status(404).json({ error: "store_not_found" });
   try {
-    const created = RetailSellerSalesService.bulkCreate(orgId, { storeId, saleDate, entries, source, imageUrl }, req.user?.userId);
+    // P4: matrícula escolhida na lista só vale se for de pessoa ATIVA desta org (o cliente não inventa vínculo);
+    // escolhida, grava o nome CADASTRADO (uma grafia só por pessoa).
+    const safeEntries = entries.map((e: any) => {
+      const picked = RetailClosingTeamService.validMatricula(orgId, e?.matricula);
+      return { ...e, matricula: picked?.matricula || null, sellerName: picked?.name || e?.sellerName };
+    });
+    const created = RetailSellerSalesService.bulkCreate(orgId, { storeId, saleDate, entries: safeEntries, source, imageUrl }, req.user?.userId);
     if (!created.length) return res.status(400).json({ error: "Nenhuma linha válida (precisa de nome e valor ou peças)." });
     res.status(201).json({ created });
   } catch (e: any) { res.status(400).json({ error: e.message }); }

@@ -1,6 +1,8 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
 import { MonthCheckCard } from './retailops/MonthCheckCard';
 import { STOPPED_AFTER_DAYS, candidateLabel, isStoppedCode, proposalLabel, sameNameQuestion } from './retailops/sellerCodeLabels';
+import { SellerPick } from './retailops/SellerPick';
+import { autoMatchRows, outsideTeamNames, type TeamPerson } from './retailops/sellerPickRules';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
@@ -3198,7 +3200,7 @@ function AddBrandRow({ onAdd }: { onAdd: (name: string) => void | Promise<void> 
 // POR BANDEIRA (configuráveis por loja), despesas, ranking por vendedor
 // (valor/AT/peças — pré-preenchido pela escala do dia), cadastros, boletas,
 // malote e conferência com o resumo do POS. Foto da folha pré-preenche (IA).
-type RankRow = { sellerName: string; valor: string; at: string; pecas: string; produtos: string };
+type RankRow = { sellerName: string; matricula?: string | null; valor: string; at: string; pecas: string; produtos: string };
 type DespesaRow = { descricao: string; valor: string };
 // POS-003/004 (Fatia 3): custo esperado das tarifas do POS a partir do resumo.
 // Usa a regra detalhada (crédito/débito) quando existe, senão a taxa agregada.
@@ -3238,7 +3240,12 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   const [credito, setCredito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.credito || {}).map(([k, v]) => [k, String(v)])));
   const [debito, setDebito] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(existing.debito || {}).map(([k, v]) => [k, String(v)])));
   const [despesas, setDespesas] = useState<DespesaRow[]>(() => (existing.despesas || []).map((d: any) => ({ descricao: d.descricao, valor: String(d.valor) })));
-  const [ranking, setRanking] = useState<RankRow[]>(() => (existing.ranking || []).map((r: any) => ({ sellerName: r.sellerName, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' })));
+  const [ranking, setRanking] = useState<RankRow[]>(() => (existing.ranking || []).map((r: any) => ({ sellerName: r.sellerName, matricula: r.matricula || null, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' })));
+  // P4: o vendedor é ESCOLHIDO da equipe da loja (lotação do dia) — digitar fica como "Outro" e é avisado.
+  // `team === null` = lista não carregou → cai no campo de texto de antes (nada trava).
+  const [team, setTeam] = useState<{ team: TeamPerson[]; others: TeamPerson[] } | null>(null);
+  // Quando a equipe chega, casa as linhas sem pessoa (escala por nome, fechamento antigo) — mesma regra do servidor.
+  useEffect(() => { if (team) setRanking(prev => autoMatchRows(prev, team.team, team.others)); }, [team]);
   const [cadastros, setCadastros] = useState(existing.cadastros ? String(existing.cadastros) : '');
   const [boletaInicial, setBoletaInicial] = useState(existing.boletaInicial || '');
   const [boletaFinal, setBoletaFinal] = useState(existing.boletaFinal || '');
@@ -3280,10 +3287,15 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
     }).catch(() => setBrands({ credito: ['Amex', 'Master', 'Visa', 'Elo'], debito: ['Redshop', 'Eletron', 'Elo'] }));
     // Escala do dia: pré-preenche o ranking com quem trabalhou (status work).
     apiFetch(`/api/retailops/schedule?storeId=${storeId}&start=${date}&end=${date}`).then(r => r.json()).then(d => {
-      const names = (d?.entries || []).filter((e: any) => e.status === 'work').map((e: any) => e.seller_name || e.seller_key.replace(/^(mat|nom|user):/, ''));
+      const work = (d?.entries || []).filter((e: any) => e.status === 'work');
+      const names = work.map((e: any) => e.seller_name || e.seller_key.replace(/^(mat|nom|user):/, ''));
       setEscalados(names);
-      setRanking(prev => prev.length ? prev : (names.length ? names.map((n: string) => ({ sellerName: n, valor: '', at: '', pecas: '' })) : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
+      // Escala por matrícula (`mat:X`) já chega com a pessoa escolhida.
+      setRanking(prev => prev.length ? prev : (work.length ? work.map((e: any) => ({ sellerName: e.seller_name || e.seller_key.replace(/^(mat|nom|user):/, ''), matricula: String(e.seller_key || '').startsWith('mat:') ? String(e.seller_key).slice(4) : null, valor: '', at: '', pecas: '', produtos: '' })) : [{ sellerName: '', valor: '', at: '', pecas: '', produtos: '' }]));
     }).catch(() => setRanking(prev => prev.length ? prev : [{ sellerName: '', valor: '', at: '', pecas: '' }]));
+    apiFetch(`/api/retailops/stores/${storeId}/team?date=${date}`).then(r => (r.ok ? r.json() : null)).then(d => {
+      if (d && Array.isArray(d.team)) setTeam({ team: d.team, others: Array.isArray(d.others) ? d.others : [] });
+    }).catch(() => setTeam(null));
     // Boletas em tempo real (Fase C3): pré-preenche inicial/final com o dia
     // aberto + cliques, e traz a contagem pra conferência ao vivo.
     apiFetch(`/api/retailops/boletas/day?storeId=${storeId}&day=${date}`).then(r => r.json()).then(d => {
@@ -3425,7 +3437,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
       // gerente. Mantém as linhas com dado e acrescenta só os vendedores da foto
       // que ainda não estão na lista (match por nome).
       if (Array.isArray(x.ranking) && x.ranking.length) {
-        const photoRows: RankRow[] = x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' }));
+        const read: RankRow[] = x.ranking.map((r: any) => ({ sellerName: String(r.nome || ''), matricula: null, valor: r.valor ? String(r.valor) : '', at: r.atendimentos ? String(r.atendimentos) : '', pecas: r.pecas ? String(r.pecas) : '', produtos: r.produtos ? String(r.produtos) : '' }));
+        // P4: nome lido da folha casa com UMA pessoa da equipe (mesma regra do servidor); sem par fica como "Outro".
+        const photoRows: RankRow[] = team ? autoMatchRows(read, team.team, team.others) : read;
         setRanking(prev => {
           const typed = prev.filter(r => r.sellerName.trim() || r.valor || r.at || r.pecas);
           if (!typed.length) return photoRows;
@@ -3460,6 +3474,9 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
   };
 
   const save = async () => {
+    // P4: nome digitado fora da equipe vira outra pessoa na comissão/metas — confirma antes (não trava).
+    const outside = team ? outsideTeamNames(ranking.filter(r => r.valor || r.at || r.pecas)) : [];
+    if (outside.length && !window.confirm(`${outside.join(', ')} não ${outside.length === 1 ? 'está' : 'estão'} na lista da equipe e ${outside.length === 1 ? 'vai' : 'vão'} contar como outra pessoa na comissão e nas metas.\n\nSe é alguém da loja, cancele e escolha na lista. Salvar mesmo assim?`)) return;
     setSaving(true);
     try {
       const details = {
@@ -3468,7 +3485,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         credito: Object.fromEntries((brands?.credito || []).map(b => [b, n(String(credito[b] ?? ''))])),
         debito: Object.fromEntries((brands?.debito || []).map(b => [b, n(String(debito[b] ?? ''))])),
         despesas: despesas.map(d => ({ descricao: d.descricao, valor: n(d.valor) })),
-        ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas), produtos: parseInt(String(r.produtos).replace(/[^0-9]/g, ''), 10) || 0 })).filter(r => r.sellerName),
+        ranking: ranking.map(r => ({ sellerName: r.sellerName.trim(), matricula: r.matricula || undefined, valor: n(r.valor), atendimentos: n(r.at), pecas: n(r.pecas), produtos: parseInt(String(r.produtos).replace(/[^0-9]/g, ''), 10) || 0 })).filter(r => r.sellerName),
         cadastros: n(cadastros), boletaInicial, boletaFinal, malote, premioDia, obs,
         pos: n(posCred) > 0 || n(posDeb) > 0 ? { creditoValor: n(posCred), creditoQtd: n(posCredQtd), debitoValor: n(posDeb), debitoQtd: n(posDebQtd) } : null,
       };
@@ -3596,7 +3613,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
         <div className="mt-3 rounded-lg border border-zinc-800 p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Ranking por vendedor · {brl(rankingTotal)}</span>
-            <button onClick={() => setRanking(p => [...p, { sellerName: '', valor: '', at: '', pecas: '', produtos: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
+            <button onClick={() => setRanking(p => [...p, { sellerName: '', matricula: null, valor: '', at: '', pecas: '', produtos: '' }])} className="text-[11px] text-indigo-300 hover:text-indigo-200">+ vendedor</button>
           </div>
           <p className="mb-2 text-[10px] text-zinc-600">Na aprovação, essas linhas viram as vendas por vendedor da comissão/corrida (AT = atendimentos). P.A = Peças ÷ AT (peças por atendimento, calculado). Prod = produtos DIFERENTES (códigos/nomes distintos) — usado pra contar as boletas ({PRODUTOS_POR_BOLETA} por boleta).{escalados.length ? ' Pré-preenchido pela escala do dia.' : ''}</p>
           {/* CLOSE-001: cabeçalho só no desktop; no mobile cada vendedor vira cartão */}
@@ -3606,7 +3623,8 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
           {ranking.map((r, i) => (
             <div key={i} className="mt-1.5 sm:mt-1 rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto_auto_auto] sm:gap-1.5 sm:items-center">
               <div className="flex items-center gap-1.5">
-                <input value={r.sellerName} onChange={e => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: e.target.value } : x))} placeholder="Nome do vendedor" className={`${inp} flex-1`} />
+                <SellerPick team={team?.team ?? null} others={team?.others || []} name={r.sellerName} matricula={r.matricula} className={inp}
+                  onChange={(name, matricula) => setRanking(p => p.map((x, j) => j === i ? { ...x, sellerName: name, matricula } : x))} />
                 <button onClick={() => setRanking(p => p.filter((_, j) => j !== i))} className="shrink-0 text-zinc-600 hover:text-red-300 sm:hidden"><Trash2 className="w-4 h-4" /></button>
               </div>
               <div className="mt-1.5 grid grid-cols-5 gap-1.5 sm:mt-0 sm:contents">
@@ -3753,7 +3771,7 @@ function InformModal({ closing, onClose, onSaved }: { closing: any; onClose: () 
 // ---- Lançamento de vendas por vendedor (manual / foto+IA — Cenário B) -------
 // A loja anota as vendas de cada vendedor no papel; o gestor digita aqui OU
 // envia a foto da folha p/ a IA ler e pré-preencher, conferindo antes de salvar.
-type SellerRow = { sellerName: string; valor: string; pecas: string; atendimentos: string };
+type SellerRow = { sellerName: string; matricula?: string | null; valor: string; pecas: string; atendimentos: string };
 function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: string; onClose: () => void; onSaved: () => void }) {
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
@@ -3764,8 +3782,16 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [scanSource, setScanSource] = useState<'manual' | 'photo'>('manual');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  // P4: com a loja escolhida, o vendedor sai da lista da equipe (digitar fica como "Outro"). Sem loja → campo de texto.
+  const [team, setTeam] = useState<{ team: TeamPerson[]; others: TeamPerson[] } | null>(null);
 
   useEffect(() => { apiFetch('/api/retailops/stores').then(r => r.json()).then(d => setStores(Array.isArray(d?.stores) ? d.stores : [])).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!storeId) { setTeam(null); return; }
+    apiFetch(`/api/retailops/stores/${storeId}/team?date=${date}`).then(r => (r.ok ? r.json() : null))
+      .then(d => setTeam(d && Array.isArray(d.team) ? { team: d.team, others: Array.isArray(d.others) ? d.others : [] } : null)).catch(() => setTeam(null));
+  }, [storeId, date]);
+  useEffect(() => { if (team) setRows(prev => autoMatchRows(prev, team.team, team.others)); }, [team]);
 
   const total = useMemo(() => rows.reduce((a, r) => a + (Number(r.valor) || 0), 0), [rows]);
   const totalPecas = useMemo(() => rows.reduce((a, r) => a + (Number(r.pecas) || 0), 0), [rows]);
@@ -3782,7 +3808,8 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
       if (!res.ok) { toast.error(d.error || 'Falha ao ler a folha.'); return; }
       const entries = Array.isArray(d.entries) ? d.entries : [];
       if (!entries.length) { toast.error('A IA não encontrou vendedores legíveis. Tente uma foto mais nítida ou digite manualmente.'); return; }
-      setRows(entries.map((e: any) => ({ sellerName: String(e.sellerName || ''), valor: e.valor ? String(e.valor) : '', pecas: e.pecas ? String(e.pecas) : '', atendimentos: e.atendimentos ? String(e.atendimentos) : '' })));
+      const read: SellerRow[] = entries.map((e: any) => ({ sellerName: String(e.sellerName || ''), matricula: null, valor: e.valor ? String(e.valor) : '', pecas: e.pecas ? String(e.pecas) : '', atendimentos: e.atendimentos ? String(e.atendimentos) : '' }));
+      setRows(team ? autoMatchRows(read, team.team, team.others) : read);
       setScanSource('photo'); setImageUrl(d.imageUrl || null);
       setScanNote(d.needsReview
         ? `Leitura com baixa confiança (${d.confidence}%). CONFIRA cada linha antes de salvar.`
@@ -3793,9 +3820,11 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
 
   const save = async () => {
     const entries = rows
-      .map(r => ({ sellerName: r.sellerName.trim(), valor: Number(r.valor) || 0, pecas: Number(r.pecas) || 0, atendimentos: Number(r.atendimentos) || 0 }))
+      .map(r => ({ sellerName: r.sellerName.trim(), matricula: r.matricula || undefined, valor: Number(r.valor) || 0, pecas: Number(r.pecas) || 0, atendimentos: Number(r.atendimentos) || 0 }))
       .filter(e => e.sellerName && (e.valor > 0 || e.pecas > 0));
     if (!entries.length) { toast.error('Informe ao menos um vendedor com nome e valor (ou peças).'); return; }
+    const outside = team ? outsideTeamNames(entries) : [];
+    if (outside.length && !window.confirm(`${outside.join(', ')} não ${outside.length === 1 ? 'está' : 'estão'} na lista da equipe e ${outside.length === 1 ? 'vai' : 'vão'} contar como outra pessoa na comissão e nas metas.\n\nSe é alguém da loja, cancele e escolha na lista. Salvar mesmo assim?`)) return;
     setSaving(true);
     try {
       const res = await apiFetch('/api/retailops/seller-sales', {
@@ -3845,7 +3874,8 @@ function SellerSalesModal({ defaultDate, onClose, onSaved }: { defaultDate: stri
           {rows.map((r, i) => (
             <div key={i} className="rounded-lg border border-zinc-800 p-2 sm:border-0 sm:p-0 sm:rounded-none sm:grid sm:grid-cols-[1fr_auto_auto_auto_auto] sm:gap-2 sm:items-center">
               <div className="flex items-center gap-1.5">
-                <input value={r.sellerName} onChange={e => setRow(i, { sellerName: e.target.value })} placeholder="Nome do vendedor" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100" />
+                <SellerPick team={team?.team ?? null} others={team?.others || []} name={r.sellerName} matricula={r.matricula} className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1.5 text-sm text-zinc-100"
+                  onChange={(name, matricula) => setRow(i, { sellerName: name, matricula })} />
                 <button onClick={() => removeRow(i)} title="Remover linha" className="shrink-0 text-zinc-600 hover:text-red-300 sm:hidden"><Trash2 className="w-4 h-4" /></button>
               </div>
               <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:mt-0 sm:contents">

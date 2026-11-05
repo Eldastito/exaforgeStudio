@@ -17,7 +17,7 @@
  *    indicadores do módulo NÃO alimentam cobrança/comissão; o contexto expõe o
  *    flag para a UI avisar.
  */
-import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
+import { RetailSellerIdentityService, normalizeAlias } from "./RetailSellerIdentityService.js";
 import db from "./db.js";
 import { BusinessTimeService } from "./BusinessTimeService.js";
 import { randomUUID, createHash, timingSafeEqual } from "crypto";
@@ -204,9 +204,17 @@ export class RetailFloorService {
    * (RetailSellerCodeProposalService). Código que já é de outra pessoa — como
    * matrícula ou como apelido — é recusado (antes duplicava a pessoa).
    */
-  static createSeller(orgId: string, input: { name?: string; matricula?: string; photoUrl?: string }, actorId?: string): any {
+  static createSeller(orgId: string, input: { name?: string; matricula?: string; photoUrl?: string; allowSameName?: boolean }, actorId?: string): any {
     const name = String(input?.name || "").trim();
     if (!name) throw new Error("Nome do vendedor é obrigatório.");
+    // "Já trabalha na rede?": nome IGUAL ao de uma pessoa ativa vira erro com a pessoa — marque-a na equipe em vez de
+    // cadastrar de novo (duplicar a pessoa separa a venda dela em duas). `allowSameName` cria de propósito (homônimo).
+    if (!input?.allowSameName) {
+      const k = normalizeAlias(name);
+      const same = (db.prepare(`SELECT id, name, matricula FROM retail_sellers WHERE organization_id = ? AND active = 1 AND merged_into_seller_id IS NULL AND name IS NOT NULL`).all(orgId) as any[])
+        .find((r) => normalizeAlias(r.name) === k);
+      if (same) throw new Error(`same_name_exists:${same.id}:Já existe ${same.name} na rede. Se é a mesma pessoa, marque-a na lista da equipe em vez de cadastrar de novo.`);
+    }
     const matricula = String(input?.matricula || "").trim() || `LV-${randomUUID().slice(0, 6).toUpperCase()}`;
     const photoUrl = input?.photoUrl ? String(input.photoUrl).trim() : null;
     const dup = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;

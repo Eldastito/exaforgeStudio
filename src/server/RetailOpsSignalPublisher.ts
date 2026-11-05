@@ -7,6 +7,7 @@ import { RetailTransferService } from "./RetailTransferService.js";
 import { haversineKm } from "./geo.js";
 import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
 import { RetailSellerCodeBirthService } from "./RetailSellerCodeBirthService.js";
+import { RetailSellerCodeProposalService } from "./RetailSellerCodeProposalService.js";
 import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
@@ -266,15 +267,22 @@ export class RetailOpsSignalPublisher {
     // liga/desliga das exceções do dia.
     if (RetailExceptionSignalService.enabled(orgId)) {
       try {
+        // P3: pessoa cadastrada SEM código cujo dia bate com o código novo → a proposta entra no aviso (preferida à
+        // sugestão geral da auditoria). Só sugere; confirmar é de uma pessoa.
+        let proposalByCode = new Map<string, { name: string; sellerId: string; why: string }>();
+        try { proposalByCode = new Map(RetailSellerCodeProposalService.proposals(orgId, { asOf }).map((p) => [p.code, { name: p.name, sellerId: p.sellerId, why: p.why }])); } catch { /* sem dados: segue sem proposta */ }
         for (const c of RetailSellerCodeBirthService.newCodes(orgId, asOf)) {
           const dm = (d: string) => `${d.slice(8)}/${d.slice(5, 7)}`;
+          const prop = proposalByCode.get(c.matricula) || null;
+          const hint = prop ? ` Parece ser ${prop.name} (cadastrado sem código do caixa).` : c.likelyPerson ? ` Parece ser ${c.likelyPerson.name}.` : "";
           pub({
             domain: "retail_ops", signalType: "retail_seller_code_new", severity: "attention", impactAmount: null, impactUnit: null,
             sourceEntityType: "retail_store", sourceEntityId: c.storeId,
             evidence: {
-              summary: `Código novo ${c.matricula} vendendo na ${c.storeName} desde ${dm(c.firstSale)}, sem nome — quem é?${c.likelyPerson ? ` Parece ser ${c.likelyPerson.name}.` : ""}`,
+              summary: `Código novo ${c.matricula} vendendo na ${c.storeName} desde ${dm(c.firstSale)}, sem nome — quem é?${hint}`,
               store: c.storeName, code: c.matricula, firstSale: c.firstSale, lastSale: c.lastSale, sales: c.sales,
-              likelyPerson: c.likelyPerson?.name || null, likelyWhy: c.likelyPerson?.why || null, sharedBoxSuspect: c.sharedBoxSuspect,
+              likelyPerson: prop?.name || c.likelyPerson?.name || null, likelyWhy: prop?.why || c.likelyPerson?.why || null,
+              proposalSellerId: prop?.sellerId || null, sharedBoxSuspect: c.sharedBoxSuspect,
             },
             dedupeKey: `retail_ops:seller_code_new:${c.storeId}:${c.matricula}`,
           });

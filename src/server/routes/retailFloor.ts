@@ -17,6 +17,10 @@ import { RetailFloorSignalPublisher } from "../RetailFloorSignalPublisher.js";
 import { RetailFloorAnalyticsService, RetailFloorNetworkAnalytics, RetailFloorOpsMetricsService } from "../RetailFloorAnalyticsService.js";
 import { RetailFloorDigestService } from "../RetailFloorDigestService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
+import { RetailSellerCodeBirthService } from "../RetailSellerCodeBirthService.js";
+import { RetailSellerCodeProposalService, PLACEHOLDER_CODE } from "../RetailSellerCodeProposalService.js";
+import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
+import db from "../db.js";
 import { AccountIdentityService } from "../AccountIdentityService.js";
 
 const router = Router();
@@ -74,6 +78,46 @@ router.put("/sellers/:id", (req: AuthRequest, res) => {
     res.json(RetailFloorService.updateSeller(req.organizationId!, req.params.id, {
       name: req.body?.name, matricula: req.body?.matricula, photoUrl: req.body?.photoUrl, active: req.body?.active,
     }, actor(req)));
+  } catch (e: any) { fail(res, e); }
+});
+
+// Códigos do caixa na LOJA (P1/P3, análise dos códigos sem nome): códigos SEM NOME que venderam aqui (o cadastro
+// escolhe o real em vez de deixar "LV-"), as propostas "o código X parece ser de Fulano" para quem está sem código
+// e os códigos já ligados a cada vendedor. Gestor DESTA loja ou owner/admin. Somente leitura.
+router.get("/stores/:storeId/seller-codes", (req: AuthRequest, res) => {
+  try {
+    const orgId = req.organizationId!, storeId = req.params.storeId;
+    RetailFloorService.assertStoreManager(orgId, req.user, storeId);
+    const cand = RetailSellerCodeBirthService.candidatesForStore(orgId, storeId);
+    const proposals = RetailSellerCodeProposalService.proposals(orgId).filter((p) => p.storeIds.includes(storeId));
+    // Só código que DE FATO vendeu (PDV/ERP): matrícula chutada que nunca vendeu não aparece como "código do caixa".
+    const sold = (code: string) => !PLACEHOLDER_CODE.test(code) && (
+      !!db.prepare(`SELECT 1 FROM retail_pdv_sales WHERE organization_id = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor) = ? LIMIT 1`).get(orgId, code)
+      || !!db.prepare(`SELECT 1 FROM retail_erp_seller_sales WHERE organization_id = ? AND matricula = ? LIMIT 1`).get(orgId, code));
+    const linked: Record<string, string[]> = {};
+    for (const r of db.prepare(`SELECT id, matricula FROM retail_sellers WHERE organization_id = ? AND active = 1`).all(orgId) as any[]) {
+      if (sold(String(r.matricula))) (linked[r.id] ||= []).push(String(r.matricula));
+    }
+    for (const a of db.prepare(`SELECT seller_id, alias FROM retail_seller_aliases WHERE organization_id = ? AND kind IN ('matricula','cai_usuario')`).all(orgId) as any[]) {
+      if (sold(String(a.alias))) (linked[a.seller_id] ||= []).push(String(a.alias));
+    }
+    res.json({ storeId, candidates: cand.candidates, proposals, linked });
+  } catch (e: any) { fail(res, e); }
+});
+
+// Confirma "o código X é de Fulano" pela LOJA: só código SEM NOME que vendeu NESTA loja; liga como apelido de
+// matrícula (reversível, não cria vendedor, não troca a matrícula). Gestor desta loja ou owner/admin.
+router.post("/stores/:storeId/sellers/:sellerId/link-code", (req: AuthRequest, res) => {
+  try {
+    const orgId = req.organizationId!, storeId = req.params.storeId;
+    RetailFloorService.assertStoreManager(orgId, req.user, storeId);
+    const code = String(req.body?.code || "").trim();
+    if (!code) throw new Error("Informe o código do caixa.");
+    const cand = RetailSellerCodeBirthService.candidatesForStore(orgId, storeId);
+    if (!cand.candidates.some((c: any) => c.matricula === code)) throw new Error("Esse código não está entre os códigos sem nome que venderam nesta loja.");
+    const seller = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, req.params.sellerId) as any;
+    if (!seller) throw new Error("Vendedor não encontrado.");
+    res.json(RetailSellerIdentityService.linkMatricula(orgId, code, seller.id, actor(req)));
   } catch (e: any) { fail(res, e); }
 });
 

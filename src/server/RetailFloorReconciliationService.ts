@@ -11,7 +11,11 @@
  * (loja, vendedor, dia), por COBERTURA DE VALOR:
  *
  *  1. Par loja↔ERP: es.store_id quando o sync resolveu; senão filial =
- *     retail_stores.code. Vendedor↔ERP: retail_sellers.matricula.
+ *     retail_stores.code. Vendedor↔ERP: retail_sellers.matricula + os códigos
+ *     LIGADOS à pessoa como apelido de matrícula (P3 da análise dos códigos sem
+ *     nome: o vendedor cadastrado como "LV-…" no Atendimento de Loja ganha o
+ *     código real do caixa como apelido — sem isso a venda declarada dele nunca
+ *     casava com o ERP e virava "não confirmada").
  *  2. erpValor <= 0 no dia → TODOS os declarados do vendedor viram
  *     `unmatched` (declarou, PDV não registrou nada).
  *  3. erpValor > 0 → confirma na ordem de started_at enquanto a soma dos
@@ -60,9 +64,11 @@ export class RetailFloorReconciliationService {
     ).all(orgId, storeId, date) as any[];
     if (!pendings.length) return this.summary(orgId, storeId, date);
 
-    const erpForSeller = db.prepare(
+    // Códigos do vendedor = matrícula + apelidos de matrícula (regra 1). Sem apelido = a matrícula sozinha (0-regressão).
+    const aliasCodes = db.prepare(`SELECT alias FROM retail_seller_aliases WHERE organization_id = ? AND seller_id = ? AND kind IN ('matricula','cai_usuario')`);
+    const erpForCodes = (codes: string[]) => db.prepare(
       `SELECT COALESCE(SUM(valor), 0) AS valor FROM retail_erp_seller_sales
-        WHERE organization_id = ? AND sale_date = ? AND matricula = ?
+        WHERE organization_id = ? AND sale_date = ? AND matricula IN (${codes.map(() => "?").join(",")})
           AND (store_id = ? OR (store_id IS NULL AND filial = ?))`
     );
     // Idempotência do só-promove: o que JÁ está confirmado consome o orçamento
@@ -84,7 +90,8 @@ export class RetailFloorReconciliationService {
     const tx = db.transaction(() => {
       for (const [, atts] of bySeller) {
         const matricula = atts[0].matricula || "";
-        const erpValor = Number((erpForSeller.get(orgId, date, matricula, storeId, store.code || "") as any)?.valor || 0);
+        const codes = Array.from(new Set([matricula, ...(aliasCodes.all(orgId, atts[0].seller_id) as any[]).map((r) => String(r.alias))]));
+        const erpValor = Number((erpForCodes(codes).get(orgId, date, ...codes, storeId, store.code || "") as any)?.valor || 0);
         if (erpValor <= 0) {
           for (const a of atts) { setState.run("unmatched", orgId, a.id); unmatched++; }
           continue;

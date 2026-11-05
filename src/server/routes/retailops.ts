@@ -141,6 +141,7 @@ import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
 import { RetailSellerCodeBirthService } from "../RetailSellerCodeBirthService.js";
+import { RetailSellerCodeProposalService } from "../RetailSellerCodeProposalService.js";
 import { RetailSellerLinkageAuditService } from "../RetailSellerLinkageAuditService.js";
 import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
 import { RetailFilialRemapService } from "../RetailFilialRemapService.js";
@@ -1590,6 +1591,13 @@ router.post("/stores/filial-remap/undo/:remapId", requireNetworkScope, (req: Aut
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   try { res.json(RetailFilialRemapService.undo(orgId, req.params.remapId, req.user?.userId)); }
   catch (e: any) { res.status(/already_undone/.test(e.message) ? 409 : 400).json({ error: e.message }); }
+});
+// P3 — pessoas cadastradas SEM código do caixa (LV- do Atendimento de Loja ou matrícula que nunca vendeu) + a proposta
+// de código de cada uma (padrão diário). SOMENTE LEITURA; confirmar usa /sellers/identity/link-matricula. owner/admin da rede.
+router.get("/sellers/identity/codeless", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  res.json(RetailSellerCodeProposalService.report(orgId));
 });
 // "É alguém já cadastrado?" — seletor da rede inteira + vínculo do código novo à pessoa existente (alias reversível). owner/admin da rede.
 router.get("/sellers/identity/directory", requireNetworkScope, (req: AuthRequest, res): any => {

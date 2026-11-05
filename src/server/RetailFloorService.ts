@@ -198,6 +198,11 @@ export class RetailFloorService {
    * conciliação com o ERP; quando o lojista não informa (vendedor sem código
    * no PDV ainda), geramos placeholder `LV-xxxxxx` — trocável depois via
    * updateSeller sem perder histórico (o id não muda).
+   * Desde o P3 (análise dos códigos sem nome) a tela oferece os códigos SEM NOME
+   * que venderam na loja; sem escolha fica "sem código" (LV-) e, quando o código
+   * real começar a vender e bater com o dia da pessoa, o ZapFlow PROPÕE o vínculo
+   * (RetailSellerCodeProposalService). Código que já é de outra pessoa — como
+   * matrícula ou como apelido — é recusado (antes duplicava a pessoa).
    */
   static createSeller(orgId: string, input: { name?: string; matricula?: string; photoUrl?: string }, actorId?: string): any {
     const name = String(input?.name || "").trim();
@@ -206,6 +211,11 @@ export class RetailFloorService {
     const photoUrl = input?.photoUrl ? String(input.photoUrl).trim() : null;
     const dup = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
     if (dup) throw new Error(`Já existe vendedor com a matrícula "${matricula}".`);
+    const aliasOwner = db.prepare(
+      `SELECT s.name FROM retail_seller_aliases a JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
+        WHERE a.organization_id = ? AND a.kind IN ('matricula','cai_usuario') AND LOWER(TRIM(a.alias)) = LOWER(?) LIMIT 1`
+    ).get(orgId, matricula) as any;
+    if (aliasOwner) throw new Error(`O código "${matricula}" já é de ${aliasOwner.name || "outro vendedor"}.`);
     const id = randomUUID();
     db.prepare(
       `INSERT INTO retail_sellers (id, organization_id, matricula, name, photo_url, active) VALUES (?, ?, ?, ?, ?, 1)`

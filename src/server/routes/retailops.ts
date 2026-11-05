@@ -140,6 +140,7 @@ import { BusinessTimeService } from "../BusinessTimeService.js";
 import { RetailSellerDirectoryService } from "../RetailSellerDirectoryService.js";
 import { RetailSellerIdentityService } from "../RetailSellerIdentityService.js";
 import { RetailSellerCodeAuditService } from "../RetailSellerCodeAuditService.js";
+import { RetailSellerCodeBirthService } from "../RetailSellerCodeBirthService.js";
 import { RetailSellerLinkageAuditService } from "../RetailSellerLinkageAuditService.js";
 import { RetailFilialCodeAuditService } from "../RetailFilialCodeAuditService.js";
 import { RetailFilialRemapService } from "../RetailFilialRemapService.js";
@@ -1471,6 +1472,14 @@ router.put("/sellers/:matricula", requireNetworkScope, (req: AuthRequest, res): 
   const matricula = String(req.params.matricula || "").trim();
   if (!matricula) return res.status(400).json({ error: "Matrícula é obrigatória." });
   const name = req.body?.name != null ? String(req.body.name).trim() : null;
+  // Dar nome a um código: se já existe pessoa ATIVA com esse nome em OUTRA matrícula, criar outra
+  // linha duplicaria a pessoa (código e lançamento manual somariam separados). Devolve 409 com a
+  // pessoa existente; a tela pergunta "é a mesma pessoa?" (liga o código) ou reenvia com allowSameName.
+  const current = db.prepare(`SELECT name FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
+  if (name && !String(current?.name || "").trim() && req.body?.allowSameName !== true) {
+    const existing = RetailSellerCodeBirthService.sameNameSeller(orgId, name, matricula);
+    if (existing) return res.status(409).json({ error: `Já existe ${existing.name} (matrícula ${existing.matricula}). Se é a mesma pessoa, ligue este código a ela em vez de criar outra.`, code: "same_name_exists", existing });
+  }
   db.prepare(
     `INSERT INTO retail_sellers (id, organization_id, matricula, name, user_id, active)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -1479,6 +1488,20 @@ router.put("/sellers/:matricula", requireNetworkScope, (req: AuthRequest, res): 
        active = excluded.active, updated_at = CURRENT_TIMESTAMP`
   ).run(randomUUID(), orgId, matricula, name, req.body?.userId || null, req.body?.active === false ? 0 : 1);
   res.json(db.prepare(`SELECT id, matricula, name, user_id, active FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula));
+});
+
+// Códigos SEM NOME que venderam no caixa da loja — o cadastro escolhe o código REAL daqui em vez de
+// um palpite (P1, análise dos códigos sem nome). `matricula` opcional: diz se esse código já vendeu na loja.
+router.get("/sellers/code-candidates", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  const storeId = String(req.query.storeId || "");
+  if (!storeId) return res.status(400).json({ error: "storeId obrigatório" });
+  try {
+    const out = RetailSellerCodeBirthService.candidatesForStore(orgId, storeId);
+    const m = String(req.query.matricula || "").trim();
+    res.json(m ? { ...out, matricula: m, seenInStore: RetailSellerCodeBirthService.seenInStore(orgId, storeId, m) } : out);
+  } catch (e: any) { res.status(404).json({ error: e.message }); }
 });
 
 // Sugere a PRÓXIMA matrícula no padrão da rede (auto-preencher no cadastro de

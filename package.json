@@ -54,6 +54,7 @@
     "test:retail-seller-link-matricula": "tsx scripts/test-retail-seller-link-matricula.ts",
     "test:retail-seller-code-audit": "tsx scripts/test-retail-seller-code-audit.ts",
     "test:retail-seller-linkage-audit": "tsx scripts/test-retail-seller-linkage-audit.ts",
+    "test:retail-seller-code-birth": "tsx scripts/test-retail-seller-code-birth.ts",
     "test:stale-chunk": "tsx scripts/test-stale-chunk.ts",
     "test:pickup-ready-notice": "tsx scripts/test-pickup-ready-notice.ts",
     "test:ffmpeg-service": "tsx scripts/test-ffmpeg-service.ts",

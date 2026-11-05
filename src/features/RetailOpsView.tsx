@@ -1,5 +1,6 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
 import { MonthCheckCard } from './retailops/MonthCheckCard';
+import { STOPPED_AFTER_DAYS, candidateLabel, isStoppedCode, sameNameQuestion } from './retailops/sellerCodeLabels';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
@@ -7677,6 +7678,7 @@ function UnidentifiedSellersCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [people, setPeople] = useState<Array<{ id: string; name: string; matricula: string; stores: string[] }>>([]);
   const [picks, setPicks] = useState<Record<string, string>>({});
+  const [showStopped, setShowStopped] = useState(false);
   const personLabel = (p: { name: string; matricula: string; stores: string[] }) => `${p.name} — ${p.matricula}${p.stores.length ? ` · ${p.stores.join(', ')}` : ''}`;
   const linkTo = async (m: string) => {
     const person = people.find(p => personLabel(p) === (picks[m] || ''));
@@ -7708,20 +7710,32 @@ function UnidentifiedSellersCard() {
     apiFetch('/api/retailops/sellers/identity/directory').then(r => (r.ok ? r.json() : null)).then(d => setPeople(Array.isArray(d?.sellers) ? d.sellers : [])).catch(() => setPeople([]));
   }, []);
   if (!items.length) return null;
+  // Código parado (sem venda há mais de 45 dias) fica guardado à parte — reversível: um toque mostra de novo.
+  const todayISO = todayStr();
+  const active = items.filter((u: any) => !isStoppedCode(u.lastSale, todayISO));
+  const stopped = items.filter((u: any) => isStoppedCode(u.lastSale, todayISO));
+  const shown = showStopped ? [...active, ...stopped] : active;
   const save = async (m: string) => {
     const name = (names[m] || '').trim();
     if (!name) return;
     setBusy(m);
     try {
-      const res = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(m)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-      if (res.ok) { toast.success(`Matrícula ${m} agora é ${name}.`); setNames(n => ({ ...n, [m]: '' })); load(); } else toast.error('Não foi possível salvar.');
-    } finally { setBusy(null); }
+      const r = await putSellerName(m, name);
+      if (!r.ok) return;
+      toast.success(r.linkedTo ? `Código ${m} agora é de ${r.linkedTo}.` : `Matrícula ${m} agora é ${name}.`);
+      setNames(n => ({ ...n, [m]: '' })); load();
+    } catch (e: any) { toast.error(e.message || 'Não foi possível salvar.'); } finally { setBusy(null); }
   };
   return (
     <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Users className="w-4 h-4 text-amber-400" /> Vendedores a identificar <span className="text-[11px] font-normal text-zinc-500">— {items.length} matrícula{items.length === 1 ? '' : 's'} vendendo sem nome confirmado</span></div>
+      <div className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Users className="w-4 h-4 text-amber-400" /> Vendedores a identificar <span className="text-[11px] font-normal text-zinc-500">— {active.length} matrícula{active.length === 1 ? '' : 's'} vendendo sem nome confirmado{stopped.length > 0 ? ` · ${stopped.length} parada${stopped.length === 1 ? '' : 's'}` : ''}</span></div>
+      {stopped.length > 0 && (
+        <button onClick={() => setShowStopped(v => !v)} className="mt-1 text-[11px] text-zinc-400 hover:text-zinc-200 hover:underline">
+          {showStopped ? 'Esconder os códigos parados' : `Mostrar ${stopped.length} código${stopped.length === 1 ? '' : 's'} parado${stopped.length === 1 ? '' : 's'} (sem venda há mais de ${STOPPED_AFTER_DAYS} dias)`}
+        </button>
+      )}
       <div className="mt-2 space-y-1.5">
-        {items.slice(0, 20).map((u: any) => (
+        {shown.slice(0, 20).map((u: any) => (
           <div key={u.matricula} className="flex flex-wrap items-center gap-2 text-[12px] text-zinc-300">
             <span className="min-w-[210px]">{u.displayName}</span>
             <span className="text-zinc-500">{u.sales} venda{u.sales === 1 ? '' : 's'}{u.lastSale ? ` · última ${String(u.lastSale).slice(0, 10)}` : ''}</span>
@@ -7940,6 +7954,28 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
   );
 }
 
+// Dá nome a um código. Se o servidor responder que já existe pessoa com esse nome (409 same_name_exists),
+// pergunta se é a mesma pessoa (liga o código a ela, sem criar outra) ou se é outra pessoa com o mesmo nome.
+async function putSellerName(matricula: string, name: string): Promise<{ ok: boolean; linkedTo?: string; data?: any }> {
+  const put = (extra?: Record<string, unknown>) => apiFetch(`/api/retailops/sellers/${encodeURIComponent(matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, ...(extra || {}) }) });
+  let r = await put();
+  let d = await r.json().catch(() => ({}));
+  if (r.status === 409 && d?.code === 'same_name_exists' && d.existing) {
+    const ex = d.existing;
+    if (window.confirm(sameNameQuestion(ex, matricula))) {
+      const rl = await apiFetch(`/api/retailops/sellers/${ex.id}/aliases`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: matricula, kind: 'matricula' }) });
+      const dl = await rl.json().catch(() => ({}));
+      if (!rl.ok) throw new Error(dl.error || 'Não foi possível ligar o código à pessoa.');
+      return { ok: true, linkedTo: ex.name };
+    }
+    if (!window.confirm(`Criar outra pessoa chamada ${name}, separada de ${ex.name} (matrícula ${ex.matricula})?`)) return { ok: false };
+    r = await put({ allowSameName: true });
+    d = await r.json().catch(() => ({}));
+  }
+  if (!r.ok) throw new Error(d.error || 'Falha ao salvar o vendedor.');
+  return { ok: true, data: d };
+}
+
 // Formulário de cadastro/nome de vendedor (substitui o window.prompt). Dá nome a
 // uma matrícula do PDV e, opcionalmente, LOTA o vendedor na loja atual (SELL-002).
 // Em modo "cadastrar" (allowCodeEdit) a matrícula é digitável — dá pra registrar
@@ -7947,7 +7983,8 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
 function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeName, stores, onClose, onSaved }: { codigo: string; initialName?: string; allowCodeEdit?: boolean; storeId?: string; storeName?: string; stores?: any[]; onClose: () => void; onSaved: () => void }) {
   const [mat, setMat] = useState(codigo || '');
   const [matTouched, setMatTouched] = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
+  // Cadastro: códigos SEM NOME que venderam no caixa da loja escolhida — o código real sai daqui (nunca um palpite).
+  const [candidates, setCandidates] = useState<any[] | null>(null);
   const [name, setName] = useState(initialName || '');
   // No cadastro, a loja é escolhida aqui (define onde o vendedor é lotado). No
   // modo "dar nome" segue a loja atual da aba.
@@ -7967,20 +8004,19 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
   const lotStore = allowCodeEdit ? store : storeId;
   const lotStoreName = allowCodeEdit ? (storeList.find((s: any) => s.id === store)?.name || 'loja escolhida') : (storeName || 'loja atual');
 
-  // Auto-preenche a matrícula no padrão da rede — só no cadastro e enquanto o
-  // gestor não digitar à mão. Re-sugere ao trocar de loja (o padrão é por filial).
+  // Não sugere mais a "próxima matrícula" (era um palpite: a pessoa ficava num código que nunca vendia e o
+  // código real vendia sem nome). Lista os códigos sem nome que DE FATO venderam no caixa da loja escolhida.
   useEffect(() => {
-    if (!allowCodeEdit || matTouched || !store) return;
+    if (!allowCodeEdit || !store) { setCandidates(null); return; }
     let alive = true;
-    setSuggesting(true);
-    apiFetch(`/api/retailops/sellers/next-matricula?storeId=${encodeURIComponent(store)}`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { if (alive && !matTouched && d?.matricula) setMat(String(d.matricula)); })
-      .catch(() => {})
-      .finally(() => { if (alive) setSuggesting(false); });
+    setCandidates(null);
+    apiFetch(`/api/retailops/sellers/code-candidates?storeId=${encodeURIComponent(store)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (alive) setCandidates(Array.isArray(d?.candidates) ? d.candidates : []); })
+      .catch(() => { if (alive) setCandidates([]); });
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowCodeEdit, store, matTouched]);
+  }, [allowCodeEdit, store]);
+  const ownerOfMat = allowCodeEdit && mat.trim() ? people.find(p => p.matricula === mat.trim()) || null : null;
 
   const choosePerson = (label: string) => {
     setPick(label);
@@ -8005,11 +8041,19 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
     const matricula = mat.trim();
     if (!matricula) { toast.error('Informe a matrícula (código do vendedor no PDV).'); return; }
     if (!name.trim()) { toast.error('Informe o nome do vendedor.'); return; }
+    // Cadastro: a matrícula já é de outra pessoa → salvar renomearia essa pessoa. Bloqueia.
+    if (ownerOfMat) { toast.error(`A matrícula ${matricula} já é de ${ownerOfMat.name}.`); return; }
     setSaving(true);
     try {
-      const r = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Falha ao salvar o vendedor.');
+      // Código digitado à mão que nunca vendeu no caixa da loja: confirma antes (era assim que nasciam as matrículas "fantasma").
+      if (allowCodeEdit && lotStore && !(candidates || []).some((c: any) => c.matricula === matricula)) {
+        const chk = await apiFetch(`/api/retailops/sellers/code-candidates?storeId=${encodeURIComponent(lotStore)}&matricula=${encodeURIComponent(matricula)}`).then(r => (r.ok ? r.json() : null)).catch(() => null);
+        if (chk && chk.seenInStore === false && !window.confirm(`O código ${matricula} nunca vendeu no caixa de ${lotStoreName}.\n\nSe a pessoa ainda não vendeu, o melhor é esperar: quando o código dela começar a vender, o ZapFlow avisa a loja.\n\nCadastrar mesmo assim?`)) return;
+      }
+      const res = await putSellerName(matricula, name.trim());
+      if (!res.ok) return;
+      if (res.linkedTo) { toast.success(`Matrícula ${matricula} agora é de ${res.linkedTo}.`); onSaved(); return; }
+      const d = res.data;
       // Lotação na loja escolhida (opcional) — usa o id devolvido pelo upsert.
       if (lotar && lotStore && d?.id) {
         const rs = await apiFetch(`/api/retailops/sellers/${d.id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [lotStore], primaryStoreId: lotStore }) });
@@ -8032,8 +8076,28 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
         )}
         <label className="block text-[12px] text-zinc-400 mb-2">Matrícula
           <input value={mat} onChange={e => { setMat(e.target.value); setMatTouched(true); }} disabled={!allowCodeEdit} placeholder="Ex.: 1024" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 disabled:opacity-60 font-mono" />
-          {allowCodeEdit && <span className="mt-1 block text-[10px] text-zinc-500">{suggesting ? 'Sugerindo no padrão da rede…' : 'Sugerida automaticamente no padrão da rede — pode editar.'}</span>}
+          {allowCodeEdit && <span className="mt-1 block text-[10px] text-zinc-500">Use o código que a pessoa usa no caixa (escolha abaixo). Se ela ainda não vendeu, cadastre depois: quando o código dela começar a vender, o ZapFlow avisa a loja.</span>}
+          {ownerOfMat && <span className="mt-1 block text-[10px] text-rose-300">Essa matrícula já é de {ownerOfMat.name}.</span>}
         </label>
+        {allowCodeEdit && (
+          <div className="mb-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
+            <div className="text-[11px] text-zinc-400 mb-1">Códigos sem nome que venderam no caixa desta loja</div>
+            {candidates === null ? <div className="text-[11px] text-zinc-500">Carregando…</div>
+              : candidates.length === 0 ? <div className="text-[11px] text-zinc-500">Nenhum código sem nome vendeu nesta loja.</div>
+              : (
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {candidates.map((c: any) => (
+                    <button key={c.matricula} type="button" onClick={() => { setMat(c.matricula); setMatTouched(true); }} className={`block w-full text-left rounded border px-2 py-1 text-[11px] ${mat.trim() === c.matricula ? 'border-indigo-500 bg-indigo-600/15 text-indigo-200' : 'border-zinc-800 text-zinc-300 hover:bg-zinc-800'}`}>
+                      <span className="font-mono">{candidateLabel(c)}</span>
+                      {c.status === 'parado' && <span className="text-zinc-500"> · parado</span>}
+                      {c.sharedBoxSuspect && <span className="text-amber-300"> · pode ser caixa compartilhado</span>}
+                      {c.likelyPerson && <span className="block text-sky-300">parece ser {c.likelyPerson.name}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+          </div>
+        )}
         {allowCodeEdit && people.length > 0 && (
           <label className="block text-[12px] text-zinc-400 mb-2">Já cadastrado? Busque a pessoa
             <input list="seller-people" value={pick} onChange={e => choosePerson(e.target.value)} placeholder="Nome — matrícula · loja" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />

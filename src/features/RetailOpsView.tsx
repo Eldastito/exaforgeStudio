@@ -7930,6 +7930,8 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
   const [deleteFor, setDeleteFor] = useState<any>(null);
   // Modal de cadastro/nome: { codigo, initialName, allowCodeEdit }. Sem window.prompt.
   const [nameModal, setNameModal] = useState<{ codigo: string; initialName?: string; allowCodeEdit?: boolean } | null>(null);
+  // Código sem nome parado (sem venda há mais de 45 dias — ex.: códigos antigos da loja) fica à parte; um toque mostra.
+  const [showStoppedPend, setShowStoppedPend] = useState(false);
 
   // Carrega as lojas SEMPRE (o modal de cadastro precisa da lista); só define a
   // loja padrão pelo seletor interno quando NÃO está embutido.
@@ -7977,20 +7979,33 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
             )}
           </div>
           {/* Pendências de nome */}
-          {cov.pendingName.length > 0 && (
+          {cov.pendingName.length > 0 && (() => {
+            const today = todayStr();
+            const pendActive = cov.pendingName.filter((p: any) => !isStoppedCode(p.lastSale, today));
+            const pendStopped = cov.pendingName.filter((p: any) => isStoppedCode(p.lastSale, today));
+            const pendShown = showStoppedPend ? [...pendActive, ...pendStopped] : pendActive;
+            return (
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-amber-300/80 mb-1.5">Matrículas sem nome — pendência ({cov.counts.pendingName})</div>
+              <div className="text-[11px] uppercase tracking-wide text-amber-300/80 mb-1.5">Matrículas sem nome — pendência ({pendActive.length} vendendo{pendStopped.length ? ` · ${pendStopped.length} parada${pendStopped.length === 1 ? '' : 's'}` : ''})</div>
+              {pendActive.length === 0 && !showStoppedPend && <p className="mb-1.5 text-[11px] text-zinc-500">Nenhum código sem nome vendendo nesta loja agora.</p>}
+              {pendStopped.length > 0 && (
+                <button onClick={() => setShowStoppedPend(v => !v)} className="mb-1.5 text-[11px] text-zinc-400 hover:text-zinc-200 hover:underline">
+                  {showStoppedPend ? 'Esconder os códigos parados' : `Mostrar ${pendStopped.length} código${pendStopped.length === 1 ? '' : 's'} parado${pendStopped.length === 1 ? '' : 's'} (sem venda há mais de ${STOPPED_AFTER_DAYS} dias)`}
+                </button>
+              )}
               <div className="space-y-1.5">
-                {cov.pendingName.map((p: any) => (
+                {pendShown.map((p: any) => (
                   <div key={p.codigo} className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5">
                     <span className="font-mono text-[13px] text-zinc-200">Matrícula {p.codigo}</span>
                     <span className="text-[11px] text-zinc-500">{p.sales} venda(s){p.lastSale ? ` · última ${p.lastSale}` : ''}</span>
+                    {isStoppedCode(p.lastSale, today) && <span className="text-[11px] text-zinc-600">· parado</span>}
                     <button onClick={() => setNameModal({ codigo: p.codigo })} className="ml-auto rounded-md border border-indigo-500/30 px-2 py-0.5 text-[12px] text-indigo-300 hover:bg-indigo-500/10">Dar nome</button>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+            );
+          })()}
           {/* Suspeitos de código compartilhado */}
           {cov.sharedCodeSuspects.length > 0 && (
             <div>

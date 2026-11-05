@@ -155,6 +155,7 @@ async function main() {
   check("6.1 cadastro não chama mais a 'próxima matrícula' (palpite)", !view.includes("/sellers/next-matricula"));
   check("6.2 cadastro lista os códigos reais da loja", view.includes("/api/retailops/sellers/code-candidates?storeId="));
   check("6.3 tela trata o 409 'same_name_exists' (liga o código ou cria de propósito)", view.includes("same_name_exists") && view.includes("allowSameName: true"));
+  check("6.4 'Vendedores da loja' separa os códigos parados (mesma regra do cartão)", view.includes("setShowStoppedPend") && /pendActive = cov\.pendingName\.filter\(\(p: any\) => !isStoppedCode\(p\.lastSale, today\)\)/.test(view));
 
   const passed = results.filter((x) => x.ok).length;
   for (const x of results) if (!x.ok) console.log(`  ✗ ${x.name} ${x.detail ? `(${x.detail})` : ""}`);

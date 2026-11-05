@@ -892,6 +892,10 @@ router.get("/stores/:id", requireStoreAccess(inParam("id")), (req: AuthRequest, 
 router.post("/stores", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  // P5: loja nova não nasce na fonte padrão sem ninguém escolher (soma dupla PDV + lançamento do gerente).
+  if (!RetailStoreService.sellerSourceChoice(req.body?.sellerSource)) {
+    return res.status(400).json({ error: "Escolha de onde vem a venda de cada vendedor desta loja: do caixa (PDV) ou do lançamento do gerente no fechamento.", code: "seller_source_required" });
+  }
   try {
     const store = RetailStoreService.create(orgId, req.body || {}, req.user?.userId);
     res.status(201).json(store);

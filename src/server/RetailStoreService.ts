@@ -99,6 +99,17 @@ export class RetailStoreService {
     if (dup) throw new Error(`Já existe a loja ativa "${dup.name}" com o código ${c}. Edite a loja existente em vez de criar outra (o código da filial precisa ser único — é por ele que o estoque e o caixa do ERP são casados).`);
   }
 
+  /**
+   * P5 (docs/retail/ANALISE-CODIGOS-VENDEDOR-SEM-NOME.md) — a fonte da venda por vendedor é decisão EXPLÍCITA na
+   * criação da loja. Antes a loja nova nascia em "PDV" sem ninguém escolher; se o gerente também lançava venda por
+   * vendedor no fechamento, a mesma venda contava duas vezes (BANGU). A ROTA de criação exige esta escolha; o
+   * service continua aceitando sem ela (seeds, testes e outros chamadores internos — o padrão segue PDV).
+   * Só 'pdv' ou 'manual' valem; qualquer outra coisa = sem escolha (null).
+   */
+  static sellerSourceChoice(v: unknown): "pdv" | "manual" | null {
+    return v === "pdv" || v === "manual" ? v : null;
+  }
+
   static create(orgId: string, input: StoreInput, actorId?: string): any {
     const name = String(input.name || "").trim();
     if (!name) throw new Error("Nome da loja é obrigatório");

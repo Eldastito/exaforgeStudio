@@ -5,6 +5,7 @@ import { SellerPick } from './retailops/SellerPick';
 import { autoMatchRows, outsideTeamNames, type TeamPerson } from './retailops/sellerPickRules';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
 import { pickStoreForFix, storeFieldId } from '@/src/lib/actionLinks';
+import { DOUBLED_ASK_OWNER, isSourceChoice, networkSourceHint, networkSourceSummary, sourceChoiceError } from './retailops/storeSourceRules';
 import { similarPeople, personLabel as dirLabel, type DirectoryPerson } from './sellers/sellerNameMatch';
 import { Fragment, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Store, Loader2, Check, X, RefreshCw, Calculator, CalendarDays, Plus, Scale, AlertTriangle, Users, Upload, Trash2, Sparkles, Globe, Download, Lightbulb, Boxes, TrendingUp, CreditCard, Pencil, ArrowLeftRight, Truck, PackageCheck, DollarSign, Tag, ChevronRight, ChevronDown, Copy, Share2 , Target } from 'lucide-react';
@@ -2936,7 +2937,15 @@ function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | 
   const [city, setCity] = useState(store?.city || '');
   const [lat, setLat] = useState(store?.latitude != null ? String(store.latitude) : '');
   const [lng, setLng] = useState(store?.longitude != null ? String(store.longitude) : '');
-  const [sellerSource, setSellerSource] = useState(store?.seller_source === 'manual' ? 'manual' : 'pdv');
+  // P5: loja nova começa SEM fonte escolhida (antes nascia em "caixa" calada); ao editar, null no banco = caixa.
+  const [sellerSource, setSellerSource] = useState<string>(editing ? (store?.seller_source === 'manual' ? 'manual' : 'pdv') : '');
+  const [networkSourceText, setNetworkSourceText] = useState<string | null>(null);
+  useEffect(() => {
+    if (editing) return;
+    apiFetch('/api/retailops/stores').then(r => r.ok ? r.json() : null)
+      .then(d => setNetworkSourceText(networkSourceHint(networkSourceSummary(Array.isArray(d?.stores) ? d.stores : []))))
+      .catch(() => setNetworkSourceText(null));
+  }, [editing]);
   const [margin, setMargin] = useState(store?.gross_margin_percent != null ? String(store.gross_margin_percent) : '');
   const [briefTime, setBriefTime] = useState<string>(store?.closing_brief_time || '');
   // Dias fixos SEM funcionamento (0=domingo..6=sábado): sem cota, sem cobrança
@@ -2989,6 +2998,13 @@ function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | 
 
   const save = async () => {
     if (!name.trim()) { toast.error('Dê um nome à loja.'); return; }
+    const srcErr = sourceChoiceError(sellerSource, editing);
+    if (srcErr) {
+      toast.error(srcErr);
+      const el = document.getElementById(storeFieldId('sellerSource'));
+      if (el) { el.scrollIntoView({ block: 'center' }); (el as HTMLSelectElement).focus(); }
+      return;
+    }
     setSaving(true);
     try {
       const body = JSON.stringify({
@@ -2996,7 +3012,7 @@ function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | 
         address: address.trim() || null, city: city.trim() || null,
         latitude: lat.trim() === '' ? null : Number(lat.replace(',', '.')),
         longitude: lng.trim() === '' ? null : Number(lng.replace(',', '.')),
-        sellerSource: sellerSource === 'manual' ? 'manual' : null,
+        sellerSource: isSourceChoice(sellerSource) ? sellerSource : null,
         grossMarginPercent: margin.trim() === '' ? null : Number(margin.replace(',', '.')),
         closedWeekdays: closedDays.length ? closedDays : null,
         closingBriefTime: briefTime.trim() === '' ? null : briefTime.trim(),
@@ -3081,12 +3097,16 @@ function StoreFormModal({ store, focusField, onClose, onSaved }: { store: any | 
             <input type="time" value={briefTime} onChange={e => setBriefTime(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
             <span className="mt-1 block text-[11px] text-zinc-500">Horário (Brasília) em que o gestor recebe o fechamento <strong>desta loja</strong> — use uns 30 min depois que a loja fecha (ex.: loja que fecha às 19h → 19:30). Vazio = padrão da rede (22:30). Só vale se o resumo da noite estiver ligado.</span>
           </label>
-          <label className="block text-xs text-zinc-400">Comissão por vendedor vem de
-            <select id={storeFieldId('sellerSource')} value={sellerSource} onChange={e => setSellerSource(e.target.value)} className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100">
-              <option value="pdv">PDV/ERP (padrão)</option>
-              <option value="manual">Lançamento manual da equipe (feito no fechamento de caixa)</option>
+          <label className="block text-xs text-zinc-400">De onde vem a venda de cada vendedor (comissão, metas, ranking){!editing && <span className="text-rose-300"> *</span>}
+            <select id={storeFieldId('sellerSource')} value={sellerSource} onChange={e => setSellerSource(e.target.value)} className={`mt-1 w-full bg-zinc-950 border rounded-lg px-2.5 py-1.5 text-sm text-zinc-100 ${!editing && !isSourceChoice(sellerSource) ? 'border-amber-500/60' : 'border-zinc-800'}`}>
+              {!editing && <option value="" disabled>Escolha…</option>}
+              <option value="pdv">Do caixa (PDV/ERP) — cada vendedor tem o próprio código</option>
+              <option value="manual">Do lançamento do gerente no fechamento</option>
             </select>
-            <span className="mt-1 block text-[11px] text-zinc-500">Se o código de vendedor que vem do PDV/ERP dessa loja NÃO identifica cada pessoa de verdade (ex.: um código só, compartilhado pra loja inteira), escolha "Lançamento manual" — o PDV dessa loja deixa de contar na comissão por vendedor, e passa a valer o que o gestor lançar em "Vendas por vendedor" no fechamento diário.</span>
+            <span className="mt-1 block text-[11px] text-zinc-500"><strong>Do caixa:</strong> a venda de cada vendedor vem sozinha do código dele no caixa. O que o gerente lançar por vendedor no fechamento <strong>soma em cima</strong> (a mesma venda conta duas vezes).</span>
+            <span className="mt-1 block text-[11px] text-zinc-500"><strong>Do lançamento do gerente:</strong> use quando o caixa da loja não separa os vendedores (código único ou compartilhado). Vale o que o gerente lança por vendedor no fechamento; o caixa desta loja fica fora da conta por vendedor.</span>
+            <span className="mt-1 block text-[11px] text-zinc-500">O total de venda da loja é o mesmo nas duas opções. Dá para mudar depois.</span>
+            {!editing && networkSourceText && <span className="mt-1 block text-[11px] text-sky-300">{networkSourceText}</span>}
           </label>
 
           {/* Custos fixos + margem → lucro e ponto de equilíbrio por loja */}
@@ -7523,6 +7543,13 @@ function StockPolicyModal({ row, onClose, onDone }: { row: any; onClose: () => v
 function SellerScoreboardTab() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
+  // P5: o "⚠ dobrado" leva o dono da REDE ao campo da fonte da loja; gerente (admin com loja) não edita loja → só o aviso.
+  const [scopeUnrestricted, setScopeUnrestricted] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiFetch('/api/retailops/store-scope/me').then(r => r.ok ? r.json() : null).then(sc => setScopeUnrestricted(typeof sc?.unrestricted === 'boolean' ? sc.unrestricted : null)).catch(() => setScopeUnrestricted(null));
+  }, [isAdmin]);
+  const isNetwork = isAdmin && scopeUnrestricted !== false;
   const [stores, setStores] = useState<any[]>([]);
   const [storeId, setStoreId] = useState('');
   const [date, setDate] = useState(todayStr());
@@ -7675,7 +7702,7 @@ function SellerScoreboardTab() {
                         if (!keys.length) return null;
                         const LBL: Record<string, string> = { pdv: 'PDV', manual: 'Manual', erp: 'ERP', zappflow: 'Loja online' };
                         const parts = keys.map(k => `${LBL[k] || k} ${brl(src[k])}`).join(' + ');
-                        return <div className={`mt-0.5 text-[10px] ${s.month?.doubled ? 'text-red-300' : 'text-zinc-500'}`} title="Origem das vendas do mês por fonte. Duas fontes na mesma venda = dobra (a mesma venda contada 2×).">fonte (mês): {parts}{s.month?.doubled ? ' ⚠ dobrado' : ''}</div>;
+                        return <div className={`mt-0.5 text-[10px] ${s.month?.doubled ? 'text-red-300' : 'text-zinc-500'}`} title="Origem das vendas do mês por fonte. Duas fontes na mesma venda = dobra (a mesma venda contada 2×).">fonte (mês): {parts}{s.month?.doubled ? ' ⚠ dobrado' : ''}{s.month?.doubled && <>{' — '}{isNetwork && storeId ? <StoreFixLink field="sellerSource" storeId={storeId} tone="red" title="Abrir a loja já no campo de onde vem a venda de cada vendedor">escolher a fonte da loja</StoreFixLink> : DOUBLED_ASK_OWNER}</>}</div>;
                       })()}
                     </td>
                     <td className="px-3 py-2"><Cell p={s.day} /></td>

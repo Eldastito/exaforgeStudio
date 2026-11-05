@@ -195,6 +195,11 @@ const CATALOG: Record<string, Entry> = {
     meaning: "Há matrículas vendendo sem nome confirmado: a comissão e as metas dessas pessoas ficam incompletas.",
     actionLabel: "Identificar vendedores", actionWillDo: "Cria uma tarefa para dar nome a cada matrícula que vende sem identificação.", affected: "no",
   },
+  retail_seller_code_new: {
+    title: (ev) => (ev?.code ? `${ev?.store ? `${ev.store}: ` : ""}código novo ${ev.code} vendendo sem nome — quem é?` : "Um código novo de vendedor está vendendo sem nome"),
+    meaning: "Um código de vendedor começou a vender no caixa desta loja e ainda não tem pessoa. Sem nome, a venda não entra na comissão nem na meta de ninguém.",
+    actionLabel: "Identificar o vendedor", actionWillDo: "Cria uma tarefa para dizer de quem é o código (ou ligá-lo à pessoa já cadastrada) em Vendedores a identificar.", affected: "no",
+  },
   retail_writeback_backlog: {
     title: "Há vendas esperando baixa no caixa", meaning: "Baixas pendentes deixam o estoque e o caixa desatualizados.",
     actionLabel: "Lançar as baixas", actionWillDo: "Cria uma tarefa para lançar as baixas pendentes.", affected: "yes",

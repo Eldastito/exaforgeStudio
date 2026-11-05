@@ -6,6 +6,7 @@ import { RetailCommissionService } from "./RetailCommissionService.js";
 import { RetailTransferService } from "./RetailTransferService.js";
 import { haversineKm } from "./geo.js";
 import { RetailExceptionSignalService } from "./RetailExceptionSignalService.js";
+import { RetailSellerCodeBirthService } from "./RetailSellerCodeBirthService.js";
 import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrategyService.js";
 
 /**
@@ -33,6 +34,8 @@ import { RetailReplenishmentStrategyService } from "./RetailReplenishmentStrateg
  *    cobrar o fechamento). Só para lojas que participam da rotina.
  *  - `retail_store_below_quota`: loja que fechou ABAIXO da cota no último dia
  *    (ação: entender o desvio). Leva o gap em R$.
+ *  - `retail_seller_code_new`: código de vendedor NOVO (1ª venda na loja há ≤30 dias) vendendo SEM NOME
+ *    → aviso da loja "quem é?" com a sugestão da auditoria (nunca nomeia sozinho). Some ao dar nome.
  *  - `retail_discontinued_online_stock`: item DESCONTINUADO no catálogo Alterdata
  *    mas ainda com saldo na filial da loja virtual (ação: limpar antes de vender
  *    fantasma). Só com a loja virtual ligada. Reconciliação read-only.
@@ -255,6 +258,28 @@ export class RetailOpsSignalPublisher {
             sourceEntityType: "organization", sourceEntityId: orgId, evidence: { count: x.count }, dedupeKey: `retail_ops:sellers_unidentified` });
         }
       }
+    }
+
+    // ── Código de vendedor NOVO vendendo sem nome → aviso da LOJA (P2, análise dos códigos sem nome) ──
+    // Avisa no nascimento (antes só existia o número agregado do "Hoje", sem loja nem sugestão). Por loja (o gerente dela vê),
+    // dedupe por loja+código; resolve sozinho quando o código ganha nome (sai da lista → auto-resolve abaixo). Mesmo
+    // liga/desliga das exceções do dia.
+    if (RetailExceptionSignalService.enabled(orgId)) {
+      try {
+        for (const c of RetailSellerCodeBirthService.newCodes(orgId, asOf)) {
+          const dm = (d: string) => `${d.slice(8)}/${d.slice(5, 7)}`;
+          pub({
+            domain: "retail_ops", signalType: "retail_seller_code_new", severity: "attention", impactAmount: null, impactUnit: null,
+            sourceEntityType: "retail_store", sourceEntityId: c.storeId,
+            evidence: {
+              summary: `Código novo ${c.matricula} vendendo na ${c.storeName} desde ${dm(c.firstSale)}, sem nome — quem é?${c.likelyPerson ? ` Parece ser ${c.likelyPerson.name}.` : ""}`,
+              store: c.storeName, code: c.matricula, firstSale: c.firstSale, lastSale: c.lastSale, sales: c.sales,
+              likelyPerson: c.likelyPerson?.name || null, likelyWhy: c.likelyPerson?.why || null, sharedBoxSuspect: c.sharedBoxSuspect,
+            },
+            dedupeKey: `retail_ops:seller_code_new:${c.storeId}:${c.matricula}`,
+          });
+        }
+      } catch { /* sem PDV/auditoria: nada a avisar */ }
     }
 
     // ── Fechamento diário → Central de Saúde (pedido TOULON) ──────────────────

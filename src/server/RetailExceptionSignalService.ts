@@ -11,12 +11,14 @@
  *    entradas nessa janela) e que ABRE no dia, e que não tem NENHUMA entrada pro dia. Folga geral (entradas todas 'off') é loja
  *    fechada/de folga — NÃO é "sem escala"; org ou loja que nunca usou escala não é cobrada;
  *  - "vendedores a identificar": matrículas que vendem sem pessoa confirmada (`RetailSellerIdentityService.unidentified`) — nunca
- *    nomeia, só conta.
+ *    nomeia, só conta. Conta só código VENDENDO (última venda até 45 dias antes do dia — mesmo limiar de "parado" da auditoria):
+ *    na TOULON 12 de 19 pendentes estavam parados há meses e escondiam os que vendiam agora. Os parados seguem listados no cartão.
  * Nasce LIGADO (`retail_exception_signals_enabled` DEFAULT 1, decisão do dono) e é desligável. Isola por organization_id.
  */
 import db from "./db.js";
 import { RetailClosingService } from "./RetailOpsService.js";
 import { RetailSellerIdentityService } from "./RetailSellerIdentityService.js";
+import { AUDIT_INACTIVE_DAYS } from "./RetailSellerCodeAuditService.js";
 
 export const EXCEPTION_SIGNAL_TYPES = ["retail_store_no_schedule", "retail_sellers_unidentified"] as const;
 const WINDOW_DAYS = 31;
@@ -56,15 +58,17 @@ export class RetailExceptionSignalService {
     return out;
   }
 
-  static unidentifiedCount(orgId: string): number {
-    try { return RetailSellerIdentityService.unidentified(orgId).length; } catch { return 0; }
+  static unidentifiedCount(orgId: string, date?: string): number {
+    const ref = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? String(date) : new Date().toISOString().slice(0, 10);
+    const since = addDays(ref, -AUDIT_INACTIVE_DAYS);
+    try { return RetailSellerIdentityService.unidentified(orgId).filter((u) => !!u.lastSale && String(u.lastSale).slice(0, 10) >= since).length; } catch { return 0; }
   }
 
   /** As exceções do dia, já com o texto do gestor — a fonte que o resumo, o panorama e o publicador usam. */
   static items(orgId: string, date: string): ExceptionItem[] {
     const out: ExceptionItem[] = [];
     try { for (const s of this.storesWithoutSchedule(orgId, date)) out.push({ type: "retail_store_no_schedule", storeId: s.id, storeName: s.name, text: `${s.name} está sem escala.` }); } catch { /* best-effort */ }
-    const n = this.unidentifiedCount(orgId);
+    const n = this.unidentifiedCount(orgId, date);
     if (n > 0) out.push({ type: "retail_sellers_unidentified", count: n, text: n === 1 ? "1 vendedor ainda precisa ser identificado." : `${n} vendedores ainda precisam ser identificados.` });
     return out;
   }

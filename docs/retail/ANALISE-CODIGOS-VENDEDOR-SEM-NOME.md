@@ -69,3 +69,10 @@ Ordem sugerida: **diagnóstico (seção 8) → P1 + P2 (param a reincidência) �
 2. `CAI_USUARIO` é sempre igual a `VEN_CODIGO`? O código muda quando a loja muda de código (1005 → 1006 → 1084) ou quando o vendedor é transferido?
 3. Quando um vendedor é transferido temporariamente para outra loja, o ERP cria um código novo ou reaproveita o original?
 4. É possível que o `VendaMalote` traga o **nome** do vendedor junto do código?
+
+## 11. Status (05/11/2026)
+
+- **P1 entregue.** O cadastro não sugere mais a "próxima matrícula". Lista os códigos sem nome que venderam no caixa da loja escolhida (vendas, última venda, "parece ser X") e avisa quando o código digitado nunca vendeu ali. Dar a um código o nome de alguém já cadastrado devolve 409 com a pessoa existente; a tela pergunta "é a mesma pessoa?" (liga o código) ou cria outra pessoa de propósito. Serviço `RetailSellerCodeBirthService`, rota `GET /sellers/code-candidates`.
+- **P2 entregue.** Código novo (1ª venda na loja há ≤30 dias) sem nome vira aviso da loja (`retail_seller_code_new`, visto pelo gerente dela) com a sugestão; some sozinho ao ganhar nome. O número do "Hoje" conta só código vendendo (última venda ≤45 dias); os parados ficam num "mostrar parados" no cartão.
+- **Não feito:** o placeholder `LV-xxxxxx` do Atendimento de Loja (C2) e o vínculo seguro da pessoa sem código (P3); P4, P5 e P6. O método e a rota `next-matricula` continuam no servidor, mas a tela não os usa mais.
+- Teste: `test:retail-seller-code-birth`.

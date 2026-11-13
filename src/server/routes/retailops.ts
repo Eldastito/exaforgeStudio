@@ -1654,6 +1654,13 @@ router.delete("/sellers/aliases/:aliasId", requireNetworkScope, (req: AuthReques
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
   res.json({ ok: RetailSellerIdentityService.removeAlias(orgId, req.params.aliasId, req.user?.userId) });
 });
+// Corrige a matrícula OFICIAL de quem foi cadastrado no código errado (libera o código pro dono real).
+router.post("/sellers/:sellerId/matricula", requireNetworkScope, (req: AuthRequest, res): any => {
+  const orgId = req.organizationId;
+  if (!orgId) return res.status(401).json({ error: "Unauthorized" });
+  try { res.json(RetailSellerIdentityService.changeMatricula(orgId, req.params.sellerId, String(req.body?.matricula || ""), req.user?.userId)); }
+  catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: String(e.message).replace(/^matricula_conflict: /, "") }); }
+});
 router.post("/sellers/:sellerId/merge", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });

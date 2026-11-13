@@ -21,6 +21,7 @@
 import { randomUUID } from "crypto";
 import db from "./db.js";
 import { logAuthEvent } from "./auditLog.js";
+import { SellerIdentityContext } from "./RetailSellerIdentityService.js";
 
 // Acima disto, uma filial com UM ÚNICO código de vendedor é suspeita de caixa/
 // login compartilhado (o código não representa uma pessoa).
@@ -152,8 +153,15 @@ export class RetailSellerDirectoryService {
 
     const distinctCodes = rows.length;
     const confirmed: any[] = [], pendingName: any[] = [], sharedCodeSuspects: any[] = [];
+    // Código ligado a uma pessoa por APELIDO confirmado ("é a mesma pessoa?") também está identificado —
+    // antes só a matrícula oficial contava e o código ligado seguia aparecendo como pendência.
+    const ctx = SellerIdentityContext.load(orgId);
     for (const r of rows) {
-      const seller = db.prepare(`SELECT id, name, identity_status FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, r.codigo) as any;
+      let seller = db.prepare(`SELECT id, name, identity_status FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, r.codigo) as any;
+      if (!seller?.name) {
+        const res = ctx.resolve({ matricula: String(r.codigo) });
+        if (res.status === "identified" && res.seller?.name) seller = { id: res.seller.id, name: res.seller.name };
+      }
       const item = { codigo: r.codigo, sales: Number(r.sales), firstSale: r.first_sale, lastSale: r.last_sale, sellerId: seller?.id || null, name: seller?.name || null };
       // Suspeita de código compartilhado: a filial tem UM só código e volume alto.
       const shared = distinctCodes === 1 && Number(r.sales) >= SHARED_CODE_MIN_SALES;

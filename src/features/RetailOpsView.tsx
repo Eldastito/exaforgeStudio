@@ -8262,6 +8262,7 @@ function SellerDeleteModal({ seller, onClose, onDeleted }: { seller: any; onClos
 // Modal de lotação: em quais lojas o vendedor atua + qual é a principal.
 function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; stores: any[]; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(seller.name || '');
+  const [mat, setMat] = useState(String(seller.matricula || ''));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [primary, setPrimary] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -8275,11 +8276,22 @@ function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; 
   const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const save = async () => {
     if (!name.trim()) { toast.error('Informe o nome do vendedor.'); return; }
+    const newMat = mat.trim();
+    const oldMat = String(seller.matricula || '').trim();
+    const matChanged = !!newMat && newMat !== oldMat;
+    if (!newMat) { toast.error('Informe a matrícula.'); return; }
+    if (matChanged && !window.confirm(`Trocar a matrícula de ${seller.name || 'este vendedor'} de ${oldMat} para ${newMat}?\n\nAs vendas do código ${newMat} passam a contar para essa pessoa, e o código ${oldMat} fica livre para quem é o dono dele.`)) return;
     setSaving(true);
     try {
+      // Matrícula errada no cadastro — corrige antes de tudo (o nome é gravado pela matrícula).
+      if (matChanged) {
+        const rm = await apiFetch(`/api/retailops/sellers/${seller.seller_id}/matricula`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: newMat }) });
+        if (!rm.ok) throw new Error((await rm.json().catch(() => ({}))).error || 'Falha ao trocar a matrícula.');
+      }
+      const curMat = matChanged ? newMat : oldMat;
       // Nome (opcional editar) — grava pela matrícula antes de reconciliar as lojas.
-      if (name.trim() !== (seller.name || '') && seller.matricula) {
-        const rn = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(seller.matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+      if (name.trim() !== (seller.name || '') && curMat) {
+        const rn = await apiFetch(`/api/retailops/sellers/${encodeURIComponent(curMat)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
         if (!rn.ok) throw new Error((await rn.json().catch(() => ({}))).error || 'Falha ao salvar o nome.');
       }
       const r = await apiFetch(`/api/retailops/sellers/${seller.seller_id}/stores`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeIds: [...selected], primaryStoreId: primary && selected.has(primary) ? primary : null }) });
@@ -8294,6 +8306,10 @@ function SellerStoresModal({ seller, stores, onClose, onSaved }: { seller: any; 
         <p className="text-[11px] text-zinc-500 mb-3">Ajuste o nome e as lojas onde ele atua. A principal é onde ele fica lotado; para <strong>transferir de loja</strong>, marque a nova e torne-a principal (desmarque a antiga).</p>
         <label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Maria Souza" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
+        </label>
+        <label className="block text-[12px] text-zinc-400 mb-3">Matrícula (código no caixa)
+          <input value={mat} onChange={e => setMat(e.target.value)} inputMode="numeric" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm font-mono text-zinc-100" />
+          {mat.trim() && mat.trim() !== String(seller.matricula || '').trim() && <span className="mt-1 block text-[10px] text-amber-300">Cadastrou no código errado? Ao salvar, a matrícula muda e o código {seller.matricula} fica livre.</span>}
         </label>
         <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">Lojas</div>
         <div className="space-y-1.5 max-h-[50vh] overflow-auto">

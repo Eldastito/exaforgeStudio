@@ -324,6 +324,54 @@ export class RetailSellerIdentityService {
     return { matricula: m, sellerId, name: target.name || null };
   }
 
+  /**
+   * Gesto HUMANO: corrige a matrícula OFICIAL de um vendedor cadastrado no código errado
+   * (caso real: Rhenã ficou na 10830007, que é da Maria Eduarda; a dela é a 10830006).
+   *  - A matrícula nova não pode ser a oficial de OUTRO vendedor nem apelido de OUTRO → conflito, nunca "rouba".
+   *  - Se a nova já era apelido DESTE vendedor (ex.: ligada antes pelo "é a mesma pessoa?"), o apelido sai:
+   *    vira a oficial.
+   *  - A antiga NÃO vira apelido: foi um erro de cadastro e o código fica livre pro dono real.
+   *  - O planejamento chaveado pela matrícula (`mat:<antiga>` em cota/escala/folga) e o lançamento manual
+   *    (`retail_seller_sales.matricula`) acompanham a pessoa. Se já houver planejamento em `mat:<nova>`,
+   *    recusa antes de escrever (não decide sozinha qual vale).
+   *  - Vendas do PDV/ERP NÃO são tocadas: são lidas pelo código, então passam a cair na pessoa certa sozinhas.
+   */
+  static changeMatricula(orgId: string, sellerId: string, newMatricula: string, actorId?: string | null): { sellerId: string; from: string; to: string; moved: Record<string, number> } {
+    const seller = this.seller(orgId, sellerId);
+    if (!seller) throw new Error("Vendedor não encontrado.");
+    if (seller.merged_into_seller_id) throw new Error("seller_merged: use a identidade canônica.");
+    const from = String(seller.matricula ?? "").trim();
+    const to = String(newMatricula ?? "").trim();
+    if (!to) throw new Error("Informe a matrícula nova.");
+    if (to === from) throw new Error("A matrícula nova é igual à atual.");
+    const owner = db.prepare(`SELECT id, name FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, to) as any;
+    if (owner) throw new Error(`matricula_conflict: a matrícula ${to} já é de ${owner.name || "outro cadastro"}.`);
+    const toNorm = normalizeAlias(to);
+    const aliasOwners = db.prepare(
+      `SELECT DISTINCT seller_id FROM retail_seller_aliases WHERE organization_id = ? AND kind IN ('matricula','cai_usuario') AND alias_norm = ?`
+    ).all(orgId, toNorm) as any[];
+    if (aliasOwners.some((a) => a.seller_id !== sellerId)) throw new Error(`matricula_conflict: o código ${to} está ligado a outro vendedor.`);
+    const keyed = ["retail_seller_quotas", "retail_schedule_entries", "retail_seller_off_pattern"];
+    for (const t of keyed) {
+      const n = (db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE organization_id = ? AND seller_key = ?`).get(orgId, `mat:${to}`) as any).n;
+      if (n > 0) throw new Error(`matricula_conflict: já existe planejamento (cota/escala) lançado na matrícula ${to}. Ajuste antes de trocar.`);
+    }
+
+    const moved: Record<string, number> = {};
+    db.transaction(() => {
+      moved.aliasRemoved = db.prepare(
+        `DELETE FROM retail_seller_aliases WHERE organization_id = ? AND seller_id = ? AND kind IN ('matricula','cai_usuario') AND alias_norm = ?`
+      ).run(orgId, sellerId, toNorm).changes;
+      db.prepare(`UPDATE retail_sellers SET matricula = ?, updated_at = CURRENT_TIMESTAMP WHERE organization_id = ? AND id = ?`).run(to, orgId, sellerId);
+      for (const t of keyed) {
+        moved[t] = db.prepare(`UPDATE ${t} SET seller_key = ? WHERE organization_id = ? AND seller_key = ?`).run(`mat:${to}`, orgId, `mat:${from}`).changes;
+      }
+      moved.retail_seller_sales = db.prepare(`UPDATE retail_seller_sales SET matricula = ? WHERE organization_id = ? AND matricula = ?`).run(to, orgId, from).changes;
+    })();
+    try { logAuthEvent(orgId, actorId || "system", sellerId, "RETAIL_SELLER_MATRICULA_CHANGED", { from, to, moved }); } catch { /* noop */ }
+    return { sellerId, from, to, moved };
+  }
+
   // ── fusão governada ───────────────────────────────────────────────────────
   /**
    * Funde `fromId` em `intoId`. NÃO apaga nada: `from` é desativada e marcada `merged_into`;

@@ -12767,6 +12767,10 @@ const initDb = () => {
       PRIMARY KEY (remap_id, table_name, row_id)
     );
   `); } catch(e){ console.error('[DB] Falha ao criar retail_filial_remaps', e); }
+
+  // Ajuda (ADR-179 F5): marca que o vídeo do seed JÁ foi aplicado ao artigo. O seed só preenche
+  // a mídia uma vez; se o curador remover depois, o restart não devolve o vídeo.
+  try { db.exec(`ALTER TABLE help_articles ADD COLUMN media_seeded INTEGER DEFAULT 0`); } catch (e) { /* noop */ }
 };
 
 initDb();

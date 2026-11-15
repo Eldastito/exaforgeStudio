@@ -366,10 +366,12 @@ export class HelpKnowledgeService {
         (id, vertical, module_key, title, what, purpose, steps_json, common_errors_json, keywords, reviewed_by, source_ref, status)
       VALUES (@id, @vertical, @module_key, @title, @what, @purpose, @steps, @errors, @keywords, @reviewed_by, @source_ref, @status)
     `);
-    // Vídeo do seed preenche SÓ quando o artigo ainda não tem mídia: alcança a base
-    // já semeada (o INSERT OR IGNORE não toca linha existente) sem atropelar a
-    // mídia que o curador escolheu no painel master.
-    const fillMedia = db.prepare(`UPDATE help_articles SET media_url = @media_url WHERE id = @id AND media_url IS NULL`);
+    // Vídeo do seed entra UMA vez por artigo (media_seeded): alcança a base já semeada
+    // (o INSERT OR IGNORE não toca linha existente), não atropela a mídia que o curador
+    // escolheu e não devolve o vídeo que o curador removeu depois (null = remoção).
+    const fillMedia = db.prepare(`
+      UPDATE help_articles SET media_url = COALESCE(media_url, @media_url), media_seeded = 1
+       WHERE id = @id AND COALESCE(media_seeded, 0) = 0`);
     const tx = db.transaction(() => {
       for (const a of SEED) {
         ins.run({

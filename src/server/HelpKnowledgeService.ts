@@ -62,7 +62,8 @@ function tokenize(text: string): string[] {
 // Semente dos módulos mais usados (ADR-179 F1). Conteúdo CURADO/humano (reviewedBy).
 // GLOBAL por padrão (vertical NULL) → serve toda a base; um artigo clínico prova o
 // recorte por vertical. Ids fixos → seed idempotente (INSERT OR IGNORE).
-const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: string }> = [
+// `mediaUrl` (opcional) aponta pro vídeo curto de treinamento em public/ajuda/.
+const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: string; mediaUrl?: string }> = [
   {
     id: "help_seed_central_saude",
     vertical: null,
@@ -218,6 +219,7 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
   // MESMA orientação dentro do produto, na tela onde a dúvida nasce. ──
   {
     id: "help_seed_retail_implantacao",
+    mediaUrl: "/ajuda/rede_1_ligar_e_cadastrar_loja.mp4",
     vertical: null,
     module_key: "retail",
     title: "Operação da Rede: por onde começar",
@@ -240,6 +242,7 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
   },
   {
     id: "help_seed_retail_loja_codigo",
+    mediaUrl: "/ajuda/rede_1_ligar_e_cadastrar_loja.mp4",
     vertical: null,
     module_key: "retail",
     title: "Cadastro de loja e o código da filial",
@@ -262,6 +265,7 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
   },
   {
     id: "help_seed_retail_matricula",
+    mediaUrl: "/ajuda/rede_2_vendedores_matricula.mp4",
     vertical: null,
     module_key: "retail",
     title: "Vendedores: matrícula e lotação",
@@ -283,6 +287,7 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
   },
   {
     id: "help_seed_retail_escala_cotas",
+    mediaUrl: "/ajuda/rede_3_escala_e_cotas.mp4",
     vertical: null,
     module_key: "retail",
     title: "Escala & cotas: a régua das metas",
@@ -304,6 +309,7 @@ const SEED: Array<Omit<HelpArticle, "id" | "mediaUrl"> & { id: string; status?: 
   },
   {
     id: "help_seed_retail_malote",
+    mediaUrl: "/ajuda/rede_4_malote_depositos.mp4",
     vertical: null,
     module_key: "retail",
     title: "Malote e depósitos: o 'Em caixa'",
@@ -360,6 +366,10 @@ export class HelpKnowledgeService {
         (id, vertical, module_key, title, what, purpose, steps_json, common_errors_json, keywords, reviewed_by, source_ref, status)
       VALUES (@id, @vertical, @module_key, @title, @what, @purpose, @steps, @errors, @keywords, @reviewed_by, @source_ref, @status)
     `);
+    // Vídeo do seed preenche SÓ quando o artigo ainda não tem mídia: alcança a base
+    // já semeada (o INSERT OR IGNORE não toca linha existente) sem atropelar a
+    // mídia que o curador escolheu no painel master.
+    const fillMedia = db.prepare(`UPDATE help_articles SET media_url = @media_url WHERE id = @id AND media_url IS NULL`);
     const tx = db.transaction(() => {
       for (const a of SEED) {
         ins.run({
@@ -369,6 +379,7 @@ export class HelpKnowledgeService {
           keywords: a.keywords, reviewed_by: a.reviewedBy, source_ref: a.sourceRef,
           status: a.status || "published",
         });
+        if (a.mediaUrl) fillMedia.run({ id: a.id, media_url: a.mediaUrl });
       }
     });
     try { tx(); _seeded = true; } catch { /* best-effort: tabela pode não existir em fluxo atípico */ }

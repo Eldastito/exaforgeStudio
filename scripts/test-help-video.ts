@@ -50,6 +50,16 @@ async function main() {
   check("2.3 seed não sobrescreve o texto do artigo existente", (db.prepare(`SELECT title FROM help_articles WHERE id='help_seed_retail_matricula'`).get() as any).title === "Vendedores (antigo)");
   check("2.4 artigo sem vídeo no seed segue sem mídia", media("help_seed_vendas") === null);
 
+  // 2b. curador remove o vídeo → restart (novo seed) NÃO devolve
+  db.prepare(`UPDATE help_articles SET media_url = NULL WHERE id = 'help_seed_retail_escala_cotas'`).run();
+  // Restart de verdade: outro processo, mesmo banco, roda o seed do zero.
+  const { execFileSync } = await import("child_process");
+  const svc = new URL("../src/server/HelpKnowledgeService.ts", import.meta.url).pathname;
+  execFileSync(process.execPath, ["--import", "tsx", "-e", `import(${JSON.stringify(svc)}).then(m => m.HelpKnowledgeService.ensureSeeded())`],
+    { env: { ...process.env, DATA_DIR: tmpDir }, stdio: "pipe" });
+  check("2.5 remoção do curador sobrevive ao restart", media("help_seed_retail_escala_cotas") === null);
+  check("2.6 seed marca o artigo como já aplicado", (db.prepare(`SELECT media_seeded m FROM help_articles WHERE id='help_seed_retail_escala_cotas'`).get() as any).m === 1);
+
   // 3. o vídeo chega ao usuário pelo tour/sugestões
   const A = `org_${randomUUID().slice(0, 8)}`;
   db.prepare(`INSERT INTO organization_settings (id, organization_id, business_name, status, vertical, plan_id, billing_status) VALUES (?, ?, 'A', 'active', 'varejo', 'autonomo', 'active')`).run(randomUUID(), A);

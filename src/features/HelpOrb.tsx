@@ -10,6 +10,7 @@
  */
 import { useState, useRef, useEffect, type FormEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { apiFetch } from '@/src/lib/api';
+import { isVideoUrl } from '@/src/lib/helpMedia';
 
 interface HelpArticle {
   id: string;
@@ -49,6 +50,14 @@ const MODULE_TO_VIEW: Record<string, string> = {
   // superfícies de navegação ("onde fica…")
   hoje: 'saude', resultados: 'reports', empresa: 'settings',
 };
+
+// Vídeo toca dentro do balão (sem autoplay: quem abriu a ajuda decide). Imagem/GIF segue como antes.
+function HelpMedia({ url, title, className = '' }: { url: string; title: string; className?: string }) {
+  if (isVideoUrl(url)) {
+    return <video src={url} controls playsInline preload="metadata" aria-label={title} className={`${className} w-full rounded-lg border border-zinc-700 bg-black`} />;
+  }
+  return <img src={url} alt={title} loading="lazy" className={`${className} w-full rounded-lg border border-zinc-700`} />;
+}
 
 export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; onNavigate?: (viewMode: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -219,7 +228,7 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
             {tourStep !== null && tour && (
               <div className="rounded-lg border border-indigo-800/50 bg-indigo-950/20 px-3 py-3">
                 <div className="text-[11px] text-indigo-300 mb-1">Tour · {tour.title} · passo {tourStep + 1}/{tour.steps.length}</div>
-                {tour.mediaUrl && tourStep === 0 && <img src={tour.mediaUrl} alt={tour.title} loading="lazy" className="mb-2 w-full rounded-lg border border-zinc-700" />}
+                {tour.mediaUrl && tourStep === 0 && <HelpMedia url={tour.mediaUrl} title={tour.title} className="mb-2" />}
                 <div className="text-sm text-zinc-100">{tour.steps[tourStep]}</div>
                 <div className="mt-3 flex items-center gap-2">
                   <button onClick={() => setTourStep((s) => (s! > 0 ? s! - 1 : s))} disabled={tourStep === 0}
@@ -279,7 +288,7 @@ export function HelpOrb({ moduleKey, onNavigate }: { moduleKey?: string | null; 
                   <div className="rounded-lg bg-zinc-800/70 px-3 py-2">
                     <div className="text-sm text-zinc-100 whitespace-pre-line">{t.a.message}</div>
                     {t.a.article?.mediaUrl && (
-                      <img src={t.a.article.mediaUrl} alt={t.a.article.title} loading="lazy" className="mt-2 w-full rounded-lg border border-zinc-700" />
+                      <HelpMedia url={t.a.article.mediaUrl} title={t.a.article.title} className="mt-2" />
                     )}
                     {t.a.article && t.a.article.commonErrors.length > 0 && (
                       <div className="mt-2 text-xs text-zinc-400">

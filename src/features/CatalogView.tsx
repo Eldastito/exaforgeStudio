@@ -427,7 +427,7 @@ export function CatalogView() {
 
   return (
     <div className="flex-1 overflow-auto p-6 bg-zinc-950 relative">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div>
           <p className="zf-kicker mb-1">Produtos & Estoque</p>
           <h2 className="zf-page-title flex items-center gap-2">
@@ -436,7 +436,7 @@ export function CatalogView() {
           </h2>
           <p className="text-zinc-400 text-sm mt-1">Produtos, serviços e controle de estoque usado pela IA vendedora</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" className="border-emerald-700/50 text-emerald-300 hover:border-emerald-500" onClick={openScan}>
             <Camera className="w-4 h-4 mr-2" /> Cadastro Inteligente
           </Button>

@@ -13,7 +13,7 @@ import { apiFetch } from '@/src/lib/api';
 import { toast } from '@/src/lib/toast';
 
 import { formatBRL } from '@/src/lib/metric';
-import { candidateLabel, floorCodeLabel, proposalLabel } from './retailops/sellerCodeLabels';
+import { candidateLabel, codeConfirmedMessage, confirmCodeQuestion, floorCodeLabel, proposalLabel } from './retailops/sellerCodeLabels';
 import { similarPeople } from './sellers/sellerNameMatch';
 const brl = (n: any) => formatBRL(n); // null/undefined → '—' (nunca 'R$ 0,00'); zero real segue 'R$ 0,00'
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -990,10 +990,11 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
   }, [storeId]);
   useEffect(() => { loadCodes(); }, [loadCodes]);
   const proposalFor = (sellerId: string) => (codes?.proposals || []).find((p: any) => p.sellerId === sellerId) || null;
-  const confirmCode = async (sellerId: string, code: string, name: string) => {
-    if (!window.confirm(`Confirmar que o código ${code} do caixa é de ${name}? Dá para desfazer depois.`)) return;
+  // Quem tem proposta está sem código do caixa (LV-) ou com matrícula que nunca vendeu: o código vira a matrícula oficial.
+  const confirmCode = async (sellerId: string, code: string, name: string, matricula?: string | null) => {
+    if (!window.confirm(confirmCodeQuestion({ code, name, matricula }))) return;
     setLinking(sellerId);
-    try { await api(`/stores/${storeId}/sellers/${sellerId}/link-code`, { code }); toast.success(`Código ${code} agora é de ${name}.`); loadCodes(); onChanged(); }
+    try { const r = await api(`/stores/${storeId}/sellers/${sellerId}/link-code`, { code }); toast.success(codeConfirmedMessage(code, name, r)); loadCodes(); onChanged(); }
     catch (e: any) { toast.error(e.message); } finally { setLinking(null); }
   };
 
@@ -1065,7 +1066,7 @@ function TeamModal({ allSellers, teamIds, scoped, storeId, storeName, onClose, o
                   {(() => { const p = proposalFor(s.id); return p ? (
                     <span className="mt-1 block text-xs text-amber-300">
                       {proposalLabel(p)}{' '}
-                      <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); if (linking !== s.id) confirmCode(s.id, p.code, s.name || s.matricula); }}
+                      <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); if (linking !== s.id) confirmCode(s.id, p.code, s.name || s.matricula, s.matricula); }}
                         className="ml-1 rounded-md border border-amber-400/50 px-1.5 py-0.5 font-semibold text-amber-200 hover:bg-amber-500/15">{linking === s.id ? 'Confirmando…' : 'Confirmar'}</span>
                     </span>
                   ) : null; })()}

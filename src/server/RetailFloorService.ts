@@ -217,8 +217,8 @@ export class RetailFloorService {
     }
     const matricula = String(input?.matricula || "").trim() || `LV-${randomUUID().slice(0, 6).toUpperCase()}`;
     const photoUrl = input?.photoUrl ? String(input.photoUrl).trim() : null;
-    const dup = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
-    if (dup) throw new Error(`Já existe vendedor com a matrícula "${matricula}".`);
+    const dup = db.prepare(`SELECT id, name FROM retail_sellers WHERE organization_id = ? AND matricula = ?`).get(orgId, matricula) as any;
+    if (dup) throw new Error(dup.name ? `O código "${matricula}" já é de ${dup.name}.` : `Já existe vendedor com a matrícula "${matricula}".`);
     const aliasOwner = db.prepare(
       `SELECT s.name FROM retail_seller_aliases a JOIN retail_sellers s ON s.organization_id = a.organization_id AND s.id = a.seller_id
         WHERE a.organization_id = ? AND a.kind IN ('matricula','cai_usuario') AND LOWER(TRIM(a.alias)) = LOWER(?) LIMIT 1`

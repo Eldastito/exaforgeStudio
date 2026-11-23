@@ -110,8 +110,9 @@ router.get("/stores/:storeId/seller-codes", (req: AuthRequest, res) => {
   } catch (e: any) { fail(res, e); }
 });
 
-// Confirma "o código X é de Fulano" pela LOJA: só código SEM NOME que vendeu NESTA loja; liga como apelido de
-// matrícula (reversível, não cria vendedor, não troca a matrícula). Gestor desta loja ou owner/admin.
+// Confirma "o código X é de Fulano" pela LOJA: só código SEM NOME que vendeu NESTA loja. Não cria vendedor. Se a
+// matrícula oficial da pessoa nunca vendeu (LV- ou palpite), o código vira a oficial e a antiga fica livre; senão vira
+// apelido (confirmCode). Gestor desta loja ou owner/admin.
 router.post("/stores/:storeId/sellers/:sellerId/link-code", (req: AuthRequest, res) => {
   try {
     const orgId = req.organizationId!, storeId = req.params.storeId;
@@ -122,7 +123,7 @@ router.post("/stores/:storeId/sellers/:sellerId/link-code", (req: AuthRequest, r
     if (!cand.candidates.some((c: any) => c.matricula === code)) throw new Error("Esse código não está entre os códigos sem nome que venderam nesta loja.");
     const seller = db.prepare(`SELECT id FROM retail_sellers WHERE organization_id = ? AND id = ? AND active = 1`).get(orgId, req.params.sellerId) as any;
     if (!seller) throw new Error("Vendedor não encontrado.");
-    res.json(RetailSellerIdentityService.linkMatricula(orgId, code, seller.id, actor(req)));
+    res.json(RetailSellerIdentityService.confirmCode(orgId, code, seller.id, actor(req)));
   } catch (e: any) { fail(res, e); }
 });
 

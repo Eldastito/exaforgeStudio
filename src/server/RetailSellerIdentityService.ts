@@ -324,6 +324,44 @@ export class RetailSellerIdentityService {
     return { matricula: m, sellerId, name: target.name || null };
   }
 
+  /** O código aparece em alguma venda do caixa (PDV) ou do ERP desta empresa? */
+  static codeHasSales(orgId: string, code: string | null | undefined): boolean {
+    const m = String(code ?? "").trim();
+    if (!m) return false;
+    return !!(db.prepare(`SELECT 1 FROM retail_pdv_sales WHERE organization_id = ? AND COALESCE(NULLIF(vendedor_codigo, ''), vendedor) = ? LIMIT 1`).get(orgId, m)
+      || db.prepare(`SELECT 1 FROM retail_erp_seller_sales WHERE organization_id = ? AND matricula = ? LIMIT 1`).get(orgId, m));
+  }
+
+  /**
+   * "Confirmar": o código `matricula` do caixa é a pessoa `sellerId` (proposta do P3, "É esta pessoa", Atendimento de Loja).
+   * Se a matrícula OFICIAL da pessoa NUNCA vendeu no caixa/ERP — palpite da antiga "próxima matrícula" ou placeholder
+   * `LV-` —, o código real vira a OFICIAL e a antiga fica LIVRE (changeMatricula: escala/cota/folga e lançamento manual
+   * vão junto; venda do caixa não é tocada). Antes ele virava só apelido e o palpite continuava preso à pessoa: quando o
+   * dono real daquele código começava a vender, a venda caía em silêncio no nome errado e o cadastro dele era recusado
+   * ("já é de Beto", Nova Iguaçu, 11/2026). Se a oficial JÁ vendeu (pessoa com dois códigos reais, ex.: loja que trocou de
+   * código), segue como apelido. Planejamento já lançado no código novo → não decide sozinho: fica apelido e avisa.
+   */
+  static confirmCode(orgId: string, matricula: string, sellerId: string, actorId?: string | null): { matricula: string; sellerId: string; name: string | null; mode: "swapped" | "alias"; previous?: string; note?: string } {
+    const m = String(matricula ?? "").trim();
+    if (!m) throw new Error("Informe o código do vendedor.");
+    const target = this.seller(orgId, sellerId);
+    if (!target) throw new Error("Vendedor não encontrado.");
+    if (!this.codeHasSales(orgId, m)) throw new Error("Esse código não aparece nas vendas desta empresa.");
+    const current = String(target.matricula ?? "").trim();
+    let note: string | undefined;
+    if (!target.merged_into_seller_id && current && current !== m && !this.codeHasSales(orgId, current)) {
+      try {
+        const r = this.changeMatricula(orgId, sellerId, m, actorId);
+        return { matricula: m, sellerId, name: target.name || null, mode: "swapped", previous: r.from };
+      } catch (e: any) {
+        if (!/planejamento/.test(String(e?.message))) throw e;
+        note = `A matrícula ${current} continua oficial: já existe escala/cota lançada no código ${m}. Ajuste e troque pelo lápis.`;
+      }
+    }
+    const r = this.linkMatricula(orgId, m, sellerId, actorId);
+    return { ...r, mode: "alias", ...(note ? { note } : {}) };
+  }
+
   /**
    * Gesto HUMANO: corrige a matrícula OFICIAL de um vendedor cadastrado no código errado
    * (caso real: Rhenã ficou na 10830007, que é da Maria Eduarda; a dela é a 10830006).

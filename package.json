@@ -601,6 +601,7 @@
     "test:semantic-metric": "tsx scripts/test-semantic-metric.ts",
     "test:signal-language": "tsx scripts/test-signal-language.ts",
     "test:retail-seller-change-matricula": "tsx scripts/test-retail-seller-change-matricula.ts",
+    "test:retail-seller-confirm-code": "tsx scripts/test-retail-seller-confirm-code.ts",
     "test:retail-seller-identity": "tsx scripts/test-retail-seller-identity.ts",
     "test:retail-seller-identity-aggregation": "tsx scripts/test-retail-seller-identity-aggregation.ts",
     "test:retail-commission-policy-status": "tsx scripts/test-retail-commission-policy-status.ts",

@@ -38,3 +38,25 @@ export function floorCodeLabel(matricula: string, linkedCodes: string[] | undefi
   if (linked.length) return `Código do caixa ${linked.join(', ')}`;
   return /^LV-/i.test(String(matricula || '')) ? 'Sem código do caixa' : `Matrícula ${matricula}`;
 }
+
+/**
+ * Pergunta do "Confirmar" (proposta "parece ser o código X"). Quem recebe proposta é quem está sem código do caixa
+ * (LV-) ou com matrícula que NUNCA vendeu (palpite antigo): o código real vira a matrícula oficial e a antiga fica livre.
+ */
+export function confirmCodeQuestion(p: { code: string; name: string; matricula?: string | null }): string {
+  const cur = String(p.matricula || '').trim();
+  const base = `Confirmar que o código ${p.code} do caixa é de ${p.name}?`;
+  if (!cur || cur === p.code) return base;
+  if (/^LV-/i.test(cur)) return `${base}\n\n${p.name} estava sem código do caixa e passa a ter a matrícula ${p.code}.`;
+  return `${base}\n\nA matrícula de ${p.name} passa a ser ${p.code}. A ${cur}, que nunca vendeu no caixa, fica livre para quem é o dono dela.`;
+}
+
+/** Aviso depois de confirmar: o servidor diz se trocou a matrícula oficial (`swapped`) ou ligou como apelido. */
+export function codeConfirmedMessage(code: string, name: string, r?: { mode?: string; previous?: string; note?: string } | null): string {
+  if (r?.mode === 'swapped') {
+    return /^LV-/i.test(String(r.previous || '')) || !r.previous
+      ? `${name} agora tem a matrícula ${code}.`
+      : `${name} agora tem a matrícula ${code}; a ${r.previous} ficou livre.`;
+  }
+  return `Código ${code} agora é de ${name}.${r?.note ? ` ${r.note}` : ''}`;
+}

@@ -1615,7 +1615,8 @@ router.get("/sellers/identity/directory", requireNetworkScope, (req: AuthRequest
 router.post("/sellers/identity/link-matricula", requireNetworkScope, (req: AuthRequest, res): any => {
   const orgId = req.organizationId;
   if (!orgId) return res.status(401).json({ error: "Unauthorized" });
-  try { res.json(RetailSellerIdentityService.linkMatricula(orgId, String(req.body?.matricula || ""), String(req.body?.sellerId || ""), req.user?.userId)); }
+  // "Confirmar"/"É esta pessoa": se a matrícula oficial da pessoa nunca vendeu, o código real vira a oficial (confirmCode).
+  try { res.json(RetailSellerIdentityService.confirmCode(orgId, String(req.body?.matricula || ""), String(req.body?.sellerId || ""), req.user?.userId)); }
   catch (e: any) { res.status(/conflict/.test(e.message) ? 409 : 400).json({ error: e.message }); }
 });
 // F1.1c — "são a mesma pessoa?": sugestões por nome + resposta de um toque. owner/admin.

@@ -1,6 +1,6 @@
 import { FilialCodeAuditCard } from './retailops/FilialCodeAuditCard';
 import { MonthCheckCard } from './retailops/MonthCheckCard';
-import { STOPPED_AFTER_DAYS, candidateLabel, isStoppedCode, proposalLabel, sameNameQuestion } from './retailops/sellerCodeLabels';
+import { STOPPED_AFTER_DAYS, candidateLabel, codeConfirmedMessage, confirmCodeQuestion, isStoppedCode, proposalLabel, sameNameQuestion } from './retailops/sellerCodeLabels';
 import { SellerPick } from './retailops/SellerPick';
 import { autoMatchRows, outsideTeamNames, type TeamPerson } from './retailops/sellerPickRules';
 import { ActionLink, TabLink, StoreFixLink } from '@/src/components/ui/ActionLink';
@@ -7744,7 +7744,7 @@ function UnidentifiedSellersCard() {
     try {
       const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: m, sellerId: person.id }) });
       const d = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(`Código ${m} agora é de ${person.name}.`); setPicks(x => ({ ...x, [m]: '' })); load(); } else toast.error(d.error || 'Não foi possível vincular.');
+      if (res.ok) { toast.success(codeConfirmedMessage(m, person.name, d)); setPicks(x => ({ ...x, [m]: '' })); load(); } else toast.error(d.error || 'Não foi possível vincular.');
     } finally { setBusy(null); }
   };
   const [audit, setAudit] = useState<any | null>(null);
@@ -7760,7 +7760,8 @@ function UnidentifiedSellersCard() {
     try { const r = await apiFetch('/api/retailops/sellers/identity/linkage'); setLinkage(r.ok ? await r.json() : { error: true }); } catch { setLinkage({ error: true }); } finally { setLinking(false); }
   };
   // P3 — pessoas cadastradas SEM código do caixa (LV- do Atendimento de Loja ou matrícula que nunca vendeu) e o
-  // código novo que bate com o dia de cada uma. Só sugere; o "Confirmar" liga o código como apelido (reversível).
+  // código novo que bate com o dia de cada uma. Só sugere. O "Confirmar" faz do código a matrícula OFICIAL (a antiga
+  // nunca vendeu e fica livre para o dono real); se a oficial já vendeu, liga como apelido.
   const [codeless, setCodeless] = useState<any[]>([]);
   const load = useCallback(() => {
     apiFetch('/api/retailops/sellers/identity/unidentified').then(r => (r.ok ? r.json() : null)).then(d => setItems(Array.isArray(d?.unidentified) ? d.unidentified : [])).catch(() => setItems([]));
@@ -7768,12 +7769,12 @@ function UnidentifiedSellersCard() {
   }, []);
   useEffect(() => { load(); }, [load]);
   const confirmProposal = async (p: any) => {
-    if (!window.confirm(`Confirmar que o código ${p.code} do caixa é de ${p.name}? Dá para desfazer depois.`)) return;
+    if (!window.confirm(confirmCodeQuestion({ code: p.code, name: p.name, matricula: p.matricula }))) return;
     setBusy(p.code);
     try {
       const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: p.code, sellerId: p.sellerId }) });
       const d = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(`Código ${p.code} agora é de ${p.name}.`); load(); } else toast.error(d.error || 'Não foi possível confirmar.');
+      if (res.ok) { toast.success(codeConfirmedMessage(p.code, p.name, d)); load(); } else toast.error(d.error || 'Não foi possível confirmar.');
     } finally { setBusy(null); }
   };
   useEffect(() => {
@@ -7792,7 +7793,7 @@ function UnidentifiedSellersCard() {
     try {
       const r = await putSellerName(m, name);
       if (!r.ok) return;
-      toast.success(r.linkedTo ? `Código ${m} agora é de ${r.linkedTo}.` : `Matrícula ${m} agora é ${name}.`);
+      toast.success(r.linkedTo ? codeConfirmedMessage(m, r.linkedTo, r.linked) : `Matrícula ${m} agora é ${name}.`);
       setNames(n => ({ ...n, [m]: '' })); load();
     } catch (e: any) { toast.error(e.message || 'Não foi possível salvar.'); } finally { setBusy(null); }
   };
@@ -7852,7 +7853,7 @@ function UnidentifiedSellersCard() {
                 {r.flags.testPattern && <span className="text-amber-300"> · parece código de teste</span>}
                 {r.likelyPerson && (
                   <div className="text-sky-300">↳ parece ser <strong>{r.likelyPerson.name}</strong> — {r.likelyPerson.why}
-                    {r.likelyPerson.sellerId && !r.identified && <button disabled={busy === r.matricula} onClick={async () => { setBusy(r.matricula); try { const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: r.matricula, sellerId: r.likelyPerson.sellerId }) }); const d = await res.json().catch(() => ({})); if (res.ok) { toast.success(`Código ${r.matricula} agora é de ${r.likelyPerson.name}.`); load(); runAudit(); } else toast.error(d.error || 'Não foi possível vincular.'); } finally { setBusy(null); } }} className="ml-2 px-2 py-0.5 rounded bg-sky-700/80 hover:bg-sky-600 text-white disabled:opacity-40">É esta pessoa</button>}
+                    {r.likelyPerson.sellerId && !r.identified && <button disabled={busy === r.matricula} onClick={async () => { setBusy(r.matricula); try { const res = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula: r.matricula, sellerId: r.likelyPerson.sellerId }) }); const d = await res.json().catch(() => ({})); if (res.ok) { toast.success(codeConfirmedMessage(r.matricula, r.likelyPerson.name, d)); load(); runAudit(); } else toast.error(d.error || 'Não foi possível vincular.'); } finally { setBusy(null); } }} className="ml-2 px-2 py-0.5 rounded bg-sky-700/80 hover:bg-sky-600 text-white disabled:opacity-40">É esta pessoa</button>}
                   </div>
                 )}
                 {r.successors.map((x: any) => <div key={x.matricula} className="text-zinc-400">↳ {x.evidence === 'forte' ? 'provável' : 'possível'} sucessor: {x.name || x.matricula} ({x.matricula}) — {x.why}</div>)}
@@ -8059,17 +8060,28 @@ function SellersDirectoryTab({ embedStoreId }: { embedStoreId?: string } = {}) {
 
 // Dá nome a um código. Se o servidor responder que já existe pessoa com esse nome (409 same_name_exists),
 // pergunta se é a mesma pessoa (liga o código a ela, sem criar outra) ou se é outra pessoa com o mesmo nome.
-async function putSellerName(matricula: string, name: string): Promise<{ ok: boolean; linkedTo?: string; data?: any }> {
+// Liga um código a uma pessoa JÁ cadastrada. Código que vendeu passa pelo "Confirmar" do servidor (vira a matrícula oficial
+// se a atual nunca vendeu — palpite antigo); código que ainda não vendeu fica como apelido, como antes.
+async function linkCodeToPerson(matricula: string, sellerId: string): Promise<any> {
+  const r = await apiFetch('/api/retailops/sellers/identity/link-matricula', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matricula, sellerId }) });
+  const d = await r.json().catch(() => ({}));
+  if (r.ok) return d;
+  if (r.status !== 400 || !/não aparece nas vendas/.test(String(d?.error || ''))) throw new Error(d.error || 'Não foi possível ligar o código à pessoa.');
+  const rl = await apiFetch(`/api/retailops/sellers/${sellerId}/aliases`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: matricula, kind: 'matricula' }) });
+  const dl = await rl.json().catch(() => ({}));
+  if (!rl.ok) throw new Error(dl.error || 'Não foi possível ligar o código à pessoa.');
+  return { mode: 'alias' };
+}
+
+async function putSellerName(matricula: string, name: string): Promise<{ ok: boolean; linkedTo?: string; linked?: any; data?: any }> {
   const put = (extra?: Record<string, unknown>) => apiFetch(`/api/retailops/sellers/${encodeURIComponent(matricula)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, ...(extra || {}) }) });
   let r = await put();
   let d = await r.json().catch(() => ({}));
   if (r.status === 409 && d?.code === 'same_name_exists' && d.existing) {
     const ex = d.existing;
     if (window.confirm(sameNameQuestion(ex, matricula))) {
-      const rl = await apiFetch(`/api/retailops/sellers/${ex.id}/aliases`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: matricula, kind: 'matricula' }) });
-      const dl = await rl.json().catch(() => ({}));
-      if (!rl.ok) throw new Error(dl.error || 'Não foi possível ligar o código à pessoa.');
-      return { ok: true, linkedTo: ex.name };
+      const linked = await linkCodeToPerson(matricula, ex.id);
+      return { ok: true, linkedTo: ex.name, linked };
     }
     if (!window.confirm(`Criar outra pessoa chamada ${name}, separada de ${ex.name} (matrícula ${ex.matricula})?`)) return { ok: false };
     r = await put({ allowSameName: true });
@@ -8133,10 +8145,8 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
     if (matricula === picked.matricula) { toast.error('Essa já é a matrícula dessa pessoa.'); return; }
     setSaving(true);
     try {
-      const r = await apiFetch(`/api/retailops/sellers/${picked.id}/aliases`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias: matricula, kind: 'matricula' }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Não foi possível vincular.');
-      toast.success(`Matrícula ${matricula} agora é de ${picked.name}.`); onSaved();
+      const d = await linkCodeToPerson(matricula, picked.id);
+      toast.success(codeConfirmedMessage(matricula, picked.name, d)); onSaved();
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
   const save = async () => {
@@ -8155,7 +8165,7 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
       }
       const res = await putSellerName(matricula, name.trim());
       if (!res.ok) return;
-      if (res.linkedTo) { toast.success(`Matrícula ${matricula} agora é de ${res.linkedTo}.`); onSaved(); return; }
+      if (res.linkedTo) { toast.success(codeConfirmedMessage(matricula, res.linkedTo, res.linked)); onSaved(); return; }
       const d = res.data;
       // Lotação na loja escolhida (opcional) — usa o id devolvido pelo upsert.
       if (lotar && lotStore && d?.id) {
@@ -8205,7 +8215,7 @@ function SellerNameModal({ codigo, initialName, allowCodeEdit, storeId, storeNam
           <label className="block text-[12px] text-zinc-400 mb-2">Já cadastrado? Busque a pessoa
             <input list="seller-people" value={pick} onChange={e => choosePerson(e.target.value)} placeholder="Nome — matrícula · loja" className="mt-1 w-full bg-zinc-950 border border-zinc-800 rounded-lg px-2.5 py-1.5 text-sm text-zinc-100" />
             <datalist id="seller-people">{people.map(p => <option key={p.id} value={dirLabel(p)} />)}</datalist>
-            {picked && <span className="mt-1 block text-[10px] text-sky-300">A matrícula abaixo vira apelido de <strong>{picked.name}</strong>; nenhum vendedor novo é criado e a lotação dela não muda (para transferir, use "Lojas do vendedor").</span>}
+            {picked && <span className="mt-1 block text-[10px] text-sky-300">A matrícula abaixo passa a ser de <strong>{picked.name}</strong> (se a matrícula atual dela nunca vendeu no caixa, esta vira a oficial e a antiga fica livre); nenhum vendedor novo é criado e a lotação dela não muda (para transferir, use "Lojas do vendedor").</span>}
           </label>
         )}
         {!picked && (<label className="block text-[12px] text-zinc-400 mb-3">Nome do vendedor

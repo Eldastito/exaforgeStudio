@@ -142,11 +142,12 @@ async function main() {
     const bad = await call("POST", `/api/retail-floor/stores/${bangu}/sellers/${paula}/link-code`, A, "agent", "mgrB", { code: "10650001" });
     check("5.4 código que não vendeu nesta loja: recusado", bad.status === 400);
     const ok = await call("POST", `/api/retail-floor/stores/${bangu}/sellers/${paula}/link-code`, A, "agent", "mgrB", { code: "10830007" });
-    check("5.5 gerente confirma: 10830007 vira código da Paula (apelido)", ok.status === 200 && !!db.prepare(`SELECT 1 FROM retail_seller_aliases WHERE organization_id = ? AND seller_id = ? AND alias = '10830007' AND kind = 'matricula'`).get(A, paula), JSON.stringify(ok.body));
-    check("5.6 a matrícula principal da Paula não muda (LV- fica; histórico preservado)", /^LV-/.test((db.prepare(`SELECT matricula m FROM retail_sellers WHERE id = ?`).get(paula) as any).m));
+    // Desde 11/2026 o "Confirmar" troca a matrícula quando a oficial nunca vendeu (LV- ou palpite): test:retail-seller-confirm-code.
+    check("5.5 gerente confirma: 10830007 vira a matrícula OFICIAL da Paula", ok.status === 200 && ok.body?.mode === "swapped" && (db.prepare(`SELECT matricula m FROM retail_sellers WHERE id = ?`).get(paula) as any).m === "10830007", JSON.stringify(ok.body));
+    check("5.6 o LV- da Paula não fica preso nela (sem apelido); a pessoa é a mesma (id)", !db.prepare(`SELECT 1 FROM retail_seller_aliases WHERE organization_id = ? AND seller_id = ? AND alias LIKE 'LV-%'`).get(A, paula));
     check("5.7 Paula sai de 'sem código'", !P.codelessPeople(A).some((p) => p.sellerId === paula));
     const sc2 = await call("GET", `/api/retail-floor/stores/${bangu}/seller-codes`, A, "agent", "mgrB");
-    check("5.8 a tela passa a mostrar 'Código do caixa 10830007' para a Paula", labels.floorCodeLabel("LV-X", sc2.body.linked?.[paula]) === "Código do caixa 10830007");
+    check("5.8 a tela passa a mostrar a matrícula 10830007 para a Paula", labels.floorCodeLabel("10830007", sc2.body.linked?.[paula]) === "Matrícula 10830007" || labels.floorCodeLabel("10830007", sc2.body.linked?.[paula]) === "Código do caixa 10830007");
     const rede = await call("GET", `/api/retailops/sellers/identity/codeless`, A, "owner", "own");
     check("5.9 rede: lista quem segue sem código, com a proposta do Marcus", rede.status === 200 && rede.body.people.some((p: any) => p.sellerId === marcus && p.proposal?.code === "10830005") && !rede.body.people.some((p: any) => p.sellerId === paula));
     const redeAgent = await call("GET", `/api/retailops/sellers/identity/codeless`, A, "agent", "mgrB");

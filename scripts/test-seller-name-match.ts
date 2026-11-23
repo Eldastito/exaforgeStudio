@@ -22,7 +22,11 @@ check("rótulo traz nome, matrícula e lojas", personLabel(people[0]) === "Lohan
 
 const v = fs.readFileSync("src/features/RetailOpsView.tsx", "utf8");
 const modal = v.slice(v.indexOf("function SellerNameModal"), v.indexOf("function SellerDeleteModal"));
-check("modal: vincula pela rota de alias de matrícula (não cria vendedor)", /sellers\/\$\{picked\.id\}\/aliases/.test(modal) && /kind: 'matricula'/.test(modal));
+// Desde 11/2026 o modal liga pela mesma função do "Confirmar" (linkCodeToPerson): código que vendeu passa pelo
+// link-matricula do servidor (vira a oficial se a atual nunca vendeu); o que ainda não vendeu cai na rota de alias.
+// Em nenhum caso cria vendedor.
+const linkHelper = v.slice(v.indexOf("async function linkCodeToPerson"), v.indexOf("async function putSellerName"));
+check("modal: vincula pela rota de alias de matrícula (não cria vendedor)", /linkCodeToPerson\(matricula, picked\.id\)/.test(modal) && /sellers\/\$\{sellerId\}\/aliases/.test(linkHelper) && /kind: 'matricula'/.test(linkHelper) && /identity\/link-matricula/.test(linkHelper) && !/method: 'PUT'/.test(linkHelper));
 check("modal: escolher pessoa não altera a lotação", !/sellers\/\$\{picked\.id\}\/stores/.test(modal));
 check("modal: matrícula igual à oficial da pessoa é recusada", /matricula === picked\.matricula/.test(modal));
 check("modal: seletor só no cadastro", /allowCodeEdit && people\.length > 0/.test(modal));
